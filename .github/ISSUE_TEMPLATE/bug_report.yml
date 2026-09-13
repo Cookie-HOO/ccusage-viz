@@ -1,0 +1,59 @@
+name: Bug report
+description: Report a reproducible problem in ccusage-viz.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve ccusage-viz. Please do not include tokens, credentials, private paths, or raw usage data.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Describe the observed behavior and what you expected instead.
+      placeholder: Tell us what went wrong.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction steps
+      description: Include the smallest command and input conditions that reproduce the issue. Redact sensitive values.
+      placeholder: |
+        1. Run ...
+        2. Choose ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: ccusage-viz version
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Operating system, terminal, Python version, and ccusage version.
+      placeholder: macOS/Linux/Windows; terminal; Python 3.12; ccusage 20.0.20
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant output
+      description: Paste redacted output or a screenshot if useful. Remove tokens, usernames, private paths, and internal URLs.
+      render: text
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I searched existing issues.
+          required: true
+        - label: I removed secrets and private information from this report.
+          required: true

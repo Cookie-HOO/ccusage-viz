@@ -1,0 +1,45 @@
+name: Feature request
+description: Suggest a focused improvement to ccusage-viz.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for proposing an improvement. Please keep requests aligned with the public roadmap and do not include private data.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      description: What user problem would this solve?
+      placeholder: Describe the workflow that is currently difficult or unavailable.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the behavior or public interface you would like.
+      placeholder: Explain the smallest useful change.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What alternatives or workarounds have you tried?
+  - type: textarea
+    id: scope
+    attributes:
+      label: Compatibility and scope
+      description: Note any CLI, TUI, data-source, or output-contract implications.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I searched existing issues and the roadmap.
+          required: true
+        - label: I removed secrets and private information from this request.
+          required: true
