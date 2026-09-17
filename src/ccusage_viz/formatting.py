@@ -21,11 +21,12 @@ def format_tokens(value: int) -> str:
 
 
 def format_summary_tokens(value: int) -> str:
-    """Format summary token counts with fixed four-decimal compact precision."""
+    """Format summary token counts with up to two compact decimal places."""
     absolute = abs(value)
     for threshold, suffix in ((1_000_000_000, "B"), (1_000_000, "M"), (1_000, "K")):
         if absolute >= threshold:
-            return f"{value / threshold:.4f}{suffix}"
+            text = f"{value / threshold:.2f}".rstrip("0").rstrip(".")
+            return f"{text}{suffix}"
     return str(value)
 
 

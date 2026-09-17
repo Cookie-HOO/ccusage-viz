@@ -3,7 +3,7 @@ from argparse import Namespace
 
 import pytest
 
-from ccusage_viz.cli import _to_options, build_parser
+from ccusage_viz.cli import _inject_default_command, _to_options, build_parser
 from ccusage_viz.errors import UsageError
 from ccusage_viz.i18n import load_translator
 from ccusage_viz.options import DEFAULT_STYLES
@@ -34,6 +34,11 @@ def test_timeline_and_monitor_accept_legend_positions(command: str, position: st
     assert parser.parse_args([command, "--legend-position", position]).legend_position == position
 
 
+def test_monitor_accepts_values_legend_position() -> None:
+    parser = build_parser(load_translator("en"))
+    assert parser.parse_args(["monitor", "--legend-position", "values"]).legend_position == "values"
+
+
 @pytest.mark.parametrize("position", ("below-title", "hidden"))
 def test_stack_accepts_supported_legend_positions(position: str) -> None:
     parser = build_parser(load_translator("en"))
@@ -55,6 +60,9 @@ def test_all_commands_accept_themes() -> None:
     [
         ("timeline", "linear"),
         ("timeline", "step"),
+        ("timeline", "no-line"),
+        ("timeline", "points"),
+        ("timeline", "line-points"),
         ("timeline", "stem"),
         ("timeline", "area"),
         ("calendar", "relative"),
@@ -70,6 +78,9 @@ def test_all_commands_accept_themes() -> None:
         ("monitor", "bars"),
         ("monitor", "line"),
         ("monitor", "step"),
+        ("monitor", "points"),
+        ("monitor", "line-points"),
+        ("monitor", "ranking"),
     ],
 )
 def test_commands_accept_their_own_styles(command: str, style: str) -> None:
@@ -81,6 +92,13 @@ def test_style_is_rejected_for_the_wrong_command() -> None:
     parser = build_parser(load_translator("en"))
     with pytest.raises(UsageError) as caught:
         parser.parse_args(["calendar", "--style", "step"])
+    assert caught.value.key == "error.arguments"
+
+
+def test_timeline_rejects_removed_point_style() -> None:
+    parser = build_parser(load_translator("en"))
+    with pytest.raises(UsageError) as caught:
+        parser.parse_args(["timeline", "--style", "point"])
     assert caught.value.key == "error.arguments"
 
 
@@ -131,7 +149,7 @@ def test_root_help_lists_localized_subcommand_summaries(
 def namespace(**overrides: object) -> Namespace:
     values: dict[str, object] = {
         "command": "timeline",
-        "days": None,
+        "period": None,
         "since": None,
         "until": None,
         "timezone": None,
@@ -320,7 +338,35 @@ def test_demo_monitor_pick_explains_that_demo_is_already_ready() -> None:
     assert caught.value.key == "error.monitor_demo_pick"
 
 
-@pytest.mark.parametrize("flag", ["--pick-theme", "--color-scheme", "--preview-schemes"])
+def test_global_language_options_precede_a_subcommand() -> None:
+    assert _inject_default_command(["--lang", "zh", "timeline"]) == [
+        "timeline",
+        "--lang",
+        "zh",
+    ]
+    assert _inject_default_command(["--lang-file", "custom.json", "ranking"]) == [
+        "ranking",
+        "--lang-file",
+        "custom.json",
+    ]
+
+
+def test_large_top_values_are_accepted() -> None:
+    parser = build_parser(load_translator("en"))
+    assert _to_options(parser.parse_args(["ranking", "--top", "999"])).top == 999
+
+
+@pytest.mark.parametrize("timeout", ("0", "nan", "inf"))
+def test_dashboard_rejects_non_positive_or_non_finite_timeout(timeout: str) -> None:
+    parser = build_parser(load_translator("en"))
+    with pytest.raises(UsageError) as caught:
+        _to_options(parser.parse_args(["dashboard", "--timeout", timeout]))
+    assert caught.value.key == "error.arguments"
+
+
+@pytest.mark.parametrize(
+    "flag", ["--pick-theme", "--color-scheme", "--preview-schemes", "--no-color"]
+)
 def test_obsolete_appearance_flags_are_rejected(flag: str) -> None:
     parser = build_parser(load_translator("en"))
     args = ["timeline", flag, "nord"] if flag == "--color-scheme" else ["timeline", flag]

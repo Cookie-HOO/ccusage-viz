@@ -9,7 +9,9 @@ from typing import cast
 
 import pytest
 
+from ccusage_viz.coverage import DateCoverage, DateInterval
 from ccusage_viz.domain import Notice
+from ccusage_viz.errors import UsageError
 from ccusage_viz.formatting import display_width, strip_ansi
 from ccusage_viz.i18n import load_translator
 from ccusage_viz.options import CommandOptions, DateRange
@@ -17,6 +19,7 @@ from ccusage_viz.query.client import QueryRunner
 from ccusage_viz.terminal import InteractiveScreen, Terminal
 from ccusage_viz.watch import (
     AppearancePickerResult,
+    RefreshResult,
     UsageSnapshot,
     _controls_line,
     _notice_lines,
@@ -57,12 +60,12 @@ def test_watch_paint_places_footer_last_without_refresh_newline(
     _paint(
         "summary\nchart\n",
         "status",
-        "q quit · r refresh · Space pause",
+        "r refresh · m adjust · Space pause",
         ("! warning one", "! warning two"),
     )
     assert capsys.readouterr().out == (
         "\x1b[H\x1b[2Jstatus\nsummary\nchart\n"
-        "! warning one\n! warning two\nq quit · r refresh · Space pause"
+        "! warning one\n! warning two\nr refresh · m adjust · Space pause"
     )
 
 
@@ -70,7 +73,7 @@ def test_watch_paint_pads_controls_to_fixed_final_rows(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     _paint("chart", "status", ("adjustment", "controls"), ("warning",), height=6)
-    assert capsys.readouterr().out == "\x1b[H\x1b[2Jstatus\nchart\nwarning\n\nadjustment\ncontrols"
+    assert capsys.readouterr().out == "\x1b[H\x1b[2Jstatus\nchart\n\nwarning\nadjustment\ncontrols"
 
 
 def test_watch_paint_keeps_footer_visible_if_body_is_too_tall(
@@ -164,13 +167,47 @@ def test_notice_lines_use_redundant_glyph_color_and_width() -> None:
 
 
 def test_controls_are_dimmed_and_clipped_to_one_row() -> None:
-    colored = _controls_line("q quit · r refresh · Space pause", width=20, color=True)
-    plain = _controls_line("q quit · r refresh · Space pause", width=20, color=False)
+    colored = _controls_line("r refresh · m adjust · Space pause", width=20, color=True)
+    plain = _controls_line("r refresh · m adjust · Space pause", width=20, color=False)
 
     assert colored.startswith("\x1b[2m") and colored.endswith("\x1b[0m")
     assert display_width(colored) == 20
-    assert plain == "q quit · r refresh ·"
+    assert plain == "r refresh · m adjust"
     assert "\x1b[" not in plain
+
+
+def test_ranking_render_shows_daily_summary_and_separate_scope_warning() -> None:
+    scope_notice = Notice("notice.summary_excludes_session_agent", {"agent": "Codex"})
+    rendered = _render(
+        options(),
+        load_translator("en"),
+        Terminal(100, 30, False, True),
+        (),
+        (),
+        coverage=DateCoverage.from_interval(date(2025, 12, 25), date(2026, 1, 14)),
+        summary_notices=(scope_notice,),
+    )
+
+    assert rendered.chart.splitlines()[0] == (
+        "Today’s tokens 0; vs yesterday = unchanged; vs last We = unchanged"
+    )
+    assert rendered.notices == (
+        "Summary excludes Codex project-session usage; ccusage has no per-day values",
+    )
+    assert rendered.notices[0] not in rendered.chart
+
+
+def test_render_normalizes_standalone_ranking_title() -> None:
+    rendered = _render(
+        options(),
+        load_translator("en"),
+        Terminal(100, 30, False, True),
+        (),
+        (),
+        normalize_titles=True,
+    )
+
+    assert "Project · Ranking · 2026-01-01–2026-01-14" in rendered.chart
 
 
 def test_render_keeps_notices_separate_from_chart() -> None:
@@ -180,12 +217,13 @@ def test_render_keeps_notices_separate_from_chart() -> None:
         Terminal(100, 30, False, True),
         (),
         (Notice("notice.project_agent_omitted", {"agent": "Codex"}),),
+        coverage=DateCoverage.from_interval(date(2025, 12, 25), date(2026, 1, 14)),
     )
 
     assert rendered.notices == ("Codex omitted: ccusage does not expose project data",)
     assert rendered.notices[0] not in rendered.chart
     lines = rendered.chart.splitlines()
-    assert lines[0] == "Today 0; vs yesterday unchanged; vs last We unchanged"
+    assert lines[0] == "Today’s tokens 0; vs yesterday = unchanged; vs last We = unchanged"
     assert lines[1].strip() == "Ranking · 2026-01-01–2026-01-14"
     assert lines[2] == "No token usage found for the selected range."
 
@@ -212,7 +250,7 @@ def test_one_shot_reserves_one_more_row_than_watch(monkeypatch: pytest.MonkeyPat
 def test_appearance_picker_hides_timeline_area_when_grouped(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    keys = iter(("j", "j", "j", "\n"))
+    keys = iter(("s", "s", "s", "s", "s", "\n"))
     rendered_styles: list[str] = []
 
     class Screen:
@@ -240,7 +278,7 @@ def test_appearance_picker_hides_timeline_area_when_grouped(
     )
 
     assert isinstance(result, AppearancePickerResult)
-    assert rendered_styles == ["linear", "step", "stem", "linear"]
+    assert rendered_styles == ["linear", "step", "no-line", "points", "line-points", "stem"]
 
 
 @pytest.mark.parametrize(
@@ -249,22 +287,22 @@ def test_appearance_picker_hides_timeline_area_when_grouped(
         (
             "timeline",
             "total",
-            ("b", "+", "o", "u", "\n"),
+            ("b", "+", "a", "o", "u", "\n"),
             {"by": "agent", "top": 4, "show_other": True, "no_summary": True},
         ),
         (
             "ranking",
             "project",
-            ("b", "+", "o", "u", "\n"),
-            {"by": "agent", "top": 1, "show_other": True, "no_summary": True},
+            ("b", "+", "a", "o", "u", "\n"),
+            {"by": "agent", "top": 11, "show_other": True, "no_summary": True},
         ),
         (
             "stack",
             "total",
-            ("c", "u", "\n"),
+            ("a", "c", "u", "\n"),
             {"split_cache": True, "no_summary": True},
         ),
-        ("calendar", "total", ("u", "\n"), {"no_summary": True}),
+        ("calendar", "total", ("a", "u", "\n"), {"no_summary": True}),
     ],
 )
 def test_appearance_picker_adjusts_display_options_from_retained_snapshot(
@@ -314,6 +352,82 @@ def test_appearance_picker_adjusts_display_options_from_retained_snapshot(
     assert result.options.projects == current.projects
 
 
+def test_appearance_picker_retains_last_chart_until_an_invalid_draft_recovers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paints: list[tuple[object, ...]] = []
+
+    class Screen:
+        def paint(self, *args, **kwargs) -> None:
+            paints.append(args)
+
+    keys = iter(("s", "\n", "s", "\n"))
+    calls = 0
+    monkeypatch.setattr("ccusage_viz.watch._input_mode", nullcontext)
+    monkeypatch.setattr("ccusage_viz.watch._read_key", lambda timeout: next(keys))
+    monkeypatch.setattr(
+        "ccusage_viz.watch.inspect_terminal",
+        lambda *args, **kwargs: Terminal(100, 30, False, True),
+    )
+
+    def render(current, *args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise UsageError("error.stack_stacked_width", width=100)
+        return RefreshResult("chart", (), 0.25, args[2], current)
+
+    monkeypatch.setattr("ccusage_viz.watch.render_snapshot", render)
+    current = replace(
+        options(command="stack"), date_range=DateRange(date(2026, 1, 1), date(2026, 1, 7), "7d")
+    )
+    result = run_appearance_picker(
+        current,
+        load_translator("en"),
+        UsageSnapshot((), (), 0.25),
+        cast(InteractiveScreen, Screen()),
+        adjust_display=True,
+    )
+
+    assert isinstance(result, AppearancePickerResult)
+    assert calls == 3
+    assert any(args[0] == "chart" and "too narrow" in str(args[3]) for args in paints)
+
+
+def test_appearance_picker_pages_match_dashboard_and_weekdays_work(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controls: list[object] = []
+
+    class Screen:
+        def paint(self, *args, **kwargs) -> None:
+            controls.append(args[2])
+
+    keys = iter(("k", "a", "k", "b", "a", "b", "\n"))
+    monkeypatch.setattr("ccusage_viz.watch._input_mode", nullcontext)
+    monkeypatch.setattr("ccusage_viz.watch._read_key", lambda timeout: next(keys))
+    monkeypatch.setattr(
+        "ccusage_viz.watch.inspect_terminal",
+        lambda *args, **kwargs: Terminal(100, 30, True, True),
+    )
+
+    result = run_appearance_picker(
+        options(command="timeline"),
+        load_translator("en"),
+        UsageSnapshot((), (), 0.25),
+        cast(InteractiveScreen, Screen()),
+        adjust_display=True,
+    )
+
+    assert isinstance(result, AppearancePickerResult)
+    assert result.options.weekday_mode == "show"
+    assert result.options.by == "agent"
+    assert "Quick settings" in str(controls[0])
+    assert "Advanced settings" in str(controls[1])
+    assert "k weekdays" in str(controls[1])
+    assert "WEEKDAYS show" in str(controls[2])
+
+
 def test_project_adjustment_explains_missing_retained_attribution(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -323,7 +437,7 @@ def test_project_adjustment_explains_missing_retained_attribution(
         def paint(self, *args, **kwargs) -> None:
             paints.append(args)
 
-    keys = iter(("b", "b", "b", "q"))
+    keys = iter(("b", "b", "b", "\x1b"))
     monkeypatch.setattr("ccusage_viz.watch._input_mode", nullcontext)
     monkeypatch.setattr("ccusage_viz.watch._read_key", lambda timeout: next(keys))
     monkeypatch.setattr(
@@ -350,7 +464,7 @@ def test_appearance_picker_copy_uses_adjusted_display_options(
         def paint(self, *args, **kwargs) -> None:
             pass
 
-    keys = iter(("b", "+", "o", "y", "q"))
+    keys = iter(("b", "+", "a", "o", "y", "\x1b"))
     copied: list[str] = []
     monkeypatch.setattr("ccusage_viz.watch._input_mode", nullcontext)
     monkeypatch.setattr("ccusage_viz.watch._read_key", lambda timeout: next(keys))
@@ -363,7 +477,12 @@ def test_appearance_picker_copy_uses_adjusted_display_options(
     )
 
     result = run_appearance_picker(
-        replace(options(command="timeline"), by="total", top=3),
+        replace(
+            options(command="timeline"),
+            by="total",
+            top=3,
+            color_scheme="no-color",
+        ),
         load_translator("en"),
         UsageSnapshot((), (), 0.25),
         cast(InteractiveScreen, Screen()),
@@ -372,8 +491,8 @@ def test_appearance_picker_copy_uses_adjusted_display_options(
 
     assert result is None
     assert copied == [
-        "ccusage-viz timeline --since 2026-01-01 --until 2026-01-14 --by agent --top 4 "
-        "--show-other --demo small --ascii --no-color"
+        "ccuv timeline --since 2026-01-01 --until 2026-01-14 --by agent --top 4 "
+        "--show-other --demo small --theme no-color --ascii"
     ]
 
 
@@ -409,7 +528,7 @@ def test_appearance_picker_cycles_theme_and_style_with_retained_snapshot(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     rendered_appearances: list[tuple[str, str]] = []
-    keys = iter(("n", "j", "k", "p", "\n"))
+    keys = iter(("t", "s", "S", "T", "\n"))
 
     class Screen:
         def paint(self, *args, **kwargs) -> None:
@@ -452,6 +571,34 @@ def test_appearance_picker_cycles_theme_and_style_with_retained_snapshot(
     ]
 
 
+def test_appearance_picker_ignores_retired_navigation_aliases(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    keys = iter(("n", "p", "j", "k", "q", "Q", "\n"))
+
+    class Screen:
+        def paint(self, *args, **kwargs) -> None:
+            pass
+
+    monkeypatch.setattr("ccusage_viz.watch._input_mode", nullcontext)
+    monkeypatch.setattr("ccusage_viz.watch._read_key", lambda timeout: next(keys))
+    monkeypatch.setattr(
+        "ccusage_viz.watch.inspect_terminal",
+        lambda *args, **kwargs: Terminal(100, 30, True, True),
+    )
+
+    result = run_appearance_picker(
+        replace(options(command="timeline", demo="small"), pick=True),
+        load_translator("en"),
+        UsageSnapshot((), (), 0.25),
+        cast(InteractiveScreen, Screen()),
+    )
+
+    assert isinstance(result, AppearancePickerResult)
+    assert result.options.color_scheme == "classic"
+    assert result.options.style == "linear"
+
+
 @pytest.mark.parametrize("size", ["small", "medium", "large"])
 def test_demo_snapshot_uses_requested_size_once_without_query_runner(
     size: str, monkeypatch: pytest.MonkeyPatch
@@ -473,7 +620,48 @@ def test_demo_snapshot_uses_requested_size_once_without_query_runner(
     )
 
     assert snapshot.records == ()
+    assert snapshot.coverage == DateCoverage.from_interval(date(2026, 1, 1), date(2026, 1, 14))
     assert generated == [size]
+
+
+def test_successful_empty_daily_query_still_records_requested_coverage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Runner:
+        def run(self, plan):
+            from ccusage_viz.query.models import QueryResult
+
+            return tuple(QueryResult(query.kind, {}) for query in plan.queries)
+
+    monkeypatch.setattr("ccusage_viz.watch.parse_usage_records", lambda kind, data: ())
+    snapshot = load_snapshot(
+        replace(options(command="timeline"), demo=None),
+        cast(QueryRunner, Runner()),
+    )
+
+    assert snapshot.records == ()
+    assert snapshot.coverage.covers(DateInterval(date(2026, 1, 1), date(2026, 1, 14)))
+
+
+def test_snapshot_retains_daily_coverage_when_project_ranking_also_uses_sessions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Runner:
+        def run(self, plan):
+            from ccusage_viz.query.models import QueryResult
+
+            return tuple(QueryResult(query.kind, {}) for query in plan.queries)
+
+    monkeypatch.setattr("ccusage_viz.watch.parse_usage_records", lambda kind, data: ())
+    snapshot = load_snapshot(
+        replace(options(command="ranking"), demo=None),
+        cast(QueryRunner, Runner()),
+    )
+
+    assert snapshot.coverage == DateCoverage.from_interval(date(2026, 1, 1), date(2026, 1, 14))
+    assert snapshot.summary_notices == (
+        Notice("notice.summary_excludes_session_agent", {"agent": "Codex"}),
+    )
 
 
 def test_demo_refresh_never_invokes_query_runner() -> None:
@@ -540,22 +728,22 @@ def test_appearance_picker_navigates_wraps_and_restores_terminal() -> None:
 
     try:
         read_until(
-            b"THEME \xc2\xb7 1/10 \xc2\xb7 classic \xc2\xb7 STYLE \xc2\xb7 1/4 \xc2\xb7 linear"
+            b"THEME \xc2\xb7 1/11 \xc2\xb7 classic \xc2\xb7 STYLE \xc2\xb7 1/7 \xc2\xb7 linear"
         )
         previous_length = len(output)
-        os.write(master, b"p")
+        os.write(master, b"T")
         read_until(
-            b"THEME \xc2\xb7 10/10 \xc2\xb7 mono \xc2\xb7 STYLE \xc2\xb7 1/4 \xc2\xb7 linear",
+            b"THEME \xc2\xb7 11/11 \xc2\xb7 no-color \xc2\xb7 STYLE \xc2\xb7 1/7 \xc2\xb7 linear",
             after=previous_length,
         )
         previous_length = len(output)
-        os.write(master, b"n")
+        os.write(master, b"t")
         read_until(
-            b"THEME \xc2\xb7 1/10 \xc2\xb7 classic \xc2\xb7 STYLE \xc2\xb7 1/4 \xc2\xb7 linear",
+            b"THEME \xc2\xb7 1/11 \xc2\xb7 classic \xc2\xb7 STYLE \xc2\xb7 1/7 \xc2\xb7 linear",
             after=previous_length,
         )
 
-        os.write(master, b"q")
+        os.write(master, b"\x03")
         exit_deadline = time.monotonic() + 3
         while process.poll() is None and time.monotonic() < exit_deadline:
             readable, _, _ = select.select([master], [], [], 0.05)
@@ -636,13 +824,13 @@ def test_appearance_picker_confirmation_hands_demo_snapshot_to_watch() -> None:
         assert text in output[after:]
 
     try:
-        read_until(b"THEME \xc2\xb7 8/10 \xc2\xb7 nord \xc2\xb7 STYLE \xc2\xb7 1/4 \xc2\xb7 linear")
+        read_until(b"THEME \xc2\xb7 8/11 \xc2\xb7 nord \xc2\xb7 STYLE \xc2\xb7 1/7 \xc2\xb7 linear")
         previous_length = len(output)
         os.write(master, b"\r")
         read_until(b"refresh every 10s", after=previous_length)
         assert b"DEMO DATA \xc2\xb7 small" in output[previous_length:]
 
-        os.write(master, b"q")
+        os.write(master, b"\x03")
         exit_deadline = time.monotonic() + 3
         while process.poll() is None and time.monotonic() < exit_deadline:
             readable, _, _ = select.select([master], [], [], 0.05)
@@ -688,7 +876,8 @@ def test_demo_watch_reports_pause_immediately_and_restores_terminal() -> None:
             "--watch",
             "2",
             "--ascii",
-            "--no-color",
+            "--theme",
+            "no-color",
         ],
         stdin=slave,
         stdout=slave,
@@ -714,7 +903,7 @@ def test_demo_watch_reports_pause_immediately_and_restores_terminal() -> None:
                 output.extend(os.read(master, 8192))
         assert b"paused" in output
 
-        os.write(master, b"q")
+        os.write(master, b"\x03")
         assert process.wait(timeout=3) == 0
         while True:
             readable, _, _ = select.select([master], [], [], 0.1)

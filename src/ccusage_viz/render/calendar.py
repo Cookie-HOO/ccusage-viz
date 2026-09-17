@@ -102,28 +102,33 @@ def render_calendar(model: CalendarModel, context: RenderContext) -> str:
             cells[weekday].append(mark)
 
     separator = " " * (stride - 1)
-    lines = [
+    lines = []
+    if model.summary:
+        lines.append(render_summary(model.summary, context))
+    lines.append(
         center_text(
             date_range_heading(context.translator.text("label.calendar"), first, last, context),
             context.width,
         )
-    ]
-    if model.summary:
-        lines.append(render_summary(model.summary, context))
+    )
     lines.append("   " + _month_header(months, week_count=week_count, stride=stride))
     for weekday in range(7):
         weekday_name = context.translator.text(f"calendar.weekday.{weekday}")
         lines.append(f"{weekday_name:>2} " + separator.join(cells[weekday]))
 
     peak = model.peak
-    stats = [
-        context.translator.text("label.active_days", count=model.active_days),
-        context.translator.text("label.current_streak", count=model.current_streak),
-        context.translator.text("label.longest_streak", count=model.longest_streak),
-        context.translator.text("label.average", value=format_tokens(round(model.average))),
+    activity = " · ".join(
+        (
+            context.translator.text("label.active_days", count=model.active_days),
+            context.translator.text("label.current_streak", count=model.current_streak),
+            context.translator.text("label.longest_streak", count=model.longest_streak),
+        )
+    )
+    usage_stats = [
+        context.translator.text("label.average", value=format_tokens(round(model.average)))
     ]
     if peak:
-        stats.append(
+        usage_stats.append(
             context.translator.text(
                 "label.peak", date=peak.day.isoformat(), value=format_tokens(peak.usage.total)
             )
@@ -135,7 +140,7 @@ def render_calendar(model: CalendarModel, context: RenderContext) -> str:
         f"{colored_mark(marks[level], colors[level - 1], context)}{legend_labels[level - 1]}"
         for level in range(1, 5)
     )
-    lines.extend((" · ".join(stats), legend))
+    lines.extend((activity, " · ".join(usage_stats), legend))
     return "\n".join(
         clip_width(line, context.width) if display_width(line) > context.width else line
         for line in lines

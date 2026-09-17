@@ -20,6 +20,26 @@ class ColorScheme:
     cache_creation: Color
     highlight: Color
 
+    @property
+    def summary_value(self) -> Color:
+        return self.highlight
+
+    @property
+    def trend_increase(self) -> Color:
+        return self.cache
+
+    @property
+    def trend_decrease(self) -> Color:
+        return self.cache_creation
+
+    @property
+    def trend_neutral(self) -> Color:
+        return self.other
+
+    @property
+    def muted(self) -> Color:
+        return self.other
+
     def component(self, name: str) -> Color:
         return {
             "input": self.input,
@@ -141,6 +161,19 @@ _SCHEMES = {
         246,
         240,
         255,
+    ),
+    # Rendering suppresses ANSI for this explicit theme. Reusing the classic
+    # semantic map keeps non-color layout and mark selection unchanged.
+    "no-color": ColorScheme(
+        (33, 208, 36, 170, 69, 166, 37, 100),
+        (153, 74, 32, 24),
+        245,
+        33,
+        208,
+        37,
+        170,
+        166,
+        214,
     ),
 }
 

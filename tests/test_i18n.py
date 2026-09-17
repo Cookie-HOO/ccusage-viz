@@ -66,21 +66,16 @@ def test_summary_fragments_may_be_reordered(tmp_path) -> None:
     path.write_text(
         json.dumps(
             {
-                "summary.line": "{week_over_week} | {today} | {day_over_day}",
-                "summary.today": "Today: {value}",
+                "summary.line": "[{comparisons}]",
+                "summary.current.day": "Today: {value}",
             }
         ),
         encoding="utf-8",
     )
     translator = load_translator("en", str(path))
     assert (
-        translator.text(
-            "summary.line",
-            today="Today: 1M",
-            day_over_day="day",
-            week_over_week="week",
-        )
-        == "week | Today: 1M | day"
+        translator.text("summary.line", comparisons="Today: 1M | day | week")
+        == "[Today: 1M | day | week]"
     )
 
 
@@ -98,8 +93,8 @@ def test_appearance_picker_placeholders_may_be_reordered(tmp_path) -> None:
     path.write_text(
         json.dumps(
             {
-                "status.appearance_picker_adjust_timeline": (
-                    "{style} ({style_index}/{style_count}) · {theme} ({theme_index}/{theme_count}) · {legend_position} · {grouping} · {top} · {other} · {summary}"
+                "status.appearance_picker_adjust_timeline_advanced": (
+                    "{legend_position} · {other} · {weekday} · {summary}"
                 )
             }
         ),
@@ -108,20 +103,13 @@ def test_appearance_picker_placeholders_may_be_reordered(tmp_path) -> None:
     translator = load_translator("en", str(path))
     assert (
         translator.text(
-            "status.appearance_picker_adjust_timeline",
-            theme_index=2,
-            theme_count=10,
-            theme="nord",
-            style_index=1,
-            style_count=4,
-            style="linear",
+            "status.appearance_picker_adjust_timeline_advanced",
             legend_position="below title",
-            grouping="model",
-            top=3,
             other="on",
+            weekday="auto",
             summary="on",
         )
-        == "linear (1/4) · nord (2/10) · below title · model · 3 · on · on"
+        == "below title · on · auto · on"
     )
 
 

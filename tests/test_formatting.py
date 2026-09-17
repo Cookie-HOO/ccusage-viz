@@ -27,14 +27,14 @@ def test_decimal_token_formatting(value: int, expected: str) -> None:
     ("value", "expected"),
     [
         (999, "999"),
-        (1_000, "1.0000K"),
-        (1_250, "1.2500K"),
-        (21_400_000, "21.4000M"),
-        (153_000_000, "153.0000M"),
-        (2_500_000_000, "2.5000B"),
+        (1_000, "1K"),
+        (1_250, "1.25K"),
+        (21_400_000, "21.4M"),
+        (153_000_000, "153M"),
+        (2_500_000_000, "2.5B"),
     ],
 )
-def test_summary_token_formatting_has_fixed_compact_precision(value: int, expected: str) -> None:
+def test_summary_token_formatting_has_at_most_two_decimals(value: int, expected: str) -> None:
     assert format_summary_tokens(value) == expected
 
 

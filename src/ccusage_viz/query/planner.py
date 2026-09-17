@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from ccusage_viz.coverage import DateInterval
 from ccusage_viz.domain import Notice
 from ccusage_viz.options import CommandOptions
 from ccusage_viz.query.models import QueryKind, QueryPlan, QuerySpec
@@ -22,6 +23,7 @@ def _timezone(options: CommandOptions) -> tuple[str, ...]:
 def plan_queries(options: CommandOptions) -> QueryPlan:
     if options.demo:
         return QueryPlan(())
+    coverage = DateInterval(options.date_range.since, options.date_range.until)
     project_required = bool(options.projects) or options.by == "project"
     if options.command in {"timeline", "calendar", "stack"} and project_required:
         since, until = _bounds(options, compact=True)
@@ -39,6 +41,7 @@ def plan_queries(options: CommandOptions) -> QueryPlan:
                 *_timezone(options),
                 "--offline",
             ),
+            coverage,
         )
         notice = Notice("notice.daily_project_omitted", {"agent": "Codex"})
         return QueryPlan((query,), (notice,))
@@ -60,6 +63,7 @@ def plan_queries(options: CommandOptions) -> QueryPlan:
                 *_timezone(options),
                 "--offline",
             ),
+            coverage,
         )
         codex = QuerySpec(
             QueryKind.CODEX_SESSIONS,
@@ -76,7 +80,10 @@ def plan_queries(options: CommandOptions) -> QueryPlan:
                 "--no-cost",
             ),
         )
-        return QueryPlan((claude, codex))
+        return QueryPlan(
+            (claude, codex),
+            summary_notices=(Notice("notice.summary_excludes_session_agent", {"agent": "Codex"}),),
+        )
 
     since, until = _bounds(options)
     unified = QuerySpec(
@@ -93,5 +100,6 @@ def plan_queries(options: CommandOptions) -> QueryPlan:
             "--offline",
             "--no-cost",
         ),
+        coverage,
     )
     return QueryPlan((unified,))

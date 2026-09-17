@@ -2,32 +2,46 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Hashable, Iterable
+from dataclasses import replace
 from datetime import date, timedelta
 
 from ccusage_viz.chart_models import (
     CalendarDay,
     CalendarModel,
-    ChangeDirection,
-    DailySummary,
-    PercentChange,
     RankingEntry,
     RankingModel,
     Series,
     StackModel,
     TimelineModel,
 )
+from ccusage_viz.coverage import DateCoverage
 from ccusage_viz.domain import Notice, TokenUsage, UsageRecord
 from ccusage_viz.errors import UsageError
 from ccusage_viz.options import DateRange
 from ccusage_viz.project_identity import project_label, resolve_projects, unique_projects
 from ccusage_viz.selectors import SelectorCandidate, resolve_selectors
+from ccusage_viz.summaries import build_period_summary, period_start
 
 _OTHER_KEY = ("other",)
 _TOTAL_KEY = ("total",)
+_EMPTY_COVERAGE = DateCoverage()
 
 
 def date_axis(date_range: DateRange) -> tuple[date, ...]:
     return tuple(date_range.since + timedelta(days=offset) for offset in range(date_range.days))
+
+
+def period_axis(date_range: DateRange, aggregation: str) -> tuple[date, ...]:
+    return tuple(dict.fromkeys(period_start(day, aggregation) for day in date_axis(date_range)))
+
+
+def _aggregate_daily(values: dict[date, TokenUsage], aggregation: str) -> dict[date, TokenUsage]:
+    if aggregation == "day":
+        return values
+    aggregated: dict[date, TokenUsage] = defaultdict(TokenUsage.zero)
+    for day, usage in values.items():
+        aggregated[period_start(day, aggregation)] += usage
+    return aggregated
 
 
 def _simple_selection(
@@ -282,35 +296,6 @@ def _top_other(
     return visible, len(excluded_groups)
 
 
-def _percent_change(current: int, baseline: int) -> PercentChange:
-    if current == baseline:
-        return PercentChange(ChangeDirection.UNCHANGED)
-    if baseline == 0:
-        return PercentChange(ChangeDirection.FROM_ZERO)
-    if current > baseline:
-        return PercentChange(ChangeDirection.INCREASE, (current - baseline) / baseline * 100)
-    return PercentChange(ChangeDirection.DECREASE, (baseline - current) / baseline * 100)
-
-
-def _daily_summary(
-    days: tuple[date, ...], values: tuple[TokenUsage, ...], *, enabled: bool
-) -> DailySummary | None:
-    if not enabled or not days:
-        return None
-    by_day = dict(zip(days, values, strict=True))
-    current_day = days[-1]
-    yesterday = current_day - timedelta(days=1)
-    previous_week = current_day - timedelta(days=7)
-    current = by_day[current_day].total
-    return DailySummary(
-        current_day,
-        current,
-        _percent_change(current, by_day.get(yesterday, TokenUsage.zero()).total),
-        _percent_change(current, by_day.get(previous_week, TokenUsage.zero()).total),
-        previous_week,
-    )
-
-
 def build_timeline(
     records: Iterable[UsageRecord],
     date_range: DateRange,
@@ -320,14 +305,23 @@ def build_timeline(
     show_other: bool = False,
     include_summary: bool = True,
     notices: Iterable[Notice] = (),
+    aggregation: str = "day",
+    coverage: DateCoverage = _EMPTY_COVERAGE,
 ) -> TimelineModel:
     records = tuple(records)
-    days = date_axis(date_range)
+    days = period_axis(date_range, aggregation)
     groups, excluded = _top_other(
         _ranked_groups(_grouped_daily(records, by)), top=top, show_other=show_other
     )
     series = tuple(
-        Series(key, label, tuple(values.get(day, TokenUsage.zero()) for day in days), is_other)
+        Series(
+            key,
+            label,
+            tuple(
+                _aggregate_daily(values, aggregation).get(day, TokenUsage.zero()) for day in days
+            ),
+            is_other,
+        )
         for key, label, values, is_other in groups
     )
     model_notices = tuple(notices)
@@ -335,20 +329,16 @@ def build_timeline(
         model_notices += (Notice("notice.model_overattributed"),)
     if show_other and top is not None and groups and excluded == 0:
         model_notices += (Notice("notice.other_not_needed", {"count": len(groups), "top": top}),)
-    visible_values = tuple(
-        sum((item.values[index] for item in series), TokenUsage.zero())
-        for index in range(len(days))
+    summary = build_period_summary(
+        records,
+        date_range.until,
+        aggregation,
+        coverage,
+        enabled=include_summary and not date_range.fixed_bounds,
     )
-    summary = (
-        _daily_summary(
-            days,
-            visible_values,
-            enabled=include_summary and not date_range.fixed_bounds,
-        )
-        if series
-        else None
-    )
-    return TimelineModel(days, series, model_notices, summary)
+    if summary is not None and excluded and not show_other:
+        summary = replace(summary, current_filter_total=True, chart_top=top)
+    return TimelineModel(days, series, model_notices, summary, aggregation)
 
 
 def build_calendar(
@@ -357,7 +347,9 @@ def build_calendar(
     *,
     include_summary: bool = True,
     notices: Iterable[Notice] = (),
+    coverage: DateCoverage = _EMPTY_COVERAGE,
 ) -> CalendarModel:
+    records = tuple(records)
     totals: dict[date, TokenUsage] = defaultdict(TokenUsage.zero)
     for record in records:
         if record.day is not None:
@@ -367,9 +359,11 @@ def build_calendar(
     return CalendarModel(
         tuple(CalendarDay(day, value) for day, value in zip(days, values, strict=True)),
         tuple(notices),
-        _daily_summary(
-            days,
-            values,
+        build_period_summary(
+            records,
+            date_range.until,
+            "day",
+            coverage,
             enabled=include_summary and not date_range.fixed_bounds,
         ),
     )
@@ -386,12 +380,16 @@ def build_stack(
     split_cache: bool = False,
     include_summary: bool = True,
     notices: Iterable[Notice] = (),
+    aggregation: str = "day",
+    coverage: DateCoverage = _EMPTY_COVERAGE,
 ) -> StackModel:
+    records = tuple(records)
     totals: dict[date, TokenUsage] = defaultdict(TokenUsage.zero)
     for record in records:
         if record.day is not None:
             totals[record.day] = totals[record.day] + record.usage
-    days = date_axis(date_range)
+    days = period_axis(date_range, aggregation)
+    period_totals = _aggregate_daily(totals, aggregation)
     definitions = [("input", lambda value: value.input), ("output", lambda value: value.output)]
     if split_cache:
         definitions.extend(
@@ -406,20 +404,24 @@ def build_stack(
         definitions.append(("other", lambda value: value.other))
     components = tuple(
         Series(
-            ("component", name), name, tuple(_component_usage(getter(totals[day])) for day in days)
+            ("component", name),
+            name,
+            tuple(_component_usage(getter(period_totals[day])) for day in days),
         )
         for name, getter in definitions
     )
-    values = tuple(totals[day] for day in days)
     return StackModel(
         days,
         components,
         tuple(notices),
-        _daily_summary(
-            days,
-            values,
+        build_period_summary(
+            records,
+            date_range.until,
+            aggregation,
+            coverage,
             enabled=include_summary and not date_range.fixed_bounds,
         ),
+        aggregation,
     )
 
 
@@ -432,6 +434,8 @@ def build_ranking(
     show_other: bool = False,
     include_summary: bool = True,
     notices: Iterable[Notice] = (),
+    summary_notices: Iterable[Notice] = (),
+    coverage: DateCoverage = _EMPTY_COVERAGE,
 ) -> RankingModel:
     records = tuple(records)
     ranked_groups = _ranked_groups(_grouped_daily(records, by))
@@ -454,16 +458,15 @@ def build_ranking(
         model_notices += (Notice("notice.model_overattributed"),)
     if show_other and top is not None and groups and excluded == 0:
         model_notices += (Notice("notice.other_not_needed", {"count": len(groups), "top": top}),)
-    days = date_axis(date_range)
-    daily_totals: dict[date, TokenUsage] = defaultdict(TokenUsage.zero)
-    for record in records:
-        if record.day is not None:
-            daily_totals[record.day] = daily_totals[record.day] + record.usage
-    values = tuple(daily_totals[day] for day in days)
-    return RankingModel(
-        entries,
-        date_range,
-        model_notices,
-        denominator,
-        _daily_summary(days, values, enabled=include_summary and not date_range.fixed_bounds),
+    summary = build_period_summary(
+        records,
+        date_range.until,
+        "day",
+        coverage,
+        enabled=include_summary and not date_range.fixed_bounds,
     )
+    if summary is not None:
+        model_notices += tuple(summary_notices)
+        if excluded and not show_other:
+            summary = replace(summary, current_filter_total=True, chart_top=top)
+    return RankingModel(entries, date_range, model_notices, denominator, summary)

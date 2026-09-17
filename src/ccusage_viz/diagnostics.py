@@ -12,12 +12,7 @@ _BOLD = "\x1b[1m"
 
 
 def color_enabled(stream: TextIO, *, no_color: bool = False) -> bool:
-    return (
-        stream.isatty()
-        and not no_color
-        and "NO_COLOR" not in os.environ
-        and os.environ.get("TERM") != "dumb"
-    )
+    return stream.isatty() and not no_color and os.environ.get("TERM") != "dumb"
 
 
 def _casefold_map(text: str) -> tuple[str, list[int]]:

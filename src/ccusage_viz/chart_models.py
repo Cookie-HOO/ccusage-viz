@@ -25,12 +25,38 @@ class PercentChange:
 
 
 @dataclass(frozen=True, slots=True)
+class PeriodSummary:
+    period: str
+    day: date
+    total: int
+    sequential: PercentChange | None
+    year_over_year: PercentChange | None = None
+    previous_week_day: date | None = None
+    all_agents: bool = False
+    current_filter_total: bool = False
+    chart_top: int | None = None
+
+    @property
+    def day_over_day(self) -> PercentChange | None:
+        return self.sequential
+
+    @property
+    def week_over_week(self) -> PercentChange | None:
+        return self.year_over_year
+
+
+@dataclass(frozen=True, slots=True)
 class DailySummary:
+    """Legacy daily summary input retained for API compatibility."""
+
     day: date
     total: int
     day_over_day: PercentChange
     week_over_week: PercentChange
     previous_week_day: date
+    all_agents: bool = False
+    current_filter_total: bool = False
+    chart_top: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,7 +76,8 @@ class TimelineModel:
     days: tuple[date, ...]
     series: tuple[Series, ...]
     notices: tuple[Notice, ...] = field(default_factory=tuple)
-    summary: DailySummary | None = None
+    summary: PeriodSummary | DailySummary | None = None
+    aggregation: str = "day"
 
     @property
     def total(self) -> TokenUsage:
@@ -67,7 +94,7 @@ class CalendarDay:
 class CalendarModel:
     days: tuple[CalendarDay, ...]
     notices: tuple[Notice, ...] = field(default_factory=tuple)
-    summary: DailySummary | None = None
+    summary: PeriodSummary | DailySummary | None = None
 
     @property
     def total(self) -> TokenUsage:
@@ -113,7 +140,8 @@ class StackModel:
     days: tuple[date, ...]
     components: tuple[Series, ...]
     notices: tuple[Notice, ...] = field(default_factory=tuple)
-    summary: DailySummary | None = None
+    summary: PeriodSummary | DailySummary | None = None
+    aggregation: str = "day"
 
     @property
     def total(self) -> TokenUsage:
@@ -136,7 +164,7 @@ class RankingModel:
     date_range: DateRange
     notices: tuple[Notice, ...] = field(default_factory=tuple)
     denominator: TokenUsage | None = None
-    summary: DailySummary | None = None
+    summary: PeriodSummary | DailySummary | None = None
 
     @property
     def total(self) -> TokenUsage:

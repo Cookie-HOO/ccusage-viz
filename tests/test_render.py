@@ -1,6 +1,8 @@
 import os
+import re
 import subprocess
 import sys
+from dataclasses import replace
 from datetime import date
 
 import plotext as plt
@@ -20,7 +22,7 @@ from ccusage_viz.chart_models import (
 )
 from ccusage_viz.domain import TokenUsage
 from ccusage_viz.errors import UsageError
-from ccusage_viz.formatting import strip_ansi
+from ccusage_viz.formatting import display_width, strip_ansi
 from ccusage_viz.i18n import load_translator
 from ccusage_viz.options import DateRange
 from ccusage_viz.render.base import RenderContext, isolated_plot
@@ -50,6 +52,65 @@ def period() -> DateRange:
     return DateRange(date(2026, 1, 1), date(2026, 1, 14), None)
 
 
+def test_normalized_content_headings_prefix_timeline_and_ranking() -> None:
+    translator = load_translator("en")
+    timeline = TimelineModel((date(2026, 1, 1),), (Series("total", "Total", (usage(1),)),))
+    ranking = RankingModel((RankingEntry("a", "A", usage(1_200)),), period())
+
+    timeline_output = render_timeline(
+        timeline,
+        RenderContext(80, 24, translator, color=False, period="10d", title_content="Total"),
+    )
+    ranking_output = render_ranking(
+        ranking,
+        RenderContext(80, 24, translator, color=False, period="14d", title_content="Project"),
+    )
+
+    assert "Total · Timeline · 10d" in timeline_output
+    assert "Project · Ranking · 14d" in ranking_output
+
+
+def test_rolling_heading_shows_period_while_fixed_heading_shows_dates() -> None:
+    model = RankingModel((RankingEntry("a", "A", usage(1_200)),), period())
+
+    rolling = render_ranking(
+        model,
+        RenderContext(80, 24, load_translator("en"), color=False, period="14d"),
+    )
+    fixed = render_ranking(model, context())
+
+    assert "Ranking · 14d" in rolling
+    assert "2026-01-01" not in rolling
+    assert "Ranking · 2026-01-01–2026-01-14" in fixed
+
+
+@pytest.mark.parametrize(
+    ("render", "model"),
+    [
+        (
+            render_timeline,
+            TimelineModel((date(2026, 1, 1),), (Series("a", "A", (usage(1),)),)),
+        ),
+        (
+            render_stack,
+            StackModel((date(2026, 1, 1),), (Series("input", "input", (usage(1),)),)),
+        ),
+        (
+            render_calendar,
+            CalendarModel((CalendarDay(date(2026, 1, 1), usage(1)),)),
+        ),
+    ],
+)
+def test_all_historical_renderers_show_rolling_period_headings(render, model) -> None:
+    output = render(
+        model,
+        RenderContext(80, 24, load_translator("en"), color=False, period="14d"),
+    )
+
+    assert "· 14d" in output
+    assert "· 2026-01-01–2026-01-01" not in output
+
+
 def test_ranking_and_custom_calendar_render_without_json_or_table() -> None:
     ranking = render_ranking(
         RankingModel((RankingEntry("a", "项目", usage(1_200)),), period()), context(True)
@@ -60,6 +121,75 @@ def test_ranking_and_custom_calendar_render_without_json_or_table() -> None:
         CalendarModel((CalendarDay(date(2026, 1, 1), usage(4)),)), context(True)
     )
     assert "Calendar" in calendar and "#4" in calendar
+
+
+def test_ranking_change_markers_separate_rank_activity_and_value() -> None:
+    model = RankingModel(
+        (
+            RankingEntry(("project", "app"), "app", usage(1_200)),
+            RankingEntry(("project", "api"), "api", usage(800)),
+        ),
+        period(),
+    )
+
+    static = render_ranking(model, context(True))
+    live = render_ranking(
+        model,
+        RenderContext(
+            80,
+            24,
+            load_translator("en"),
+            color=False,
+            ascii=True,
+            deltas={("project", "app"): 100, ("project", "api"): -10},
+            rank_deltas={("project", "app"): 1, ("project", "api"): -1},
+        ),
+    )
+
+    assert "^" not in static
+    app_line = next(line for line in live.splitlines() if "app" in line)
+    api_line = next(line for line in live.splitlines() if "api" in line)
+    assert "1 ^ * app" in app_line
+    assert "1.2K ^" in app_line
+    assert "2 v * api" in api_line
+    assert "800 v" in api_line
+
+    equal = render_ranking(
+        model,
+        replace(
+            context(True),
+            deltas={("project", "app"): 0},
+            rank_deltas={("project", "app"): 0},
+        ),
+    )
+    equal_line = next(line for line in equal.splitlines() if "app" in line)
+    assert "1     app" in equal_line
+    assert "1.2K =" in equal_line
+
+
+def test_ranking_other_has_value_activity_but_no_rank_marker() -> None:
+    other = RankingModel(
+        (RankingEntry("Other", "Other", usage(500), is_other=True),),
+        period(),
+    )
+
+    output = render_ranking(
+        other,
+        RenderContext(
+            80,
+            24,
+            load_translator("en"),
+            color=False,
+            ascii=True,
+            deltas={"Other": 10},
+            rank_deltas={"Other": 1},
+        ),
+    )
+
+    line = next(line for line in output.splitlines() if "Other" in line)
+    assert "1   * Other" in line
+    assert "500 ^" in line
+    assert "1 ^ * Other" not in line
 
 
 def test_empty_ranking_keeps_localized_effective_range() -> None:
@@ -82,6 +212,40 @@ def test_calendar_absolute_style_has_stable_token_band_legend() -> None:
     assert "#>100K" in calendar
 
 
+def test_calendar_footer_separates_activity_usage_and_legend() -> None:
+    calendar = render_calendar(
+        CalendarModel(
+            (
+                CalendarDay(date(2026, 1, 1), usage(0)),
+                CalendarDay(date(2026, 1, 2), usage(4_000)),
+            )
+        ),
+        RenderContext(100, 24, load_translator("en"), color=False, ascii=True),
+    )
+    lines = calendar.splitlines()
+    activity = next(line for line in lines if "Active days" in line)
+    usage_line = next(line for line in lines if "Daily average" in line)
+    legend = next(line for line in lines if ".1" in line and "#4" in line)
+
+    assert "Current streak" in activity and "Longest streak" in activity
+    assert "Peak" not in activity
+    assert "Peak" in usage_line
+    assert lines.index(activity) + 1 == lines.index(usage_line)
+    assert lines.index(usage_line) + 1 == lines.index(legend)
+
+
+def test_calendar_footer_keeps_average_without_peak_and_clips_rows_independently() -> None:
+    calendar = render_calendar(
+        CalendarModel((CalendarDay(date(2026, 1, 1), usage(0)),)),
+        RenderContext(24, 24, load_translator("en"), color=False, ascii=True),
+    )
+    lines = calendar.splitlines()
+
+    assert any("Daily average" in line for line in lines)
+    assert not any("Peak" in line for line in lines)
+    assert all(len(line) <= 24 for line in lines)
+
+
 def test_calendar_labels_follow_selected_language() -> None:
     calendar = render_calendar(
         CalendarModel((CalendarDay(date(2026, 1, 1), usage(4)),)),
@@ -102,10 +266,7 @@ def test_timeline_area_requires_one_visible_series() -> None:
     )
     with pytest.raises(UsageError) as caught:
         render_timeline(model, RenderContext(80, 24, load_translator("en"), style="area"))
-    assert caught.value.key == "error.arguments"
-    assert (
-        caught.value.values["detail"] == "timeline area style requires exactly one visible series"
-    )
+    assert caught.value.key == "error.timeline_area_series"
 
 
 def test_timeline_no_color_has_no_ansi_sequences() -> None:
@@ -251,23 +412,103 @@ def test_stack_style_selects_solid_or_pattern_markers(monkeypatch: pytest.Monkey
             Series(("component", "output"), "output", (usage(500),)),
         ),
     )
-    captured: list[list[str]] = []
     original_bar = plt.figure.bar
 
-    def record_bar(*args: object, **kwargs: object) -> object:
-        markers = kwargs["marker"]
-        assert isinstance(markers, list)
-        captured.append([str(marker) for marker in markers])
+    def unexpected_bar(*args: object, **kwargs: object) -> object:
+        pytest.fail("non-grouped Stack styles must use the integer-cell renderer")
         return original_bar(*args, **kwargs)
 
-    monkeypatch.setattr(plt.figure, "bar", record_bar)
-    render_stack(model, RenderContext(100, 24, load_translator("en"), color=False, style="stacked"))
-    render_stack(
+    monkeypatch.setattr(plt.figure, "bar", unexpected_bar)
+    solid = render_stack(
+        model, RenderContext(100, 24, load_translator("en"), color=False, style="stacked")
+    )
+    pattern = render_stack(
         model, RenderContext(100, 24, load_translator("en"), color=False, style="stacked-pattern")
     )
 
-    assert captured[0] == ["PlotextMarker(█)", "PlotextMarker(█)"]
-    assert captured[1] == ["PlotextMarker(/)", "PlotextMarker(\\)"]
+    assert "█" in solid
+    assert "/" in pattern
+    assert "\\" in pattern
+
+
+def test_stacked_grid_aligns_axis_and_distributes_non_divisible_slots() -> None:
+    days = tuple(date(2026, 9, index) for index in range(3, 17))
+    model = StackModel(
+        days,
+        (Series(("component", "input"), "input", tuple(usage(100) for _ in days)),),
+    )
+    output = render_stack(
+        model,
+        RenderContext(80, 24, load_translator("en"), color=False, ascii=True, style="stacked"),
+    )
+    chart = output.splitlines()[2:]
+    baseline = next(line for line in chart if "+" in line)
+    data_row = next(line for line in chart if "|" in line)
+
+    assert baseline.index("+") == data_row.index("|")
+    assert all(display_width(line) == 80 for line in chart)
+
+
+def test_stacked_bars_use_equal_cell_widths_when_plotext_pitch_is_fractional() -> None:
+    days = tuple(date(2026, 1, index) for index in range(1, 8))
+    model = StackModel(
+        days,
+        (
+            Series(("component", "input"), "input", tuple(usage(100) for _ in days)),
+            Series(("component", "output"), "output", tuple(usage(100) for _ in days)),
+        ),
+    )
+
+    output = render_stack(
+        model,
+        RenderContext(80, 24, load_translator("en"), color=False, ascii=True, style="stacked"),
+    )
+    widths = [len(run) for run in re.findall(r"#+", output.splitlines()[2])]
+
+    assert widths == [4] * 7
+
+
+def test_stacked_slots_do_not_change_when_components_or_periods_are_zero() -> None:
+    days = tuple(date(2026, 1, index) for index in range(1, 8))
+    components = (
+        Series(("component", "input"), "input", tuple(usage(100) for _ in days)),
+        Series(("component", "output"), "output", tuple(usage(100) for _ in days)),
+    )
+    baseline = render_stack(
+        StackModel(days, components),
+        RenderContext(80, 24, load_translator("en"), color=False, ascii=True, style="stacked"),
+    )
+    with_zeros = render_stack(
+        StackModel(
+            days,
+            (
+                Series(
+                    ("component", "input"),
+                    "input",
+                    (
+                        usage(100),
+                        usage(100),
+                        usage(0),
+                        usage(100),
+                        usage(100),
+                        usage(100),
+                        usage(100),
+                    ),
+                ),
+                Series(
+                    ("component", "output"),
+                    "output",
+                    (usage(100), usage(0), usage(0), usage(0), usage(100), usage(100), usage(0)),
+                ),
+            ),
+        ),
+        RenderContext(80, 24, load_translator("en"), color=False, ascii=True, style="stacked"),
+    )
+
+    baseline_starts = [match.start() for match in re.finditer(r"#+", baseline.splitlines()[2])]
+    zero_starts = [match.start() for match in re.finditer(r"#+", with_zeros.splitlines()[-3])]
+
+    assert zero_starts == [baseline_starts[index] for index in (0, 1, 3, 4, 5, 6)]
 
 
 def test_grouped_stack_uses_uniform_day_pitch_and_explicit_width(
@@ -460,6 +701,7 @@ def test_color_schemes_include_curated_theme_families() -> None:
         "nord",
         "github",
         "mono",
+        "no-color",
     )
 
 
@@ -486,7 +728,7 @@ def test_color_schemes_allocate_distinct_visible_series() -> None:
 
 
 @pytest.mark.parametrize("scheme", ["classic", "vivid", "contrast"])
-def test_summary_uses_fixed_semantic_colors(scheme: str) -> None:
+def test_summary_uses_theme_semantic_colors(scheme: str) -> None:
     summary = DailySummary(
         date(2026, 1, 2),
         21_400_000,
@@ -502,9 +744,10 @@ def test_summary_uses_fixed_semantic_colors(scheme: str) -> None:
         ),
         RenderContext(100, 24, load_translator("en"), color=True, color_scheme=scheme),
     )
-    assert "\x1b[38;5;45m" in output
-    assert "\x1b[38;5;35m" in output
-    assert "\x1b[38;5;166m" in output
+    palette = get_color_scheme(scheme)
+    assert f"\x1b[38;5;{palette.summary_value}m" in output
+    assert f"\x1b[38;5;{palette.trend_increase}m" in output
+    assert f"\x1b[38;5;{palette.trend_decrease}m" in output
 
 
 def test_summary_is_localized_and_color_is_foreground_only() -> None:
@@ -523,14 +766,14 @@ def test_summary_is_localized_and_color_is_foreground_only() -> None:
         model, RenderContext(100, 24, load_translator("zh"), color=True, color_scheme="vivid")
     )
     plain = strip_ansi(output)
-    assert "今天21.4000M，环比昨天上升12.4%，同比上周五下降23.4%" in plain
+    assert "今日 Token 21.4M，环比昨天 ↑ 12.4%，同比上周五 ↓ 23.4%" in plain
     assert "\x1b[38;5;" in output
     assert "\x1b[38;2;" not in output
     assert "\x1b[48;" not in output
 
     colorless = render_timeline(model, RenderContext(100, 24, load_translator("zh"), color=False))
     assert "\x1b[" not in colorless
-    assert "今天21.4000M，环比昨天上升12.4%，同比上周五下降23.4%" in colorless
+    assert "今日 Token 21.4M，环比昨天 ↑ 12.4%，同比上周五 ↓ 23.4%" in colorless
 
 
 def test_mono_summary_uses_grayscale() -> None:
@@ -570,7 +813,7 @@ def test_from_zero_summary_describes_the_transition() -> None:
         ),
         RenderContext(100, 24, load_translator("zh"), color=False),
     )
-    assert "今天58.3000M，环比昨天下降49.1%，同比上周三从 0 增至58.3000M" in output
+    assert "今日 Token 58.3M，环比昨天 ↓ 49.1%，同比上周三 ↑ 从 0 增至58.3M" in output
 
 
 def test_categorical_color_follows_entity_key_not_rank() -> None:

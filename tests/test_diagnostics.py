@@ -33,8 +33,10 @@ def test_ambiguous_diagnostic_highlights_candidates_only() -> None:
     assert "matches multiple" in rendered
 
 
-def test_redirected_and_disabled_diagnostics_are_plain(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_redirected_and_explicitly_disabled_diagnostics_are_plain(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     assert color_enabled(Stream(False)) is False
     assert color_enabled(Stream(True), no_color=True) is False
     monkeypatch.setenv("NO_COLOR", "1")
-    assert color_enabled(Stream(True)) is False
+    assert color_enabled(Stream(True)) is True

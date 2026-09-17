@@ -10,9 +10,16 @@ from ccusage_viz.formatting import (
     truncate_middle_width,
     truncate_width,
 )
-from ccusage_viz.render.base import RenderContext, colored_mark, date_range_heading
+from ccusage_viz.render.base import (
+    RenderContext,
+    colored_mark,
+    content_heading,
+    date_range_heading,
+    styled_text,
+)
 from ccusage_viz.render.palette import get_color_scheme
 from ccusage_viz.render.summary import render_summary
+from ccusage_viz.trends import trend_glyph
 
 
 def _compact_labels(labels: list[str], width: int) -> list[str]:
@@ -57,13 +64,11 @@ def _compact_labels(labels: list[str], width: int) -> list[str]:
 
 
 def render_ranking(model: RankingModel, context: RenderContext) -> str:
+    title = context.translator.text("label.ranking")
     heading = center_text(
-        date_range_heading(
-            context.translator.text("label.ranking"),
-            model.date_range.since,
-            model.date_range.until,
-            context,
-        ),
+        content_heading(title, model.date_range.since, model.date_range.until, context)
+        if context.title_content
+        else date_range_heading(title, model.date_range.since, model.date_range.until, context),
         context.width,
     )
     summary = render_summary(model.summary, context) if model.summary else ""
@@ -73,12 +78,14 @@ def render_ranking(model: RankingModel, context: RenderContext) -> str:
         )
     total = model.percentage_total.total
     label_width = max(12, min(28, context.width // 3))
-    suffix_width = 14
-    bar_width = max(8, context.width - label_width - suffix_width - 7)
+    bar_width = max(8, context.width - label_width - 25)
     maximum = max(entry.usage.total for entry in model.entries) or 1
     full, empty = ("█", "░") if not context.ascii else ("#", ".")
     dot, track = ("●", "·") if not context.ascii else ("o", ".")
-    mark_color = get_color_scheme(context.color_scheme).highlight
+    scheme = get_color_scheme(context.color_scheme)
+    mark_color = scheme.highlight
+    growth = context.deltas or {}
+    rank_growth = context.rank_deltas or {}
     raw_labels = [
         context.translator.text("label.other") if entry.is_other else entry.label
         for entry in model.entries
@@ -102,9 +109,35 @@ def render_ranking(model: RankingModel, context: RenderContext) -> str:
             mark = colored_mark(dot * length, mark_color, context) + track * (bar_width - length)
         else:
             mark = colored_mark(full * length, mark_color, context) + empty * (bar_width - length)
+        rank_change = rank_growth.get(entry.key, 0)
+        rank_marker = " "
+        if not entry.is_other and rank_change:
+            rank_color = scheme.trend_increase if rank_change > 0 else scheme.trend_decrease
+            rank_marker = styled_text(
+                trend_glyph(rank_change, ascii=context.ascii), rank_color, context, bold=True
+            )
+        activity = " "
+        value_marker = " "
+        if entry.key in growth:
+            change = growth[entry.key]
+            color = (
+                scheme.trend_increase
+                if change > 0
+                else scheme.trend_decrease
+                if change < 0
+                else scheme.trend_neutral
+            )
+            value_marker = styled_text(
+                trend_glyph(change, ascii=context.ascii), color, context, bold=change != 0
+            )
+            if change:
+                activity = styled_text(
+                    "*" if context.ascii else "●", scheme.highlight, context, bold=True
+                )
         lines.append(
-            f"{rank:>2} {pad_width(truncate_width(label, label_width), label_width)} "
-            f"{mark} {format_tokens(entry.usage.total):>6} "
+            f"{rank:>2} {rank_marker} {activity} "
+            f"{pad_width(truncate_width(label, label_width), label_width)} {mark} "
+            f"{format_tokens(entry.usage.total):>6} {value_marker} "
             f"{format_percent(entry.usage.total, total):>6}"
         )
     return "\n".join(lines)

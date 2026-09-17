@@ -3,26 +3,32 @@ from __future__ import annotations
 import argparse
 import math
 import re
+import shlex
 import sys
+from dataclasses import replace
 from pathlib import Path
 from typing import Never
 
 from ccusage_viz import __version__
 from ccusage_viz.application import run
+from ccusage_viz.dashboard import DEFAULT_DASHBOARD_PANELS
 from ccusage_viz.diagnostics import color_enabled, format_error
 from ccusage_viz.errors import UsageError, VizError
 from ccusage_viz.i18n import Translator, detect_language, load_translator
 from ccusage_viz.locales import CATALOGS
 from ccusage_viz.options import (
     COMMAND_STYLES,
+    DASHBOARD_STYLES,
     DEFAULT_STYLES,
+    HEADER_SUMMARIES,
     CommandOptions,
     compatible_styles,
     resolve_date_range,
 )
 from ccusage_viz.render.palette import COLOR_SCHEMES
 
-_COMMANDS = ("timeline", "calendar", "stack", "ranking", "monitor")
+_COMMANDS = ("timeline", "calendar", "stack", "ranking", "monitor", "dashboard")
+_TUI_COMMANDS = ("timeline", "calendar", "stack", "ranking", "monitor")
 _DURATION_PATTERN = re.compile(r"(?P<value>[1-9][0-9]*)(?P<unit>[mh])$")
 
 
@@ -55,7 +61,6 @@ def _add_presentation(
     parser.add_argument("--lang-file", type=Path, help=tr.text("help.lang_file"))
     parser.add_argument("--ccusage-bin", default="ccusage", help=tr.text("help.ccusage_bin"))
     parser.add_argument("--timeout", type=float, default=30.0, help=argparse.SUPPRESS)
-    parser.add_argument("--no-color", action="store_true", help=tr.text("help.no_color"))
     parser.add_argument("--ascii", action="store_true", help=tr.text("help.ascii"))
     parser.add_argument(
         "--theme",
@@ -75,6 +80,8 @@ def _add_presentation(
             "--legend-position",
             choices=("below-title", "hidden")
             if command == "stack"
+            else ("below-title", "inside", "hidden", "values")
+            if command == "monitor"
             else ("below-title", "inside", "hidden"),
             default="below-title",
             help=tr.text("help.legend_position"),
@@ -88,10 +95,23 @@ def _add_history_shared(
     *,
     include_summary: bool = False,
 ) -> None:
-    parser.add_argument("--days", type=int, help=tr.text("help.days"))
+    parser.add_argument("--period", help=tr.text("help.period"))
     parser.add_argument("--since", help=tr.text("help.since"))
     parser.add_argument("--until", help=tr.text("help.until"))
     parser.add_argument("--timezone", help=tr.text("help.timezone"))
+    if command in {"timeline", "stack"}:
+        parser.add_argument(
+            "--aggregate",
+            choices=("day", "month", "quarter", "year"),
+            default="day",
+            help=tr.text("help.aggregate"),
+        )
+        parser.add_argument(
+            "--weekdays",
+            choices=("auto", "show", "hidden"),
+            default="auto",
+            help=tr.text("help.weekdays"),
+        )
     parser.add_argument("--agent", action="append", default=[], help=tr.text("help.agent"))
     parser.add_argument("--model", action="append", default=[], help=tr.text("help.model"))
     parser.add_argument("--project", action="append", default=[], help=tr.text("help.project"))
@@ -106,6 +126,55 @@ def _add_history_shared(
         help=tr.text("help.watch"),
     )
     _add_presentation(parser, tr, command)
+
+
+def _add_tui(parser: argparse.ArgumentParser, tr: Translator) -> None:
+    parser.add_argument(
+        "--panel", dest="panels", action="append", default=[], help=tr.text("help.panel")
+    )
+    parser.add_argument("--grid", default="2x2", help=tr.text("help.grid"))
+    parser.add_argument("--interval", type=float, default=15.0, help=tr.text("help.interval"))
+    parser.add_argument(
+        "--header-style",
+        choices=("hidden", "compact", "banner", "panel"),
+        default="panel",
+        help=tr.text("help.header_style"),
+    )
+    parser.add_argument(
+        "--header-summary",
+        choices=HEADER_SUMMARIES,
+        default="day",
+        help=tr.text("help.header_summary"),
+    )
+    parser.add_argument(
+        "--header-interval", type=float, default=60.0, help=tr.text("help.header_interval")
+    )
+    parser.add_argument(
+        "--style",
+        dest="dashboard_style",
+        choices=DASHBOARD_STYLES,
+        default="split",
+        help=tr.text("help.style"),
+    )
+    parser.add_argument(
+        "--demo",
+        nargs="?",
+        choices=("small", "medium", "large"),
+        const="medium",
+        help=tr.text("help.demo"),
+    )
+    parser.add_argument("--lang", choices=("en", "zh"), help=tr.text("help.lang"))
+    parser.add_argument("--lang-file", type=Path, help=tr.text("help.lang_file"))
+    parser.add_argument("--ccusage-bin", default="ccusage", help=tr.text("help.ccusage_bin"))
+    parser.add_argument("--timeout", type=float, default=30.0, help=argparse.SUPPRESS)
+    parser.add_argument("--ascii", action="store_true", help=tr.text("help.ascii"))
+    parser.add_argument(
+        "--theme",
+        dest="color_scheme",
+        choices=COLOR_SCHEMES,
+        default="classic",
+        help=tr.text("help.theme"),
+    )
 
 
 def _add_monitor(parser: argparse.ArgumentParser, tr: Translator) -> None:
@@ -173,6 +242,11 @@ def build_parser(tr: Translator) -> argparse.ArgumentParser:
     )
     _add_monitor(monitor, tr)
 
+    tui = subparsers.add_parser(
+        "dashboard", help=tr.text("help.dashboard"), description=tr.text("help.dashboard")
+    )
+    _add_tui(tui, tr)
+
     return parser
 
 
@@ -191,11 +265,73 @@ def _inject_default_command(argv: list[str]) -> list[str]:
         return ["timeline"]
     if argv[0] in _COMMANDS or argv[0] in {"-h", "--help", "--version"}:
         return argv
+    leading: list[str] = []
+    remaining = list(argv)
+    while remaining and remaining[0] in {"--lang", "--lang-file"}:
+        if len(remaining) < 2:
+            return ["timeline", *argv]
+        leading.extend(remaining[:2])
+        remaining = remaining[2:]
+    if remaining and remaining[0] in _COMMANDS:
+        return [remaining[0], *leading, *remaining[1:]]
     return ["timeline", *argv]
 
 
 def _to_options(namespace: argparse.Namespace) -> CommandOptions:
     command = namespace.command or "timeline"
+    if command == "dashboard":
+        if not namespace.panels:
+            namespace.panels = list(DEFAULT_DASHBOARD_PANELS)
+        parsed_panels = []
+        for fragment in namespace.panels:
+            try:
+                tokens = shlex.split(fragment)
+            except ValueError as exc:
+                raise UsageError("error.tui_panel", value=fragment) from exc
+            if not tokens or tokens[0] not in _TUI_COMMANDS:
+                raise UsageError("error.tui_panel", value=fragment)
+            parsed_panels.append(fragment)
+        namespace.panels = parsed_panels
+        if namespace.grid != "auto":
+            try:
+                rows, columns = (int(item) for item in namespace.grid.lower().split("x", 1))
+            except (ValueError, AttributeError):
+                raise UsageError("error.tui_grid", value=namespace.grid) from None
+            if rows < 1 or columns < 1 or rows * columns < len(namespace.panels):
+                raise UsageError("error.tui_grid", value=namespace.grid)
+        if not math.isfinite(namespace.interval) or namespace.interval < 1:
+            raise UsageError("error.interval_min", minimum=1)
+        if not math.isfinite(namespace.header_interval) or namespace.header_interval < 1:
+            raise UsageError("error.interval_min", minimum=1)
+        if not math.isfinite(namespace.timeout) or namespace.timeout <= 0:
+            raise UsageError("error.arguments", detail="--timeout must be positive and finite")
+        return CommandOptions(
+            command="dashboard",
+            date_range=resolve_date_range(
+                "timeline", period="14d", since=None, until=None, timezone=None
+            ),
+            by=None,
+            top=None,
+            show_other=False,
+            split_cache=False,
+            agents=(),
+            models=(),
+            projects=(),
+            watch=None,
+            demo=namespace.demo,
+            ccusage_bin=namespace.ccusage_bin,
+            timeout=namespace.timeout,
+            no_color=namespace.color_scheme == "no-color",
+            ascii=namespace.ascii,
+            color_scheme=namespace.color_scheme,
+            panels=tuple(namespace.panels),
+            grid=namespace.grid,
+            interval=namespace.interval,
+            header_style=namespace.header_style,
+            header_summary=namespace.header_summary,
+            header_interval=namespace.header_interval,
+            dashboard_style=namespace.dashboard_style,
+        )
     if command == "monitor" and getattr(namespace, "pick", False):
         raise UsageError(
             "error.monitor_demo_pick" if namespace.demo is not None else "error.monitor_pick"
@@ -206,7 +342,7 @@ def _to_options(namespace: argparse.Namespace) -> CommandOptions:
         namespace.show_other = True
     if command == "monitor" and namespace.by in {"agent", "model", "project"} and top is None:
         top = 3
-    if top is not None and not 1 <= top <= 10:
+    if top is not None and top < 1:
         raise UsageError("error.top_positive")
     if command == "timeline" and top is not None and namespace.by == "total":
         raise UsageError("error.top_requires_by")
@@ -238,15 +374,19 @@ def _to_options(namespace: argparse.Namespace) -> CommandOptions:
         raise UsageError("error.arguments", detail="--timeout must be positive and finite")
     if command == "monitor":
         window_seconds = _parse_window(namespace.window)
-        date_range = resolve_date_range("timeline", days=1, since=None, until=None, timezone=None)
+        date_range = resolve_date_range(
+            "timeline", period="1d", since=None, until=None, timezone=None
+        )
     else:
         window_seconds = None
+        aggregation = getattr(namespace, "aggregate", "day")
         date_range = resolve_date_range(
             command,
-            days=namespace.days,
+            period=namespace.period,
             since=namespace.since,
             until=namespace.until,
             timezone=namespace.timezone,
+            aggregation=aggregation,
         )
     return CommandOptions(
         command=command,
@@ -262,7 +402,7 @@ def _to_options(namespace: argparse.Namespace) -> CommandOptions:
         demo=namespace.demo,
         ccusage_bin=namespace.ccusage_bin,
         timeout=namespace.timeout,
-        no_color=namespace.no_color,
+        no_color=namespace.color_scheme == "no-color",
         ascii=namespace.ascii,
         color_scheme=namespace.color_scheme,
         style=style,
@@ -271,11 +411,16 @@ def _to_options(namespace: argparse.Namespace) -> CommandOptions:
         interval=interval,
         no_summary=getattr(namespace, "no_summary", False),
         legend_position=getattr(namespace, "legend_position", "below-title"),
+        aggregation=getattr(namespace, "aggregate", "day"),
+        weekday_mode=getattr(namespace, "weekdays", "auto"),
     )
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _inject_default_command(list(sys.argv[1:] if argv is None else argv))
+    ccusage_bin_explicit = any(
+        argument == "--ccusage-bin" or argument.startswith("--ccusage-bin=") for argument in args
+    )
     language, lang_file = _preparse_language(args)
     builtin = Translator(language, dict(CATALOGS[language]))
     tr = builtin
@@ -283,14 +428,18 @@ def main(argv: list[str] | None = None) -> int:
         tr = load_translator(language, lang_file)
         parser = build_parser(tr)
         namespace = parser.parse_args(args)
-        options = _to_options(namespace)
+        options = replace(_to_options(namespace), ccusage_bin_explicit=ccusage_bin_explicit)
         return run(options, tr)
     except VizError as exc:
         error_translator = builtin if exc.key.startswith("error.lang_file_") else tr
         text = format_error(
             exc,
             error_translator,
-            color=color_enabled(sys.stderr, no_color="--no-color" in args),
+            color=color_enabled(
+                sys.stderr,
+                no_color=getattr(locals().get("namespace"), "color_scheme", "classic")
+                == "no-color",
+            ),
             color_scheme=getattr(locals().get("namespace"), "color_scheme", "classic"),
         )
         print(text, file=sys.stderr)
