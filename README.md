@@ -1,10 +1,10 @@
 # ccusage-viz
 
-[简体中文](README.zh-CN.md)
+[简体中文](README.zh-CN.md) · [Design philosophy](docs/design-philosophy.md)
 
 `ccusage-viz` turns [`ccusage`](https://github.com/ryoppippi/ccusage) Token data into one terminal-native chart per invocation. It is designed for people who use Claude Code, Codex, or custom models and want an on-demand view—or a lightweight live dashboard—without introducing another usage database.
 
-> **Status:** `0.1.0` is an alpha release under local development. The code has been tested against `ccusage 20.0.20`; `ccusage` is not bundled.
+> **Status:** `0.1.0` is an alpha release under local development. Versions use `major.minor.patch`; stable compatibility begins with `1.x.x`. During `0.x.x`, CLI, TUI, data, and other public interfaces may change incompatibly. Feedback and issue reports are welcome. The code has been tested against `ccusage 20.0.20`; `ccusage` is not bundled.
 
 ## Why ccusage-viz?
 
@@ -22,17 +22,17 @@ Every chart command requires an interactive terminal. Help and version output do
 Try the renderer safely with deterministic synthetic data. Demo mode does not invoke `ccusage` and does not write usage data:
 
 ```bash
-uv run ccusage-viz timeline --demo
-uv run ccusage-viz calendar --demo small
-uv run ccusage-viz stack --demo large --split-cache
-uv run ccusage-viz ranking --demo --by project
+uv run ccuv timeline --demo
+uv run ccuv calendar --demo small
+uv run ccuv stack --demo large --split-cache
+uv run ccuv ranking --demo --by project
 ```
 
 To use real data, install and configure `ccusage`, then run:
 
 ```bash
-uv run ccusage-viz timeline
-uv run ccusage-viz ranking --by model --days 30
+uv run ccuv timeline
+uv run ccuv ranking --by model --period 30d
 ```
 
 ## Installation
@@ -41,7 +41,7 @@ After the package is published to PyPI, install it with pipx:
 
 ```bash
 pipx install ccusage-viz
-ccusage-viz --version
+ccuv --version
 ccuv --version
 ```
 
@@ -56,21 +56,21 @@ Python 3.11–3.13 and [`uv`](https://docs.astral.sh/uv/) are required for this 
 git clone https://github.com/Cookie-HOO/ccusage-viz.git
 cd ccusage-viz
 uv sync --all-groups
-uv run ccusage-viz --help
+uv run ccuv --help
 ```
 
 Install the checkout as an editable command-line tool:
 
 ```bash
 uv tool install -e .
-ccusage-viz --version
+ccuv --version
 ```
 
-`ccusage` must be available on `PATH`, or supplied with `--ccusage-bin`. The application uses `plotext` as its only runtime Python dependency.
+`ccusage` must be available on `PATH`, or supplied with `--ccusage-bin`. If the default `ccusage` command is missing in an interactive terminal, ccuv shows the exact `npm install -g ccusage` command and runs it only after an empty Enter confirmation, then continues the original command. Ctrl-C, EOF, or any typed text cancels. Demo, redirected/noninteractive execution, and custom `--ccusage-bin` values never trigger installation; install manually if npm is unavailable or restart/update `PATH` if npm succeeds but the command is still not visible. The application uses `plotext` as its only runtime Python dependency.
 
 ## Commands
 
-Each invocation renders exactly one chart.
+Each rendering command produces one chart; `dashboard` composes independently refreshed charts in one terminal.
 
 | Command | Default range | Default grouping | Default Top N | Output |
 | --- | ---: | --- | ---: | --- |
@@ -79,31 +79,32 @@ Each invocation renders exactly one chart.
 | `stack` | 14 days | Token components | — | Daily stacked bars for input, output, and combined cache |
 | `ranking` | 14 days | `project` | 10 | Horizontal total-Token bars with the effective inclusive range in the heading |
 | `monitor` | process-local 1 hour | authoritative Total TPM | — | Persistent observed Token throughput from repeated snapshots |
+| `dashboard` | per pane | Timeline, Stack, Ranking, Monitor | per pane | One dashboard with adjustment-only pane selection and independent refresh |
 
-All date ranges are **inclusive natural days**. `--days 14` means today plus the preceding 13 days. `--until` defaults to today; use `--timezone` with an IANA name to define the natural-day boundary. `--days` cannot be combined with `--since`.
+All date ranges are **inclusive natural days**. `--period 14d` means today plus the preceding 13 days. Rolling ranges are headed by their canonical period (for example, `Timeline · 14d`); a range explicitly bounded by both `--since` and `--until` instead shows its resolved dates. `--until` defaults to today; use `--timezone` with an IANA name to define the natural-day boundary. `--period` cannot be combined with `--since`.
 
 ```bash
 # One total line for the last 14 days
-ccusage-viz timeline
+ccuv timeline
 
 # Top three models on one chart (the packaged alias is equivalent)
 ccuv timeline --by model
 
 # Top five Agents, with all remaining positive groups combined last
-ccusage-viz timeline --by agent --top 5 --show-other
+ccuv timeline --by agent --top 5 --show-other
 
 # A bounded range in a chosen natural-day timezone
-ccusage-viz calendar --since 2026-01-01 --until 2026-03-31 \
+ccuv calendar --since 2026-01-01 --until 2026-03-31 \
   --timezone America/Los_Angeles
 
 # Split cache read and cache creation instead of combining them
-ccusage-viz stack --days 30 --split-cache
+ccuv stack --period 30d --split-cache
 
 # Agent-scoped project ranking
-ccusage-viz ranking --by project --top 20
+ccuv ranking --by project --top 20
 ```
 
-`--top` must be positive. For Monitor, `--top` is valid only with `--by model`. Filters run before grouping and Top N. Groups beyond the post-filter Top N are hidden unless `--show-other` is set; only those excluded groups are combined as `Other`, which does not consume a Top slot and is always last. If no post-filter group falls beyond Top N, no empty `Other` is drawn and a notice explains why. Use a large value such as `--top 999` when you want an effectively unlimited view.
+`--top` must be positive. For Monitor, `--top` requires `--by agent`, `--by model`, or `--by project`. Filters run before grouping and Top N. Groups beyond the post-filter Top N are hidden unless `--show-other` is set; only those excluded groups are combined as `Other`, which does not consume a Top slot and is always last. If no post-filter group falls beyond Top N, no empty `Other` is drawn and a notice explains why. Use a large value such as `--top 999` when you want an effectively unlimited view. During Watch or Dashboard refreshes, Ranking separates three signals: an arrow beside the rank appears only when a stable item moves up or down; a highlighted `●` (`*` with `--ascii`) before the item marks changed activity; and `↑`, `↓`, or `—` beside the numeric value marks increase, decrease, or equality (`^`, `v`, or `=` with `--ascii`). The initial baseline is marker-free. An entry first seen after that baseline gets activity and value-up markers but no fabricated rank arrow; `Other` never claims rank movement.
 
 ### Filters and grouping
 
@@ -118,8 +119,8 @@ The ordinary metric is `SUM(totalTokens)`. `--by` acts like `GROUP BY`; `--agent
 Selectors are repeatable:
 
 ```bash
-ccusage-viz timeline --by model --agent claude --model sonnet --model opus
-ccusage-viz ranking --by project --project project-a --project project-b
+ccuv timeline --by model --agent claude --model sonnet --model opus
+ccuv ranking --by project --project project-a --project project-b
 ```
 
 Repeated selectors in one dimension are ORed; different dimensions are ANDed. Matching is case-insensitive and exact-first. A unique contains match is accepted; ambiguous contains matches produce candidates and require more text.
@@ -142,57 +143,89 @@ Current `ccusage 20.0.20` capabilities differ by view:
 
 The two-query ranking path is a fixed data-source plan, not a loop over dates, Agents, models, or projects. Claude session totals are intentionally not used for bounded accounting because `ccusage 20.0.20` can include out-of-range usage from matching sessions; Codex session filtering is event-range bounded.
 
-### Daily comparison summary
+### Period comparison summaries
 
-`calendar` and `timeline` show one localized summary for default ranges, `--days`, and ranges with only one explicit boundary. `--no-summary` suppresses that summary for timeline, calendar, and stack. A range with both `--since` and `--until` is treated as a fixed historical range and omits the summary. Calendar compares its displayed aggregate daily totals; timeline aggregates only the lines actually drawn, including a visible `Other` line while excluding groups hidden by Top N.
+`timeline` and `stack` follow their chart aggregation (`day`, `month`, `quarter`, or `year`); runtime `g` changes both together. `calendar` and `ranking` remain daily. Their automatic monthly window is `13mo`, while an explicit `--period 12mo` remains valid. `--no-summary` suppresses a chart summary. A range with both `--since` and `--until` is fixed and omits it. Summaries always aggregate the complete current filter scope, independent of Top N presentation clipping. When Top N hides groups and `Other` is off, the summary is qualified as the current-filter total and notes that the chart shows only Top N; complete charts omit that qualification.
 
-Summary values use fixed four-decimal compact tokens where applicable. The summary compares the range's current day with the preceding day and with the same weekday seven days earlier, using the localized “today” wording for these current-day views. Comparison dates outside a short rendered range are zero-filled like missing source dates in the chart. Positive baselines use percentage change with one decimal place; equal values are shown as unchanged, a positive value against a zero baseline is shown as “up from 0 to the current value,” and a positive baseline falling to zero is a 100% decrease. The current value uses a fixed cyan accent, increases use green, and decreases use a darker amber that remains readable on light and dark terminal backgrounds, independent of the chart scheme; `mono` remains grayscale. The complete sentence, fragments, punctuation, and placeholders can be changed through the strict language override catalog.
+Day compares today with yesterday and the same weekday seven days earlier. Month and quarter compare period-to-date with the same elapsed-day count in the prior period and last year; year compares year-to-date with prior-year-to-date. Calendar boundaries are used rather than fixed 30/90/365-day subtraction, and shorter periods are clamped. A summary derives only from records already loaded for its chart—standalone commands and Dashboard panes never run summary-only queries.
+
+Coverage comes from each successful requested interval, including successful empty responses; it is never inferred from the first or last returned row. A missing row inside covered time is a real zero, while time outside coverage is unknown. Current-period coverage is required before a numeric summary appears, and each uncovered comparison is omitted independently. Equal values use a neutral marker (`—`, or `=` with `--ascii`), a positive value against zero is shown as “from 0” with an upward marker, and a positive baseline falling to zero is a 100% decrease. The complete sentence, fragments, punctuation, and placeholders can be changed through the strict language override catalog.
+
+Calendar’s metrics footer is always three logical rows: active days/current streak/longest streak; daily average plus an optional peak; and the heat legend. The average remains visible when no peak exists, and narrow terminals clip each row independently.
 
 
 ## Monitor
 
 ```bash
-ccusage-viz monitor
-ccusage-viz monitor --by model --top 2
-ccusage-viz monitor --interval 20 --window 2h
-ccusage-viz monitor --demo small
+ccuv monitor
+ccuv monitor --by model --top 2
+ccuv monitor --interval 20 --window 2h
+ccuv monitor --demo small
 ```
 
 `monitor` is an always-running, process-local observation. The first successful cumulative `ccusage` snapshot establishes a baseline; later snapshots are differentiated using monotonic elapsed time. It therefore has no readings before startup and cannot reconstruct a past 24-hour chart. Native process-local history keeps minute rollups for up to 24 hours; the displayed window defaults to one hour and can be adjusted from 5 minutes to 24 hours. `--window` retains only this invocation's observed history (5m–24h, default `1h`); `--interval` is the target delay between sampling attempts (default 15 seconds for real monitoring). Demo Monitor defaults to a 1-second synthetic cadence unless `--interval` is explicitly supplied; hidden `--timeout` bounds one `ccusage` subprocess invocation.
 
-Omitting `--by` shows authoritative **Total TPM**. `--by model` and `--by agent` show their respective TPM projections; `--by project` shows each project’s cumulative Token growth from the visible window’s left edge. Grouped Monitor modes default to Top 3 and fold the remainder into `Other`. `--agent`, `--model`, and `--project` are startup-only source filters. Monitor supports `q` quit, `r` sample now, Space pause/resume, and `m` to open the two-row runtime adjustment panel. The panel adjusts window, interval, grouping, Top, theme, and style without querying again or losing retained history; `y` copies its candidate command. Monitor x-axis labels use `HH:MM`. Use `--theme` and `--style` to choose an initial appearance; Monitor deliberately rejects startup `--pick` because real observed history does not exist yet—use `monitor --demo` for immediate style exploration instead. Demo monitor data is deterministic, starts with a fluctuating in-memory history, stays in memory, and never invokes `ccusage`.
+Omitting `--by` shows authoritative **Total TPM**. `--by model` shows per-model TPM; `--by agent` and `--by project` show cumulative Token growth from the visible window’s left edge. Grouped views can use `--legend-position values` for a minimal, marker-free list of each visible item and its latest displayed observation. Compact Monitor ranking uses an arrow beside the rank only for real rank movement and `↑`, `↓`, or `—` beside the value for increase, decrease, or equality (`^`, `v`, and `=` with `--ascii`); it intentionally has no activity point because every Monitor series is live. The initial baseline is marker-free, while a series first seen later gets value-up but no fabricated rank arrow. Grouped Monitor modes default to Top 3 and fold the remainder into `Other`. `--agent`, `--model`, and `--project` are startup-only source filters. Monitor exits with `Ctrl-C`; `r` samples now, Space pauses/resumes, and `v` cycles chart → compact command → full command → Markdown data table → JSON data → chart. The compact command omits defaults; full command makes every effective setting explicit. Chart view permits `m` adjustment and has no copy shortcut. Every other view permits `y` copy but not adjustment. The table and JSON serialize the exact displayed buckets, including grouping, Top N, and `Other`, never raw counters. `h` hides or restores the session-only control footer to reclaim chart rows, and `m` opens the two-row runtime adjustment panel only from chart view. Its Quick page adjusts window, interval, grouping, Top, theme, and style without querying again or losing retained history; `a` switches to Advanced, where legend placement lives, and `y` copies the candidate command. Startup `--model` filters are preserved and are not runtime controls. Adjustment guides always remain visible and closing the panel restores the prior footer preference. Monitor x-axis labels use `HH:MM`. Use `--theme` and `--style` to choose an initial appearance; Monitor deliberately rejects startup `--pick` because real observed history does not exist yet—use `monitor --demo` for immediate style exploration instead. Demo monitor data is deterministic, starts with a fluctuating in-memory history, stays in memory, and never invokes `ccusage`.
 
-Observed TPM is neither QPM nor API rate-limit TPM. There is no QPM metric. External QPM, when added in a future release, will count logical requests and will never infer requests from tokens or retries. It does not claim historical per-minute data, arbitrary date-range hourly distribution, or a rolling period that predates process startup. Sampling gaps, query errors, and counter decreases are not treated as zero traffic.
+Observed TPM is neither QPM nor API rate-limit TPM. There is no QPM metric. External QPM, when added in a future release, will count logical requests and will never infer requests from tokens or retries. Monitor `style=ranking` is a compact current-value view of the process-local observed window, not the cumulative historical `ranking` command: Total and Model show current observed TPM, while Agent and Project show current Token growth within the visible window. Monitor does not claim historical per-minute data, arbitrary date-range hourly distribution, or a rolling period that predates process startup. Sampling gaps, query errors, and counter decreases are not treated as zero traffic.
+
+## Dashboard
+
+```bash
+# Filled 2×2 overview; Monitor defaults to Model TPM
+ccuv dashboard
+
+# Choose any supported pane types and a startup grid
+ccuv dashboard --panel "timeline --period 7d" --panel "stack" \
+  --panel "ranking --by agent" --panel "monitor --by model --top 5" --grid 2x2
+
+# Choose header presentation, summary period, and independent refresh cadence
+ccuv dashboard --header-style panel --header-summary quarter --header-interval 90
+```
+
+`dashboard` owns one terminal input loop and compositor while each pane keeps its own schedule, latest result, failure state, and—when it is a Monitor pane—its own in-memory observation history. It starts with a compact loading state rather than an empty framed grid. The default dashboard is a filled 2×2 overview: Timeline, Stack, Ranking, and Monitor grouped by Model. This generated Monitor default is equivalent to `monitor --by model`; standalone `monitor` and an explicit `--panel "monitor"` still show authoritative Total TPM. `--panel` is repeatable and takes a quoted normal command fragment beginning with `timeline`, `calendar`, `stack`, `ranking`, or `monitor`; `--grid ROWSxCOLUMNS` selects the startup grid (`auto` uses up to two columns).
+
+The Dashboard Header is independent from pane summaries. `--header-style` accepts `hidden`, `compact`, `banner`, or `panel` (the default). `--header-summary` independently selects `day`, `month`, `quarter`, `year`, or `none` (default `day`); `none` keeps the title and freshness but omits detail, while `hidden` removes the entire Header. During a cold period switch, the full localized structure appears immediately with `??` values and is replaced only by accepted data. Header data is an unfiltered all-agent total refreshed separately every 60 seconds by default (`--header-interval`). The title row right-aligns the last successfully accepted update time; failed or stale refreshes do not advance it. Dashboard `--theme` colors only the shell, title, Header summary, placeholders, and separators; every pane keeps its own `--theme`. Dashboard `--style` consolidates shell structure into `minimal`, `split` (default), `framed`, or `accent`; it never changes pane chart styles or Header Style. Press `s` to adjust pane 1 or click a pane directly; `Tab` is inert while browsing and wraps between panes during pane adjustment.
+
+Browse mode intentionally has one concise footer row: `r` refresh all, `s`/click adjust a pane, `g` open global adjustment, `h` hide/show controls, `y` copy the Dashboard, and Space pause/resume scheduling. Details and pane-command display are not part of Dashboard. Data and capability warnings from panes appear once in a global warning block directly above this footer, rather than inside compact pane cells. Pane and global adjustment both start on **Quick** settings; `a` toggles **Advanced**. Global Quick contains Theme, Style, Header, summary, and layout. Global Advanced contains `+` add pane, `x` delete, `[`/`]` reorder, and `Tab` select pane. Pane adjustment retains each chart’s standalone-like controls and `y` copies only that pane. A copied Dashboard preserves shell Theme/Style and each pane’s independent Theme/Style. `Ctrl-C` restores the terminal and cancels active child queries.
+
+Monitor owns an anchored, padded y-axis shared by standalone and Dashboard rendering. The bound expands immediately when data crosses it and shrinks only after sustained lower utilization, so small fluctuations move the line instead of continuously moving the axis. This changes presentation only: Total and Model remain observed TPM, while Agent and Project remain visible-window Token growth.
+
+Dashboard child panes share no completed data. Overlapping calls with the **exact** executable string, argument tuple, and timeout use one running subprocess, then each pane receives its own decoded copy. Different commands, options, timeouts, or calls that start after a prior one finished are never merged. The independent Header alone retains a process-local unfiltered daily coverage cache: a warm period switch renders immediately, a cold wider switch queries only Header data and shows `?` for unknown detail until accepted, and accepted intervals authoritatively replace cached rows. Failed, cancelled, or stale results preserve the last accepted Header data and freshness.
 
 ## Watch mode
 
 ```bash
-ccusage-viz timeline --watch       # 5 seconds
-ccusage-viz timeline --watch 10    # 10 seconds
+ccuv timeline --watch       # 5 seconds
+ccuv timeline --watch 10    # 10 seconds
 ```
 
 The minimum interval is two seconds. The delay starts after a refresh completes, so refreshes do not overlap. Watch keeps a compact control reminder on the terminal’s final row; Demo mode also includes its size keys. Controls:
 
-- `q` — quit and cancel child `ccusage` processes owned by this invocation.
+- `Ctrl-C` — exit and cancel child `ccusage` processes owned by this invocation.
 - `r` — refresh now; while a refresh is running, queue at most one more.
+- `h` — hide or restore the session-only control footer, returning its row to the chart; adjustment guides remain visible.
 - `Space` — pause or resume automatic refresh. Manual refresh remains available.
-- `s`, `m`, `l` — switch synthetic magnitude while watching Demo mode.
+- `v` — cycle chart → compact command → full command → Markdown data table → JSON data → chart; the footer names the next view.
+- `y` — unavailable in chart view; copy the compact command, full command, complete Markdown table, or complete JSON payload from the corresponding text view.
+- `m` — available only in chart view to adjust the active historical view; rolling ranges offer only 7, 14, 30, or 365 days. The adjustment starts on **Quick** settings; press `a` for **Advanced** settings, where Timeline/Stack expose weekday labels with `k`.
+- `s`, `d`, `l` — switch synthetic magnitude while watching Demo mode (`d` selects medium there).
 
-Watch uses the full active terminal height and repaints without a trailing newline, preventing each refresh from scrolling the screen. The status remains on the first row, the control reminder remains on the final row, and warnings appear immediately above the controls with a warning glyph and fixed semantic foreground color. While a refresh runs, Watch preserves the previous status text and appends a dim `refreshing` hint by updating only the first line; pressing Space likewise updates that row immediately, including when a query is still running. The chart is repainted only when a result arrives. Watch emits one final newline on exit so the shell prompt starts cleanly. One-shot rendering instead reserves one terminal row for the next shell prompt and keeps notices above the chart. The previous successful chart remains visible while refreshing and after a later error. No-data and too-small-terminal states remain alive for a later refresh. Relative windows such as `--days 14` advance when the selected natural-day timezone crosses midnight; explicitly bounded ranges stay fixed. `Ctrl-C` behaves like quit and restores terminal input mode without a traceback.
+Watch data-table and data-json modes serialize the chart-ready post-filter, post-aggregation model: displayed date buckets, series/components, Top N, and `Other`, never pre-aggregation provider rows. The compact command omits defaults; the full command is an explicit audit command and includes local executable, timeout, and selected project-path settings. Watch uses the full active terminal height and repaints without a trailing newline, preventing each refresh from scrolling the screen. The status remains on the first row, the control reminder remains on the final row, and warnings appear immediately above the controls with a warning glyph and fixed semantic foreground color. While a refresh runs, Watch preserves the previous status text and appends a dim `refreshing` hint by updating only the first line; pressing Space likewise updates that row immediately, including when a query is still running. The selected body is repainted when a result arrives; any terminal resize also forces a full repaint. Watch emits one final newline on exit so the shell prompt starts cleanly. One-shot rendering instead reserves one terminal row for the next shell prompt and keeps notices above the chart. The previous successful chart remains visible while refreshing and after a later error. No-data and too-small-terminal states remain alive for a later refresh. Relative windows such as `--period 14d` advance when the selected natural-day timezone crosses midnight; explicitly bounded ranges stay fixed. `Ctrl-C` exits and restores terminal input mode without a traceback.
 
 Multiple Watch processes can run independently. There is no global lock, daemon, PID file, shared cache, or cross-process state; each process owns only its children. Concurrent instances also run independent `ccusage` scans, so CPU, disk, and memory costs add up.
 
 ### Deferred hourly and rolling-history views
 
-Current `ccusage 20.0.20` JSON cannot support exact hourly history: daily rows contain dates only, session rows expose aggregate totals rather than time-bucketed usage, Claude blocks are five-hour billing windows, and there is no uniform Claude/Codex request count. The upstream hourly proposal [#724](https://github.com/ccusage/ccusage/pull/724) closed without merge, and the former `blocks --live` monitor was removed in [#782](https://github.com/ccusage/ccusage/pull/782). Consequently, ccusage-viz does not claim exact rolling 24-hour peaks, hourly usage habits, or call volume. It also does not compensate by reading raw Agent logs, sampling into a history file, running a collector, or creating a usage database. Exact hourly views remain blocked on a supported upstream hourly JSON contract.
+Current `ccusage 20.0.20` JSON cannot support exact hourly history: daily rows contain dates only, session rows expose aggregate totals rather than time-bucketed usage, Claude blocks are five-hour billing windows, and there is no uniform Claude/Codex request count. The upstream hourly proposal [#724](https://github.com/ccusage/ccusage/pull/724) closed without merge, and the former `blocks --live` monitor was removed in [#782](https://github.com/ccusage/ccusage/pull/782). Consequently, ccuv does not claim exact rolling 24-hour peaks, hourly usage habits, or call volume. It also does not compensate by reading raw Agent logs, sampling into a history file, running a collector, or creating a usage database. Exact hourly views remain blocked on a supported upstream hourly JSON contract.
 
 ## Demo mode
 
 ```bash
-ccusage-viz timeline --demo         # medium
-ccusage-viz timeline --demo small
-ccusage-viz timeline --demo medium
-ccusage-viz timeline --demo large
+ccuv timeline --demo         # medium
+ccuv timeline --demo small
+ccuv timeline --demo medium
+ccuv timeline --demo large
 ```
 
 The generated records are deterministic. The three sizes change magnitude only—not dates, shape, or identities—and cover zero days, peaks, unit boundaries, same-name Agent-scoped projects, residual Tokens, and Top overflow. Demo mode never invokes `ccusage` and never writes usage records.
@@ -202,18 +235,18 @@ The generated records are deterministic. The three sizes change magnitude only�
 Theme selects semantic foreground colors; Style selects the chart grammar. Both choices apply only to the current process:
 
 ```bash
-ccusage-viz timeline --pick
-ccusage-viz calendar --pick --theme github
-ccusage-viz stack --pick --split-cache
-ccusage-viz timeline --pick --demo small
-ccusage-viz timeline --pick --watch 5
+ccuv timeline --pick
+ccuv calendar --pick --theme github
+ccuv stack --pick --split-cache
+ccuv timeline --pick --demo small
+ccuv timeline --pick --watch 5
 ```
 
 Without `--demo`, the picker performs one ordinary `ccusage` snapshot using the active date range and selectors. With `--demo [small|medium|large]`, it uses that deterministic synthetic dataset throughout and never invokes `ccusage`. Navigation rerenders only the retained in-memory snapshot; it does not query or regenerate data.
 
-The picker keeps exactly one chart on screen. Press `n` for the next theme, `p` for the previous theme, `j` for the next style, `k` for the previous style, `y` to copy the normalized candidate command, Enter to confirm, and `q` or Ctrl-C to cancel; navigation wraps. `--theme` and `--style` select the initial appearance. It works for Ranking and remains available with `--no-color` so Style can still be selected; in that mode Theme is visually inert. Without Watch, confirmation leaves the selected chart visible and exits. With Watch, the selected snapshot becomes the initial Watch chart and the first automatic refresh waits for the interval.
+The picker keeps exactly one chart on screen. Press `s`/`S` for the next/previous style, `t`/`T` for the next/previous theme, `y` to copy the normalized candidate command, Enter to confirm, and `Esc` to cancel; navigation wraps. `Ctrl-C` exits the application. `s`/`S` and `t`/`T` are the only appearance-picker navigation controls. `--theme` and `--style` select the initial appearance. It works for Ranking, including with the `no-color` theme, where Style remains fully selectable. Without Watch, confirmation leaves the selected chart visible and exits. With Watch, the selected snapshot becomes the initial Watch chart and the first automatic refresh waits for the interval.
 
-Styles are command-specific: Timeline supports `linear`, `step`, `stem`, and `area`; Calendar supports `relative` and `absolute`; Stack supports `stacked`, `stacked-pattern`, `grouped`, `grouped-thin`, and `normalized`; Ranking supports `bar`, `dot`, and `dots`. `--ascii` changes glyphs and `--no-color` removes ANSI styling; neither is a Theme or Style.
+Styles are command-specific: Timeline supports `linear`, `step`, `no-line`, `points`, `line-points`, `stem`, and `area`. `no-line` keeps each series’ distinct marker without a connecting line; `points` uses uniform filled points without lines; `line-points` connects uniform filled points with a linear line. Monitor supports `bars`, `line`, `step`, `points`, `line-points`, and `ranking`; its two uniform-point styles have the same no-line and linear-line semantics as Timeline. Calendar supports `relative` and `absolute`; Stack supports `stacked`, `stacked-pattern`, `grouped`, `grouped-thin`, and `normalized`; Ranking supports `bar`, `dot`, and `dots`. `--ascii` changes glyphs independently of Theme or Style.
 
 ## Language and terminal behavior
 
@@ -222,29 +255,29 @@ Use `--lang en` or `--lang zh`. Without it, Python's system locale selects Simpl
 A JSON file may override selected messages:
 
 ```bash
-ccusage-viz timeline --lang en --lang-file examples/language-overrides.json
+ccuv timeline --lang en --lang-file examples/language-overrides.json
 ```
 
 Override files may contain any subset of known keys; omitted keys inherit from the selected built-in language. The supplied subset is validated atomically: valid UTF-8 JSON, object root, no duplicate or unknown keys, non-empty string values, and exactly matching placeholder names, conversions, and format specifications; named placeholders may be reordered. Watch mode loads the file once. See [Language overrides](docs/language-overrides.md) for every key and placeholder.
 
-All commands accept `--theme classic|vivid|contrast|dracula|catppuccin|solarized|gruvbox|nord|github|mono`; `classic` is the default. Dracula, Catppuccin, Solarized, Gruvbox, Nord, and GitHub are curated ANSI-256 adaptations of mature theme families rather than exact editor-theme reproductions. The GitHub theme uses a contribution-graph-inspired four-level green Calendar scale plus complete semantic colors for every command. Themes select foreground colors only. They cover timeline series and Other, calendar levels, stack components, Ranking marks, and diagnostic highlights. The application does not infer terminal brands or light/dark backgrounds, so the terminal background remains inherited. Timeline uses jointly allocated categorical colors plus distinct markers. Stack uses mixed-temperature categorical colors plus distinct component marks, so identity is not color-only. Calendar uses an ordered four-step palette, while glyph density (`░▒▓█`, or `.oO#` with `--ascii`) remains the authoritative low-to-high magnitude encoding.
+All commands accept `--theme classic|vivid|contrast|dracula|catppuccin|solarized|gruvbox|nord|github|mono|no-color`; `classic` is the default. Dracula, Catppuccin, Solarized, Gruvbox, Nord, and GitHub are curated ANSI-256 adaptations of mature theme families rather than exact editor-theme reproductions. The GitHub theme uses a contribution-graph-inspired four-level green Calendar scale plus complete semantic colors for every command. Themes select foreground colors only. They cover timeline series and Other, calendar levels, stack components, Ranking marks, and diagnostic highlights. The application does not infer terminal brands or light/dark backgrounds, so the terminal background remains inherited. Timeline uses jointly allocated categorical colors plus distinct markers. Stack uses mixed-temperature categorical colors plus distinct component marks, so identity is not color-only. Calendar uses an ordered four-step palette, while glyph density (`░▒▓█`, or `.oO#` with `--ascii`) remains the authoritative low-to-high magnitude encoding.
 
-Use `--no-color` (or `NO_COLOR`) to disable all styling and make the selected scheme visually inert; use `--ascii` to change chart marks without changing summary prose. `TERM=dumb` also selects conservative terminal behavior. Minimum terminal sizes are:
+Use `--theme no-color` to disable ANSI styling explicitly and reproducibly; `NO_COLOR` is not interpreted. Use `--ascii` independently to change chart marks without changing summary prose. `TERM=dumb` still selects conservative terminal behavior. Minimum terminal sizes are:
 
 | Command | Minimum size |
 | --- | --- |
-| `timeline` | 60×18 |
-| `calendar` | 72×14 |
-| `stack` | 60×18 |
-| `ranking` | 60×12 |
+| `timeline` | 58×16 |
+| `calendar` | 58×16 |
+| `stack` | 58×16 |
+| `ranking` | 58×16 |
 
 ## Suggested aliases
 
 ```bash
-alias cct='ccusage-viz timeline --watch'
-alias ccm='ccusage-viz timeline --by model --days 30'
-alias ccs='ccusage-viz stack --days 30 --split-cache'
-alias ccp='ccusage-viz ranking --by project --days 30'
+alias cct='ccuv timeline --watch'
+alias ccm='ccuv timeline --by model --period 30d'
+alias ccs='ccuv stack --period 30d --split-cache'
+alias ccp='ccuv ranking --by project --period 30d'
 ```
 
 ## Stateless and privacy boundaries

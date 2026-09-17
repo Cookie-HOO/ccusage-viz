@@ -4,9 +4,10 @@
 
 ## 0.1.x
 
-- Add a `ccuv tui` command with a useful default panel grid, optional CLI-declared panels, and a global summary. Monitoring panels will show normalized commands by default and let users toggle them with `c`.
+- Continue refining Dashboard layouts, pane scheduling, and the global summary without adding compatibility aliases.
 - Add external Token and QPM data only when a supported upstream contract is available. External QPM will count logical requests and will never infer request counts from tokens or blindly count retries.
 - Revisit animation only after a public design pass establishes its purpose, interaction model, terminal constraints, and maintenance boundary. It is not part of the current release contract.
+- Evaluate interval-aware completed-result caches and bounded recent/history refreshes for long-range Watch and Dashboard historical panes. Current polling intentionally remains unchanged until correctness, invalidation, and source-specific semantics are validated.
 
 ## 0.2.0
 
