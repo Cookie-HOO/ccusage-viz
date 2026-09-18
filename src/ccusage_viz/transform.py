@@ -17,8 +17,8 @@ from ccusage_viz.chart_models import (
 from ccusage_viz.core.time import DateRange
 from ccusage_viz.coverage import DateCoverage
 from ccusage_viz.domain import Notice, TokenUsage, UsageRecord
+from ccusage_viz.processing.summaries import build_period_summary, period_start
 from ccusage_viz.project_identity import project_label, unique_projects
-from ccusage_viz.summaries import build_period_summary, period_start
 
 _OTHER_KEY = ("other",)
 _TOTAL_KEY = ("total",)

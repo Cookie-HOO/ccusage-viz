@@ -44,6 +44,7 @@ from ccusage_viz.options import (
     TimelineConfig,
     adjust_standalone,
 )
+from ccusage_viz.processing import build_period_summary, required_summary_coverage
 from ccusage_viz.processing.monitor import ObservedTPM, monitor_counters, monitor_rank_keys
 from ccusage_viz.query.client import QueryRunner
 from ccusage_viz.query.coordinator import QueryHandle
@@ -52,7 +53,6 @@ from ccusage_viz.query.runtime import QueryRuntime
 from ccusage_viz.render.base import RenderContext, styled_text
 from ccusage_viz.render.palette import COLOR_SCHEMES, get_color_scheme
 from ccusage_viz.render.summary import render_summary, render_summary_placeholder
-from ccusage_viz.summaries import build_period_summary, required_summary_coverage
 from ccusage_viz.terminal import InteractiveScreen, Terminal
 from ccusage_viz.tui_input import KeyEvent, MouseEvent, read_event, tui_input_mode
 from ccusage_viz.watch import (

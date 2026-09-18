@@ -3,7 +3,7 @@ from datetime import date
 from ccusage_viz.chart_models import ChangeDirection
 from ccusage_viz.coverage import DateCoverage, DateInterval
 from ccusage_viz.domain import SourceKind, TokenUsage, UsageRecord
-from ccusage_viz.summaries import build_period_summary, summary_intervals
+from ccusage_viz.processing.summaries import build_period_summary, summary_intervals
 
 
 def record(day: date, total: int) -> UsageRecord:
