@@ -14,7 +14,7 @@ from ccusage_viz.deltas import RefreshRanks
 from ccusage_viz.domain import Notice, SourceKind, TokenUsage, UsageRecord
 from ccusage_viz.errors import UsageError
 from ccusage_viz.i18n import load_translator
-from ccusage_viz.monitor import ObservedTPM
+from ccusage_viz.processing.monitor import ObservedTPM
 from ccusage_viz.query.client import QueryRunner
 from ccusage_viz.terminal import Terminal
 from ccusage_viz.tui import (

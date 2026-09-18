@@ -11,8 +11,8 @@ from ccusage_viz.processing import process_historical
 
 if TYPE_CHECKING:
     from ccusage_viz.i18n import Translator
-    from ccusage_viz.monitor import ObservedBucket
     from ccusage_viz.options import StandaloneLaunch
+    from ccusage_viz.processing.monitor import ObservedBucket
     from ccusage_viz.terminal import Terminal
     from ccusage_viz.watch import UsageSnapshot
 

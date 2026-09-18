@@ -31,13 +31,7 @@ from ccusage_viz.formatting import (
     truncate_width,
 )
 from ccusage_viz.i18n import Translator
-from ccusage_viz.monitor import (
-    ObservedTPM,
-    load_monitor_sample,
-    monitor_counters,
-    monitor_rank_keys,
-    render_monitor_snapshot,
-)
+from ccusage_viz.monitor import load_monitor_sample, render_monitor_snapshot
 from ccusage_viz.options import (
     DASHBOARD_STYLES,
     HEADER_SUMMARIES,
@@ -50,6 +44,7 @@ from ccusage_viz.options import (
     TimelineConfig,
     adjust_standalone,
 )
+from ccusage_viz.processing.monitor import ObservedTPM, monitor_counters, monitor_rank_keys
 from ccusage_viz.query.client import QueryRunner
 from ccusage_viz.query.coordinator import QueryHandle
 from ccusage_viz.query.models import ProviderResult, QueryTrigger

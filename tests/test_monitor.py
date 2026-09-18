@@ -5,19 +5,12 @@ from ccusage_viz.domain import ProjectRef, SourceKind, TokenUsage, UsageRecord
 from ccusage_viz.formatting import display_width
 from ccusage_viz.i18n import load_translator
 from ccusage_viz.monitor import (
-    CounterSnapshot,
     MonitorSeries,
-    ObservedTPM,
-    _agent_records,
-    _copy_observer,
-    _counters,
     _elapsed_labels,
     _monitor_plan,
-    _nice_y_max,
     _render,
     _render_current_rows,
     _series_descriptors,
-    _stable_y_max,
 )
 from ccusage_viz.options import (
     ChartPresentation,
@@ -25,6 +18,15 @@ from ccusage_viz.options import (
     ProcessConfig,
     StandaloneHostConfig,
     StandaloneLaunch,
+)
+from ccusage_viz.processing.monitor import (
+    CounterSnapshot,
+    ObservedTPM,
+    _agent_records,
+    _copy_observer,
+    _counters,
+    _nice_y_max,
+    _stable_y_max,
 )
 from ccusage_viz.render.base import RenderContext
 from ccusage_viz.render.palette import get_color_scheme
