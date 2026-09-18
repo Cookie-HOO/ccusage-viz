@@ -254,14 +254,6 @@ Dashboard 浏览模式有意只保留一行控制栏：`r` 刷新全部、`s`/�
 
 使用 `--lang en` 或 `--lang zh`。未指定时，Python 系统 Locale 中的 `zh_CN`、`zh_SG` 或 `Hans` 选择简体中文；繁体中文 Locale 与其他语言回退为英文。
 
-可用 JSON 文件覆盖部分文案：
-
-```bash
-ccuv timeline --lang zh --lang-file examples/language-overrides.json
-```
-
-覆盖文件可以只提供任意一部分已知 Key；未提供的 Key 继承所选内置语言。所提供的部分采用原子校验：必须是有效 UTF-8 JSON、顶层为对象、无重复或未知 Key、值为非空字符串，而且占位符名称、转换和格式必须完全一致；命名占位符可以调整顺序。Watch 模式只加载一次文件。全部 Key 和占位符参见[语言覆盖](docs/language-overrides.zh-CN.md)。
-
 所有子命令都支持 `--theme classic|vivid|contrast|dracula|catppuccin|solarized|gruvbox|nord|github|mono|no-color`，默认为 `classic`。Dracula、Catppuccin、Solarized、Gruvbox、Nord 与 GitHub 是对成熟主题家族的 ANSI-256 精选适配，并非编辑器主题的逐值复刻。GitHub 主题为 Calendar 提供类似贡献图的四档绿色，并为所有命令提供完整语义色。主题只设置前景色，覆盖 Timeline 序列与“其他”、Calendar 强度、Stack 构成、Ranking 标记和诊断高亮。程序不推断终端品牌或明暗背景，因此继续继承终端背景。Timeline 会联合分配分类颜色并配合不同标记；Stack 使用冷暖混合分类色和不同构成字符，因此不会只依赖颜色区分。Calendar 使用有序的四档配色，而字符密度（`░▒▓█`，设置 `--ascii` 时为 `.oO#`）始终是从低到高的权威强度编码。
 
 使用 `--theme no-color` 可显式且可复现地禁用 ANSI 样式；程序不解释 `NO_COLOR`。`--ascii` 独立改变图形字符，不改变摘要文案。`TERM=dumb` 仍会选择保守的终端行为。最小终端尺寸为：

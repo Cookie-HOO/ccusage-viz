@@ -7,7 +7,6 @@ import shlex
 import sys
 from dataclasses import dataclass, replace
 from enum import StrEnum
-from pathlib import Path
 from typing import Never
 
 from ccusage_viz import __version__
@@ -16,7 +15,6 @@ from ccusage_viz.dashboard import DEFAULT_DASHBOARD_PANELS
 from ccusage_viz.diagnostics import color_enabled, format_error
 from ccusage_viz.errors import UsageError, VizError
 from ccusage_viz.i18n import Translator, detect_language, load_translator
-from ccusage_viz.locales import CATALOGS
 from ccusage_viz.options import (
     COMMAND_STYLES,
     DASHBOARD_STYLES,
@@ -76,12 +74,11 @@ def _render_short_circuit(route: ShortCircuitRoute) -> int:
     raise AssertionError("argparse help did not exit")
 
 
-def _preparse_language(argv: list[str]) -> tuple[str, str | None]:
+def _preparse_language(argv: list[str]) -> str:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--lang", choices=("en", "zh"))
-    parser.add_argument("--lang-file")
     namespace, _ = parser.parse_known_args(argv)
-    return namespace.lang or detect_language(), namespace.lang_file
+    return namespace.lang or detect_language()
 
 
 def _add_presentation(
@@ -97,7 +94,6 @@ def _add_presentation(
     if include_pick:
         parser.add_argument("--pick", action="store_true", help=tr.text("help.pick"))
     parser.add_argument("--lang", choices=("en", "zh"), help=tr.text("help.lang"))
-    parser.add_argument("--lang-file", type=Path, help=tr.text("help.lang_file"))
     parser.add_argument("--ccusage-bin", default="ccusage", help=tr.text("help.ccusage_bin"))
     parser.add_argument("--timeout", type=float, default=30.0, help=argparse.SUPPRESS)
     parser.add_argument("--ascii", action="store_true", help=tr.text("help.ascii"))
@@ -203,7 +199,6 @@ def _add_tui(parser: argparse.ArgumentParser, tr: Translator) -> None:
         help=tr.text("help.demo"),
     )
     parser.add_argument("--lang", choices=("en", "zh"), help=tr.text("help.lang"))
-    parser.add_argument("--lang-file", type=Path, help=tr.text("help.lang_file"))
     parser.add_argument("--ccusage-bin", default="ccusage", help=tr.text("help.ccusage_bin"))
     parser.add_argument("--timeout", type=float, default=30.0, help=argparse.SUPPRESS)
     parser.add_argument("--ascii", action="store_true", help=tr.text("help.ascii"))
@@ -306,7 +301,7 @@ def _inject_default_command(argv: list[str]) -> list[str]:
         return argv
     leading: list[str] = []
     remaining = list(argv)
-    while remaining and remaining[0] in {"--lang", "--lang-file"}:
+    while remaining and remaining[0] == "--lang":
         if len(remaining) < 2:
             return ["timeline", *argv]
         leading.extend(remaining[:2])
@@ -464,20 +459,17 @@ def main(argv: list[str] | None = None) -> int:
     ccusage_bin_explicit = any(
         argument == "--ccusage-bin" or argument.startswith("--ccusage-bin=") for argument in args
     )
-    language, lang_file = _preparse_language(args)
-    builtin = Translator(language, dict(CATALOGS[language]))
-    tr = builtin
+    language = _preparse_language(args)
+    tr = load_translator(language)
     try:
-        tr = load_translator(language, lang_file)
         parser = build_parser(tr)
         namespace = parser.parse_args(args)
         options = replace(_to_options(namespace), ccusage_bin_explicit=ccusage_bin_explicit)
         return run(options, tr)
     except VizError as exc:
-        error_translator = builtin if exc.key.startswith("error.lang_file_") else tr
         text = format_error(
             exc,
-            error_translator,
+            tr,
             color=color_enabled(
                 sys.stderr,
                 no_color=getattr(locals().get("namespace"), "color_scheme", "classic")

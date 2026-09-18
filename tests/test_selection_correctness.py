@@ -55,26 +55,6 @@ def test_project_ambiguity_never_exposes_raw_ids() -> None:
     assert "/private" not in candidates
 
 
-def test_ambiguity_candidates_work_with_strict_language_override(tmp_path) -> None:
-    language_file = tmp_path / "language.json"
-    language_file.write_text(
-        '{"error.selector_ambiguous": "{dimension}/{selector}: {candidates}"}',
-        encoding="utf-8",
-    )
-    translator = load_translator("en", str(language_file))
-    projects = (
-        make_project_ref("claude", "/claude/app"),
-        make_project_ref("codex", "/codex/app"),
-    )
-
-    with pytest.raises(UsageError) as caught:
-        resolve_projects(("pp",), projects)
-
-    assert translator.text(caught.value.key, **caught.value.values) == (
-        "Project/pp:   - app (claude)\n  - app (codex)"
-    )
-
-
 def test_selected_values_without_rows_emit_notices_and_keep_available_groups() -> None:
     records = (
         _record(1, "claude", "/claude/app", "sonnet", 10),

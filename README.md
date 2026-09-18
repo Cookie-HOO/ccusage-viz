@@ -252,14 +252,6 @@ Styles are command-specific: Timeline supports `linear`, `step`, `no-line`, `poi
 
 Use `--lang en` or `--lang zh`. Without it, Python's system locale selects Simplified Chinese for `zh_CN`, `zh_SG`, or `Hans`; Traditional Chinese locales and all other languages fall back to English.
 
-A JSON file may override selected messages:
-
-```bash
-ccuv timeline --lang en --lang-file examples/language-overrides.json
-```
-
-Override files may contain any subset of known keys; omitted keys inherit from the selected built-in language. The supplied subset is validated atomically: valid UTF-8 JSON, object root, no duplicate or unknown keys, non-empty string values, and exactly matching placeholder names, conversions, and format specifications; named placeholders may be reordered. Watch mode loads the file once. See [Language overrides](docs/language-overrides.md) for every key and placeholder.
-
 All commands accept `--theme classic|vivid|contrast|dracula|catppuccin|solarized|gruvbox|nord|github|mono|no-color`; `classic` is the default. Dracula, Catppuccin, Solarized, Gruvbox, Nord, and GitHub are curated ANSI-256 adaptations of mature theme families rather than exact editor-theme reproductions. The GitHub theme uses a contribution-graph-inspired four-level green Calendar scale plus complete semantic colors for every command. Themes select foreground colors only. They cover timeline series and Other, calendar levels, stack components, Ranking marks, and diagnostic highlights. The application does not infer terminal brands or light/dark backgrounds, so the terminal background remains inherited. Timeline uses jointly allocated categorical colors plus distinct markers. Stack uses mixed-temperature categorical colors plus distinct component marks, so identity is not color-only. Calendar uses an ordered four-step palette, while glyph density (`░▒▓█`, or `.oO#` with `--ascii`) remains the authoritative low-to-high magnitude encoding.
 
 Use `--theme no-color` to disable ANSI styling explicitly and reproducibly; `NO_COLOR` is not interpreted. Use `--ascii` independently to change chart marks without changing summary prose. `TERM=dumb` still selects conservative terminal behavior. Minimum terminal sizes are:

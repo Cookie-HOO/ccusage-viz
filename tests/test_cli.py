@@ -1,6 +1,5 @@
 import math
 from argparse import Namespace
-from pathlib import Path
 
 import pytest
 
@@ -59,21 +58,6 @@ def test_version_short_circuits_before_translation_or_runtime(
 
     assert main(["--version"]) == 0
     assert capsys.readouterr().out.strip() == f"ccusage-viz {__version__}"
-
-
-def test_help_ignores_language_file_before_runtime(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    missing = tmp_path / "missing.json"
-    monkeypatch.setattr(
-        "ccusage_viz.cli.run", lambda *_args, **_kwargs: pytest.fail("runtime must not start")
-    )
-
-    with pytest.raises(SystemExit) as caught:
-        main(["timeline", "--lang-file", str(missing), "--lang", "zh", "--help"])
-
-    assert caught.value.code == 0
-    assert "将每日 Token 用量绘制为折线图" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("command", ("timeline", "monitor"))
@@ -209,7 +193,6 @@ def namespace(**overrides: object) -> Namespace:
         "demo": "small",
         "pick": False,
         "lang": "en",
-        "lang_file": None,
         "ccusage_bin": "ccusage",
         "timeout": 30.0,
         "no_color": True,
@@ -392,11 +375,6 @@ def test_global_language_options_precede_a_subcommand() -> None:
         "timeline",
         "--lang",
         "zh",
-    ]
-    assert _inject_default_command(["--lang-file", "custom.json", "ranking"]) == [
-        "ranking",
-        "--lang-file",
-        "custom.json",
     ]
 
 

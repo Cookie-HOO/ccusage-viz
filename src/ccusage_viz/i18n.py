@@ -1,13 +1,8 @@
 from __future__ import annotations
 
-import json
 import locale
-import string
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Any
 
-from ccusage_viz.errors import UsageError
 from ccusage_viz.locales import CATALOGS
 
 
@@ -29,23 +24,6 @@ def detect_language(locale_name: str | None = None) -> str:
     return "en"
 
 
-def _placeholder_signature(value: str) -> tuple[tuple[str, str | None, str | None], ...]:
-    signature = []
-    for _, field_name, format_spec, conversion in string.Formatter().parse(value):
-        if field_name is not None:
-            signature.append((field_name, conversion, format_spec))
-    return tuple(sorted(signature))
-
-
-def _reject_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-    result: dict[str, Any] = {}
-    for key, value in pairs:
-        if key in result:
-            raise UsageError("error.lang_file_duplicate", key=key)
-        result[key] = value
-    return result
-
-
 @dataclass(frozen=True, slots=True)
 class Translator:
     language: str
@@ -59,34 +37,6 @@ class Translator:
         return self.messages[key].format(**rendered_values)
 
 
-def load_translator(language: str | None, lang_file: str | None = None) -> Translator:
+def load_translator(language: str | None) -> Translator:
     selected = language or detect_language()
-    base = dict(CATALOGS[selected])
-    if lang_file is None:
-        return Translator(selected, base)
-
-    path = Path(lang_file)
-    try:
-        raw = path.read_text(encoding="utf-8")
-    except (OSError, UnicodeError) as exc:
-        raise UsageError("error.lang_file_read", path=str(path), detail=str(exc)) from exc
-    try:
-        overrides = json.loads(raw, object_pairs_hook=_reject_duplicates)
-    except UsageError:
-        raise
-    except json.JSONDecodeError as exc:
-        raise UsageError("error.lang_file_json", path=str(path), detail=exc.msg) from exc
-    if not isinstance(overrides, dict):
-        raise UsageError("error.lang_file_object")
-
-    for key, value in overrides.items():
-        if key not in base:
-            raise UsageError("error.lang_file_unknown", key=key)
-        if not isinstance(value, str) or not value.strip():
-            raise UsageError("error.lang_file_value", key=key)
-        required = _placeholder_signature(base[key])
-        if _placeholder_signature(value) != required:
-            placeholders = ", ".join(item[0] for item in required) or "(none)"
-            raise UsageError("error.lang_file_placeholders", key=key, placeholders=placeholders)
-    base.update(overrides)
-    return Translator(selected, base)
+    return Translator(selected, dict(CATALOGS[selected]))
