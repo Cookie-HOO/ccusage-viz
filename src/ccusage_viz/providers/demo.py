@@ -105,6 +105,7 @@ class DemoProvider:
             coverage,
             notices,
             plan.summary_notices,
+            includes_project_attribution=True,
         )
 
 

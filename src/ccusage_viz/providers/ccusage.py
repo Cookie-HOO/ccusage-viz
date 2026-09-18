@@ -249,6 +249,10 @@ class CcusageProvider:
             coverage,
             notices,
             plan.summary_notices,
+            includes_project_attribution=any(
+                query.operation in {"claude_daily_projects", "codex_sessions"}
+                for query in plan.queries
+            ),
         )
 
 

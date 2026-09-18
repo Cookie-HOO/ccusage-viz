@@ -14,7 +14,7 @@ from ccusage_viz.options import (
     StandaloneLaunch,
     TimelineConfig,
 )
-from ccusage_viz.providers.ccusage import plan_ccusage_queries
+from ccusage_viz.providers.ccusage import CCUSAGE_DEFINITION, plan_ccusage_queries
 from ccusage_viz.providers.demo import DEMO_DEFINITION
 from ccusage_viz.query.models import QueryKind
 from ccusage_viz.query.planner import plan_queries
@@ -81,3 +81,23 @@ def test_provider_neutral_planner_compiles_demo_acquisition() -> None:
     assert query.provider == DEMO_DEFINITION.provider.provider
     assert query.operation == "generate"
     assert query.arguments == ("small", "2026-01-02", "2026-01-03")
+
+
+def test_empty_provider_results_preserve_query_attribution_semantics() -> None:
+    unified = CCUSAGE_DEFINITION.provider.assemble(
+        plan_queries(options("timeline"), CCUSAGE_DEFINITION.provider), ()
+    )
+    project = CCUSAGE_DEFINITION.provider.assemble(
+        plan_queries(options("ranking", by="project"), CCUSAGE_DEFINITION.provider), ()
+    )
+    demo = DEMO_DEFINITION.provider.assemble(
+        plan_queries(
+            replace(options("timeline"), host=replace(options("timeline").host, demo_size="small")),
+            DEMO_DEFINITION.provider,
+        ),
+        (),
+    )
+
+    assert not unified.includes_project_attribution
+    assert project.includes_project_attribution
+    assert demo.includes_project_attribution

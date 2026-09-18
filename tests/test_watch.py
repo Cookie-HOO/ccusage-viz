@@ -26,7 +26,8 @@ from ccusage_viz.options import (
     StandaloneLaunch,
     TimelineConfig,
 )
-from ccusage_viz.query.client import QueryRunner
+from ccusage_viz.query.models import DataResolution, ProviderResult
+from ccusage_viz.query.runtime import QueryRuntime
 from ccusage_viz.terminal import InteractiveScreen, Terminal
 from ccusage_viz.watch import (
     RefreshResult,
@@ -71,6 +72,38 @@ def options(*, command: str = "ranking", demo: str | None = "small") -> Standalo
         ProcessConfig(ccusage_bin="/not/invoked", query_timeout=2),
         StandaloneHostConfig(ascii=True, demo_size=demo, watch=False),
         chart,
+    )
+
+
+class Runtime:
+    def __init__(self, result: ProviderResult) -> None:
+        self.result = result
+        self.options: list[StandaloneLaunch] = []
+        self.cancelled = False
+
+    def acquire(self, selected: StandaloneLaunch) -> ProviderResult:
+        self.options.append(selected)
+        return self.result
+
+    def cancel(self) -> None:
+        self.cancelled = True
+
+
+def provider_result(
+    *,
+    coverage: DateCoverage | None = None,
+    notices: tuple[Notice, ...] = (),
+    summary_notices: tuple[Notice, ...] = (),
+    includes_project_attribution: bool = False,
+) -> ProviderResult:
+    return ProviderResult(
+        (),
+        (),
+        DataResolution.DATE,
+        coverage or DateCoverage(),
+        notices,
+        summary_notices,
+        includes_project_attribution=includes_project_attribution,
     )
 
 
@@ -287,13 +320,13 @@ def test_one_shot_reserves_one_more_row_than_watch(monkeypatch: pytest.MonkeyPat
         return "chart"
 
     monkeypatch.setattr("ccusage_viz.watch.render_ranking", capture_height)
-    runner = cast(QueryRunner, object())
+    runtime = cast(QueryRuntime, Runtime(provider_result()))
     terminal = Terminal(100, 30, False, True)
     translator = load_translator("en")
 
-    _refresh(options(), translator, terminal, runner)
-    _refresh(options(), translator, terminal, runner, reserve_prompt=True)
-    _refresh(options(), translator, terminal, runner, control_rows=1)
+    _refresh(options(), translator, terminal, runtime)
+    _refresh(options(), translator, terminal, runtime, reserve_prompt=True)
+    _refresh(options(), translator, terminal, runtime, control_rows=1)
 
     assert heights == [29, 28, 28]
 
@@ -554,89 +587,71 @@ def test_runtime_adjustment_normalizes_timeline_area_when_grouping_changes(
 
 
 @pytest.mark.parametrize("size", ["small", "medium", "large"])
-def test_demo_snapshot_uses_requested_size_once_without_query_runner(
-    size: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    generated: list[str] = []
-
-    class Runner:
-        def run(self, plan):
-            raise AssertionError("demo must not invoke ccusage")
-
-    def generate(selected, date_range):
-        generated.append(selected)
-        return ()
-
-    monkeypatch.setattr("ccusage_viz.watch.generate_demo", generate)
-    snapshot = load_snapshot(
-        replace(
-            options(command="timeline"),
-            host=replace(options(command="timeline").host, demo_size=size),
-        ),
-        cast(QueryRunner, Runner()),
+def test_demo_snapshot_uses_requested_size_through_query_runtime(size: str) -> None:
+    coverage = DateCoverage.from_interval(date(2026, 1, 1), date(2026, 1, 14))
+    runtime = Runtime(
+        provider_result(coverage=coverage, includes_project_attribution=True)
+    )
+    selected = replace(
+        options(command="timeline"),
+        host=replace(options(command="timeline").host, demo_size=size),
     )
 
+    snapshot = load_snapshot(selected, cast(QueryRuntime, runtime))
+
     assert snapshot.records == ()
-    assert snapshot.coverage == DateCoverage.from_interval(date(2026, 1, 1), date(2026, 1, 14))
-    assert generated == [size]
+    assert snapshot.coverage == coverage
+    assert snapshot.includes_project_attribution
+    assert runtime.options == [selected]
 
 
-def test_successful_empty_daily_query_still_records_requested_coverage(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    class Runner:
-        def run(self, plan):
-            from ccusage_viz.query.models import QueryResult
-
-            return tuple(QueryResult(query.kind, {}) for query in plan.queries)
-
-    monkeypatch.setattr("ccusage_viz.watch.parse_usage_records", lambda kind, data: ())
+def test_successful_empty_daily_query_still_records_requested_coverage() -> None:
+    coverage = DateCoverage.from_interval(date(2026, 1, 1), date(2026, 1, 14))
+    runtime = Runtime(provider_result(coverage=coverage))
     snapshot = load_snapshot(
         replace(
             options(command="timeline"),
             host=replace(options(command="timeline").host, demo_size=None),
         ),
-        cast(QueryRunner, Runner()),
+        cast(QueryRuntime, runtime),
     )
 
     assert snapshot.records == ()
     assert snapshot.coverage.covers(DateInterval(date(2026, 1, 1), date(2026, 1, 14)))
+    assert not snapshot.includes_project_attribution
 
 
-def test_snapshot_retains_daily_coverage_when_project_ranking_also_uses_sessions(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    class Runner:
-        def run(self, plan):
-            from ccusage_viz.query.models import QueryResult
-
-            return tuple(QueryResult(query.kind, {}) for query in plan.queries)
-
-    monkeypatch.setattr("ccusage_viz.watch.parse_usage_records", lambda kind, data: ())
+def test_snapshot_retains_daily_coverage_when_project_ranking_also_uses_sessions() -> None:
+    coverage = DateCoverage.from_interval(date(2026, 1, 1), date(2026, 1, 14))
+    summary_notices = (
+        Notice("notice.summary_excludes_session_agent", {"agent": "Codex"}),
+    )
+    runtime = Runtime(
+        provider_result(
+            coverage=coverage,
+            summary_notices=summary_notices,
+            includes_project_attribution=True,
+        )
+    )
     snapshot = load_snapshot(
         replace(
             options(command="ranking"),
             host=replace(options(command="ranking").host, demo_size=None),
         ),
-        cast(QueryRunner, Runner()),
+        cast(QueryRuntime, runtime),
     )
 
-    assert snapshot.coverage == DateCoverage.from_interval(date(2026, 1, 1), date(2026, 1, 14))
-    assert snapshot.summary_notices == (
-        Notice("notice.summary_excludes_session_agent", {"agent": "Codex"}),
-    )
+    assert snapshot.coverage == coverage
+    assert snapshot.summary_notices == summary_notices
+    assert snapshot.includes_project_attribution
 
 
-def test_demo_refresh_never_invokes_query_runner() -> None:
-    class Runner:
-        def run(self, plan):
-            raise AssertionError("demo must not invoke ccusage")
-
+def test_demo_refresh_uses_provider_runtime() -> None:
     result = _refresh(
         options(),
         load_translator("en"),
         Terminal(100, 30, False, True),
-        cast(QueryRunner, Runner()),
+        cast(QueryRuntime, Runtime(provider_result(includes_project_attribution=True))),
     )
     assert "Ranking" in result.chart
     assert result.notices == ()

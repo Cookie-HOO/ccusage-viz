@@ -214,6 +214,7 @@ class ProviderResult:
     notices: tuple[Notice, ...] = ()
     summary_notices: tuple[Notice, ...] = ()
     provider_metadata: Metadata = ()
+    includes_project_attribution: bool = False
 
 
 class QueryKind(StrEnum):

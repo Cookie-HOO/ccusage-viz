@@ -12,6 +12,7 @@ from dataclasses import dataclass, replace
 from shutil import get_terminal_size
 from typing import Literal, cast
 
+from ccusage_viz.bootstrap import build_query_runtime
 from ccusage_viz.command_copy import (
     copy_command,
     format_command,
@@ -23,7 +24,6 @@ from ccusage_viz.core.time import refresh_date_range
 from ccusage_viz.coverage import DateCoverage
 from ccusage_viz.data_view import BodyView, next_body_view, render_snapshot_data
 from ccusage_viz.deltas import RefreshDeltas, RefreshRanks
-from ccusage_viz.demo import generate_demo
 from ccusage_viz.diagnostics import color_enabled, format_error
 from ccusage_viz.domain import Notice, UsageRecord
 from ccusage_viz.errors import UsageError
@@ -39,9 +39,7 @@ from ccusage_viz.options import (
     adjust_standalone,
     compatible_styles,
 )
-from ccusage_viz.providers.ccusage import plan_ccusage_queries
-from ccusage_viz.query.client import QueryRunner
-from ccusage_viz.query.models import QueryKind
+from ccusage_viz.query.runtime import QueryRuntime
 from ccusage_viz.render import (
     RenderContext,
     render_calendar,
@@ -51,7 +49,6 @@ from ccusage_viz.render import (
 )
 from ccusage_viz.render.base import styled_text
 from ccusage_viz.render.palette import COLOR_SCHEMES, WARNING_COLOR
-from ccusage_viz.schema import parse_usage_records
 from ccusage_viz.terminal import InteractiveScreen, Terminal, inspect_terminal
 from ccusage_viz.transform import (
     build_calendar,
@@ -255,39 +252,18 @@ def ranking_keys(options: StandaloneLaunch, snapshot: UsageSnapshot) -> tuple[Ha
     return tuple(key for key, _, is_other in ranking_entries(options, snapshot) if not is_other)
 
 
-def load_snapshot(options: StandaloneLaunch, runner: QueryRunner) -> UsageSnapshot:
+def load_snapshot(options: StandaloneLaunch, runtime: QueryRuntime) -> UsageSnapshot:
     if isinstance(options.chart, MonitorConfig):
         raise TypeError("historical snapshot loading does not support monitor configurations")
     started = time.monotonic()
-    if options.host.demo_size:
-        records = generate_demo(options.host.demo_size, options.chart.date_range)
-        notices: tuple[Notice, ...] = ()
-        includes_project_attribution = True
-        coverage = DateCoverage.from_interval(
-            options.chart.date_range.since, options.chart.date_range.until
-        )
-    else:
-        plan = plan_ccusage_queries(options)
-        results = runner.run(plan)
-        records = tuple(
-            record for result in results for record in parse_usage_records(result.kind, result.data)
-        )
-        notices = plan.notices
-        includes_project_attribution = any(
-            query.kind in {QueryKind.CLAUDE_DAILY_PROJECTS, QueryKind.CODEX_SESSIONS}
-            for query in plan.queries
-        )
-        daily_intervals = tuple(
-            query.daily_coverage for query in plan.queries if query.daily_coverage is not None
-        )
-        coverage = DateCoverage(daily_intervals)
+    result = runtime.acquire(options)
     return UsageSnapshot(
-        records,
-        notices,
+        result.records,
+        result.notices,
         time.monotonic() - started,
-        includes_project_attribution,
-        coverage,
-        () if options.host.demo_size else plan.summary_notices,
+        result.includes_project_attribution,
+        result.coverage,
+        result.summary_notices,
     )
 
 
@@ -326,7 +302,7 @@ def _refresh(
     options: StandaloneLaunch,
     translator: Translator,
     terminal: Terminal,
-    runner: QueryRunner,
+    runtime: QueryRuntime,
     *,
     reserve_prompt: bool = False,
     control_rows: int = 0,
@@ -336,7 +312,7 @@ def _refresh(
         options,
         translator,
         terminal,
-        load_snapshot(options, runner),
+        load_snapshot(options, runtime),
         reserve_prompt=reserve_prompt,
         control_rows=control_rows,
         normalize_titles=normalize_titles,
@@ -355,32 +331,35 @@ def run_once(options: StandaloneLaunch, translator: Translator) -> int:
         no_color=current.chart.presentation.theme == "no-color",
         ascii=current.host.ascii,
     )
-    runner = QueryRunner(current.process.ccusage_bin, timeout=current.process.query_timeout)
-    result = _refresh(
-        current, translator, terminal, runner, reserve_prompt=True, normalize_titles=True
-    )
-    status = (
-        translator.text("status.demo", size=current.host.demo_size)
-        if current.host.demo_size
-        else translator.text("status.query_time", seconds=f"{result.elapsed:.2f}")
-    )
-    screen = InteractiveScreen(sys.stdout)
-    screen.paint(
-        result.chart,
-        status,
-        "",
-        _notice_lines(
-            result.notices,
-            width=terminal.width,
-            color=terminal.color,
-            ascii=terminal.ascii,
-            translator=translator,
-            color_scheme=current.chart.presentation.theme,
-        ),
-        height=terminal.height,
-    )
-    screen.finish()
-    return 0
+    runtime = build_query_runtime()
+    try:
+        result = _refresh(
+            current, translator, terminal, runtime, reserve_prompt=True, normalize_titles=True
+        )
+        status = (
+            translator.text("status.demo", size=current.host.demo_size)
+            if current.host.demo_size
+            else translator.text("status.query_time", seconds=f"{result.elapsed:.2f}")
+        )
+        screen = InteractiveScreen(sys.stdout)
+        screen.paint(
+            result.chart,
+            status,
+            "",
+            _notice_lines(
+                result.notices,
+                width=terminal.width,
+                color=terminal.color,
+                ascii=terminal.ascii,
+                translator=translator,
+                color_scheme=current.chart.presentation.theme,
+            ),
+            height=terminal.height,
+        )
+        screen.finish()
+        return 0
+    finally:
+        runtime.cancel()
 
 
 @contextmanager
@@ -682,7 +661,7 @@ def run_watch(
         raise TypeError("historical watch mode does not support monitor configurations")
     active_screen = screen or InteractiveScreen(sys.stdout)
     interval = options.host.interval or 10.0
-    runner = QueryRunner(options.process.ccusage_bin, timeout=options.process.query_timeout)
+    runtime = build_query_runtime()
     results: queue.Queue[tuple[int, RefreshResult | BaseException]] = queue.Queue()
     running = False
     queued = False
@@ -875,7 +854,7 @@ def run_watch(
                             snapshot,
                             translator,
                             size,
-                            runner,
+                            runtime,
                             control_rows=1,
                             normalize_titles=True,
                         ),
@@ -1034,8 +1013,8 @@ def run_watch(
                     else:
                         next_refresh = time.monotonic()
     except KeyboardInterrupt:
-        runner.cancel()
         return 0
     finally:
+        runtime.cancel()
         if screen is None:
             active_screen.finish()
