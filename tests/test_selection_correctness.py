@@ -6,9 +6,8 @@ from ccusage_viz.core.time import DateRange
 from ccusage_viz.domain import ModelBreakdown, SourceKind, TokenUsage, UsageRecord
 from ccusage_viz.errors import UsageError
 from ccusage_viz.i18n import load_translator
-from ccusage_viz.processing import filter_records
+from ccusage_viz.processing import build_timeline, filter_records
 from ccusage_viz.project_identity import make_project_ref, resolve_projects
-from ccusage_viz.transform import build_timeline
 
 
 def _record(day: int, agent: str, project: str, model: str, total: int) -> UsageRecord:

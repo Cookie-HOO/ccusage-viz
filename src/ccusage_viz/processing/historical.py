@@ -7,7 +7,12 @@ from ccusage_viz.coverage import DateCoverage
 from ccusage_viz.domain import Notice, UsageRecord
 from ccusage_viz.options import HistoricalChartConfig
 from ccusage_viz.processing.filtering import filter_records
-from ccusage_viz.transform import build_calendar, build_ranking, build_stack, build_timeline
+from ccusage_viz.processing.projection import (
+    build_calendar,
+    build_ranking,
+    build_stack,
+    build_timeline,
+)
 
 HistoricalModel: TypeAlias = TimelineModel | CalendarModel | StackModel | RankingModel
 _EMPTY_COVERAGE = DateCoverage()

@@ -41,7 +41,7 @@ from ccusage_viz.options import (
     adjust_standalone,
     compatible_styles,
 )
-from ccusage_viz.processing import filter_records, process_historical
+from ccusage_viz.processing import build_ranking, filter_records, process_historical
 from ccusage_viz.query.coordinator import QueryHandle
 from ccusage_viz.query.models import ProviderResult, QueryTrigger
 from ccusage_viz.query.runtime import QueryRuntime
@@ -55,7 +55,6 @@ from ccusage_viz.render import (
 from ccusage_viz.render.base import styled_text
 from ccusage_viz.render.palette import COLOR_SCHEMES, WARNING_COLOR
 from ccusage_viz.terminal import InteractiveScreen, Terminal, inspect_terminal
-from ccusage_viz.transform import build_ranking
 
 
 @dataclass(frozen=True, slots=True)
