@@ -8,10 +8,7 @@ import time
 from contextlib import suppress
 from dataclasses import dataclass
 from threading import Event, Thread
-from typing import TYPE_CHECKING, Final
-
-if TYPE_CHECKING:
-    from ccusage_viz.options import StandaloneLaunch
+from typing import Final
 
 from ccusage_viz.coverage import DateCoverage, DateInterval
 from ccusage_viz.domain import Notice
@@ -27,10 +24,7 @@ from ccusage_viz.query.models import (
     ProviderResultFragment,
     QueryIntent,
     QueryKind,
-    QueryPlan,
-    QuerySpec,
 )
-from ccusage_viz.query.planner import plan_queries
 from ccusage_viz.query.provider import ProviderCapabilities, ProviderDefinition
 from ccusage_viz.schema import parse_usage_records
 
@@ -42,8 +36,6 @@ _OPERATION_SOURCES = {
     "claude_daily_projects": QueryKind.CLAUDE_DAILY_PROJECTS,
     "codex_sessions": QueryKind.CODEX_SESSIONS,
 }
-
-_OPERATION_KINDS = _OPERATION_SOURCES
 
 
 @dataclass(frozen=True, slots=True)
@@ -258,25 +250,6 @@ class CcusageProvider:
 
 
 CCUSAGE_DEFINITION = ProviderDefinition(CcusageProvider())
-
-
-def plan_ccusage_queries(options: StandaloneLaunch) -> QueryPlan:
-    """Temporary adapter for legacy consumers during phased runtime migration."""
-    if options.host.demo_size:
-        return QueryPlan(())
-    return _legacy_plan(plan_queries(options, CCUSAGE_DEFINITION.provider))
-
-
-def _legacy_plan(physical: PhysicalPlan) -> QueryPlan:
-    queries = tuple(
-        QuerySpec(
-            _OPERATION_KINDS[query.operation],
-            query.arguments,
-            query.coverage.intervals[0] if query.coverage.intervals else None,
-        )
-        for query in physical.queries
-    )
-    return QueryPlan(queries, physical.notices, physical.summary_notices)
 
 
 def _communicate_bounded(
