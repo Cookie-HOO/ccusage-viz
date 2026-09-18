@@ -25,6 +25,7 @@ from ccusage_viz.tui import (
     _adjustment_footer,
     _adjustment_key_supported,
     _adjustment_target,
+    _choose_pane_type,
     _dashboard_adjustment_status,
     _dashboard_title_line,
     _finish_clicked,
@@ -629,6 +630,62 @@ def test_tui_refresh_ranks_require_an_existing_stable_key() -> None:
     assert pane.rank_deltas == {}
     _refresh_ranks(pane, ("b", "new", "a"))
     assert pane.rank_deltas == {"b": 1, "a": -2}
+
+
+def test_pane_chooser_reuses_dashboard_decoder_and_ignores_mouse(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Screen:
+        def paint(self, *args: object, **kwargs: object) -> None:
+            pass
+
+    decoder = InputDecoder()
+    decoder.feed("\x1b[<0;20;5M\x1b[B\r")
+    monkeypatch.setattr(
+        tui_module,
+        "read_event",
+        lambda active, timeout: active.next(now=1.0),
+    )
+
+    assert (
+        _choose_pane_type(
+            Screen(),
+            load_translator("en"),
+            decoder,
+            height=20,
+        )
+        == "calendar"
+    )
+
+
+def test_pane_chooser_wraps_backward_and_escape_cancels(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Screen:
+        def paint(self, *args: object, **kwargs: object) -> None:
+            pass
+
+    decoder = InputDecoder()
+    decoder.feed("k\r")
+    monkeypatch.setattr(
+        tui_module,
+        "read_event",
+        lambda active, timeout: active.next(now=1.0),
+    )
+    assert (
+        _choose_pane_type(Screen(), load_translator("en"), decoder, height=20)
+        == "monitor"
+    )
+
+    cancelled = InputDecoder()
+    cancelled.feed("\x1b")
+    moments = iter((1.0, 1.04))
+    monkeypatch.setattr(
+        tui_module,
+        "read_event",
+        lambda active, timeout: active.next(now=next(moments)),
+    )
+    assert _choose_pane_type(Screen(), load_translator("en"), cancelled, height=20) is None
 
 
 def test_tui_input_decodes_keys_and_fragmented_mouse_press() -> None:

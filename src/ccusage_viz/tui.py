@@ -63,8 +63,7 @@ from ccusage_viz.render.palette import COLOR_SCHEMES, get_color_scheme
 from ccusage_viz.render.summary import render_summary, render_summary_placeholder
 from ccusage_viz.terminal import InteractiveScreen, Terminal
 from ccusage_viz.terminal_ui import notice_lines as format_notice_lines
-from ccusage_viz.terminal_ui import read_key
-from ccusage_viz.tui_input import KeyEvent, MouseEvent, read_event, tui_input_mode
+from ccusage_viz.tui_input import InputDecoder, KeyEvent, MouseEvent, read_event, tui_input_mode
 
 _PANE_COMMANDS = ("timeline", "calendar", "stack", "ranking", "monitor")
 
@@ -816,7 +815,11 @@ def _dashboard_adjustment_status(
 
 
 def _choose_pane_type(
-    screen: InteractiveScreen, translator: Translator, *, height: int
+    screen: InteractiveScreen,
+    translator: Translator,
+    decoder: InputDecoder,
+    *,
+    height: int,
 ) -> str | None:
     index = 0
     while True:
@@ -830,7 +833,10 @@ def _choose_pane_type(
             translator.text("status.tui_add_controls"),
             height=height,
         )
-        key = read_key(0.1)
+        event = read_event(decoder, 0.1)
+        if not isinstance(event, KeyEvent):
+            continue
+        key = event.value
         if key in {"j", "\x1b[B"}:
             index = (index + 1) % len(_PANE_COMMANDS)
         elif key in {"k", "\x1b[A"}:
@@ -1548,7 +1554,10 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                             grid_error = translator.text("error.tui_grid_full", layout=active_grid)
                         else:
                             choice = _choose_pane_type(
-                                screen, translator, height=get_terminal_size().lines
+                                screen,
+                                translator,
+                                decoder,
+                                height=get_terminal_size().lines,
                             )
                             if choice:
                                 panes.append(
