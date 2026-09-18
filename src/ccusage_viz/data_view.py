@@ -10,11 +10,11 @@ from ccusage_viz.formatting import format_tokens
 from ccusage_viz.processing import process_historical
 
 if TYPE_CHECKING:
+    from ccusage_viz.historical_component import UsageSnapshot
     from ccusage_viz.i18n import Translator
     from ccusage_viz.options import StandaloneLaunch
     from ccusage_viz.processing.monitor import ObservedBucket
     from ccusage_viz.terminal import Terminal
-    from ccusage_viz.watch import UsageSnapshot
 
 
 BodyView = Literal["chart", "command", "full-command", "data-table", "data-json"]

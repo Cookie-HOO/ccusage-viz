@@ -27,6 +27,7 @@ from ccusage_viz.historical_component import (
     HistoricalCompletion,
     UsageSnapshot,
 )
+from ccusage_viz.historical_render import render_historical_component
 from ccusage_viz.i18n import Translator
 from ccusage_viz.options import (
     HistoricalChartConfig,
@@ -40,16 +41,9 @@ from ccusage_viz.options import (
 )
 from ccusage_viz.query.coordinator import QueryHandle
 from ccusage_viz.query.models import ProviderResult, QueryTrigger
-from ccusage_viz.render import RenderContext
 from ccusage_viz.render.palette import COLOR_SCHEMES
 from ccusage_viz.terminal import InteractiveScreen, Terminal, inspect_terminal
 from ccusage_viz.terminal_ui import controls_line, dimmed, input_mode, notice_lines, read_key
-
-
-@dataclass(frozen=True, slots=True)
-class RenderedChart:
-    chart: str
-    notices: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,57 +80,6 @@ def _adjustment_key_supported(command: str, page: str, key: str) -> bool:
     return key in keys[command]
 
 
-def historical_chart_config(options: StandaloneLaunch) -> HistoricalChartConfig:
-    if isinstance(options.chart, MonitorConfig):
-        raise TypeError("historical rendering does not support monitor configurations")
-    return options.chart
-
-
-def _render_component(
-    component: HistoricalChartComponent,
-    translator: Translator,
-    terminal: Terminal,
-    *,
-    reserve_prompt: bool = False,
-    control_rows: int = 0,
-    hide_upper_right_axes: bool = False,
-    ranking_deltas: Mapping[Hashable, float] | None = None,
-    ranking_rank_deltas: Mapping[Hashable, int] | None = None,
-    normalize_titles: bool = False,
-) -> RenderedChart:
-    options = component.accepted_options
-    model = component.model
-    if options is None or model is None:
-        raise RuntimeError("historical component has no accepted model")
-    chart = historical_chart_config(options)
-    title_content = (
-        translator.text(f"label.{options.chart.by or 'total'}")
-        if normalize_titles and options.chart.kind == "timeline"
-        else translator.text(f"label.{options.chart.by or 'project'}")
-        if normalize_titles and options.chart.kind == "ranking"
-        else None
-    )
-    context = RenderContext(
-        terminal.width,
-        max(1, terminal.height - 1 - len(model.notices) - int(reserve_prompt) - control_rows),
-        translator,
-        color=terminal.color,
-        ascii=terminal.ascii,
-        color_scheme=options.chart.presentation.theme,
-        style=options.chart.presentation.style,
-        legend_position=options.chart.presentation.legend,
-        hide_upper_right_axes=hide_upper_right_axes,
-        deltas=ranking_deltas,
-        rank_deltas=ranking_rank_deltas,
-        weekday_mode=getattr(options.chart, "weekdays", "show"),
-        period=chart.date_range.period if chart.date_range.relative_until else None,
-        title_content=title_content,
-    )
-    chart = component.render(context)
-    messages = tuple(translator.text(notice.key, **notice.values) for notice in model.notices)
-    return RenderedChart(chart, messages)
-
-
 def render_component(
     component: HistoricalChartComponent,
     translator: Translator,
@@ -153,7 +96,7 @@ def render_component(
     options = component.accepted_options
     if snapshot is None or options is None:
         raise RuntimeError("historical component has no accepted snapshot")
-    rendered = _render_component(
+    rendered = render_historical_component(
         component,
         translator,
         terminal,

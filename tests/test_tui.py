@@ -13,6 +13,7 @@ from ccusage_viz.coverage import DateCoverage, DateInterval
 from ccusage_viz.deltas import RefreshRanks
 from ccusage_viz.domain import Notice, SourceKind, TokenUsage, UsageRecord
 from ccusage_viz.errors import UsageError
+from ccusage_viz.historical_component import UsageSnapshot
 from ccusage_viz.i18n import load_translator
 from ccusage_viz.processing.monitor import ObservedTPM
 from ccusage_viz.query.client import QueryRunner
@@ -49,7 +50,6 @@ from ccusage_viz.tui import (
     resolve_panel_layout,
 )
 from ccusage_viz.tui_input import InputDecoder, KeyEvent, MouseEvent
-from ccusage_viz.watch import UsageSnapshot
 
 
 def test_dashboard_defaults_to_a_filled_four_pane_dashboard() -> None:
@@ -314,13 +314,13 @@ def test_dashboard_pane_retains_last_render_for_localized_renderer_warnings(
     pane.component.seed(pane.component.candidate, UsageSnapshot((), (), 0.25))
     monkeypatch.setattr(
         tui_module,
-        "render_component",
+        "render_historical_component",
         lambda *args, **kwargs: tui_module.PaneRender("previous chart"),
     )
     first = _pane_render(pane, load_translator("en"), Terminal(58, 16, False, True))
     monkeypatch.setattr(
         tui_module,
-        "render_component",
+        "render_historical_component",
         lambda *args, **kwargs: (_ for _ in ()).throw(
             UsageError("error.stack_stacked_width", width=58)
         ),

@@ -88,6 +88,17 @@ def test_dashboard_panes_do_not_mirror_historical_component_state() -> None:
     )
 
 
+def test_reusable_historical_views_do_not_import_watch_host() -> None:
+    violations = _forbidden_imports(PACKAGE_ROOT, {"ccusage_viz.watch"})
+
+    assert [
+        violation
+        for violation in violations
+        if violation.split(":", 1)[0]
+        in {"data_view.py", "historical_render.py", "tui.py"}
+    ] == []
+
+
 def test_processing_package_does_not_import_runtime_or_adapter_layers() -> None:
     assert _forbidden_imports(
         PACKAGE_ROOT / "processing",

@@ -18,7 +18,7 @@ from ccusage_viz.coverage import DateCoverage
 from ccusage_viz.domain import Notice
 from ccusage_viz.errors import UsageError
 from ccusage_viz.formatting import display_width, strip_ansi
-from ccusage_viz.historical_component import HistoricalChartComponent
+from ccusage_viz.historical_component import HistoricalChartComponent, UsageSnapshot
 from ccusage_viz.i18n import load_translator
 from ccusage_viz.options import (
     CalendarConfig,
@@ -36,7 +36,6 @@ from ccusage_viz.terminal_ui import controls_line, notice_lines
 from ccusage_viz.watch import (
     RefreshResult,
     RuntimeAdjustmentResult,
-    UsageSnapshot,
     _paint,
     _paint_status,
     _refreshing_status,

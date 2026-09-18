@@ -10,6 +10,7 @@ from ccusage_viz.data_view import (
     render_snapshot_data,
 )
 from ccusage_viz.domain import Agent, SourceKind, TokenUsage, UsageRecord
+from ccusage_viz.historical_component import UsageSnapshot
 from ccusage_viz.i18n import load_translator
 from ccusage_viz.options import (
     ProcessConfig,
@@ -19,7 +20,6 @@ from ccusage_viz.options import (
 )
 from ccusage_viz.processing.monitor import ObservedBucket
 from ccusage_viz.terminal import Terminal
-from ccusage_viz.watch import UsageSnapshot
 
 
 def _options() -> StandaloneLaunch:
