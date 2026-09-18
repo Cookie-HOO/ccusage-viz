@@ -39,6 +39,7 @@ from ccusage_viz.options import (
     adjust_standalone,
     compatible_styles,
 )
+from ccusage_viz.query.models import ProviderResult
 from ccusage_viz.query.runtime import QueryRuntime
 from ccusage_viz.render import (
     RenderContext,
@@ -252,19 +253,23 @@ def ranking_keys(options: StandaloneLaunch, snapshot: UsageSnapshot) -> tuple[Ha
     return tuple(key for key, _, is_other in ranking_entries(options, snapshot) if not is_other)
 
 
+def snapshot_from_result(result: ProviderResult, elapsed: float) -> UsageSnapshot:
+    return UsageSnapshot(
+        result.records,
+        result.notices,
+        elapsed,
+        result.includes_project_attribution,
+        result.coverage,
+        result.summary_notices,
+    )
+
+
 def load_snapshot(options: StandaloneLaunch, runtime: QueryRuntime) -> UsageSnapshot:
     if isinstance(options.chart, MonitorConfig):
         raise TypeError("historical snapshot loading does not support monitor configurations")
     started = time.monotonic()
     result = runtime.acquire(options)
-    return UsageSnapshot(
-        result.records,
-        result.notices,
-        time.monotonic() - started,
-        result.includes_project_attribution,
-        result.coverage,
-        result.summary_notices,
-    )
+    return snapshot_from_result(result, time.monotonic() - started)
 
 
 def render_snapshot(

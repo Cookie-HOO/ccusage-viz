@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import Future
 from dataclasses import replace
 from datetime import date
 from typing import cast
@@ -14,7 +15,7 @@ from ccusage_viz.options import (
     StandaloneLaunch,
     TimelineConfig,
 )
-from ccusage_viz.query.coordinator import QueryCoordinator
+from ccusage_viz.query.coordinator import QueryCoordinator, QueryHandle
 from ccusage_viz.query.models import PhysicalPlan, ProviderResult
 from ccusage_viz.query.provider import Provider
 from ccusage_viz.query.registry import ProviderRegistry
@@ -59,10 +60,14 @@ def test_runtime_delegates_execution_and_cancellation() -> None:
             self.provider: Provider | None = None
             self.cancelled = False
 
-        def run(self, plan: PhysicalPlan, provider: Provider) -> ProviderResult:
+        def submit(
+            self, plan: PhysicalPlan, provider: Provider
+        ) -> QueryHandle[ProviderResult]:
             self.plan = plan
             self.provider = provider
-            return provider.assemble(plan, ())
+            future: Future[ProviderResult] = Future()
+            future.set_result(provider.assemble(plan, ()))
+            return QueryHandle(future, lambda: None)
 
         def cancel(self) -> None:
             self.cancelled = True
@@ -71,7 +76,8 @@ def test_runtime_delegates_execution_and_cancellation() -> None:
 
     coordinator = Coordinator()
     runtime = QueryRuntime(build_provider_registry(), cast(QueryCoordinator, coordinator))
-    runtime.acquire(historical())
+    handle = runtime.submit(historical())
+    assert handle.result() == runtime.acquire(historical())
     runtime.cancel()
 
     assert coordinator.plan is not None

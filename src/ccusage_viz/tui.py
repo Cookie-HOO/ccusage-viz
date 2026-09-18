@@ -50,6 +50,8 @@ from ccusage_viz.options import (
     adjust_standalone,
 )
 from ccusage_viz.query.client import QueryRunner
+from ccusage_viz.query.coordinator import QueryHandle
+from ccusage_viz.query.models import ProviderResult
 from ccusage_viz.query.runtime import QueryRuntime
 from ccusage_viz.render.base import RenderContext, styled_text
 from ccusage_viz.render.palette import COLOR_SCHEMES, get_color_scheme
@@ -65,6 +67,7 @@ from ccusage_viz.watch import (
     ranking_keys,
     ranking_values,
     render_snapshot,
+    snapshot_from_result,
 )
 
 _PANE_COMMANDS = ("timeline", "calendar", "stack", "ranking", "monitor")
@@ -77,6 +80,7 @@ class TuiPane:
     snapshot: UsageSnapshot | None = None
     observer: ObservedTPM | None = None
     future: Future[UsageSnapshot | tuple[UsageRecord, ...]] | None = None
+    query_handle: QueryHandle[ProviderResult] | None = None
     refreshed_at: float = 0.0
     demo_ordinal: int = 0
     error: str | None = None
@@ -106,6 +110,7 @@ class DashboardHeader:
     runtime: QueryRuntime
     snapshot: UsageSnapshot | None = None
     future: Future[UsageSnapshot] | None = None
+    query_handle: QueryHandle[ProviderResult] | None = None
     refreshed_at: float = 0.0
     error: str | None = None
     generation: int = 0
@@ -551,6 +556,12 @@ def _load_pane(
     return load_snapshot(options, runtime)
 
 
+def _await_historical(
+    handle: QueryHandle[ProviderResult], started: float
+) -> UsageSnapshot:
+    return snapshot_from_result(handle.result(), time.monotonic() - started)
+
+
 def _ranking_values(options: StandaloneLaunch, snapshot: UsageSnapshot) -> dict[Hashable, float]:
     return ranking_values(options, snapshot)
 
@@ -818,6 +829,8 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         pane = panes[index]
         if pane.future is not None and not pane.future.done():
             pane.refresh_pending = pane.refresh_pending or queue_if_running
+            if queue_if_running and pane.query_handle is not None:
+                pane.query_handle.cancel()
             return
         pane.error = None
         pane.submitted_generation = pane.generation
@@ -834,9 +847,15 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             )
         )
         pane.submitted_options = submitted
-        pane.future = executor.submit(
-            _load_pane, submitted, runtime, pane.monitor_runner, pane.demo_ordinal
-        )
+        if isinstance(submitted.chart, MonitorConfig):
+            pane.query_handle = None
+            pane.future = executor.submit(
+                _load_pane, submitted, runtime, pane.monitor_runner, pane.demo_ordinal
+            )
+        else:
+            started = time.monotonic()
+            pane.query_handle = runtime.submit(submitted)
+            pane.future = executor.submit(_await_historical, pane.query_handle, started)
 
     def refresh_header(*, queue_if_running: bool = False, aggressive: bool = False) -> None:
         requested = _header_refresh_interval(header, aggressive=aggressive)
@@ -844,6 +863,8 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             return
         if header.future is not None and not header.future.done():
             header.refresh_pending = header.refresh_pending or queue_if_running
+            if queue_if_running and header.query_handle is not None:
+                header.query_handle.cancel()
             return
         header.error = None
         header.submitted_generation = header.generation
@@ -856,7 +877,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         )
         header.submitted_options = submitted
         header.refreshed_at = time.monotonic()
-        header.future = executor.submit(load_snapshot, submitted, header.runtime)
+        started = time.monotonic()
+        header.query_handle = header.runtime.submit(submitted)
+        header.future = executor.submit(_await_historical, header.query_handle, started)
 
     def collect() -> bool:
         nonlocal last_successful_update
@@ -866,6 +889,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             submitted_generation = header.submitted_generation
             submitted_options = header.submitted_options
             header.future = None
+            header.query_handle = None
             header.submitted_generation = None
             header.submitted_options = None
             try:
@@ -891,6 +915,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             submitted_generation = pane.submitted_generation
             submitted_options = pane.submitted_options
             pane.future = None
+            pane.query_handle = None
             pane.submitted_generation = None
             pane.submitted_options = None
             observed_at = time.monotonic()
@@ -1258,6 +1283,8 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                             focused += 1
                         elif key in {"x", "X"} and len(panes) > 1:
                             removed = panes.pop(focused)
+                            if removed.query_handle is not None:
+                                removed.query_handle.cancel()
                             if removed.monitor_runner is not None:
                                 removed.monitor_runner.cancel()
                             focused = min(focused, len(panes) - 1)
