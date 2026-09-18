@@ -17,14 +17,14 @@ def options(**changes: object) -> CommandOptions:
     base = CommandOptions(
         command="timeline",
         date_range=DateRange(date(2026, 1, 1), date(2026, 1, 2), None),
-        by="total",
+        by=None,
         top=None,
         other="hide",
         cache="combined",
         agents=(),
         models=(),
         projects=(),
-        watch=None,
+        interval=None,
         demo=None,
         ccusage_bin="ccusage",
         query_timeout=2,
@@ -39,7 +39,7 @@ def test_dependency_preflight_skips_demo_and_custom_binary(monkeypatch: pytest.M
 
     ensure_ccusage(options(demo="small"), load_translator("en"))
     ensure_ccusage(options(ccusage_bin="/custom/ccusage"), load_translator("en"))
-    ensure_ccusage(options(ccusage_bin_explicit=True), load_translator("en"))
+    ensure_ccusage(options(explicit=frozenset({"ccusage_bin"})), load_translator("en"))
 
 
 def test_dependency_preflight_skips_existing_ccusage(monkeypatch: pytest.MonkeyPatch) -> None:

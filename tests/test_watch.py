@@ -31,6 +31,7 @@ from ccusage_viz.watch import (
     _render,
     _watch_status,
     load_snapshot,
+    run_once,
     run_runtime_adjustment,
 )
 
@@ -39,20 +40,51 @@ def options(*, command: str = "ranking", demo: str | None = "small") -> CommandO
     return CommandOptions(
         command=command,
         date_range=DateRange(date(2026, 1, 1), date(2026, 1, 14), None),
-        by="project" if command == "ranking" else "total",
+        by="project" if command == "ranking" else None,
         top=10 if command == "ranking" else 3,
         other="hide",
         cache="combined",
         agents=(),
         models=(),
         projects=(),
-        watch=None,
+        interval=None,
         demo=demo,
         ccusage_bin="/not/invoked",
         query_timeout=2,
         no_color=True,
         ascii=True,
     )
+
+
+def test_one_shot_paints_one_complete_interactive_frame(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[tuple[object, ...]] = []
+
+    class Screen:
+        def __init__(self, stream: object) -> None:
+            events.append(("init", stream))
+
+        def paint(self, *args: object, **kwargs: object) -> None:
+            events.append(("paint", *args, kwargs))
+
+        def finish(self) -> None:
+            events.append(("finish",))
+
+    monkeypatch.setattr(
+        "ccusage_viz.watch.inspect_terminal",
+        lambda *args, **kwargs: Terminal(100, 30, False, True),
+    )
+    monkeypatch.setattr(
+        "ccusage_viz.watch._refresh",
+        lambda *args, **kwargs: RefreshResult("complete chart", ("notice",), 0.25),
+    )
+    monkeypatch.setattr("ccusage_viz.watch.InteractiveScreen", Screen)
+
+    assert run_once(options(), load_translator("en")) == 0
+    assert [event[0] for event in events] == ["init", "paint", "finish"]
+    assert events[1][1] == "complete chart"
+    assert events[1][-1]["height"] == 30
 
 
 def test_watch_paint_places_footer_last_without_refresh_newline(
@@ -442,7 +474,7 @@ def test_runtime_adjustment_copy_uses_adjusted_display_options(
     result = run_runtime_adjustment(
         replace(
             options(command="timeline"),
-            by="total",
+            by=None,
             top=3,
             color_scheme="no-color",
         ),
@@ -454,7 +486,7 @@ def test_runtime_adjustment_copy_uses_adjusted_display_options(
     assert result is None
     assert copied == [
         "ccuv timeline --since 2026-01-01 --until 2026-01-14 --by agent --top 4 "
-        "--demo small --theme no-color --ascii"
+        "--demo small --ascii"
     ]
 
 
@@ -474,7 +506,7 @@ def test_runtime_adjustment_normalizes_timeline_area_when_grouping_changes(
     )
 
     result = run_runtime_adjustment(
-        replace(options(command="timeline"), by="total", style="area"),
+        replace(options(command="timeline"), by=None, style="area"),
         load_translator("en"),
         UsageSnapshot((), (), 0.25),
         cast(InteractiveScreen, Screen()),
@@ -590,11 +622,9 @@ def test_demo_watch_reports_pause_immediately_and_restores_terminal() -> None:
             "ranking",
             "--demo",
             "small",
-            "--watch",
-            "2",
+            "--interval",
+            "5",
             "--ascii",
-            "--theme",
-            "no-color",
         ],
         stdin=slave,
         stdout=slave,

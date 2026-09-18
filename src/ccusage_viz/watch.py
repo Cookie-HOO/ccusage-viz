@@ -105,11 +105,6 @@ def _adjustment_key_supported(command: str, page: str, key: str) -> bool:
     return key in keys[command]
 
 
-def _without_summary_control(text: str) -> str:
-    """Drop the retired summary runtime control from localized adjustment text."""
-    return " · ".join(part for part in text.split(" · ") if "{summary}" not in part and not part.startswith("u "))
-
-
 def _render(
     options: CommandOptions,
     translator: Translator,
@@ -327,7 +322,7 @@ def _refresh(
     )
 
 
-def run_once(options: CommandOptions, translator: Translator) -> str:
+def run_once(options: CommandOptions, translator: Translator) -> int:
     current = replace(options, date_range=refresh_date_range(options.date_range))
     terminal = inspect_terminal(
         current.command,
@@ -343,8 +338,23 @@ def run_once(options: CommandOptions, translator: Translator) -> str:
         if current.demo
         else translator.text("status.query_time", seconds=f"{result.elapsed:.2f}")
     )
-    body = "\n".join((*result.notices, result.chart)) if result.notices else result.chart
-    return f"{status}\n{body}"
+    screen = InteractiveScreen(sys.stdout)
+    screen.paint(
+        result.chart,
+        status,
+        "",
+        _notice_lines(
+            result.notices,
+            width=terminal.width,
+            color=terminal.color,
+            ascii=terminal.ascii,
+            translator=translator,
+            color_scheme=current.color_scheme,
+        ),
+        height=terminal.height,
+    )
+    screen.finish()
+    return 0
 
 
 @contextmanager
@@ -543,7 +553,7 @@ def run_runtime_adjustment(
             state_values["cache"] = translator.text(
                 "label.on" if current.cache == "split" else "label.off"
             )
-        state = _without_summary_control(translator.messages[status_key]).format(**state_values)
+        state = translator.messages[status_key].format(**state_values)
         project_preview_missing = (
             current.command in {"timeline", "ranking"}
             and current.by == "project"
@@ -560,7 +570,7 @@ def run_runtime_adjustment(
             ),
             _controls_line(
                 f"{translator.text(f'status.tui_adjust_{adjustment_page}')} · "
-                f"{_without_summary_control(translator.messages[key_key])}",
+                f"{translator.messages[key_key]}",
                 width=terminal.width,
                 color=terminal.color,
             ),
@@ -626,7 +636,7 @@ def run_watch(
     screen: InteractiveScreen | None = None,
 ) -> int:
     active_screen = screen or InteractiveScreen(sys.stdout)
-    interval = options.watch or 5.0
+    interval = options.interval or 10.0
     runner = QueryRunner(options.ccusage_bin, timeout=options.query_timeout)
     results: queue.Queue[tuple[int, RefreshResult | BaseException]] = queue.Queue()
     running = False

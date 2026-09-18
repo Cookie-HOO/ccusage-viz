@@ -127,7 +127,6 @@ def _header_options(base: CommandOptions, interval: DateInterval | None = None) 
         agents=(),
         models=(),
         projects=(),
-        watch=None,
         interval=None,
         legend="hidden",
     )
@@ -280,29 +279,48 @@ def _header_lines(
 
 
 def _panel_options(fragment: str, base: CommandOptions) -> CommandOptions:
-    tokens = shlex.split(fragment)
+    try:
+        tokens = shlex.split(fragment)
+    except ValueError as exc:
+        raise UsageError("error.arguments", detail=f"invalid panel: {exc}") from exc
     if not tokens:
-        raise ValueError("empty panel fragment")
-    from ccusage_viz.cli import _to_options, build_parser
+        raise UsageError("error.arguments", detail="panel cannot be empty")
+    from ccusage_viz.cli import (
+        _explicit_fields,
+        _to_options,
+        _validate_configuration,
+        build_parser,
+    )
 
-    parsed = _to_options(build_parser(Translator("en", dict(CATALOGS["en"]))).parse_args(tokens))
+    explicit = _explicit_fields(tokens)
+    try:
+        parsed = _to_options(
+            build_parser(Translator("en", dict(CATALOGS["en"]))).parse_args(tokens),
+            explicit=explicit,
+        )
+    except SystemExit as exc:
+        raise UsageError("error.arguments", detail="invalid panel options") from exc
+    if base.ascii and parsed.was_explicit("color_scheme"):
+        raise UsageError(
+            "error.arguments", detail="Dashboard --ascii conflicts with an explicit Pane --theme"
+        )
+    _validate_configuration(parsed)
     has_interval = any(token == "--interval" or token.startswith("--interval=") for token in tokens)
-    has_watch = any(token == "--watch" or token.startswith("--watch=") for token in tokens)
     return replace(
         parsed,
         ascii=base.ascii,
         ccusage_bin=base.ccusage_bin,
         query_timeout=base.query_timeout,
         demo=parsed.demo or base.demo,
-        interval=(
-            parsed.interval
-            if has_interval
-            else parsed.watch
-            if has_watch and parsed.command != "monitor"
-            else base.interval
-        ),
-        watch=None,
+        interval=parsed.interval if has_interval else base.interval,
+        no_watch=False,
     )
+
+
+def validate_panel_fragments(options: CommandOptions) -> None:
+    """Validate every startup Pane before dependency or terminal side effects."""
+    for fragment in options.panes or DEFAULT_DASHBOARD_PANELS:
+        _panel_options(fragment, options)
 
 
 def _grid_shape(grid: str, count: int) -> tuple[int, int]:
@@ -682,7 +700,7 @@ def _adjustment_key_supported(command: str, page: str, key: str) -> bool:
 
 def _query_affecting_adjustment(command: str, key: str) -> bool:
     """Return whether an adjustment needs a matching replacement snapshot."""
-    return key in {"p", "P", "g", "G"} or (
+    return key in {"p", "P"} or (
         key in {"b", "B"} and command in {"timeline", "ranking", "monitor"}
     )
 
@@ -771,13 +789,11 @@ def _choose_pane_type(
 
 def run_tui(options: CommandOptions, translator: Translator) -> int:
     fragments = options.panes or DEFAULT_DASHBOARD_PANELS
-    panes = [
-        _new_pane(_panel_options(fragment, options))
-        for fragment in fragments
-    ]
+    panes = [_new_pane(_panel_options(fragment, options)) for fragment in fragments]
     header_options = _header_options(options)
     header = DashboardHeader(
-        header_options, QueryRunner(header_options.ccusage_bin, timeout=header_options.query_timeout)
+        header_options,
+        QueryRunner(header_options.ccusage_bin, timeout=header_options.query_timeout),
     )
     executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix="ccusage-viz-tui")
     focused: int | None = None
@@ -1358,11 +1374,7 @@ def run_tui(options: CommandOptions, translator: Translator) -> int:
                             )
                             if choice:
                                 panes.append(
-                                    _new_pane(
-                                        _panel_options(
-                                            _panel_fragment(choice), options
-                                        )
-                                    )
+                                    _new_pane(_panel_options(_panel_fragment(choice), options))
                                 )
                                 focused = len(panes) - 1
                                 refresh(focused)

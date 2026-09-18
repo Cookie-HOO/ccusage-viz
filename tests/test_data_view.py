@@ -28,7 +28,7 @@ def _options() -> CommandOptions:
         agents=(),
         models=(),
         projects=(),
-        watch=5,
+        interval=5,
         demo=None,
         ccusage_bin="ccusage",
         query_timeout=30,

@@ -158,7 +158,7 @@ def namespace(**overrides: object) -> Namespace:
         "agent": [],
         "model": [],
         "project": [],
-        "watch": None,
+        "no_watch": False,
         "demo": "small",
         "lang": "en",
         "ccusage_bin": "ccusage",
@@ -182,11 +182,50 @@ def namespace(**overrides: object) -> Namespace:
     return Namespace(**values)
 
 
+def test_historical_lifecycle_defaults_and_validation() -> None:
+    parser = build_parser(load_translator("en"))
+    default = _to_options(parser.parse_args(["timeline"]))
+    assert default.interval == 10
+    assert not default.no_watch
+
+    one_shot = _to_options(
+        parser.parse_args(["timeline", "--no-watch"]), explicit=frozenset({"no_watch"})
+    )
+    assert one_shot.no_watch
+
+    with pytest.raises(UsageError, match="error.arguments"):
+        _to_options(
+            parser.parse_args(["timeline", "--interval", "20", "--no-watch"]),
+            explicit=frozenset({"interval", "no_watch"}),
+        )
+
+
+def test_continuous_routes_reject_ambiguous_lifecycle_options() -> None:
+    parser = build_parser(load_translator("en"))
+    with pytest.raises(UsageError, match="error.arguments"):
+        _to_options(parser.parse_args(["monitor", "--no-watch"]), explicit=frozenset({"no_watch"}))
+    for arguments in (
+        ["timeline", "--watch"],
+        ["dashboard", "--watch"],
+        ["dashboard", "--no-watch"],
+        ["dashboard", "--interval", "20"],
+    ):
+        with pytest.raises(UsageError, match="error.arguments"):
+            parser.parse_args(arguments)
+
+
+def test_ascii_conflicts_only_with_explicit_theme(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("ccusage_viz.cli.run", lambda *_args: 0)
+    assert main(["timeline", "--demo", "small", "--ascii"]) == 0
+    for theme in ("classic", "no-color"):
+        assert main(["timeline", "--demo", "small", "--ascii", "--theme", theme]) == 2
+
+
 @pytest.mark.parametrize(
     ("field", "value", "key"),
     [
-        ("watch", math.nan, "error.watch_min"),
-        ("watch", math.inf, "error.watch_min"),
+        ("interval", math.nan, "error.interval_min"),
+        ("interval", math.inf, "error.interval_min"),
         ("query_timeout", math.nan, "error.arguments"),
         ("query_timeout", math.inf, "error.arguments"),
     ],

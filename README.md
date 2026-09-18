@@ -11,9 +11,9 @@
 - **Five focused views** — daily timeline, calendar heatmap, component stack, cumulative ranking, and observed-TPM monitor.
 - **Token-only** — no cost, quota, QPM, or API rate-limit monitoring.
 - **Stateless** — reads `ccusage` command output and does not scan Agent logs, create a usage database, or keep a persistent cache.
-- **Live when useful** — Watch refreshes every five seconds by default; Monitor samples every 15 seconds by default, with pause and manual refresh controls.
+- **Live when useful** — historical charts refresh every 10 seconds by default; Monitor samples every 15 seconds by default, with pause and manual refresh controls.
 - **Source-aware projects** — Claude and Codex projects remain separate even when their display names match.
-- **Bilingual UI** — built-in English and Simplified Chinese, plus strict partial message overrides.
+- **Bilingual UI** — built-in English and Simplified Chinese.
 
 Every chart command requires an interactive terminal. Help and version output do not.
 
@@ -149,7 +149,7 @@ The two-query ranking path is a fixed data-source plan, not a loop over dates, A
 
 Day compares today with yesterday and the same weekday seven days earlier. Month and quarter compare period-to-date with the same elapsed-day count in the prior period and last year; year compares year-to-date with prior-year-to-date. Calendar boundaries are used rather than fixed 30/90/365-day subtraction, and shorter periods are clamped. A summary derives only from records already loaded for its chart—standalone commands and Dashboard panes never run summary-only queries.
 
-Coverage comes from each successful requested interval, including successful empty responses; it is never inferred from the first or last returned row. A missing row inside covered time is a real zero, while time outside coverage is unknown. Current-period coverage is required before a numeric summary appears, and each uncovered comparison is omitted independently. Equal values use a neutral marker (`—`, or `=` with `--ascii`), a positive value against zero is shown as “from 0” with an upward marker, and a positive baseline falling to zero is a 100% decrease. The complete sentence, fragments, punctuation, and placeholders can be changed through the strict language override catalog.
+Coverage comes from each successful requested interval, including successful empty responses; it is never inferred from the first or last returned row. A missing row inside covered time is a real zero, while time outside coverage is unknown. Current-period coverage is required before a numeric summary appears, and each uncovered comparison is omitted independently. Equal values use a neutral marker (`—`, or `=` with `--ascii`), a positive value against zero is shown as “from 0” with an upward marker, and a positive baseline falling to zero is a 100% decrease. The complete sentence, fragments, punctuation, and placeholders are localized in the built-in English and Simplified Chinese catalogs.
 
 Calendar’s metrics footer is always three logical rows: active days/current streak/longest streak; daily average plus an optional peak; and the heat legend. The average remains visible when no peak exists, and narrow terminals clip each row independently.
 
@@ -193,14 +193,17 @@ Monitor owns an anchored, padded y-axis shared by standalone and Dashboard rende
 
 Dashboard child panes share no completed data. Overlapping calls with the **exact** executable string, argument tuple, and timeout use one running subprocess, then each pane receives its own decoded copy. Different commands, options, timeouts, or calls that start after a prior one finished are never merged. The independent Header alone retains a process-local unfiltered daily coverage cache: a warm period switch renders immediately, a cold wider switch queries only Header data and shows `?` for unknown detail until accepted, and accepted intervals authoritatively replace cached rows. Failed, cancelled, or stale results preserve the last accepted Header data and freshness.
 
-## Watch mode
+## Historical lifecycle
+
+Historical charts continuously refresh by default every 10 seconds:
 
 ```bash
-ccuv timeline --watch       # 5 seconds
-ccuv timeline --watch 10    # 10 seconds
+ccuv timeline                # refresh every 10 seconds
+ccuv timeline --interval 20  # custom cadence
+ccuv timeline --no-watch     # paint one complete interactive frame, then exit
 ```
 
-The minimum interval is two seconds. The delay starts after a refresh completes, so refreshes do not overlap. Watch keeps a compact control reminder on the terminal’s final row; Demo mode also includes its size keys. Controls:
+The minimum interval is two seconds. `--interval` cannot be combined with `--no-watch`. The delay starts after a refresh completes, so refreshes do not overlap. Continuous historical views keep a compact control reminder on the terminal’s final row; Demo mode also includes its size keys. Controls:
 
 - `Ctrl-C` — exit and cancel child `ccusage` processes owned by this invocation.
 - `r` — refresh now; while a refresh is running, queue at most one more.
@@ -242,7 +245,7 @@ Use `--lang en` or `--lang zh`. Without it, Python's system locale selects Simpl
 
 All commands accept `--theme classic|vivid|contrast|dracula|catppuccin|solarized|gruvbox|nord|github|mono|no-color`; `classic` is the default. Dracula, Catppuccin, Solarized, Gruvbox, Nord, and GitHub are curated ANSI-256 adaptations of mature theme families rather than exact editor-theme reproductions. The GitHub theme uses a contribution-graph-inspired four-level green Calendar scale plus complete semantic colors for every command. Themes select foreground colors only. They cover timeline series and Other, calendar levels, stack components, Ranking marks, and diagnostic highlights. The application does not infer terminal brands or light/dark backgrounds, so the terminal background remains inherited. Timeline uses jointly allocated categorical colors plus distinct markers. Stack uses mixed-temperature categorical colors plus distinct component marks, so identity is not color-only. Calendar uses an ordered four-step palette, while glyph density (`░▒▓█`, or `.oO#` with `--ascii`) remains the authoritative low-to-high magnitude encoding.
 
-Use `--theme no-color` to disable ANSI styling explicitly and reproducibly; `NO_COLOR` is not interpreted. Use `--ascii` independently to change chart marks without changing summary prose. `TERM=dumb` still selects conservative terminal behavior. Minimum terminal sizes are:
+Use `--theme no-color` to disable ANSI styling explicitly and reproducibly; `NO_COLOR` is not interpreted. Explicit `--ascii` cannot be combined with any explicitly supplied `--theme`, including `classic` and `no-color`; omitting `--theme` keeps the implicit default valid. `TERM=dumb` is rejected unless `--ascii` is explicitly supplied; ASCII mode is never enabled automatically. Minimum terminal sizes are:
 
 | Command | Minimum size |
 | --- | --- |
@@ -254,7 +257,7 @@ Use `--theme no-color` to disable ANSI styling explicitly and reproducibly; `NO_
 ## Suggested aliases
 
 ```bash
-alias cct='ccuv timeline --watch'
+alias cct='ccuv timeline'
 alias ccm='ccuv timeline --by model --period 30d'
 alias ccs='ccuv stack --period 30d --cache split'
 alias ccp='ccuv ranking --by project --period 30d'

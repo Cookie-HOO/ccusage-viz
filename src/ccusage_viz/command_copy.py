@@ -68,11 +68,14 @@ def format_command(options: CommandOptions) -> str:
     for project in options.projects:
         if not _is_private_path(project):
             args.extend(("--project", project))
-    if options.watch is not None:
-        args.extend(("--watch", f"{options.watch:g}"))
+    if options.command != "monitor":
+        if options.no_watch:
+            args.append("--no-watch")
+        elif options.interval is not None and options.interval != 10.0:
+            args.extend(("--interval", f"{options.interval:g}"))
     if options.demo is not None:
         args.extend(("--demo", options.demo))
-    if options.color_scheme != "classic":
+    if options.color_scheme != "classic" and not options.ascii:
         args.extend(("--theme", options.color_scheme))
     if options.style != DEFAULT_STYLES[options.command]:
         args.extend(("--style", options.style))
@@ -118,13 +121,17 @@ def format_full_command(options: CommandOptions) -> str:
         args.extend(("--model", model))
     for project in options.projects:
         args.extend(("--project", project))
-    if options.watch is not None:
-        args.extend(("--watch", f"{options.watch:g}"))
+    if options.command != "monitor":
+        if options.no_watch:
+            args.append("--no-watch")
+        elif options.interval is not None and options.interval != 10.0:
+            args.extend(("--interval", f"{options.interval:g}"))
     if options.demo is not None:
         args.extend(("--demo", options.demo))
     args.extend(("--ccusage-bin", options.ccusage_bin))
     args.extend(("--query-timeout", f"{options.query_timeout:g}"))
-    args.extend(("--theme", options.color_scheme))
+    if not options.ascii:
+        args.extend(("--theme", options.color_scheme))
     args.extend(("--style", options.style))
     if options.command in {"timeline", "stack", "monitor"}:
         args.extend(("--legend", options.legend))
@@ -180,8 +187,8 @@ def format_dashboard_pane_command(
 ) -> str:
     """Serialize a Dashboard pane as its equivalent standalone live command."""
     if options.command == "monitor":
-        return format_command(replace(options, watch=None))
-    return format_command(replace(options, watch=refresh_interval or 15.0))
+        return format_command(options)
+    return format_command(replace(options, interval=refresh_interval or 15.0, no_watch=False))
 
 
 def format_full_dashboard_command(
@@ -199,7 +206,6 @@ def format_full_dashboard_command(
         panel_args = shlex.split(format_full_command(panel))
         args.extend(("--panel", shlex.join(panel_args[1:])))
     args.extend(("--grid", grid))
-    args.extend(("--interval", f"{(options.interval or 15.0):g}"))
     args.extend(("--header-style", header_style))
     args.extend(("--header-summary", header_summary))
     args.extend(("--header-interval", f"{options.header_interval:g}"))
@@ -208,7 +214,8 @@ def format_full_dashboard_command(
         args.extend(("--demo", options.demo))
     args.extend(("--ccusage-bin", options.ccusage_bin))
     args.extend(("--query-timeout", f"{options.query_timeout:g}"))
-    args.extend(("--theme", options.color_scheme))
+    if not options.ascii:
+        args.extend(("--theme", options.color_scheme))
     if options.ascii:
         args.append("--ascii")
     return shlex.join(args)

@@ -90,21 +90,21 @@ def test_full_dashboard_command_includes_private_and_runtime_configuration() -> 
     assert "--query-timeout 42" in full
 
 
-def test_dashboard_pane_copy_preserves_historical_refresh_as_watch() -> None:
+def test_dashboard_pane_copy_materializes_canonical_standalone_interval() -> None:
     parser = build_parser(load_translator("en"))
-    base = _to_options(parser.parse_args(["dashboard", "--interval", "30"]))
+    base = _to_options(parser.parse_args(["dashboard"]))
     timeline = _panel_options("timeline --period 7d", base)
     stack = _panel_options("stack", base)
     monitor = _panel_options("monitor --by model", base)
 
-    assert format_dashboard_pane_command(timeline, refresh_interval=timeline.interval) == (
-        "ccuv timeline --period 7d --watch 30"
+    assert format_dashboard_pane_command(timeline, refresh_interval=30) == (
+        "ccuv timeline --period 7d --interval 30"
     )
-    assert format_dashboard_pane_command(stack, refresh_interval=stack.interval) == (
-        "ccuv stack --period 14d --watch 30"
+    assert format_dashboard_pane_command(stack, refresh_interval=30) == (
+        "ccuv stack --period 14d --interval 30"
     )
     assert format_dashboard_pane_command(monitor, refresh_interval=monitor.interval) == (
-        "ccuv monitor --window 1h --interval 30 --by model --top 3 --style line"
+        "ccuv monitor --window 1h --interval 15 --by model --top 3 --style line"
     )
 
 
@@ -269,7 +269,7 @@ def test_dashboard_pane_retains_last_render_for_localized_renderer_warnings(
 
 def test_query_affecting_adjustments_are_explicit() -> None:
     assert _query_affecting_adjustment("timeline", "p")
-    assert _query_affecting_adjustment("timeline", "g")
+    assert not _query_affecting_adjustment("timeline", "g")
     assert _query_affecting_adjustment("ranking", "b")
     assert _query_affecting_adjustment("monitor", "B")
     assert not _query_affecting_adjustment("stack", "c")

@@ -90,6 +90,8 @@ def inspect_terminal(
 ) -> Terminal:
     if not stream.isatty():
         raise UsageError("error.tty")
+    if os.environ.get("TERM") == "dumb" and not ascii:
+        raise UsageError("error.arguments", detail="TERM=dumb requires explicit --ascii")
     actual = size or get_terminal_size()
     minimum_width, minimum_height = MINIMUM_SIZES[command]
     if actual.columns < minimum_width or actual.lines < minimum_height:
@@ -101,5 +103,5 @@ def inspect_terminal(
             minimum_width=minimum_width,
             minimum_height=minimum_height,
         )
-    color = not no_color and os.environ.get("TERM") != "dumb"
+    color = not no_color
     return Terminal(actual.columns, actual.lines, color, ascii)

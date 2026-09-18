@@ -1,14 +1,29 @@
 from __future__ import annotations
 
+import os
 import sys
 
 from ccusage_viz.dependency import ensure_ccusage
+from ccusage_viz.errors import UsageError
 from ccusage_viz.i18n import Translator
 from ccusage_viz.options import CommandOptions
 
 
+def _preflight_runtime(options: CommandOptions) -> None:
+    if options.command == "dashboard":
+        from ccusage_viz.tui import validate_panel_fragments
+
+        validate_panel_fragments(options)
+    if not interactive_streams():
+        raise UsageError("error.tty")
+    if options.was_explicit("interval") and options.command == "dashboard":
+        raise UsageError("error.arguments", detail="dashboard does not support --interval")
+    if os.environ.get("TERM") == "dumb" and not options.ascii:
+        raise UsageError("error.arguments", detail="TERM=dumb requires explicit --ascii")
+
+
 def run(options: CommandOptions, translator: Translator) -> int:
-    # The complete pipeline is composed here so one-shot and Watch share semantics.
+    _preflight_runtime(options)
     ensure_ccusage(options, translator)
     if options.command == "dashboard":
         from ccusage_viz.tui import run_tui
@@ -21,11 +36,9 @@ def run(options: CommandOptions, translator: Translator) -> int:
 
     from ccusage_viz.watch import run_once, run_watch
 
-    if options.watch is not None:
-        return run_watch(options, translator)
-    output = run_once(options, translator)
-    print(output)
-    return 0
+    if options.no_watch:
+        return run_once(options, translator)
+    return run_watch(options, translator)
 
 
 def interactive_streams() -> bool:

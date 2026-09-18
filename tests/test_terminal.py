@@ -126,7 +126,12 @@ def test_no_color_environment_is_ignored(monkeypatch: pytest.MonkeyPatch) -> Non
     assert terminal.color is True
 
 
-def test_dumb_terminal_disables_color(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_dumb_terminal_requires_explicit_ascii(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("TERM", "dumb")
-    terminal = inspect_terminal("timeline", stream=Stream(True), size=os.terminal_size((80, 24)))
-    assert terminal.color is False
+    with pytest.raises(UsageError, match="error.arguments"):
+        inspect_terminal("timeline", stream=Stream(True), size=os.terminal_size((80, 24)))
+
+    terminal = inspect_terminal(
+        "timeline", stream=Stream(True), size=os.terminal_size((80, 24)), ascii=True
+    )
+    assert terminal.color is True

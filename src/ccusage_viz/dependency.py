@@ -15,7 +15,7 @@ _INSTALL_COMMAND = "npm install -g ccusage"
 def ensure_ccusage(options: CommandOptions, translator: Translator) -> None:
     if (
         options.demo is not None
-        or options.ccusage_bin_explicit
+        or options.was_explicit("ccusage_bin")
         or options.ccusage_bin != _DEFAULT_CCUSAGE
     ):
         return

@@ -68,7 +68,6 @@ class CommandOptions:
     agents: tuple[str, ...]
     models: tuple[str, ...]
     projects: tuple[str, ...]
-    watch: float | None
     demo: str | None
     ccusage_bin: str
     query_timeout: float
@@ -87,7 +86,11 @@ class CommandOptions:
     dashboard_style: str = DEFAULT_DASHBOARD_STYLE
     granularity: str = "day"
     weekdays: str = "show"
-    ccusage_bin_explicit: bool = False
+    no_watch: bool = False
+    explicit: frozenset[str] = frozenset()
+
+    def was_explicit(self, field: str) -> bool:
+        return field in self.explicit
 
 
 @dataclass(frozen=True, slots=True)

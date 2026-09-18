@@ -5,7 +5,7 @@ import math
 import re
 import shlex
 import sys
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from enum import StrEnum
 from typing import Never
 
@@ -16,10 +16,14 @@ from ccusage_viz.diagnostics import color_enabled, format_error
 from ccusage_viz.errors import UsageError, VizError
 from ccusage_viz.i18n import Translator, detect_language, load_translator
 from ccusage_viz.options import (
+    CACHE_MODES,
     COMMAND_STYLES,
     DASHBOARD_STYLES,
     DEFAULT_STYLES,
+    GRANULARITIES,
     HEADER_SUMMARIES,
+    OTHER_MODES,
+    WEEKDAY_MODES,
     CommandOptions,
     compatible_styles,
     resolve_date_range,
@@ -131,13 +135,13 @@ def _add_history_shared(
     if command in {"timeline", "stack"}:
         parser.add_argument(
             "--granularity",
-            choices=("day", "month", "quarter", "year"),
+            choices=GRANULARITIES,
             default="day",
             help=tr.text("help.granularity"),
         )
         parser.add_argument(
             "--weekdays",
-            choices=("show", "hide"),
+            choices=WEEKDAY_MODES,
             default="show",
             help=tr.text("help.weekdays"),
         )
@@ -145,13 +149,9 @@ def _add_history_shared(
     parser.add_argument("--model", action="append", default=[], help=tr.text("help.model"))
     parser.add_argument("--project", action="append", default=[], help=tr.text("help.project"))
     parser.add_argument(
-        "--watch",
-        nargs="?",
-        type=float,
-        const=5.0,
-        metavar="SECONDS",
-        help=tr.text("help.watch"),
+        "--interval", type=float, default=10.0, metavar="SECONDS", help=tr.text("help.interval")
     )
+    parser.add_argument("--no-watch", action="store_true", help=tr.text("help.no_watch"))
     _add_presentation(parser, tr, command)
 
 
@@ -160,7 +160,6 @@ def _add_tui(parser: argparse.ArgumentParser, tr: Translator) -> None:
         "--panel", dest="panels", action="append", default=[], help=tr.text("help.panel")
     )
     parser.add_argument("--grid", default="2x2", help=tr.text("help.grid"))
-    parser.add_argument("--interval", type=float, default=15.0, help=tr.text("help.interval"))
     parser.add_argument(
         "--header-style",
         choices=("hidden", "compact", "banner", "panel"),
@@ -208,6 +207,7 @@ def _add_monitor(parser: argparse.ArgumentParser, tr: Translator) -> None:
     parser.add_argument(
         "--interval", type=float, default=None, metavar="SECONDS", help=tr.text("help.interval")
     )
+    parser.add_argument("--no-watch", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument(
         "--by", choices=("agent", "model", "project"), help=tr.text("help.monitor_by")
     )
@@ -240,7 +240,7 @@ def build_parser(tr: Translator) -> argparse.ArgumentParser:
     )
     timeline.add_argument("--top", type=int, default=None, help=tr.text("help.top"))
     timeline.add_argument(
-        "--other", choices=("show", "hide"), default="show", help=tr.text("help.other")
+        "--other", choices=OTHER_MODES, default="show", help=tr.text("help.other")
     )
 
     calendar = subparsers.add_parser(
@@ -253,7 +253,7 @@ def build_parser(tr: Translator) -> argparse.ArgumentParser:
     )
     _add_history_shared(stack, tr, "stack")
     stack.add_argument(
-        "--cache", choices=("combined", "split"), default="combined", help=tr.text("help.cache")
+        "--cache", choices=CACHE_MODES, default="combined", help=tr.text("help.cache")
     )
 
     ranking = subparsers.add_parser(
@@ -264,9 +264,7 @@ def build_parser(tr: Translator) -> argparse.ArgumentParser:
         "--by", choices=("agent", "model", "project"), default="project", help=tr.text("help.by")
     )
     ranking.add_argument("--top", type=int, default=10, help=tr.text("help.top"))
-    ranking.add_argument(
-        "--other", choices=("show", "hide"), default="show", help=tr.text("help.other")
-    )
+    ranking.add_argument("--other", choices=OTHER_MODES, default="show", help=tr.text("help.other"))
 
     monitor = subparsers.add_parser(
         "monitor", help=tr.text("help.monitor"), description=tr.text("help.monitor")
@@ -308,7 +306,9 @@ def _inject_default_command(argv: list[str]) -> list[str]:
     return ["timeline", *argv]
 
 
-def _to_options(namespace: argparse.Namespace) -> CommandOptions:
+def _to_options(
+    namespace: argparse.Namespace, *, explicit: frozenset[str] = frozenset()
+) -> CommandOptions:
     command = namespace.command or "timeline"
     if command == "dashboard":
         if not namespace.panels:
@@ -330,8 +330,6 @@ def _to_options(namespace: argparse.Namespace) -> CommandOptions:
                 raise UsageError("error.tui_grid", value=namespace.grid) from None
             if rows < 1 or columns < 1 or rows * columns < len(namespace.panels):
                 raise UsageError("error.tui_grid", value=namespace.grid)
-        if not math.isfinite(namespace.interval) or namespace.interval < 1:
-            raise UsageError("error.interval_min", minimum=1)
         if not math.isfinite(namespace.header_interval) or namespace.header_interval < 1:
             raise UsageError("error.interval_min", minimum=1)
         if not math.isfinite(namespace.query_timeout) or namespace.query_timeout <= 0:
@@ -350,7 +348,6 @@ def _to_options(namespace: argparse.Namespace) -> CommandOptions:
             agents=(),
             models=(),
             projects=(),
-            watch=None,
             demo=namespace.demo,
             ccusage_bin=namespace.ccusage_bin,
             query_timeout=namespace.query_timeout,
@@ -359,11 +356,12 @@ def _to_options(namespace: argparse.Namespace) -> CommandOptions:
             color_scheme=namespace.color_scheme,
             panes=tuple(namespace.panels),
             grid=namespace.grid,
-            interval=namespace.interval,
+            interval=15.0,
             header_style=namespace.header_style,
             header_summary=namespace.header_summary,
             header_interval=namespace.header_interval,
             dashboard_style=namespace.dashboard_style,
+            explicit=explicit,
         )
     top = getattr(namespace, "top", None)
     if command == "timeline" and namespace.by is not None and top is None:
@@ -384,14 +382,22 @@ def _to_options(namespace: argparse.Namespace) -> CommandOptions:
     style = requested_style or compatible_styles(command, getattr(namespace, "by", None))[0]
     if style not in compatible_styles(command, getattr(namespace, "by", None)):
         raise UsageError("error.style_incompatible", style=style, mode=namespace.by or "total")
-    watch = getattr(namespace, "watch", None)
-    if watch is not None and (not math.isfinite(watch) or watch < 2):
-        raise UsageError("error.watch_min", minimum=2)
+    no_watch = getattr(namespace, "no_watch", False)
     requested_interval = getattr(namespace, "interval", None)
+    if no_watch and "interval" in explicit:
+        raise UsageError("error.arguments", detail="--interval cannot be combined with --no-watch")
+    if command == "monitor" and no_watch:
+        raise UsageError("error.arguments", detail="monitor does not support --no-watch")
     interval = requested_interval
     if command == "monitor" and interval is None:
         interval = 1.0 if namespace.demo is not None else 15.0
-    interval_minimum = 1 if command == "monitor" and namespace.demo is not None else 5
+    interval_minimum = (
+        1
+        if command == "monitor" and namespace.demo is not None
+        else 5
+        if command == "monitor"
+        else 2
+    )
     if interval is not None and (not math.isfinite(interval) or interval < interval_minimum):
         raise UsageError("error.interval_min", minimum=interval_minimum)
     if not math.isfinite(namespace.query_timeout) or namespace.query_timeout <= 0:
@@ -420,7 +426,6 @@ def _to_options(namespace: argparse.Namespace) -> CommandOptions:
         agents=tuple(namespace.agent),
         models=tuple(namespace.model),
         projects=tuple(getattr(namespace, "project", ())),
-        watch=watch,
         demo=namespace.demo,
         ccusage_bin=namespace.ccusage_bin,
         query_timeout=namespace.query_timeout,
@@ -433,7 +438,26 @@ def _to_options(namespace: argparse.Namespace) -> CommandOptions:
         legend=getattr(namespace, "legend", "below-title"),
         granularity=getattr(namespace, "granularity", "day"),
         weekdays=getattr(namespace, "weekdays", "show"),
+        no_watch=no_watch,
+        explicit=explicit,
     )
+
+
+def _explicit_fields(argv: list[str]) -> frozenset[str]:
+    fields = set()
+    for argument in argv:
+        if not argument.startswith("--"):
+            continue
+        name = argument[2:].split("=", 1)[0].replace("-", "_")
+        fields.add("color_scheme" if name == "theme" else name)
+    return frozenset(fields)
+
+
+def _validate_configuration(options: CommandOptions) -> None:
+    if options.ascii and options.was_explicit("color_scheme"):
+        raise UsageError(
+            "error.arguments", detail="--ascii cannot be combined with an explicit --theme"
+        )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -442,15 +466,14 @@ def main(argv: list[str] | None = None) -> int:
     if short_circuit is not None:
         return _render_short_circuit(short_circuit)
     args = _inject_default_command(raw_args)
-    ccusage_bin_explicit = any(
-        argument == "--ccusage-bin" or argument.startswith("--ccusage-bin=") for argument in args
-    )
+    explicit = _explicit_fields(args)
     language = _preparse_language(args)
     tr = load_translator(language)
     try:
         parser = build_parser(tr)
         namespace = parser.parse_args(args)
-        options = replace(_to_options(namespace), ccusage_bin_explicit=ccusage_bin_explicit)
+        options = _to_options(namespace, explicit=explicit)
+        _validate_configuration(options)
         return run(options, tr)
     except VizError as exc:
         text = format_error(

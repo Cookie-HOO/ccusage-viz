@@ -22,7 +22,7 @@ def options(
         agents=(),
         models=(),
         projects=projects,
-        watch=None,
+        interval=None,
         demo=None,
         ccusage_bin="ccusage",
         query_timeout=30,

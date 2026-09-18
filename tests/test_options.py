@@ -1,12 +1,15 @@
+import shlex
 from dataclasses import replace
 from datetime import date
 
 import pytest
 
+from ccusage_viz.cli import _to_options, build_parser
 from ccusage_viz.command_copy import format_command, format_full_command, wrap_command
 from ccusage_viz.core.time import DateRange, refresh_date_range
 from ccusage_viz.errors import UsageError
 from ccusage_viz.formatting import display_width
+from ccusage_viz.i18n import load_translator
 from ccusage_viz.options import (
     CommandOptions,
     adjust_option,
@@ -117,7 +120,7 @@ def test_runtime_period_cycles_only_for_rolling_history() -> None:
         agents=(),
         models=(),
         projects=(),
-        watch=5,
+        interval=5,
         demo=None,
         ccusage_bin="ccusage",
         query_timeout=30,
@@ -157,7 +160,7 @@ def test_runtime_granularity_cycles_without_changing_period() -> None:
         agents=(),
         models=(),
         projects=(),
-        watch=5,
+        interval=5,
         demo=None,
         ccusage_bin="ccusage",
         query_timeout=30,
@@ -211,7 +214,7 @@ def test_fixed_range_granularity_changes_without_rewriting_bounds() -> None:
         agents=(),
         models=(),
         projects=(),
-        watch=5,
+        interval=5,
         demo=None,
         ccusage_bin="ccusage",
         query_timeout=30,
@@ -238,7 +241,7 @@ def test_timeline_style_cycles_through_uniform_point_variants() -> None:
         agents=(),
         models=(),
         projects=(),
-        watch=5,
+        interval=5,
         demo=None,
         ccusage_bin="ccusage",
         query_timeout=30,
@@ -268,7 +271,7 @@ def test_runtime_top_increases_without_wrapping_and_stops_at_one() -> None:
         agents=(),
         models=(),
         projects=(),
-        watch=5,
+        interval=5,
         demo=None,
         ccusage_bin="ccusage",
         query_timeout=30,
@@ -295,7 +298,7 @@ def test_runtime_weekday_cycles_with_the_displayed_key_only() -> None:
         agents=(),
         models=(),
         projects=(),
-        watch=5,
+        interval=5,
         demo=None,
         ccusage_bin="ccusage",
         query_timeout=30,
@@ -320,7 +323,6 @@ def test_monitor_copy_keeps_startup_agent_and_model_selection() -> None:
         agents=("claude",),
         models=("sonnet",),
         projects=(),
-        watch=None,
         demo=None,
         ccusage_bin="ccusage",
         query_timeout=30,
@@ -348,7 +350,7 @@ def test_copied_command_is_safe_and_reproducible() -> None:
         agents=("claude",),
         models=("public model",),
         projects=("/private/project", "demo-project"),
-        watch=5,
+        interval=5,
         demo=None,
         ccusage_bin="/private/bin/ccusage",
         query_timeout=30,
@@ -362,7 +364,7 @@ def test_copied_command_is_safe_and_reproducible() -> None:
     assert command == (
         "ccuv timeline --since 2026-09-01 --until 2026-09-14 --timezone UTC "
         "--by model --top 3 --agent claude --model 'public model' "
-        "--project demo-project --watch 5 --theme nord --style stem --ascii"
+        "--project demo-project --interval 5 --style stem --ascii"
     )
     assert "/private" not in command
     assert "--ccusage-bin" not in command
@@ -375,3 +377,11 @@ def test_copied_command_is_safe_and_reproducible() -> None:
     assert "--granularity day" in full_command
     assert "--weekdays show" in full_command
     assert "--legend below-title" in full_command
+    assert "--theme" not in full_command
+
+    parser = build_parser(load_translator("en"))
+    for generated in (command, full_command):
+        tokens = shlex.split(generated)[1:]
+        parsed = _to_options(parser.parse_args(tokens), explicit=frozenset())
+        assert parsed.command == "timeline"
+        assert parsed.interval == 5
