@@ -391,6 +391,7 @@ def test_dashboard_owns_distinct_pane_cadences() -> None:
         "timeline --no-watch",
         "timeline --no-wat",
         "timeline --watch",
+        "timeline --timezone UTC",
         "timeline --ascii",
         "timeline --demo small",
         "timeline --lang zh",

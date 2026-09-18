@@ -39,6 +39,7 @@ _PANE_FORBIDDEN_OPTIONS = frozenset(
         "--interval",
         "--no-watch",
         "--watch",
+        "--timezone",
         "--ascii",
         "--demo",
         "--lang",

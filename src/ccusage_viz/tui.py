@@ -892,7 +892,11 @@ def run_tui(options: CommandOptions, translator: Translator) -> int:
 
     def full_dashboard_command() -> str:
         return format_full_dashboard_command(
-            options,
+            replace(
+                options,
+                color_scheme=dashboard_theme,
+                no_color=dashboard_theme == "no-color",
+            ),
             tuple(pane.options for pane in panes),
             grid=active_grid,
             header_style=header_style,
