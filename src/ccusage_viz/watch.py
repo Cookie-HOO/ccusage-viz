@@ -178,7 +178,8 @@ def render_component(
     normalize_titles: bool = False,
 ) -> RefreshResult:
     snapshot = component.snapshot
-    if snapshot is None:
+    options = component.accepted_options
+    if snapshot is None or options is None:
         raise RuntimeError("historical component has no accepted snapshot")
     rendered = _render_component(
         component,
@@ -196,40 +197,7 @@ def render_component(
         rendered.notices,
         snapshot.elapsed,
         snapshot,
-        component.candidate,
-    )
-
-
-def render_snapshot(
-    options: StandaloneLaunch,
-    translator: Translator,
-    terminal: Terminal,
-    snapshot: UsageSnapshot,
-    *,
-    reserve_prompt: bool = False,
-    control_rows: int = 0,
-    hide_upper_right_axes: bool = False,
-    ranking_deltas: Mapping[Hashable, float] | None = None,
-    ranking_rank_deltas: Mapping[Hashable, int] | None = None,
-    normalize_titles: bool = False,
-) -> RefreshResult:
-    component = HistoricalChartComponent(
         options,
-        owner_id="render",
-        runtime=None,
-        registry=build_chart_registry(),
-    )
-    component.seed(options, snapshot)
-    return render_component(
-        component,
-        translator,
-        terminal,
-        reserve_prompt=reserve_prompt,
-        control_rows=control_rows,
-        hide_upper_right_axes=hide_upper_right_axes,
-        ranking_deltas=ranking_deltas,
-        ranking_rank_deltas=ranking_rank_deltas,
-        normalize_titles=normalize_titles,
     )
 
 
@@ -338,6 +306,13 @@ def run_runtime_adjustment(
     theme_index = COLOR_SCHEMES.index(options.chart.presentation.theme)
     last_size: os.terminal_size | None = None
     current = options
+    component = HistoricalChartComponent(
+        current,
+        owner_id="standalone:adjustment",
+        runtime=None,
+        registry=build_chart_registry(),
+    )
+    component.seed(current, snapshot)
     rendered: RefreshResult | None = None
     rendered_options: StandaloneLaunch | None = None
     render_warning: str | None = None
@@ -381,11 +356,11 @@ def run_runtime_adjustment(
                 ascii=current.host.ascii,
                 size=last_size,
             )
-            candidate = render_snapshot(
-                current,
+            component.configure(current, data_affecting=False)
+            candidate = render_component(
+                component,
                 translator,
                 terminal,
-                snapshot,
                 control_rows=2,
             )
         except UsageError as exc:

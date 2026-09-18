@@ -9,6 +9,7 @@ from typing import cast
 
 import pytest
 
+from ccusage_viz.bootstrap import build_chart_registry
 from ccusage_viz.charts.builtins import RANKING_DEFINITION
 from ccusage_viz.charts.definition import HistoricalRenderer
 from ccusage_viz.charts.registry import ChartRegistry
@@ -17,6 +18,7 @@ from ccusage_viz.coverage import DateCoverage, DateInterval
 from ccusage_viz.domain import Notice
 from ccusage_viz.errors import UsageError
 from ccusage_viz.formatting import display_width, strip_ansi
+from ccusage_viz.historical_component import HistoricalChartComponent
 from ccusage_viz.i18n import load_translator
 from ccusage_viz.options import (
     CalendarConfig,
@@ -42,7 +44,7 @@ from ccusage_viz.watch import (
     _refreshing_status,
     _watch_status,
     load_snapshot,
-    render_snapshot,
+    render_component,
     run_once,
     run_runtime_adjustment,
 )
@@ -74,6 +76,23 @@ def options(*, command: str = "ranking", demo: str | None = "small") -> Standalo
         StandaloneHostConfig(ascii=True, demo_size=demo, watch=False),
         chart,
     )
+
+
+def component(
+    selected: StandaloneLaunch | None = None,
+    snapshot: UsageSnapshot | None = None,
+    *,
+    registry: ChartRegistry | None = None,
+) -> HistoricalChartComponent:
+    selected = selected or options()
+    chart = HistoricalChartComponent(
+        selected,
+        owner_id="test:watch",
+        runtime=None,
+        registry=registry or build_chart_registry(),
+    )
+    chart.seed(selected, snapshot or UsageSnapshot((), (), 0.0))
+    return chart
 
 
 class Runtime:
@@ -268,17 +287,18 @@ def test_controls_are_dimmed_and_clipped_to_one_row() -> None:
 
 def test_ranking_render_shows_daily_summary_and_separate_scope_warning() -> None:
     scope_notice = Notice("notice.summary_excludes_session_agent", {"agent": "Codex"})
-    rendered = render_snapshot(
-        options(),
+    rendered = render_component(
+        component(
+            snapshot=UsageSnapshot(
+                (),
+                (),
+                0.0,
+                coverage=DateCoverage.from_interval(date(2025, 12, 25), date(2026, 1, 14)),
+                summary_notices=(scope_notice,),
+            )
+        ),
         load_translator("en"),
         Terminal(100, 30, False, True),
-        UsageSnapshot(
-            (),
-            (),
-            0.0,
-            coverage=DateCoverage.from_interval(date(2025, 12, 25), date(2026, 1, 14)),
-            summary_notices=(scope_notice,),
-        ),
     )
 
     assert rendered.chart.splitlines()[0] == (
@@ -291,11 +311,10 @@ def test_ranking_render_shows_daily_summary_and_separate_scope_warning() -> None
 
 
 def test_render_normalizes_standalone_ranking_title() -> None:
-    rendered = render_snapshot(
-        options(),
+    rendered = render_component(
+        component(),
         load_translator("en"),
         Terminal(100, 30, False, True),
-        UsageSnapshot((), (), 0.0),
         normalize_titles=True,
     )
 
@@ -303,16 +322,17 @@ def test_render_normalizes_standalone_ranking_title() -> None:
 
 
 def test_render_keeps_notices_separate_from_chart() -> None:
-    rendered = render_snapshot(
-        options(),
+    rendered = render_component(
+        component(
+            snapshot=UsageSnapshot(
+                (),
+                (Notice("notice.project_agent_omitted", {"agent": "Codex"}),),
+                0.0,
+                coverage=DateCoverage.from_interval(date(2025, 12, 25), date(2026, 1, 14)),
+            )
+        ),
         load_translator("en"),
         Terminal(100, 30, False, True),
-        UsageSnapshot(
-            (),
-            (Notice("notice.project_agent_omitted", {"agent": "Codex"}),),
-            0.0,
-            coverage=DateCoverage.from_interval(date(2025, 12, 25), date(2026, 1, 14)),
-        ),
     )
 
     assert rendered.notices == ("Codex omitted: ccusage does not expose project data",)
@@ -335,14 +355,14 @@ def test_one_shot_reserves_one_more_row_than_watch(monkeypatch: pytest.MonkeyPat
         replace(RANKING_DEFINITION, renderer=cast(HistoricalRenderer, capture_height))
     )
     registry.freeze()
-    monkeypatch.setattr("ccusage_viz.watch.build_chart_registry", lambda: registry)
     snapshot = UsageSnapshot((), (), 0.1)
     terminal = Terminal(100, 30, False, True)
     translator = load_translator("en")
+    chart = component(snapshot=snapshot, registry=registry)
 
-    render_snapshot(options(), translator, terminal, snapshot)
-    render_snapshot(options(), translator, terminal, snapshot, reserve_prompt=True)
-    render_snapshot(options(), translator, terminal, snapshot, control_rows=1)
+    render_component(chart, translator, terminal)
+    render_component(chart, translator, terminal, reserve_prompt=True)
+    render_component(chart, translator, terminal, control_rows=1)
 
     assert heights == [29, 28, 28]
 
@@ -383,22 +403,20 @@ def test_runtime_adjustment_updates_display_options_from_retained_snapshot(
             pass
 
     inputs = iter(keys)
-    rendered_snapshots: list[UsageSnapshot] = []
+    rendered_components: list[HistoricalChartComponent] = []
     monkeypatch.setattr("ccusage_viz.watch.input_mode", nullcontext)
     monkeypatch.setattr("ccusage_viz.watch.read_key", lambda timeout: next(inputs))
     monkeypatch.setattr(
         "ccusage_viz.watch.inspect_terminal",
         lambda *args, **kwargs: Terminal(100, 30, True, True),
     )
-    original_render_snapshot = __import__(
-        "ccusage_viz.watch", fromlist=["render_snapshot"]
-    ).render_snapshot
+    original_render_component = render_component
 
-    def capture_render_snapshot(*args, **kwargs):
-        rendered_snapshots.append(args[3])
-        return original_render_snapshot(*args, **kwargs)
+    def capture_render_component(chart, *args, **kwargs):
+        rendered_components.append(chart)
+        return original_render_component(chart, *args, **kwargs)
 
-    monkeypatch.setattr("ccusage_viz.watch.render_snapshot", capture_render_snapshot)
+    monkeypatch.setattr("ccusage_viz.watch.render_component", capture_render_component)
     snapshot = UsageSnapshot((), (), 0.25)
     current = options(command=command)
     if command in {"timeline", "ranking"}:
@@ -413,7 +431,9 @@ def test_runtime_adjustment_updates_display_options_from_retained_snapshot(
 
     assert isinstance(result, RuntimeAdjustmentResult)
     assert all(getattr(result.options.chart, field) == value for field, value in expected.items())
-    assert rendered_snapshots and all(item is snapshot for item in rendered_snapshots)
+    assert rendered_components
+    assert len({id(item) for item in rendered_components}) == 1
+    assert all(item.snapshot is snapshot for item in rendered_components)
     assert result.options.chart.filters.agents == current.chart.filters.agents
     assert result.options.chart.filters.models == current.chart.filters.models
     assert result.options.chart.filters.projects == current.chart.filters.projects
@@ -437,14 +457,14 @@ def test_runtime_adjustment_retains_last_chart_until_an_invalid_draft_recovers(
         lambda *args, **kwargs: Terminal(100, 30, False, True),
     )
 
-    def render(current, *args, **kwargs):
+    def render(chart, *args, **kwargs):
         nonlocal calls
         calls += 1
         if calls == 2:
             raise UsageError("error.stack_stacked_width", width=100)
-        return RefreshResult("chart", (), 0.25, args[2], current)
+        return RefreshResult("chart", (), 0.25, chart.snapshot, chart.candidate)
 
-    monkeypatch.setattr("ccusage_viz.watch.render_snapshot", render)
+    monkeypatch.setattr("ccusage_viz.watch.render_component", render)
     current = replace(
         options(command="stack"),
         chart=replace(
