@@ -53,6 +53,7 @@ class CcusageProvider:
         resolutions=(DataResolution.DATE.value,),
         dimensions=("agent", "model", "project"),
         execution_options=("chart_kind",),
+        dependencies=("ccusage",),
     )
 
     def compile(self, intent: QueryIntent) -> PhysicalPlan:

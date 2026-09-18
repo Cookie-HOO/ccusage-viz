@@ -6,8 +6,9 @@ from subprocess import CompletedProcess
 
 import pytest
 
+from ccusage_viz.bootstrap import build_provider_registry
 from ccusage_viz.core.time import DateRange
-from ccusage_viz.dependency import ensure_ccusage
+from ccusage_viz.dependency import ensure_ccusage, ensure_provider_dependencies
 from ccusage_viz.errors import QueryError
 from ccusage_viz.i18n import load_translator
 from ccusage_viz.options import (
@@ -40,6 +41,24 @@ def test_dependency_preflight_skips_demo_and_custom_binary(monkeypatch: pytest.M
     ensure_ccusage(options(demo="small"), load_translator("en"))
     ensure_ccusage(options(ccusage_bin="/custom/ccusage"), load_translator("en"))
     ensure_ccusage(options(explicit=frozenset({"ccusage_bin"})), load_translator("en"))
+
+
+def test_provider_dependency_preflight_uses_effective_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[StandaloneLaunch] = []
+    monkeypatch.setattr(
+        "ccusage_viz.dependency.ensure_ccusage",
+        lambda current, _translator: calls.append(current),
+    )
+    registry = build_provider_registry()
+
+    demo = options(demo="small")
+    ccusage = options()
+    ensure_provider_dependencies(demo, registry, load_translator("en"))
+    ensure_provider_dependencies(ccusage, registry, load_translator("en"))
+
+    assert calls == [ccusage]
 
 
 def test_dependency_preflight_skips_existing_ccusage(monkeypatch: pytest.MonkeyPatch) -> None:

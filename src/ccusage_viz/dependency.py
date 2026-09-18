@@ -7,9 +7,24 @@ import sys
 from ccusage_viz.errors import QueryError
 from ccusage_viz.i18n import Translator
 from ccusage_viz.options import LaunchConfig
+from ccusage_viz.query.registry import ProviderRegistry
 
 _DEFAULT_CCUSAGE = "ccusage"
 _INSTALL_COMMAND = "npm install -g ccusage"
+
+
+def ensure_provider_dependencies(
+    options: LaunchConfig,
+    registry: ProviderRegistry,
+    translator: Translator,
+) -> None:
+    provider_id = "demo" if options.host.demo_size else options.host.provider
+    dependencies = registry.get(provider_id).provider.capabilities.dependencies
+    for dependency in dependencies:
+        if dependency == "ccusage":
+            ensure_ccusage(options, translator)
+        else:
+            raise ValueError(f"unsupported provider dependency: {dependency}")
 
 
 def ensure_ccusage(options: LaunchConfig, translator: Translator) -> None:

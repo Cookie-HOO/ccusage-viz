@@ -3,7 +3,8 @@ from __future__ import annotations
 import os
 import sys
 
-from ccusage_viz.dependency import ensure_ccusage
+from ccusage_viz.bootstrap import build_provider_registry
+from ccusage_viz.dependency import ensure_provider_dependencies
 from ccusage_viz.errors import UsageError
 from ccusage_viz.i18n import Translator
 from ccusage_viz.options import DashboardLaunch, LaunchConfig
@@ -20,7 +21,7 @@ def _preflight_runtime(options: LaunchConfig) -> None:
 
 def run(options: LaunchConfig, translator: Translator) -> int:
     _preflight_runtime(options)
-    ensure_ccusage(options, translator)
+    ensure_provider_dependencies(options, build_provider_registry(), translator)
     if isinstance(options, DashboardLaunch):
         from ccusage_viz.tui import run_tui
 

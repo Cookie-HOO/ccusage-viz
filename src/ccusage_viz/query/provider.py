@@ -21,6 +21,7 @@ class ProviderCapabilities:
     dimensions: tuple[str, ...]
     execution_options: tuple[str, ...] = ()
     in_process: bool = False
+    dependencies: tuple[str, ...] = ()
 
     def validate(self, intent: QueryIntent) -> None:
         if intent.resolution.value not in self.resolutions:

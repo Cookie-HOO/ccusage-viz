@@ -46,7 +46,7 @@ def test_preflight_rejects_noninteractive_streams_before_dependency_check(
     def unexpected_dependency_check(*_args: object) -> None:
         raise AssertionError("dependency check must not run")
 
-    monkeypatch.setattr(application, "ensure_ccusage", unexpected_dependency_check)
+    monkeypatch.setattr(application, "ensure_provider_dependencies", unexpected_dependency_check)
 
     with pytest.raises(UsageError, match="error.tty"):
         application.run(options(), load_translator("en"))
@@ -61,8 +61,8 @@ def test_preflight_requires_explicit_ascii_for_dumb_terminal(
     dependency_calls: list[StandaloneLaunch] = []
     monkeypatch.setattr(
         application,
-        "ensure_ccusage",
-        lambda current, _translator: dependency_calls.append(current),
+        "ensure_provider_dependencies",
+        lambda current, _registry, _translator: dependency_calls.append(current),
     )
     monkeypatch.setattr("ccusage_viz.watch.run_watch", lambda *_args: 7)
 
@@ -78,7 +78,7 @@ def test_preflight_requires_explicit_ascii_for_dumb_terminal(
 def test_historical_lifecycle_dispatches_from_no_watch(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(application, "interactive_streams", lambda: True)
     monkeypatch.delenv("TERM", raising=False)
-    monkeypatch.setattr(application, "ensure_ccusage", lambda *_args: None)
+    monkeypatch.setattr(application, "ensure_provider_dependencies", lambda *_args: None)
     monkeypatch.setattr("ccusage_viz.watch.run_once", lambda *_args: 3)
     monkeypatch.setattr("ccusage_viz.watch.run_watch", lambda *_args: 4)
 

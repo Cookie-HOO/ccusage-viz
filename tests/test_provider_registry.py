@@ -33,5 +33,9 @@ def test_bootstrap_explicitly_registers_frozen_builtins() -> None:
     registry = build_provider_registry()
 
     assert [definition.provider_id for definition in registry] == ["ccusage", "demo"]
-    assert registry.get("demo").provider.capabilities.in_process
-    assert not registry.get("ccusage").provider.capabilities.in_process
+    demo = registry.get("demo").provider.capabilities
+    ccusage = registry.get("ccusage").provider.capabilities
+    assert demo.in_process
+    assert demo.dependencies == ()
+    assert not ccusage.in_process
+    assert ccusage.dependencies == ("ccusage",)
