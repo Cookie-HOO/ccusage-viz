@@ -160,6 +160,142 @@ def test_coordinator_shares_only_inflight_work_and_preserves_subscribers() -> No
     assert len(calls) == 2
 
 
+def test_handle_cancellation_detaches_only_its_plan_on_shared_coordinator() -> None:
+    calls: list[str] = []
+    provider = RecordingProvider(calls, Lock(), Event(), Event())
+    query = PhysicalQuery(provider.provider, "shared")
+    plan = PhysicalPlan("plan", (query,))
+    coordinator = QueryCoordinator(max_parallel=1)
+
+    cancelled = coordinator.submit(plan, provider)
+    assert provider.started.wait(1)
+    active = coordinator.submit(plan, provider)
+    time.sleep(0.05)
+    cancelled.cancel()
+    provider.release.set()
+
+    with pytest.raises(QueryError) as caught:
+        cancelled.result(1)
+    assert caught.value.key == "error.ccusage_cancelled"
+    assert active.result(1).records
+    assert calls == ["shared"]
+
+
+def test_plan_failure_does_not_cancel_an_unrelated_plan() -> None:
+    calls: list[str] = []
+    provider = RecordingProvider(calls, Lock(), Event(), Event())
+    coordinator = QueryCoordinator(max_parallel=2)
+    shared = PhysicalQuery(provider.provider, "shared")
+    shared_plan = PhysicalPlan("shared-plan", (shared,))
+    failing_plan = PhysicalPlan(
+        "failing-plan",
+        (PhysicalQuery(ProviderRef("other"), "invalid"),),
+    )
+
+    active = coordinator.submit(shared_plan, provider)
+    assert provider.started.wait(1)
+    failing = coordinator.submit(failing_plan, provider)
+    with pytest.raises(ValueError, match="another provider"):
+        failing.result(1)
+    provider.release.set()
+
+    assert active.result(1).records
+    assert calls == ["shared"]
+
+
+def test_optional_query_failure_preserves_required_fragments() -> None:
+    @dataclass(frozen=True, slots=True)
+    class OptionalFailureProvider(RecordingProvider):
+        def execute(self, query: PhysicalQuery, cancelled: Event) -> PhysicalResult:
+            if query.operation == "optional":
+                raise QueryError("error.ccusage_failed", query=query.operation)
+            return PhysicalResult(query, query.operation.encode())
+
+    calls: list[str] = []
+    provider = OptionalFailureProvider(calls, Lock(), Event(), Event())
+    plan = PhysicalPlan(
+        "plan",
+        (
+            PhysicalQuery(provider.provider, "required"),
+            PhysicalQuery(provider.provider, "optional", required=False),
+        ),
+    )
+
+    result = QueryCoordinator(max_parallel=2).run(plan, provider)
+
+    assert len(result.records) == 1
+    assert result.provenance[0].physical_fingerprint == plan.queries[0].fingerprint
+
+
+def test_cancelled_handle_settles_while_provider_assembly_is_blocked() -> None:
+    assembly_started = Event()
+    release_assembly = Event()
+
+    @dataclass(frozen=True, slots=True)
+    class BlockingAssemblyProvider(RecordingProvider):
+        def assemble(
+            self, plan: PhysicalPlan, fragments: tuple[ProviderResultFragment, ...]
+        ) -> ProviderResult:
+            assembly_started.set()
+            release_assembly.wait(1)
+            return super().assemble(plan, fragments)
+
+    provider = BlockingAssemblyProvider([], Lock(), Event(), Event())
+    handle = QueryCoordinator().submit(PhysicalPlan("empty", ()), provider)
+    assert assembly_started.wait(1)
+
+    handle.cancel()
+
+    with pytest.raises(QueryError) as caught:
+        handle.result(0.1)
+    assert caught.value.key == "error.ccusage_cancelled"
+    release_assembly.set()
+
+
+def test_required_failure_settles_before_cancellation_resistant_sibling() -> None:
+    sibling_started = Event()
+    release_sibling = Event()
+
+    @dataclass(frozen=True, slots=True)
+    class ResistantProvider(RecordingProvider):
+        def execute(self, query: PhysicalQuery, cancelled: Event) -> PhysicalResult:
+            if query.operation == "failure":
+                assert sibling_started.wait(1)
+                raise QueryError("error.ccusage_failed", query=query.operation)
+            sibling_started.set()
+            release_sibling.wait(1)
+            return PhysicalResult(query, query.operation.encode())
+
+    provider = ResistantProvider([], Lock(), Event(), Event())
+    handle = QueryCoordinator(max_parallel=2).submit(
+        PhysicalPlan(
+            "plan",
+            (
+                PhysicalQuery(provider.provider, "failure"),
+                PhysicalQuery(provider.provider, "resistant"),
+            ),
+        ),
+        provider,
+    )
+
+    with pytest.raises(QueryError) as caught:
+        handle.result(0.2)
+    assert caught.value.key == "error.ccusage_failed"
+    release_sibling.set()
+
+
+def test_cancelled_coordinator_rejects_new_work() -> None:
+    calls: list[str] = []
+    provider = RecordingProvider(calls, Lock(), Event(), Event())
+    coordinator = QueryCoordinator()
+    coordinator.cancel()
+
+    with pytest.raises(RuntimeError, match="coordinator is cancelled"):
+        coordinator.submit(
+            PhysicalPlan("plan", (PhysicalQuery(provider.provider, "query"),)), provider
+        )
+
+
 def test_ccusage_execution_bounds_stderr_and_times_out_pipe_holding_descendants() -> None:
     provider = CCUSAGE_DEFINITION.provider
     context = ExecutionContext(sys.executable, 0.2, 1024)
