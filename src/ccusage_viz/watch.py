@@ -23,7 +23,6 @@ from ccusage_viz.coverage import DateCoverage
 from ccusage_viz.data_view import BodyView, next_body_view, render_snapshot_data
 from ccusage_viz.deltas import RefreshDeltas, RefreshRanks
 from ccusage_viz.diagnostics import color_enabled, format_error
-from ccusage_viz.domain import Notice, UsageRecord
 from ccusage_viz.errors import UsageError
 from ccusage_viz.historical_component import (
     HistoricalChartComponent,
@@ -55,9 +54,6 @@ from ccusage_viz.terminal_ui import controls_line, dimmed, input_mode, notice_li
 class RenderedChart:
     chart: str
     notices: tuple[str, ...]
-
-
-_EMPTY_COVERAGE = DateCoverage()
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,49 +139,6 @@ def _render_component(
     chart = component.render(context)
     messages = tuple(translator.text(notice.key, **notice.values) for notice in model.notices)
     return RenderedChart(chart, messages)
-
-
-def _render(
-    options: StandaloneLaunch,
-    translator: Translator,
-    terminal: Terminal,
-    records: tuple[UsageRecord, ...],
-    notices: tuple[Notice, ...],
-    *,
-    reserve_prompt: bool = False,
-    control_rows: int = 0,
-    hide_upper_right_axes: bool = False,
-    ranking_deltas: Mapping[Hashable, float] | None = None,
-    ranking_rank_deltas: Mapping[Hashable, int] | None = None,
-    coverage: DateCoverage = _EMPTY_COVERAGE,
-    summary_notices: tuple[Notice, ...] = (),
-    normalize_titles: bool = False,
-) -> RenderedChart:
-    snapshot = UsageSnapshot(
-        records,
-        notices,
-        0.0,
-        coverage=coverage,
-        summary_notices=summary_notices,
-    )
-    component = HistoricalChartComponent(
-        options,
-        owner_id="render",
-        runtime=None,
-        registry=build_chart_registry(),
-    )
-    component.seed(options, snapshot)
-    return _render_component(
-        component,
-        translator,
-        terminal,
-        reserve_prompt=reserve_prompt,
-        control_rows=control_rows,
-        hide_upper_right_axes=hide_upper_right_axes,
-        ranking_deltas=ranking_deltas,
-        ranking_rank_deltas=ranking_rank_deltas,
-        normalize_titles=normalize_titles,
-    )
 
 
 def load_snapshot(
@@ -276,38 +229,6 @@ def render_snapshot(
         hide_upper_right_axes=hide_upper_right_axes,
         ranking_deltas=ranking_deltas,
         ranking_rank_deltas=ranking_rank_deltas,
-        normalize_titles=normalize_titles,
-    )
-
-
-def _refresh(
-    options: StandaloneLaunch,
-    translator: Translator,
-    terminal: Terminal,
-    runtime: QueryRuntime,
-    *,
-    owner_id: str = "standalone",
-    generation: int = 0,
-    trigger: QueryTrigger = QueryTrigger.STARTUP,
-    coverage: DateCoverage | None = None,
-    reserve_prompt: bool = False,
-    control_rows: int = 0,
-    normalize_titles: bool = False,
-) -> RefreshResult:
-    return render_snapshot(
-        options,
-        translator,
-        terminal,
-        load_snapshot(
-            options,
-            runtime,
-            owner_id=owner_id,
-            generation=generation,
-            trigger=trigger,
-            coverage=coverage,
-        ),
-        reserve_prompt=reserve_prompt,
-        control_rows=control_rows,
         normalize_titles=normalize_titles,
     )
 

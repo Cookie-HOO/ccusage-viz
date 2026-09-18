@@ -62,11 +62,7 @@ from ccusage_viz.terminal import InteractiveScreen, Terminal
 from ccusage_viz.terminal_ui import notice_lines as format_notice_lines
 from ccusage_viz.terminal_ui import read_key
 from ccusage_viz.tui_input import KeyEvent, MouseEvent, read_event, tui_input_mode
-from ccusage_viz.watch import (
-    load_snapshot,
-    render_component,
-    snapshot_from_result,
-)
+from ccusage_viz.watch import render_component, snapshot_from_result
 
 _PANE_COMMANDS = ("timeline", "calendar", "stack", "ranking", "monitor")
 
@@ -561,19 +557,6 @@ def _new_pane(
         observer=observer,
         owner_id=owner_id,
     )
-
-
-def _load_pane(
-    options: StandaloneLaunch,
-    runtime: QueryRuntime,
-    monitor_runner: QueryRunner | None,
-    demo_ordinal: int,
-) -> UsageSnapshot | tuple[UsageRecord, ...]:
-    if isinstance(options.chart, MonitorConfig):
-        if monitor_runner is None:
-            raise ValueError("monitor panes require a query runner")
-        return load_monitor_sample(options, monitor_runner, demo_ordinal=demo_ordinal)
-    return load_snapshot(options, runtime)
 
 
 def _load_monitor_pane(

@@ -39,11 +39,10 @@ from ccusage_viz.watch import (
     UsageSnapshot,
     _paint,
     _paint_status,
-    _refresh,
     _refreshing_status,
-    _render,
     _watch_status,
     load_snapshot,
+    render_snapshot,
     run_once,
     run_runtime_adjustment,
 )
@@ -269,14 +268,17 @@ def test_controls_are_dimmed_and_clipped_to_one_row() -> None:
 
 def test_ranking_render_shows_daily_summary_and_separate_scope_warning() -> None:
     scope_notice = Notice("notice.summary_excludes_session_agent", {"agent": "Codex"})
-    rendered = _render(
+    rendered = render_snapshot(
         options(),
         load_translator("en"),
         Terminal(100, 30, False, True),
-        (),
-        (),
-        coverage=DateCoverage.from_interval(date(2025, 12, 25), date(2026, 1, 14)),
-        summary_notices=(scope_notice,),
+        UsageSnapshot(
+            (),
+            (),
+            0.0,
+            coverage=DateCoverage.from_interval(date(2025, 12, 25), date(2026, 1, 14)),
+            summary_notices=(scope_notice,),
+        ),
     )
 
     assert rendered.chart.splitlines()[0] == (
@@ -289,12 +291,11 @@ def test_ranking_render_shows_daily_summary_and_separate_scope_warning() -> None
 
 
 def test_render_normalizes_standalone_ranking_title() -> None:
-    rendered = _render(
+    rendered = render_snapshot(
         options(),
         load_translator("en"),
         Terminal(100, 30, False, True),
-        (),
-        (),
+        UsageSnapshot((), (), 0.0),
         normalize_titles=True,
     )
 
@@ -302,13 +303,16 @@ def test_render_normalizes_standalone_ranking_title() -> None:
 
 
 def test_render_keeps_notices_separate_from_chart() -> None:
-    rendered = _render(
+    rendered = render_snapshot(
         options(),
         load_translator("en"),
         Terminal(100, 30, False, True),
-        (),
-        (Notice("notice.project_agent_omitted", {"agent": "Codex"}),),
-        coverage=DateCoverage.from_interval(date(2025, 12, 25), date(2026, 1, 14)),
+        UsageSnapshot(
+            (),
+            (Notice("notice.project_agent_omitted", {"agent": "Codex"}),),
+            0.0,
+            coverage=DateCoverage.from_interval(date(2025, 12, 25), date(2026, 1, 14)),
+        ),
     )
 
     assert rendered.notices == ("Codex omitted: ccusage does not expose project data",)
@@ -332,13 +336,13 @@ def test_one_shot_reserves_one_more_row_than_watch(monkeypatch: pytest.MonkeyPat
     )
     registry.freeze()
     monkeypatch.setattr("ccusage_viz.watch.build_chart_registry", lambda: registry)
-    runtime = cast(QueryRuntime, Runtime(provider_result()))
+    snapshot = UsageSnapshot((), (), 0.1)
     terminal = Terminal(100, 30, False, True)
     translator = load_translator("en")
 
-    _refresh(options(), translator, terminal, runtime)
-    _refresh(options(), translator, terminal, runtime, reserve_prompt=True)
-    _refresh(options(), translator, terminal, runtime, control_rows=1)
+    render_snapshot(options(), translator, terminal, snapshot)
+    render_snapshot(options(), translator, terminal, snapshot, reserve_prompt=True)
+    render_snapshot(options(), translator, terminal, snapshot, control_rows=1)
 
     assert heights == [29, 28, 28]
 
@@ -658,18 +662,6 @@ def test_snapshot_retains_daily_coverage_when_project_ranking_also_uses_sessions
     assert snapshot.coverage == coverage
     assert snapshot.summary_notices == summary_notices
     assert snapshot.includes_project_attribution
-
-
-def test_demo_refresh_uses_provider_runtime() -> None:
-    result = _refresh(
-        options(),
-        load_translator("en"),
-        Terminal(100, 30, False, True),
-        cast(QueryRuntime, Runtime(provider_result(includes_project_attribution=True))),
-    )
-    assert "Ranking" in result.chart
-    assert result.notices == ()
-    assert result.elapsed >= 0
 
 
 @pytest.mark.skipif(os.name != "posix", reason="PTY smoke test is POSIX-only")

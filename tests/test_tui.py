@@ -31,7 +31,6 @@ from ccusage_viz.tui import (
     _header_lines,
     _header_options,
     _header_refresh_interval,
-    _load_pane,
     _new_header,
     _new_pane,
     _new_pane_options,
@@ -215,40 +214,6 @@ def test_dashboard_panes_only_own_monitor_query_runners() -> None:
 
     assert historical.monitor_runner is None
     assert isinstance(monitor.monitor_runner, QueryRunner)
-
-
-def test_dashboard_load_dispatches_to_shared_runtime_or_monitor_runner(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    parser = build_parser(load_translator("en"))
-    options = _to_options(parser.parse_args(["dashboard", "--demo"]))
-    historical = standalone_from_pane(
-        options, parse_dashboard_pane("timeline", host=options)
-    )
-    monitor = standalone_from_pane(options, parse_dashboard_pane("monitor", host=options))
-    runtime = build_query_runtime()
-    monitor_runner = QueryRunner()
-    calls: list[tuple[str, object]] = []
-
-    monkeypatch.setattr(
-        tui_module,
-        "load_snapshot",
-        lambda selected, selected_runtime: calls.append(("historical", selected_runtime))
-        or UsageSnapshot((), (), 0),
-    )
-    monkeypatch.setattr(
-        tui_module,
-        "load_monitor_sample",
-        lambda selected, selected_runner, *, demo_ordinal: calls.append(
-            ("monitor", selected_runner)
-        )
-        or (),
-    )
-
-    _load_pane(historical, runtime, None, 0)
-    _load_pane(monitor, runtime, monitor_runner, 1)
-
-    assert calls == [("historical", runtime), ("monitor", monitor_runner)]
 
 
 def test_dashboard_pane_render_retains_chart_notices_and_deduplicates_them() -> None:
