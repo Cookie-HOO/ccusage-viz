@@ -44,6 +44,26 @@ def component() -> HistoricalChartComponent:
     )
 
 
+def test_component_acquires_and_accepts_provider_snapshot() -> None:
+    chart = component()
+    runtime = chart.runtime
+    assert runtime is not None
+
+    try:
+        completion = chart.submit(QueryTrigger.STARTUP).result()
+        assert completion.options == chart.candidate
+        assert completion.snapshot.records
+        assert completion.snapshot.coverage.covers(
+            DateInterval(date(2026, 1, 1), date(2026, 1, 7))
+        )
+        assert completion.snapshot.includes_project_attribution
+        assert completion.snapshot.elapsed >= 0
+        assert chart.accept(completion)
+        assert chart.snapshot is completion.snapshot
+    finally:
+        runtime.cancel()
+
+
 def test_component_accepts_snapshot_and_coverage_atomically() -> None:
     chart = component()
     coverage = DateCoverage((DateInterval(date(2026, 1, 1), date(2026, 1, 7)),))

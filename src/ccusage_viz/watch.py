@@ -9,7 +9,6 @@ from collections.abc import Hashable, Mapping
 from dataclasses import dataclass, replace
 from shutil import get_terminal_size
 
-from ccusage_viz.acquisition import historical_provider_id, historical_query_intent
 from ccusage_viz.bootstrap import build_chart_registry, build_query_runtime
 from ccusage_viz.command_copy import (
     copy_command,
@@ -19,7 +18,6 @@ from ccusage_viz.command_copy import (
     wrap_command,
 )
 from ccusage_viz.core.time import refresh_date_range
-from ccusage_viz.coverage import DateCoverage
 from ccusage_viz.data_view import BodyView, next_body_view, render_snapshot_data
 from ccusage_viz.deltas import RefreshDeltas, RefreshRanks
 from ccusage_viz.diagnostics import color_enabled, format_error
@@ -28,7 +26,6 @@ from ccusage_viz.historical_component import (
     HistoricalChartComponent,
     HistoricalCompletion,
     UsageSnapshot,
-    snapshot_from_result,
 )
 from ccusage_viz.i18n import Translator
 from ccusage_viz.options import (
@@ -43,7 +40,6 @@ from ccusage_viz.options import (
 )
 from ccusage_viz.query.coordinator import QueryHandle
 from ccusage_viz.query.models import ProviderResult, QueryTrigger
-from ccusage_viz.query.runtime import QueryRuntime
 from ccusage_viz.render import RenderContext
 from ccusage_viz.render.palette import COLOR_SCHEMES
 from ccusage_viz.terminal import InteractiveScreen, Terminal, inspect_terminal
@@ -139,30 +135,6 @@ def _render_component(
     chart = component.render(context)
     messages = tuple(translator.text(notice.key, **notice.values) for notice in model.notices)
     return RenderedChart(chart, messages)
-
-
-def load_snapshot(
-    options: StandaloneLaunch,
-    runtime: QueryRuntime,
-    *,
-    owner_id: str = "standalone",
-    generation: int = 0,
-    trigger: QueryTrigger = QueryTrigger.STARTUP,
-    coverage: DateCoverage | None = None,
-) -> UsageSnapshot:
-    if isinstance(options.chart, MonitorConfig):
-        raise TypeError("historical snapshot loading does not support monitor configurations")
-    intent = historical_query_intent(
-        options,
-        runtime.definition(historical_provider_id(options)),
-        owner_id=owner_id,
-        generation=generation,
-        trigger=trigger,
-        coverage=coverage,
-    )
-    started = time.monotonic()
-    result = runtime.acquire(intent)
-    return snapshot_from_result(result, time.monotonic() - started)
 
 
 def render_component(

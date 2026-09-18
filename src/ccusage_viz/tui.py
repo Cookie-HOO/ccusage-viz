@@ -35,6 +35,7 @@ from ccusage_viz.historical_component import (
     HistoricalCompletion,
     HistoricalSubmission,
     UsageSnapshot,
+    snapshot_from_result,
 )
 from ccusage_viz.i18n import Translator
 from ccusage_viz.monitor import load_monitor_sample, render_monitor_snapshot
@@ -63,7 +64,7 @@ from ccusage_viz.terminal import InteractiveScreen, Terminal
 from ccusage_viz.terminal_ui import notice_lines as format_notice_lines
 from ccusage_viz.terminal_ui import read_key
 from ccusage_viz.tui_input import KeyEvent, MouseEvent, read_event, tui_input_mode
-from ccusage_viz.watch import render_component, snapshot_from_result
+from ccusage_viz.watch import render_component
 
 _PANE_COMMANDS = ("timeline", "calendar", "stack", "ranking", "monitor")
 

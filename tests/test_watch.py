@@ -14,7 +14,7 @@ from ccusage_viz.charts.builtins import RANKING_DEFINITION
 from ccusage_viz.charts.definition import HistoricalRenderer
 from ccusage_viz.charts.registry import ChartRegistry
 from ccusage_viz.core.time import DateRange
-from ccusage_viz.coverage import DateCoverage, DateInterval
+from ccusage_viz.coverage import DateCoverage
 from ccusage_viz.domain import Notice
 from ccusage_viz.errors import UsageError
 from ccusage_viz.formatting import display_width, strip_ansi
@@ -31,8 +31,6 @@ from ccusage_viz.options import (
     StandaloneLaunch,
     TimelineConfig,
 )
-from ccusage_viz.query.models import DataResolution, ProviderResult, QueryIntent
-from ccusage_viz.query.runtime import QueryRuntime
 from ccusage_viz.terminal import InteractiveScreen, Terminal
 from ccusage_viz.terminal_ui import controls_line, notice_lines
 from ccusage_viz.watch import (
@@ -43,7 +41,6 @@ from ccusage_viz.watch import (
     _paint_status,
     _refreshing_status,
     _watch_status,
-    load_snapshot,
     render_component,
     run_once,
     run_runtime_adjustment,
@@ -93,43 +90,6 @@ def component(
     )
     chart.seed(selected, snapshot or UsageSnapshot((), (), 0.0))
     return chart
-
-
-class Runtime:
-    def __init__(self, result: ProviderResult) -> None:
-        self.result = result
-        self.options: list[QueryIntent] = []
-        self.cancelled = False
-
-    def definition(self, provider_id: str):
-        from ccusage_viz.bootstrap import build_provider_registry
-
-        return build_provider_registry().get(provider_id)
-
-    def acquire(self, selected: QueryIntent) -> ProviderResult:
-        self.options.append(selected)
-        return self.result
-
-    def cancel(self) -> None:
-        self.cancelled = True
-
-
-def provider_result(
-    *,
-    coverage: DateCoverage | None = None,
-    notices: tuple[Notice, ...] = (),
-    summary_notices: tuple[Notice, ...] = (),
-    includes_project_attribution: bool = False,
-) -> ProviderResult:
-    return ProviderResult(
-        (),
-        (),
-        DataResolution.DATE,
-        coverage or DateCoverage(),
-        notices,
-        summary_notices,
-        includes_project_attribution=includes_project_attribution,
-    )
 
 
 def test_one_shot_paints_one_complete_interactive_frame(
@@ -620,68 +580,6 @@ def test_runtime_adjustment_normalizes_timeline_area_when_grouping_changes(
     assert isinstance(result, RuntimeAdjustmentResult)
     assert result.options.chart.by == "agent"
     assert result.options.chart.presentation.style == "linear"
-
-
-@pytest.mark.parametrize("size", ["small", "medium", "large"])
-def test_demo_snapshot_uses_requested_size_through_query_runtime(size: str) -> None:
-    coverage = DateCoverage.from_interval(date(2026, 1, 1), date(2026, 1, 14))
-    runtime = Runtime(
-        provider_result(coverage=coverage, includes_project_attribution=True)
-    )
-    selected = replace(
-        options(command="timeline"),
-        host=replace(options(command="timeline").host, demo_size=size),
-    )
-
-    snapshot = load_snapshot(selected, cast(QueryRuntime, runtime))
-
-    assert snapshot.records == ()
-    assert snapshot.coverage == coverage
-    assert snapshot.includes_project_attribution
-    assert len(runtime.options) == 1
-    assert runtime.options[0].provider.provider_id == "demo"
-    assert dict(runtime.options[0].execution_options)["demo_size"] == size
-
-
-def test_successful_empty_daily_query_still_records_requested_coverage() -> None:
-    coverage = DateCoverage.from_interval(date(2026, 1, 1), date(2026, 1, 14))
-    runtime = Runtime(provider_result(coverage=coverage))
-    snapshot = load_snapshot(
-        replace(
-            options(command="timeline"),
-            host=replace(options(command="timeline").host, demo_size=None),
-        ),
-        cast(QueryRuntime, runtime),
-    )
-
-    assert snapshot.records == ()
-    assert snapshot.coverage.covers(DateInterval(date(2026, 1, 1), date(2026, 1, 14)))
-    assert not snapshot.includes_project_attribution
-
-
-def test_snapshot_retains_daily_coverage_when_project_ranking_also_uses_sessions() -> None:
-    coverage = DateCoverage.from_interval(date(2026, 1, 1), date(2026, 1, 14))
-    summary_notices = (
-        Notice("notice.summary_excludes_session_agent", {"agent": "Codex"}),
-    )
-    runtime = Runtime(
-        provider_result(
-            coverage=coverage,
-            summary_notices=summary_notices,
-            includes_project_attribution=True,
-        )
-    )
-    snapshot = load_snapshot(
-        replace(
-            options(command="ranking"),
-            host=replace(options(command="ranking").host, demo_size=None),
-        ),
-        cast(QueryRuntime, runtime),
-    )
-
-    assert snapshot.coverage == coverage
-    assert snapshot.summary_notices == summary_notices
-    assert snapshot.includes_project_attribution
 
 
 @pytest.mark.skipif(os.name != "posix", reason="PTY smoke test is POSIX-only")
