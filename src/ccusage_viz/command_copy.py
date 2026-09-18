@@ -49,20 +49,18 @@ def format_command(options: CommandOptions) -> str:
         if options.date_range.timezone:
             args.extend(("--timezone", options.date_range.timezone))
         if options.command in {"timeline", "stack"}:
-            if options.aggregation != "day":
-                args.extend(("--aggregate", options.aggregation))
-            if options.weekday_mode != "auto":
-                args.extend(("--weekdays", options.weekday_mode))
+            if options.granularity != "day":
+                args.extend(("--granularity", options.granularity))
+            if options.weekdays != "show":
+                args.extend(("--weekdays", options.weekdays))
     if options.by is not None:
         args.extend(("--by", options.by))
     if options.top is not None:
         args.extend(("--top", str(options.top)))
-    if options.show_other:
-        args.append("--show-other")
-    if options.split_cache:
-        args.append("--split-cache")
-    if options.no_summary:
-        args.append("--no-summary")
+    if options.command in {"timeline", "ranking"} and options.other != "show":
+        args.extend(("--other", options.other))
+    if options.command == "stack" and options.cache != "combined":
+        args.extend(("--cache", options.cache))
     for agent in options.agents:
         args.extend(("--agent", agent))
     for model in options.models:
@@ -78,8 +76,8 @@ def format_command(options: CommandOptions) -> str:
         args.extend(("--theme", options.color_scheme))
     if options.style != DEFAULT_STYLES[options.command]:
         args.extend(("--style", options.style))
-    if options.legend_position != "below-title":
-        args.extend(("--legend-position", options.legend_position))
+    if options.legend != "below-title":
+        args.extend(("--legend", options.legend))
     if options.ascii:
         args.append("--ascii")
     return _format_args(args)
@@ -88,10 +86,8 @@ def format_command(options: CommandOptions) -> str:
 def format_full_command(options: CommandOptions) -> str:
     """Return an executable command with every effective setting made explicit.
 
-    The CLI has no negative counterparts for one-way booleans, so disabled
-    ``--show-other``, ``--split-cache``, ``--no-summary``, and ``--ascii``
-    remain absent. Unlike :func:`format_command`, this deliberate audit view
-    includes local project paths, the configured executable, and timeout.
+    Unlike :func:`format_command`, this deliberate audit view includes local
+    project paths, the configured executable, and the query timeout.
     """
     args = ["ccuv", options.command]
     if options.command == "monitor":
@@ -106,18 +102,16 @@ def format_full_command(options: CommandOptions) -> str:
         if options.date_range.timezone:
             args.extend(("--timezone", options.date_range.timezone))
         if options.command in {"timeline", "stack"}:
-            args.extend(("--aggregate", options.aggregation))
-            args.extend(("--weekdays", options.weekday_mode))
+            args.extend(("--granularity", options.granularity))
+            args.extend(("--weekdays", options.weekdays))
     if options.by is not None:
         args.extend(("--by", options.by))
     if options.top is not None:
         args.extend(("--top", str(options.top)))
-    if options.show_other:
-        args.append("--show-other")
-    if options.split_cache:
-        args.append("--split-cache")
-    if options.no_summary:
-        args.append("--no-summary")
+    if options.command in {"timeline", "ranking"} and options.other != "show":
+        args.extend(("--other", options.other))
+    if options.command == "stack" and options.cache != "combined":
+        args.extend(("--cache", options.cache))
     for agent in options.agents:
         args.extend(("--agent", agent))
     for model in options.models:
@@ -129,11 +123,11 @@ def format_full_command(options: CommandOptions) -> str:
     if options.demo is not None:
         args.extend(("--demo", options.demo))
     args.extend(("--ccusage-bin", options.ccusage_bin))
-    args.extend(("--timeout", f"{options.timeout:g}"))
+    args.extend(("--query-timeout", f"{options.query_timeout:g}"))
     args.extend(("--theme", options.color_scheme))
     args.extend(("--style", options.style))
     if options.command in {"timeline", "stack", "monitor"}:
-        args.extend(("--legend-position", options.legend_position))
+        args.extend(("--legend", options.legend))
     if options.ascii:
         args.append("--ascii")
     return _format_args(args)
@@ -213,7 +207,7 @@ def format_full_dashboard_command(
     if options.demo is not None:
         args.extend(("--demo", options.demo))
     args.extend(("--ccusage-bin", options.ccusage_bin))
-    args.extend(("--timeout", f"{options.timeout:g}"))
+    args.extend(("--query-timeout", f"{options.query_timeout:g}"))
     args.extend(("--theme", options.color_scheme))
     if options.ascii:
         args.append("--ascii")

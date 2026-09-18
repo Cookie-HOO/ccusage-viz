@@ -51,7 +51,7 @@ def test_dashboard_defaults_to_a_filled_four_pane_dashboard() -> None:
     parser = build_parser(load_translator("en"))
     options = _to_options(parser.parse_args(["dashboard"]))
     assert options.command == "dashboard"
-    assert options.panels == ("timeline", "stack", "ranking", "monitor --by model")
+    assert options.panes == ("timeline", "stack", "ranking", "monitor --by model")
     assert options.grid == "2x2"
     assert options.header_style == "panel"
     assert options.header_summary == "day"
@@ -67,14 +67,14 @@ def test_full_dashboard_command_includes_private_and_runtime_configuration() -> 
                 "dashboard",
                 "--ccusage-bin",
                 "/opt/ccusage",
-                "--timeout",
+                "--query-timeout",
                 "42",
                 "--panel",
                 "timeline --project /private/project",
             ]
         )
     )
-    panels = tuple(_panel_options(fragment, dashboard) for fragment in dashboard.panels)
+    panels = tuple(_panel_options(fragment, dashboard) for fragment in dashboard.panes)
 
     full = format_full_dashboard_command(
         dashboard,
@@ -87,7 +87,7 @@ def test_full_dashboard_command_includes_private_and_runtime_configuration() -> 
 
     assert "/private/project" in full
     assert "--ccusage-bin /opt/ccusage" in full
-    assert "--timeout 42" in full
+    assert "--query-timeout 42" in full
 
 
 def test_dashboard_pane_copy_preserves_historical_refresh_as_watch() -> None:
@@ -98,7 +98,7 @@ def test_dashboard_pane_copy_preserves_historical_refresh_as_watch() -> None:
     monitor = _panel_options("monitor --by model", base)
 
     assert format_dashboard_pane_command(timeline, refresh_interval=timeline.interval) == (
-        "ccuv timeline --period 7d --by total --watch 30"
+        "ccuv timeline --period 7d --watch 30"
     )
     assert format_dashboard_pane_command(stack, refresh_interval=stack.interval) == (
         "ccuv stack --period 14d --watch 30"
@@ -284,12 +284,12 @@ def test_tui_adjustment_footer_has_quick_advanced_and_three_rows() -> None:
     stack_advanced = _adjustment_controls("stack", "advanced", translator)
 
     assert "p period" in timeline_quick
-    assert "g aggregate" in timeline_quick
+    assert "g granularity" in timeline_quick
     assert "a Advanced" in timeline_quick
     assert "k weekdays" in timeline_advanced
     assert "l legend" in timeline_advanced
     assert "a Quick" in timeline_advanced
-    assert "c split cache" in stack_advanced
+    assert "c cache mode" in stack_advanced
     assert not _adjustment_key_supported("timeline", "quick", "k")
     assert _adjustment_key_supported("timeline", "advanced", "k")
     assert _adjustment_key_supported("timeline", "quick", "b")
@@ -461,7 +461,7 @@ def test_tui_accepts_repeatable_panel_fragments_and_grid() -> None:
             ["dashboard", "--panel", "timeline --period 7d", "--panel", "ranking", "--grid", "1x2"]
         )
     )
-    assert options.panels == ("timeline --period 7d", "ranking")
+    assert options.panes == ("timeline --period 7d", "ranking")
     assert options.grid == "1x2"
 
 

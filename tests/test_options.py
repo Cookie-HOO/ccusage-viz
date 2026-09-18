@@ -110,17 +110,17 @@ def test_runtime_period_cycles_only_for_rolling_history() -> None:
         date_range=resolve_date_range(
             "timeline", period="14d", since=None, until=None, timezone=None, today=date(2026, 9, 12)
         ),
-        by="total",
+        by=None,
         top=None,
-        show_other=False,
-        split_cache=False,
+        other="hide",
+        cache="combined",
         agents=(),
         models=(),
         projects=(),
         watch=5,
         demo=None,
         ccusage_bin="ccusage",
-        timeout=30,
+        query_timeout=30,
         no_color=False,
         ascii=False,
     )
@@ -144,23 +144,23 @@ def test_runtime_period_cycles_only_for_rolling_history() -> None:
     assert adjust_option(rolling, "d") == rolling
 
 
-def test_runtime_aggregation_cycles_and_uses_natural_default_periods() -> None:
+def test_runtime_granularity_cycles_without_changing_period() -> None:
     options = CommandOptions(
         command="timeline",
         date_range=resolve_date_range(
             "timeline", period="14d", since=None, until=None, timezone=None, today=date(2026, 9, 12)
         ),
-        by="total",
+        by=None,
         top=None,
-        show_other=False,
-        split_cache=False,
+        other="hide",
+        cache="combined",
         agents=(),
         models=(),
         projects=(),
         watch=5,
         demo=None,
         ccusage_bin="ccusage",
-        timeout=30,
+        query_timeout=30,
         no_color=False,
         ascii=False,
     )
@@ -168,12 +168,12 @@ def test_runtime_aggregation_cycles_and_uses_natural_default_periods() -> None:
     observed = []
     for _ in range(4):
         options = adjust_option(options, "g")
-        observed.append((options.aggregation, options.date_range.period))
+        observed.append((options.granularity, options.date_range.period))
 
     assert observed == [
-        ("month", "13mo"),
-        ("quarter", "8q"),
-        ("year", "5y"),
+        ("month", "14d"),
+        ("quarter", "14d"),
+        ("year", "14d"),
         ("day", "14d"),
     ]
 
@@ -185,7 +185,6 @@ def test_explicit_twelve_month_period_remains_legal() -> None:
         since=None,
         until=None,
         timezone=None,
-        aggregation="month",
         today=date(2026, 9, 12),
     )
 
@@ -194,7 +193,7 @@ def test_explicit_twelve_month_period_remains_legal() -> None:
     assert result.until == date(2026, 9, 12)
 
 
-def test_fixed_range_aggregation_changes_without_rewriting_bounds() -> None:
+def test_fixed_range_granularity_changes_without_rewriting_bounds() -> None:
     fixed = CommandOptions(
         command="timeline",
         date_range=resolve_date_range(
@@ -205,23 +204,23 @@ def test_fixed_range_aggregation_changes_without_rewriting_bounds() -> None:
             timezone=None,
             today=date(2026, 9, 12),
         ),
-        by="total",
+        by=None,
         top=None,
-        show_other=False,
-        split_cache=False,
+        other="hide",
+        cache="combined",
         agents=(),
         models=(),
         projects=(),
         watch=5,
         demo=None,
         ccusage_bin="ccusage",
-        timeout=30,
+        query_timeout=30,
         no_color=False,
         ascii=False,
     )
 
     adjusted = adjust_option(fixed, "g")
-    assert adjusted.aggregation == "month"
+    assert adjusted.granularity == "month"
     assert adjusted.date_range == fixed.date_range
     assert adjusted.date_range.fixed_bounds
 
@@ -232,17 +231,17 @@ def test_timeline_style_cycles_through_uniform_point_variants() -> None:
         date_range=resolve_date_range(
             "timeline", period="14d", since=None, until=None, timezone=None
         ),
-        by="total",
+        by=None,
         top=None,
-        show_other=False,
-        split_cache=False,
+        other="hide",
+        cache="combined",
         agents=(),
         models=(),
         projects=(),
         watch=5,
         demo=None,
         ccusage_bin="ccusage",
-        timeout=30,
+        query_timeout=30,
         no_color=False,
         ascii=False,
     )
@@ -264,15 +263,15 @@ def test_runtime_top_increases_without_wrapping_and_stops_at_one() -> None:
         ),
         by="model",
         top=10,
-        show_other=False,
-        split_cache=False,
+        other="hide",
+        cache="combined",
         agents=(),
         models=(),
         projects=(),
         watch=5,
         demo=None,
         ccusage_bin="ccusage",
-        timeout=30,
+        query_timeout=30,
         no_color=False,
         ascii=False,
     )
@@ -289,25 +288,24 @@ def test_runtime_weekday_cycles_with_the_displayed_key_only() -> None:
         date_range=resolve_date_range(
             "timeline", period="14d", since=None, until=None, timezone=None
         ),
-        by="total",
+        by=None,
         top=None,
-        show_other=False,
-        split_cache=False,
+        other="hide",
+        cache="combined",
         agents=(),
         models=(),
         projects=(),
         watch=5,
         demo=None,
         ccusage_bin="ccusage",
-        timeout=30,
+        query_timeout=30,
         no_color=False,
         ascii=False,
     )
 
-    shown = adjust_option(timeline, "k")
-    hidden = adjust_option(shown, "k")
-    assert (shown.weekday_mode, hidden.weekday_mode) == ("show", "hidden")
-    assert adjust_option(hidden, "k").weekday_mode == "auto"
+    hidden = adjust_option(timeline, "k")
+    shown = adjust_option(hidden, "k")
+    assert (hidden.weekdays, shown.weekdays) == ("hide", "show")
     assert adjust_option(timeline, "w") == timeline
 
 
@@ -317,15 +315,15 @@ def test_monitor_copy_keeps_startup_agent_and_model_selection() -> None:
         date_range=DateRange(date(2026, 9, 1), date(2026, 9, 1), None),
         by="model",
         top=None,
-        show_other=False,
-        split_cache=False,
+        other="hide",
+        cache="combined",
         agents=("claude",),
         models=("sonnet",),
         projects=(),
         watch=None,
         demo=None,
         ccusage_bin="ccusage",
-        timeout=30,
+        query_timeout=30,
         no_color=False,
         ascii=False,
         window_seconds=3600,
@@ -345,36 +343,35 @@ def test_copied_command_is_safe_and_reproducible() -> None:
         date_range=DateRange(date(2026, 9, 1), date(2026, 9, 14), "UTC"),
         by="model",
         top=3,
-        show_other=True,
-        split_cache=False,
+        other="show",
+        cache="combined",
         agents=("claude",),
         models=("public model",),
         projects=("/private/project", "demo-project"),
         watch=5,
         demo=None,
         ccusage_bin="/private/bin/ccusage",
-        timeout=30,
+        query_timeout=30,
         no_color=False,
         ascii=True,
         color_scheme="nord",
         style="stem",
-        no_summary=True,
     )
 
     command = format_command(options)
     assert command == (
         "ccuv timeline --since 2026-09-01 --until 2026-09-14 --timezone UTC "
-        "--by model --top 3 --show-other --no-summary --agent claude --model 'public model' "
+        "--by model --top 3 --agent claude --model 'public model' "
         "--project demo-project --watch 5 --theme nord --style stem --ascii"
     )
     assert "/private" not in command
     assert "--ccusage-bin" not in command
-    assert "--timeout" not in command
+    assert "--query-timeout" not in command
 
     full_command = format_full_command(options)
     assert "--project /private/project" in full_command
     assert "--ccusage-bin /private/bin/ccusage" in full_command
-    assert "--timeout 30" in full_command
-    assert "--aggregate day" in full_command
-    assert "--weekdays auto" in full_command
-    assert "--legend-position below-title" in full_command
+    assert "--query-timeout 30" in full_command
+    assert "--granularity day" in full_command
+    assert "--weekdays show" in full_command
+    assert "--legend below-title" in full_command

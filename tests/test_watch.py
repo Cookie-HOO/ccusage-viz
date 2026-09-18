@@ -41,15 +41,15 @@ def options(*, command: str = "ranking", demo: str | None = "small") -> CommandO
         date_range=DateRange(date(2026, 1, 1), date(2026, 1, 14), None),
         by="project" if command == "ranking" else "total",
         top=10 if command == "ranking" else 3,
-        show_other=False,
-        split_cache=False,
+        other="hide",
+        cache="combined",
         agents=(),
         models=(),
         projects=(),
         watch=None,
         demo=demo,
         ccusage_bin="/not/invoked",
-        timeout=2,
+        query_timeout=2,
         no_color=True,
         ascii=True,
     )
@@ -254,22 +254,22 @@ def test_one_shot_reserves_one_more_row_than_watch(monkeypatch: pytest.MonkeyPat
         (
             "timeline",
             "total",
-            ("b", "+", "a", "o", "u", "\n"),
-            {"by": "agent", "top": 4, "show_other": True, "no_summary": True},
+            ("b", "+", "a", "o", "\n"),
+            {"by": "agent", "top": 4, "other": "show"},
         ),
         (
             "ranking",
             "project",
-            ("b", "+", "a", "o", "u", "\n"),
-            {"by": "agent", "top": 11, "show_other": True, "no_summary": True},
+            ("b", "+", "a", "o", "\n"),
+            {"by": "agent", "top": 11, "other": "show"},
         ),
         (
             "stack",
             "total",
-            ("a", "c", "u", "\n"),
-            {"split_cache": True, "no_summary": True},
+            ("a", "c", "\n"),
+            {"cache": "split"},
         ),
-        ("calendar", "total", ("a", "u", "\n"), {"no_summary": True}),
+        ("calendar", "total", ("a", "\n"), {}),
     ],
 )
 def test_runtime_adjustment_updates_display_options_from_retained_snapshot(
@@ -384,12 +384,12 @@ def test_runtime_adjustment_pages_match_dashboard_and_weekdays_work(
     )
 
     assert isinstance(result, RuntimeAdjustmentResult)
-    assert result.options.weekday_mode == "show"
+    assert result.options.weekdays == "hide"
     assert result.options.by == "agent"
     assert "Quick settings" in str(controls[0])
     assert "Advanced settings" in str(controls[1])
     assert "k weekdays" in str(controls[1])
-    assert "WEEKDAYS show" in str(controls[2])
+    assert "WEEKDAYS hide" in str(controls[2])
 
 
 def test_project_adjustment_explains_missing_retained_attribution(
@@ -454,7 +454,7 @@ def test_runtime_adjustment_copy_uses_adjusted_display_options(
     assert result is None
     assert copied == [
         "ccuv timeline --since 2026-01-01 --until 2026-01-14 --by agent --top 4 "
-        "--show-other --demo small --theme no-color --ascii"
+        "--demo small --theme no-color --ascii"
     ]
 
 

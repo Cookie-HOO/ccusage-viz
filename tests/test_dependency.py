@@ -19,15 +19,15 @@ def options(**changes: object) -> CommandOptions:
         date_range=DateRange(date(2026, 1, 1), date(2026, 1, 2), None),
         by="total",
         top=None,
-        show_other=False,
-        split_cache=False,
+        other="hide",
+        cache="combined",
         agents=(),
         models=(),
         projects=(),
         watch=None,
         demo=None,
         ccusage_bin="ccusage",
-        timeout=2,
+        query_timeout=2,
         no_color=True,
         ascii=True,
     )
@@ -48,10 +48,13 @@ def test_dependency_preflight_skips_existing_ccusage(monkeypatch: pytest.MonkeyP
     ensure_ccusage(options(), load_translator("en"))
 
 
-def test_dependency_preflight_noninteractive_never_installs(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_dependency_preflight_noninteractive_never_installs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr("ccusage_viz.dependency.shutil.which", lambda name: None)
     monkeypatch.setattr("ccusage_viz.dependency.sys.stdin.isatty", lambda: False)
     monkeypatch.setattr("ccusage_viz.dependency.sys.stdout.isatty", lambda: True)
+
     def unexpected_install(*args: object, **kwargs: object) -> None:
         raise AssertionError("must not install")
 

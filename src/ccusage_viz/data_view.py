@@ -78,7 +78,7 @@ def _historical_model(options: CommandOptions, snapshot: UsageSnapshot):
     )
     notices = (*snapshot.notices, *filter_notices)
     common = {
-        "include_summary": not options.no_summary,
+        "include_summary": True,
         "notices": notices,
         "coverage": snapshot.coverage,
     }
@@ -88,8 +88,8 @@ def _historical_model(options: CommandOptions, snapshot: UsageSnapshot):
             options.date_range,
             by=None if options.by == "total" else options.by,
             top=options.top,
-            show_other=options.show_other,
-            aggregation=options.aggregation,
+            show_other=options.other == "show",
+            aggregation=options.granularity,
             **common,
         )
     if options.command == "calendar":
@@ -98,8 +98,8 @@ def _historical_model(options: CommandOptions, snapshot: UsageSnapshot):
         return build_stack(
             filtered,
             options.date_range,
-            split_cache=options.split_cache,
-            aggregation=options.aggregation,
+            split_cache=options.cache == "split",
+            aggregation=options.granularity,
             **common,
         )
     return build_ranking(
@@ -107,7 +107,7 @@ def _historical_model(options: CommandOptions, snapshot: UsageSnapshot):
         options.date_range,
         by=options.by or "project",
         top=options.top,
-        show_other=options.show_other,
+        show_other=options.other == "show",
         summary_notices=snapshot.summary_notices,
         **common,
     )

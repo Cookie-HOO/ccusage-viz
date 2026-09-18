@@ -93,16 +93,21 @@ _ADJUSTMENT_QUICK_KEYS = {
     "ranking": frozenset("pPbB+-=tTsS"),
 }
 _ADJUSTMENT_ADVANCED_KEYS = {
-    "timeline": frozenset("olkuOLKU"),
-    "calendar": frozenset("uU"),
-    "stack": frozenset("clkuCLKU"),
-    "ranking": frozenset("ouOU"),
+    "timeline": frozenset("olkOLK"),
+    "calendar": frozenset(),
+    "stack": frozenset("clkCLK"),
+    "ranking": frozenset("oO"),
 }
 
 
 def _adjustment_key_supported(command: str, page: str, key: str) -> bool:
     keys = _ADJUSTMENT_QUICK_KEYS if page == "quick" else _ADJUSTMENT_ADVANCED_KEYS
     return key in keys[command]
+
+
+def _without_summary_control(text: str) -> str:
+    """Drop the retired summary runtime control from localized adjustment text."""
+    return " · ".join(part for part in text.split(" · ") if "{summary}" not in part and not part.startswith("u "))
 
 
 def _render(
@@ -149,11 +154,11 @@ def _render(
             ascii=terminal.ascii,
             color_scheme=options.color_scheme,
             style=options.style,
-            legend_position=options.legend_position,
+            legend_position=options.legend,
             hide_upper_right_axes=hide_upper_right_axes,
             deltas=ranking_deltas,
             rank_deltas=ranking_rank_deltas,
-            weekday_mode=options.weekday_mode,
+            weekday_mode=options.weekdays,
             period=options.date_range.period if options.date_range.relative_until else None,
             title_content=title_content,
         )
@@ -164,10 +169,10 @@ def _render(
             options.date_range,
             by=None if options.by == "total" else options.by,
             top=options.top,
-            show_other=options.show_other,
-            include_summary=not options.no_summary,
+            show_other=options.other == "show",
+            include_summary=True,
             notices=all_notices,
-            aggregation=options.aggregation,
+            aggregation=options.granularity,
             coverage=coverage,
         )
         chart = render_timeline(model, context_for(len(model.notices)))
@@ -175,7 +180,7 @@ def _render(
         model = build_calendar(
             filtered,
             options.date_range,
-            include_summary=not options.no_summary,
+            include_summary=True,
             notices=all_notices,
             coverage=coverage,
         )
@@ -184,10 +189,10 @@ def _render(
         model = build_stack(
             filtered,
             options.date_range,
-            split_cache=options.split_cache,
-            include_summary=not options.no_summary,
+            split_cache=options.cache == "split",
+            include_summary=True,
             notices=all_notices,
-            aggregation=options.aggregation,
+            aggregation=options.granularity,
             coverage=coverage,
         )
         chart = render_stack(model, context_for(len(model.notices)))
@@ -197,8 +202,8 @@ def _render(
             options.date_range,
             by=options.by or "project",
             top=options.top,
-            show_other=options.show_other,
-            include_summary=not options.no_summary,
+            show_other=options.other == "show",
+            include_summary=True,
             notices=all_notices,
             summary_notices=summary_notices,
             coverage=coverage,
@@ -223,7 +228,7 @@ def ranking_entries(
         options.date_range,
         by=options.by or "project",
         top=options.top,
-        show_other=options.show_other,
+        show_other=options.other == "show",
         include_summary=False,
         notices=snapshot.notices,
     )
@@ -329,7 +334,7 @@ def run_once(options: CommandOptions, translator: Translator) -> str:
         no_color=current.no_color,
         ascii=current.ascii,
     )
-    runner = QueryRunner(current.ccusage_bin, timeout=current.timeout)
+    runner = QueryRunner(current.ccusage_bin, timeout=current.query_timeout)
     result = _refresh(
         current, translator, terminal, runner, reserve_prompt=True, normalize_titles=True
     )
@@ -519,7 +524,6 @@ def run_runtime_adjustment(
             "style_index": styles.index(style) + 1,
             "style_count": len(styles),
             "style": style,
-            "summary": translator.text("label.off" if current.no_summary else "label.on"),
         }
         status_key = f"status.runtime_adjustment_{current.command}_{adjustment_page}"
         key_key = f"status.tui_adjust_{current.command}_{adjustment_page}_controls"
@@ -528,18 +532,18 @@ def run_runtime_adjustment(
             state_values.update(
                 grouping=current.by or translator.text("label.all"),
                 top=current.top if current.top is not None else translator.text("label.all"),
-                other=translator.text("label.on" if current.show_other else "label.off"),
+                other=translator.text("label.on" if current.other == "show" else "label.off"),
             )
         if current.command in {"timeline", "stack"}:
-            state_values["weekday"] = translator.text(f"label.weekday_{current.weekday_mode}")
+            state_values["weekday"] = translator.text(f"label.weekday_{current.weekdays}")
             state_values["legend_position"] = translator.text(
-                f"label.legend_{current.legend_position.replace('-', '_')}"
+                f"label.legend_{current.legend.replace('-', '_')}"
             )
         if current.command == "stack":
             state_values["cache"] = translator.text(
-                "label.on" if current.split_cache else "label.off"
+                "label.on" if current.cache == "split" else "label.off"
             )
-        state = translator.text(status_key, **state_values)
+        state = _without_summary_control(translator.messages[status_key]).format(**state_values)
         project_preview_missing = (
             current.command in {"timeline", "ranking"}
             and current.by == "project"
@@ -556,7 +560,7 @@ def run_runtime_adjustment(
             ),
             _controls_line(
                 f"{translator.text(f'status.tui_adjust_{adjustment_page}')} · "
-                f"{translator.text(key_key)}",
+                f"{_without_summary_control(translator.messages[key_key])}",
                 width=terminal.width,
                 color=terminal.color,
             ),
@@ -623,7 +627,7 @@ def run_watch(
 ) -> int:
     active_screen = screen or InteractiveScreen(sys.stdout)
     interval = options.watch or 5.0
-    runner = QueryRunner(options.ccusage_bin, timeout=options.timeout)
+    runner = QueryRunner(options.ccusage_bin, timeout=options.query_timeout)
     results: queue.Queue[tuple[int, RefreshResult | BaseException]] = queue.Queue()
     running = False
     queued = False
@@ -849,7 +853,7 @@ def run_watch(
                             if (
                                 previous_options.by,
                                 previous_options.top,
-                                previous_options.show_other,
+                                previous_options.other,
                                 previous_options.agents,
                                 previous_options.models,
                                 previous_options.projects,
@@ -857,7 +861,7 @@ def run_watch(
                             ) != (
                                 current.by,
                                 current.top,
-                                current.show_other,
+                                current.other,
                                 current.agents,
                                 current.models,
                                 current.projects,

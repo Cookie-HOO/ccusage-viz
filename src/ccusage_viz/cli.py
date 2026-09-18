@@ -91,7 +91,7 @@ def _add_presentation(parser: argparse.ArgumentParser, tr: Translator, command: 
     )
     parser.add_argument("--lang", choices=("en", "zh"), help=tr.text("help.lang"))
     parser.add_argument("--ccusage-bin", default="ccusage", help=tr.text("help.ccusage_bin"))
-    parser.add_argument("--timeout", type=float, default=30.0, help=argparse.SUPPRESS)
+    parser.add_argument("--query-timeout", type=float, default=30.0, help=argparse.SUPPRESS)
     parser.add_argument("--ascii", action="store_true", help=tr.text("help.ascii"))
     parser.add_argument(
         "--theme",
@@ -108,14 +108,14 @@ def _add_presentation(parser: argparse.ArgumentParser, tr: Translator, command: 
     )
     if command in {"timeline", "monitor", "stack"}:
         parser.add_argument(
-            "--legend-position",
+            "--legend",
             choices=("below-title", "hidden")
             if command == "stack"
             else ("below-title", "inside", "hidden", "values")
             if command == "monitor"
             else ("below-title", "inside", "hidden"),
             default="below-title",
-            help=tr.text("help.legend_position"),
+            help=tr.text("help.legend"),
         )
 
 
@@ -123,8 +123,6 @@ def _add_history_shared(
     parser: argparse.ArgumentParser,
     tr: Translator,
     command: str,
-    *,
-    include_summary: bool = False,
 ) -> None:
     parser.add_argument("--period", help=tr.text("help.period"))
     parser.add_argument("--since", help=tr.text("help.since"))
@@ -132,22 +130,20 @@ def _add_history_shared(
     parser.add_argument("--timezone", help=tr.text("help.timezone"))
     if command in {"timeline", "stack"}:
         parser.add_argument(
-            "--aggregate",
+            "--granularity",
             choices=("day", "month", "quarter", "year"),
             default="day",
-            help=tr.text("help.aggregate"),
+            help=tr.text("help.granularity"),
         )
         parser.add_argument(
             "--weekdays",
-            choices=("auto", "show", "hidden"),
-            default="auto",
+            choices=("show", "hide"),
+            default="show",
             help=tr.text("help.weekdays"),
         )
     parser.add_argument("--agent", action="append", default=[], help=tr.text("help.agent"))
     parser.add_argument("--model", action="append", default=[], help=tr.text("help.model"))
     parser.add_argument("--project", action="append", default=[], help=tr.text("help.project"))
-    if include_summary:
-        parser.add_argument("--no-summary", action="store_true", help=tr.text("help.no_summary"))
     parser.add_argument(
         "--watch",
         nargs="?",
@@ -196,7 +192,7 @@ def _add_tui(parser: argparse.ArgumentParser, tr: Translator) -> None:
     )
     parser.add_argument("--lang", choices=("en", "zh"), help=tr.text("help.lang"))
     parser.add_argument("--ccusage-bin", default="ccusage", help=tr.text("help.ccusage_bin"))
-    parser.add_argument("--timeout", type=float, default=30.0, help=argparse.SUPPRESS)
+    parser.add_argument("--query-timeout", type=float, default=30.0, help=argparse.SUPPRESS)
     parser.add_argument("--ascii", action="store_true", help=tr.text("help.ascii"))
     parser.add_argument(
         "--theme",
@@ -235,36 +231,42 @@ def build_parser(tr: Translator) -> argparse.ArgumentParser:
     timeline = subparsers.add_parser(
         "timeline", help=tr.text("help.timeline"), description=tr.text("help.timeline")
     )
-    _add_history_shared(timeline, tr, "timeline", include_summary=True)
+    _add_history_shared(timeline, tr, "timeline")
     timeline.add_argument(
         "--by",
-        choices=("total", "agent", "model", "project"),
-        default="total",
+        choices=("agent", "model", "project"),
+        default=None,
         help=tr.text("help.by"),
     )
     timeline.add_argument("--top", type=int, default=None, help=tr.text("help.top"))
-    timeline.add_argument("--show-other", action="store_true", help=tr.text("help.show_other"))
+    timeline.add_argument(
+        "--other", choices=("show", "hide"), default="show", help=tr.text("help.other")
+    )
 
     calendar = subparsers.add_parser(
         "calendar", help=tr.text("help.calendar"), description=tr.text("help.calendar")
     )
-    _add_history_shared(calendar, tr, "calendar", include_summary=True)
+    _add_history_shared(calendar, tr, "calendar")
 
     stack = subparsers.add_parser(
         "stack", help=tr.text("help.stack"), description=tr.text("help.stack")
     )
-    _add_history_shared(stack, tr, "stack", include_summary=True)
-    stack.add_argument("--split-cache", action="store_true", help=tr.text("help.split_cache"))
+    _add_history_shared(stack, tr, "stack")
+    stack.add_argument(
+        "--cache", choices=("combined", "split"), default="combined", help=tr.text("help.cache")
+    )
 
     ranking = subparsers.add_parser(
         "ranking", help=tr.text("help.ranking"), description=tr.text("help.ranking")
     )
-    _add_history_shared(ranking, tr, "ranking", include_summary=True)
+    _add_history_shared(ranking, tr, "ranking")
     ranking.add_argument(
         "--by", choices=("agent", "model", "project"), default="project", help=tr.text("help.by")
     )
     ranking.add_argument("--top", type=int, default=10, help=tr.text("help.top"))
-    ranking.add_argument("--show-other", action="store_true", help=tr.text("help.show_other"))
+    ranking.add_argument(
+        "--other", choices=("show", "hide"), default="show", help=tr.text("help.other")
+    )
 
     monitor = subparsers.add_parser(
         "monitor", help=tr.text("help.monitor"), description=tr.text("help.monitor")
@@ -332,8 +334,10 @@ def _to_options(namespace: argparse.Namespace) -> CommandOptions:
             raise UsageError("error.interval_min", minimum=1)
         if not math.isfinite(namespace.header_interval) or namespace.header_interval < 1:
             raise UsageError("error.interval_min", minimum=1)
-        if not math.isfinite(namespace.timeout) or namespace.timeout <= 0:
-            raise UsageError("error.arguments", detail="--timeout must be positive and finite")
+        if not math.isfinite(namespace.query_timeout) or namespace.query_timeout <= 0:
+            raise UsageError(
+                "error.arguments", detail="--query-timeout must be positive and finite"
+            )
         return CommandOptions(
             command="dashboard",
             date_range=resolve_date_range(
@@ -341,19 +345,19 @@ def _to_options(namespace: argparse.Namespace) -> CommandOptions:
             ),
             by=None,
             top=None,
-            show_other=False,
-            split_cache=False,
+            other="show",
+            cache="combined",
             agents=(),
             models=(),
             projects=(),
             watch=None,
             demo=namespace.demo,
             ccusage_bin=namespace.ccusage_bin,
-            timeout=namespace.timeout,
+            query_timeout=namespace.query_timeout,
             no_color=namespace.color_scheme == "no-color",
             ascii=namespace.ascii,
             color_scheme=namespace.color_scheme,
-            panels=tuple(namespace.panels),
+            panes=tuple(namespace.panels),
             grid=namespace.grid,
             interval=namespace.interval,
             header_style=namespace.header_style,
@@ -362,14 +366,13 @@ def _to_options(namespace: argparse.Namespace) -> CommandOptions:
             dashboard_style=namespace.dashboard_style,
         )
     top = getattr(namespace, "top", None)
-    if command == "timeline" and namespace.by != "total" and top is None:
+    if command == "timeline" and namespace.by is not None and top is None:
         top = 3
-        namespace.show_other = True
     if command == "monitor" and namespace.by in {"agent", "model", "project"} and top is None:
         top = 3
     if top is not None and top < 1:
         raise UsageError("error.top_positive")
-    if command == "timeline" and top is not None and namespace.by == "total":
+    if command == "timeline" and top is not None and namespace.by is None:
         raise UsageError("error.top_requires_by")
     if (
         command == "monitor"
@@ -377,10 +380,6 @@ def _to_options(namespace: argparse.Namespace) -> CommandOptions:
         and namespace.by not in {"agent", "model", "project"}
     ):
         raise UsageError("error.top_requires_by")
-    if getattr(namespace, "show_other", False) and (
-        top is None or (command == "timeline" and namespace.by == "total")
-    ):
-        raise UsageError("error.show_other_requires_top")
     requested_style = getattr(namespace, "style", None)
     style = requested_style or compatible_styles(command, getattr(namespace, "by", None))[0]
     if style not in compatible_styles(command, getattr(namespace, "by", None)):
@@ -395,8 +394,8 @@ def _to_options(namespace: argparse.Namespace) -> CommandOptions:
     interval_minimum = 1 if command == "monitor" and namespace.demo is not None else 5
     if interval is not None and (not math.isfinite(interval) or interval < interval_minimum):
         raise UsageError("error.interval_min", minimum=interval_minimum)
-    if not math.isfinite(namespace.timeout) or namespace.timeout <= 0:
-        raise UsageError("error.arguments", detail="--timeout must be positive and finite")
+    if not math.isfinite(namespace.query_timeout) or namespace.query_timeout <= 0:
+        raise UsageError("error.arguments", detail="--query-timeout must be positive and finite")
     if command == "monitor":
         window_seconds = _parse_window(namespace.window)
         date_range = resolve_date_range(
@@ -404,39 +403,36 @@ def _to_options(namespace: argparse.Namespace) -> CommandOptions:
         )
     else:
         window_seconds = None
-        aggregation = getattr(namespace, "aggregate", "day")
         date_range = resolve_date_range(
             command,
             period=namespace.period,
             since=namespace.since,
             until=namespace.until,
             timezone=namespace.timezone,
-            aggregation=aggregation,
         )
     return CommandOptions(
         command=command,
         date_range=date_range,
         by=getattr(namespace, "by", None),
         top=top,
-        show_other=getattr(namespace, "show_other", False),
-        split_cache=getattr(namespace, "split_cache", False),
+        other=getattr(namespace, "other", "show"),
+        cache=getattr(namespace, "cache", "combined"),
         agents=tuple(namespace.agent),
         models=tuple(namespace.model),
         projects=tuple(getattr(namespace, "project", ())),
         watch=watch,
         demo=namespace.demo,
         ccusage_bin=namespace.ccusage_bin,
-        timeout=namespace.timeout,
+        query_timeout=namespace.query_timeout,
         no_color=namespace.color_scheme == "no-color",
         ascii=namespace.ascii,
         color_scheme=namespace.color_scheme,
         style=style,
         window_seconds=window_seconds,
         interval=interval,
-        no_summary=getattr(namespace, "no_summary", False),
-        legend_position=getattr(namespace, "legend_position", "below-title"),
-        aggregation=getattr(namespace, "aggregate", "day"),
-        weekday_mode=getattr(namespace, "weekdays", "auto"),
+        legend=getattr(namespace, "legend", "below-title"),
+        granularity=getattr(namespace, "granularity", "day"),
+        weekdays=getattr(namespace, "weekdays", "show"),
     )
 
 

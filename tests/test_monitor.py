@@ -243,7 +243,7 @@ def test_monitor_values_display_lists_each_visible_model_observation() -> None:
     observer = ObservedTPM(window_seconds=3600, by="model", top=None)
     observer.add(snapshot(0, sonnet=0, opus=0, haiku=0), 0.0)
     observer.add(snapshot(600, sonnet=300, opus=200, haiku=100), 60.0)
-    options = replace(monitor_options(by="model"), legend_position="values")
+    options = replace(monitor_options(by="model"), legend="values")
 
     output = _render(
         observer,
@@ -263,7 +263,7 @@ def test_monitor_values_display_uses_tokens_for_agent_and_project_growth() -> No
     observer = ObservedTPM(window_seconds=3600, by="agent", top=None)
     observer.add(CounterSnapshot(usage(0), agents={"Claude": usage(0)}), 0.0)
     observer.add(CounterSnapshot(usage(60), agents={"Claude": usage(60)}), 60.0)
-    options = replace(monitor_options(by="agent"), legend_position="values")
+    options = replace(monitor_options(by="agent"), legend="values")
 
     output = _render(
         observer,
@@ -311,7 +311,7 @@ def test_monitor_ranking_style_ignores_legend_positions() -> None:
         options = replace(
             monitor_options(by="model"),
             style="ranking",
-            legend_position=legend_position,
+            legend=legend_position,
         )
         outputs.append(
             _render(

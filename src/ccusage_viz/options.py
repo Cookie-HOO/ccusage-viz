@@ -14,19 +14,20 @@ from ccusage_viz.core.time import (
 )
 from ccusage_viz.errors import UsageError
 
-AGGREGATIONS = ("day", "month", "quarter", "year")
-HEADER_SUMMARIES = (*AGGREGATIONS, "none")
+GRANULARITIES = ("day", "month", "quarter", "year")
+HEADER_SUMMARIES = (*GRANULARITIES, "none")
 PERIOD_UNITS = {"day": "d", "month": "mo", "quarter": "q", "year": "y"}
-UNIT_AGGREGATIONS = {unit: aggregation for aggregation, unit in PERIOD_UNITS.items()}
+UNIT_GRANULARITIES = {unit: granularity for granularity, unit in PERIOD_UNITS.items()}
 PERIOD_PRESETS = {
     "d": (7, 14, 30, 365),
     "mo": (3, 6, 13, 24),
     "q": (4, 8, 12),
     "y": (3, 5, 10),
 }
-DEFAULT_PERIODS = {"d": 14, "mo": 13, "q": 8, "y": 5}
 COMMAND_DEFAULT_PERIODS = {"timeline": "14d", "calendar": "365d", "stack": "14d", "ranking": "14d"}
-WEEKDAY_MODES = ("auto", "show", "hidden")
+WEEKDAY_MODES = ("show", "hide")
+OTHER_MODES = ("show", "hide")
+CACHE_MODES = ("combined", "split")
 COMMAND_STYLES = {
     "timeline": ("linear", "step", "no-line", "points", "line-points", "stem", "area"),
     "calendar": ("relative", "absolute"),
@@ -62,31 +63,30 @@ class CommandOptions:
     date_range: DateRange
     by: str | None
     top: int | None
-    show_other: bool
-    split_cache: bool
+    other: str
+    cache: str
     agents: tuple[str, ...]
     models: tuple[str, ...]
     projects: tuple[str, ...]
     watch: float | None
     demo: str | None
     ccusage_bin: str
-    timeout: float
+    query_timeout: float
     no_color: bool
     ascii: bool
     color_scheme: str = "classic"
     style: str = "linear"
     window_seconds: int | None = None
     interval: float | None = None
-    no_summary: bool = False
-    legend_position: str = "below-title"
-    panels: tuple[str, ...] = ()
+    legend: str = "below-title"
+    panes: tuple[str, ...] = ()
     grid: str = "2x2"
     header_style: str = "panel"
     header_summary: str = "day"
     header_interval: float = 60.0
     dashboard_style: str = DEFAULT_DASHBOARD_STYLE
-    aggregation: str = "day"
-    weekday_mode: str = "auto"
+    granularity: str = "day"
+    weekdays: str = "show"
     ccusage_bin_explicit: bool = False
 
 
@@ -100,7 +100,7 @@ class TuiPanel:
 def compatible_styles(command: str, by: str | None) -> tuple[str, ...]:
     """Return styles that can represent the selected series shape."""
     styles = COMMAND_STYLES[command]
-    if command == "timeline" and by != "total":
+    if command == "timeline" and by is not None:
         return tuple(style for style in styles if style != "area")
     if command == "monitor" and by is not None:
         return tuple(style for style in styles if style != "bars")
@@ -132,8 +132,8 @@ def adjust_option(options: CommandOptions, key: str) -> CommandOptions:
     if key in {"p", "P"} and options.command != "monitor":
         if not options.date_range.relative_until or options.date_range.period is None:
             return options
-        aggregation = options.aggregation
-        unit = PERIOD_UNITS[aggregation]
+        granularity = options.granularity
+        unit = PERIOD_UNITS[granularity]
         value, period_unit = parse_period(options.date_range.period)
         presets = PERIOD_PRESETS[period_unit]
         nearest = min(presets, key=lambda preset: abs(preset - value))
@@ -152,25 +152,9 @@ def adjust_option(options: CommandOptions, key: str) -> CommandOptions:
             ),
         )
     if key in {"g", "G"} and options.command in {"timeline", "stack"}:
-        aggregation = _cycle(AGGREGATIONS, options.aggregation, 1)
-        if not options.date_range.relative_until or options.date_range.period is None:
-            return replace(options, aggregation=aggregation)
-        unit = PERIOD_UNITS[aggregation]
-        value = DEFAULT_PERIODS[unit]
-        end = options.date_range.until
-        return replace(
-            options,
-            aggregation=aggregation,
-            date_range=replace(
-                options.date_range,
-                since=natural_period_start(end, value, unit),
-                period=f"{value}{unit}",
-            ),
-        )
+        return replace(options, granularity=_cycle(GRANULARITIES, options.granularity, 1))
     if key in {"k", "K"} and options.command in {"timeline", "stack"}:
-        return replace(options, weekday_mode=_cycle(WEEKDAY_MODES, options.weekday_mode, 1))
-    if key in {"u", "U"} and options.command != "monitor":
-        return replace(options, no_summary=not options.no_summary)
+        return replace(options, weekdays=_cycle(WEEKDAY_MODES, options.weekdays, 1))
     if key in {"l", "L"} and options.command in {"timeline", "stack", "monitor"}:
         positions = (
             ("below-title", "hidden")
@@ -179,12 +163,12 @@ def adjust_option(options: CommandOptions, key: str) -> CommandOptions:
             if options.command == "monitor"
             else ("below-title", "inside", "hidden")
         )
-        return replace(options, legend_position=_cycle(positions, options.legend_position, 1))
+        return replace(options, legend=_cycle(positions, options.legend, 1))
     if key in {"c", "C"} and options.command == "stack":
-        return replace(options, split_cache=not options.split_cache)
+        return replace(options, cache=_cycle(CACHE_MODES, options.cache, 1))
     if key in {"b", "B"} and options.command in {"timeline", "ranking", "monitor"}:
         values: tuple[str | None, ...] = (
-            ("total", "agent", "model", "project")
+            (None, "agent", "model", "project")
             if options.command == "timeline"
             else ("agent", "model", "project")
             if options.command == "ranking"
@@ -214,7 +198,7 @@ def adjust_option(options: CommandOptions, key: str) -> CommandOptions:
     ):
         return replace(options, top=max(1, (options.top or 1) - 1))
     if key in {"o", "O"} and options.command in {"timeline", "ranking"}:
-        return replace(options, show_other=not options.show_other)
+        return replace(options, other=_cycle(OTHER_MODES, options.other, 1))
     if key in {"w", "W"} and options.command == "monitor":
         values = (300, 900, 1800, 3600, 21600, 43200, 86400)
         current = options.window_seconds or 3600
@@ -237,7 +221,6 @@ def resolve_date_range(
     since: str | None,
     until: str | None,
     timezone: str | None,
-    aggregation: str = "day",
     today: date | None = None,
 ) -> DateRange:
     if timezone:
@@ -270,9 +253,6 @@ def resolve_date_range(
 
     canonical_period = period or COMMAND_DEFAULT_PERIODS[command]
     value, unit = parse_period(canonical_period)
-    allowed_unit = PERIOD_UNITS[aggregation] if command in {"timeline", "stack"} else "d"
-    if unit != allowed_unit:
-        raise UsageError("error.arguments", detail=f"--period unit must be {allowed_unit}")
     try:
         start = natural_period_start(end, value, unit)
     except (OverflowError, ValueError) as exc:

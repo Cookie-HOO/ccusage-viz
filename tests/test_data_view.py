@@ -23,18 +23,18 @@ def _options() -> CommandOptions:
         date_range=DateRange(date(2026, 1, 1), date(2026, 1, 31), None),
         by="agent",
         top=1,
-        show_other=True,
-        split_cache=False,
+        other="show",
+        cache="combined",
         agents=(),
         models=(),
         projects=(),
         watch=5,
         demo=None,
         ccusage_bin="ccusage",
-        timeout=30,
+        query_timeout=30,
         no_color=True,
         ascii=False,
-        aggregation="month",
+        granularity="month",
     )
 
 

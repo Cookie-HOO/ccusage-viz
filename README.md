@@ -24,7 +24,7 @@ Try the renderer safely with deterministic synthetic data. Demo mode does not in
 ```bash
 uv run ccuv timeline --demo
 uv run ccuv calendar --demo small
-uv run ccuv stack --demo large --split-cache
+uv run ccuv stack --demo large --cache split
 uv run ccuv ranking --demo --by project
 ```
 
@@ -91,20 +91,20 @@ ccuv timeline
 ccuv timeline --by model
 
 # Top five Agents, with all remaining positive groups combined last
-ccuv timeline --by agent --top 5 --show-other
+ccuv timeline --by agent --top 5 --other show
 
 # A bounded range in a chosen natural-day timezone
 ccuv calendar --since 2026-01-01 --until 2026-03-31 \
   --timezone America/Los_Angeles
 
 # Split cache read and cache creation instead of combining them
-ccuv stack --period 30d --split-cache
+ccuv stack --period 30d --cache split
 
 # Agent-scoped project ranking
 ccuv ranking --by project --top 20
 ```
 
-`--top` must be positive. For Monitor, `--top` requires `--by agent`, `--by model`, or `--by project`. Filters run before grouping and Top N. Groups beyond the post-filter Top N are hidden unless `--show-other` is set; only those excluded groups are combined as `Other`, which does not consume a Top slot and is always last. If no post-filter group falls beyond Top N, no empty `Other` is drawn and a notice explains why. Use a large value such as `--top 999` when you want an effectively unlimited view. During Watch or Dashboard refreshes, Ranking separates three signals: an arrow beside the rank appears only when a stable item moves up or down; a highlighted `●` (`*` with `--ascii`) before the item marks changed activity; and `↑`, `↓`, or `—` beside the numeric value marks increase, decrease, or equality (`^`, `v`, or `=` with `--ascii`). The initial baseline is marker-free. An entry first seen after that baseline gets activity and value-up markers but no fabricated rank arrow; `Other` never claims rank movement.
+`--top` must be positive. For Monitor, `--top` requires `--by agent`, `--by model`, or `--by project`. Filters run before grouping and Top N. Groups beyond the post-filter Top N are hidden unless `--other show` is set; only those excluded groups are combined as `Other`, which does not consume a Top slot and is always last. If no post-filter group falls beyond Top N, no empty `Other` is drawn and a notice explains why. Use a large value such as `--top 999` when you want an effectively unlimited view. During Watch or Dashboard refreshes, Ranking separates three signals: an arrow beside the rank appears only when a stable item moves up or down; a highlighted `●` (`*` with `--ascii`) before the item marks changed activity; and `↑`, `↓`, or `—` beside the numeric value marks increase, decrease, or equality (`^`, `v`, or `=` with `--ascii`). The initial baseline is marker-free. An entry first seen after that baseline gets activity and value-up markers but no fabricated rank arrow; `Other` never claims rank movement.
 
 ### Filters and grouping
 
@@ -145,7 +145,7 @@ The two-query ranking path is a fixed data-source plan, not a loop over dates, A
 
 ### Period comparison summaries
 
-`timeline` and `stack` follow their chart aggregation (`day`, `month`, `quarter`, or `year`); runtime `g` changes both together. `calendar` and `ranking` remain daily. Their automatic monthly window is `13mo`, while an explicit `--period 12mo` remains valid. `--no-summary` suppresses a chart summary. A range with both `--since` and `--until` is fixed and omits it. Summaries always aggregate the complete current filter scope, independent of Top N presentation clipping. When Top N hides groups and `Other` is off, the summary is qualified as the current-filter total and notes that the chart shows only Top N; complete charts omit that qualification.
+`timeline` and `stack` use `--granularity day|month|quarter|year`; runtime `g` changes Granularity without changing the selected Period or date range. `calendar` and `ranking` remain daily. Period accepts `d`, `mo`, `q`, and `y` independently, so an explicit `--period 12mo` remains valid at any Granularity. A range with both `--since` and `--until` is fixed. Summaries always aggregate the complete current filter scope, independent of Top N presentation clipping. When Top N hides groups and `Other` is off, the summary is qualified as the current-filter total and notes that the chart shows only Top N; complete charts omit that qualification.
 
 Day compares today with yesterday and the same weekday seven days earlier. Month and quarter compare period-to-date with the same elapsed-day count in the prior period and last year; year compares year-to-date with prior-year-to-date. Calendar boundaries are used rather than fixed 30/90/365-day subtraction, and shorter periods are clamped. A summary derives only from records already loaded for its chart—standalone commands and Dashboard panes never run summary-only queries.
 
@@ -163,9 +163,9 @@ ccuv monitor --interval 20 --window 2h
 ccuv monitor --demo small
 ```
 
-`monitor` is an always-running, process-local observation. The first successful cumulative `ccusage` snapshot establishes a baseline; later snapshots are differentiated using monotonic elapsed time. It therefore has no readings before startup and cannot reconstruct a past 24-hour chart. Native process-local history keeps minute rollups for up to 24 hours; the displayed window defaults to one hour and can be adjusted from 5 minutes to 24 hours. `--window` retains only this invocation's observed history (5m–24h, default `1h`); `--interval` is the target delay between sampling attempts (default 15 seconds for real monitoring). Demo Monitor defaults to a 1-second synthetic cadence unless `--interval` is explicitly supplied; hidden `--timeout` bounds one `ccusage` subprocess invocation.
+`monitor` is an always-running, process-local observation. The first successful cumulative `ccusage` snapshot establishes a baseline; later snapshots are differentiated using monotonic elapsed time. It therefore has no readings before startup and cannot reconstruct a past 24-hour chart. Native process-local history keeps minute rollups for up to 24 hours; the displayed window defaults to one hour and can be adjusted from 5 minutes to 24 hours. `--window` retains only this invocation's observed history (5m–24h, default `1h`); `--interval` is the target delay between sampling attempts (default 15 seconds for real monitoring). Demo Monitor defaults to a 1-second synthetic cadence unless `--interval` is explicitly supplied; hidden `--query-timeout` bounds one `ccusage` subprocess invocation.
 
-Omitting `--by` shows authoritative **Total TPM**. `--by model` shows per-model TPM; `--by agent` and `--by project` show cumulative Token growth from the visible window’s left edge. Grouped views can use `--legend-position values` for a minimal, marker-free list of each visible item and its latest displayed observation. Compact Monitor ranking uses an arrow beside the rank only for real rank movement and `↑`, `↓`, or `—` beside the value for increase, decrease, or equality (`^`, `v`, and `=` with `--ascii`); it intentionally has no activity point because every Monitor series is live. The initial baseline is marker-free, while a series first seen later gets value-up but no fabricated rank arrow. Grouped Monitor modes default to Top 3 and fold the remainder into `Other`. `--agent`, `--model`, and `--project` are startup-only source filters. Monitor exits with `Ctrl-C`; `r` samples now, Space pauses/resumes, and `v` cycles chart → compact command → full command → Markdown data table → JSON data → chart. The compact command omits defaults; full command makes every effective setting explicit. Chart view permits `m` adjustment and has no copy shortcut. Every other view permits `y` copy but not adjustment. The table and JSON serialize the exact displayed buckets, including grouping, Top N, and `Other`, never raw counters. `h` hides or restores the session-only control footer to reclaim chart rows, and `m` opens the two-row runtime adjustment panel only from chart view. Its Quick page adjusts window, interval, grouping, Top, theme, and style without querying again or losing retained history; `a` switches to Advanced, where legend placement lives, and `y` copies the candidate command. Startup `--model` filters are preserved and are not runtime controls. Adjustment guides always remain visible and closing the panel restores the prior footer preference. Monitor x-axis labels use `HH:MM`. Use `--theme` and `--style` to choose an initial appearance; use `monitor --demo` for immediate style exploration because real observed history does not exist at startup. Demo monitor data is deterministic, starts with a fluctuating in-memory history, stays in memory, and never invokes `ccusage`.
+Omitting `--by` shows authoritative **Total TPM**. `--by model` shows per-model TPM; `--by agent` and `--by project` show cumulative Token growth from the visible window’s left edge. Grouped views can use `--legend values` for a minimal, marker-free list of each visible item and its latest displayed observation. Compact Monitor ranking uses an arrow beside the rank only for real rank movement and `↑`, `↓`, or `—` beside the value for increase, decrease, or equality (`^`, `v`, and `=` with `--ascii`); it intentionally has no activity point because every Monitor series is live. The initial baseline is marker-free, while a series first seen later gets value-up but no fabricated rank arrow. Grouped Monitor modes default to Top 3 and fold the remainder into `Other`. `--agent`, `--model`, and `--project` are startup-only source filters. Monitor exits with `Ctrl-C`; `r` samples now, Space pauses/resumes, and `v` cycles chart → compact command → full command → Markdown data table → JSON data → chart. The compact command omits defaults; full command makes every effective setting explicit. Chart view permits `m` adjustment and has no copy shortcut. Every other view permits `y` copy but not adjustment. The table and JSON serialize the exact displayed buckets, including grouping, Top N, and `Other`, never raw counters. `h` hides or restores the session-only control footer to reclaim chart rows, and `m` opens the two-row runtime adjustment panel only from chart view. Its Quick page adjusts window, interval, grouping, Top, theme, and style without querying again or losing retained history; `a` switches to Advanced, where legend placement lives, and `y` copies the candidate command. Startup `--model` filters are preserved and are not runtime controls. Adjustment guides always remain visible and closing the panel restores the prior footer preference. Monitor x-axis labels use `HH:MM`. Use `--theme` and `--style` to choose an initial appearance; use `monitor --demo` for immediate style exploration because real observed history does not exist at startup. Demo monitor data is deterministic, starts with a fluctuating in-memory history, stays in memory, and never invokes `ccusage`.
 
 Observed TPM is neither QPM nor API rate-limit TPM. There is no QPM metric. External QPM, when added in a future release, will count logical requests and will never infer requests from tokens or retries. Monitor `style=ranking` is a compact current-value view of the process-local observed window, not the cumulative historical `ranking` command: Total and Model show current observed TPM, while Agent and Project show current Token growth within the visible window. Monitor does not claim historical per-minute data, arbitrary date-range hourly distribution, or a rolling period that predates process startup. Sampling gaps, query errors, and counter decreases are not treated as zero traffic.
 
@@ -256,7 +256,7 @@ Use `--theme no-color` to disable ANSI styling explicitly and reproducibly; `NO_
 ```bash
 alias cct='ccuv timeline --watch'
 alias ccm='ccuv timeline --by model --period 30d'
-alias ccs='ccuv stack --period 30d --split-cache'
+alias ccs='ccuv stack --period 30d --cache split'
 alias ccp='ccuv ranking --by project --period 30d'
 ```
 

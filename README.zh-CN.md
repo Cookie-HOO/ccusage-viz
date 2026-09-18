@@ -24,7 +24,7 @@
 ```bash
 uv run ccuv timeline --demo
 uv run ccuv calendar --demo small
-uv run ccuv stack --demo large --split-cache
+uv run ccuv stack --demo large --cache split
 uv run ccuv ranking --demo --by project
 ```
 
@@ -91,20 +91,20 @@ ccuv timeline
 ccuv timeline --by model
 
 # Top 5 Agent，其他正数分组汇总后放在最后
-ccuv timeline --by agent --top 5 --show-other
+ccuv timeline --by agent --top 5 --other show
 
 # 使用指定自然日时区的有界范围
 ccuv calendar --since 2026-01-01 --until 2026-03-31 \
   --timezone America/Los_Angeles
 
 # 不再合并缓存读取与缓存创建
-ccuv stack --period 30d --split-cache
+ccuv stack --period 30d --cache split
 
 # Agent 作用域下的项目排名
 ccuv ranking --by project --top 20
 ```
 
-`--top` 必须为正数；对 Monitor，`--top` 需要与 `--by agent`、`--by model` 或 `--by project` 一起使用。程序先筛选，再分组并计算 Top N。Top N 外的筛选后分组默认隐藏；设置 `--show-other` 后，只把这些被 Top N 排除的分组合并为 `Other`。`Other` 不占 Top 名额且始终放在最后。如果筛选后没有分组落在 Top N 之外，程序不会绘制空的 `Other`，而会显示原因提示。如需近似无限制，可以使用 `--top 999` 之类的大值。在 Watch 或 Dashboard 刷新中，Ranking 会分开表达三类变化：只有稳定条目名次上升或下降时，排名旁才显示箭头；项目名前的高亮 `●`（`--ascii` 下为 `*`）表示数值有活动变化；数值旁的 `↑`、`↓` 或 `—` 表示累计 Token 相对上一次成功接收的刷新增长、下降或持平（`--ascii` 下为 `^`、`v` 或 `=`）。初始基线不显示标记；基线后首次出现的条目显示活动和数值上升标记，但不会伪造排名箭头，`Other` 也不会显示排名变化。
+`--top` 必须为正数；对 Monitor，`--top` 需要与 `--by agent`、`--by model` 或 `--by project` 一起使用。程序先筛选，再分组并计算 Top N。Top N 外的筛选后分组默认隐藏；设置 `--other show` 后，只把这些被 Top N 排除的分组合并为 `Other`。`Other` 不占 Top 名额且始终放在最后。如果筛选后没有分组落在 Top N 之外，程序不会绘制空的 `Other`，而会显示原因提示。如需近似无限制，可以使用 `--top 999` 之类的大值。在 Watch 或 Dashboard 刷新中，Ranking 会分开表达三类变化：只有稳定条目名次上升或下降时，排名旁才显示箭头；项目名前的高亮 `●`（`--ascii` 下为 `*`）表示数值有活动变化；数值旁的 `↑`、`↓` 或 `—` 表示累计 Token 相对上一次成功接收的刷新增长、下降或持平（`--ascii` 下为 `^`、`v` 或 `=`）。初始基线不显示标记；基线后首次出现的条目显示活动和数值上升标记，但不会伪造排名箭头，`Other` 也不会显示排名变化。
 
 ### 筛选与分组
 
@@ -145,7 +145,7 @@ Ranking 的双查询路径是固定的数据源计划，不会按日期、Agent�
 
 ### 周期对比摘要
 
-`timeline` 和 `stack` 的摘要跟随图表聚合粒度（`day`、`month`、`quarter` 或 `year`），运行时按 `g` 会同步切换两者。`calendar` 和 `ranking` 保持每日摘要。月聚合的自动窗口为 `13mo`，显式 `--period 12mo` 仍然有效。`--no-summary` 可隐藏子图摘要；同时指定 `--since` 和 `--until` 的固定范围不显示摘要。摘要始终聚合当前完整筛选范围，不受 Top N 展示裁剪影响；当 Top N 隐藏尾部分组且未启用 `Other` 时，会标注为“当前筛选总量”并说明图表只显示 Top N。
+`timeline` 和 `stack` 使用 `--granularity day|month|quarter|year`；运行时按 `g` 只切换粒度，不改变所选 Period 或日期范围。`calendar` 和 `ranking` 保持每日粒度。Period 可独立使用 `d`、`mo`、`q` 和 `y`，因此任意粒度下显式 `--period 12mo` 都有效。同时指定 `--since` 和 `--until` 会得到固定范围。摘要始终聚合当前完整筛选范围，不受 Top N 展示裁剪影响；当 Top N 隐藏尾部分组且未启用 `Other` 时，会标注为“当前筛选总量”并说明图表只显示 Top N。
 
 日摘要对比今天、昨天以及七天前同一星期几。月和季度按截至当前的已过天数，分别与上一周期同期、去年同期对比；年摘要对比今年至今与去年同期。计算使用自然月、自然季度和自然年边界，而不是固定减去 30/90/365 天；较短周期会自动截断。独立命令和 Dashboard 子图只使用图表已经加载的记录，绝不会为了摘要单独查询。
 
@@ -163,9 +163,9 @@ ccuv monitor --interval 20 --window 2h
 ccuv monitor --demo small
 ```
 
-`monitor` 是常驻、进程内的观测视图。第一次成功的累计 `ccusage` 快照只建立基线；随后快照使用单调时钟的实际间隔进行差分。因此它在启动前没有任何读数，不能重建过去 24 小时图表。进程内原生历史以分钟汇总，最多保留 24 小时；显示窗口默认为 1 小时，可在 5 分钟到 24 小时之间调整。`--window` 只保留当前进程观测到的历史（5m–24h，默认 `1h`）；真实监控的 `--interval` 默认 15 秒。Demo Monitor 未显式指定 `--interval` 时以 1 秒的合成节奏推进；隐藏的 `--timeout` 限制单个 `ccusage` 子进程的最大时长。
+`monitor` 是常驻、进程内的观测视图。第一次成功的累计 `ccusage` 快照只建立基线；随后快照使用单调时钟的实际间隔进行差分。因此它在启动前没有任何读数，不能重建过去 24 小时图表。进程内原生历史以分钟汇总，最多保留 24 小时；显示窗口默认为 1 小时，可在 5 分钟到 24 小时之间调整。`--window` 只保留当前进程观测到的历史（5m–24h，默认 `1h`）；真实监控的 `--interval` 默认 15 秒。Demo Monitor 未显式指定 `--interval` 时以 1 秒的合成节奏推进；隐藏的 `--query-timeout` 限制单个 `ccusage` 子进程的最大时长。
 
-省略 `--by` 时显示权威的**总 TPM**；`--by model` 显示各模型 TPM；`--by agent` 和 `--by project` 显示从可见窗口左边界开始的累计 Token 增长。分组视图可用 `--legend-position values` 显示无标记的紧凑列表，列出各可见项及其最新显示值。紧凑 Monitor 排名只用排名旁的箭头表示真实名次变化，并用数值旁的 `↑`、`↓` 和 `—` 表示增长、下降和持平（`--ascii` 下为 `^`、`v` 和 `=`）；由于 Monitor 中每个序列都持续活跃，因此不显示活动点。初始基线不显示标记，之后首次出现的序列只显示数值上升，不伪造排名箭头。分组 Monitor 默认保留 Top 3，其余合并到 `Other`。`--agent`、`--model` 与 `--project` 都是仅启动时生效的数据源筛选。按 `Ctrl-C` 退出；`r` 立即采样，Space 暂停/恢复，`v` 按图表 → 精简命令 → 完整命令 → Markdown 数据表 → JSON 数据 → 图表循环。精简命令省略默认参数，完整命令显式列出所有生效设置。图表视图可用 `m` 调整但不可复制；其余视图可用 `y` 复制但不可调整。数据表和 JSON 都只序列化当前显示的桶（包括分组、Top N 与 `Other`），不暴露原始计数器。`h` 隐藏或恢复仅当前会话的控制栏以归还图表行数，`m` 仅可从图表打开固定两行的运行时调整面板。快捷页可调整窗口、间隔、分组、Top、主题和样式，不会重新查询或丢失已保留历史；按 `a` 切换到高级页调整图例，`y` 会复制候选命令。启动时的 `--model` 筛选会保持不变，不作为运行时控制。调整引导始终可见，关闭面板后会恢复此前的控制栏偏好。Monitor 横轴使用 `HH:MM` 标签。可用 `--theme` 和 `--style` 指定初始外观；真实观测历史在启动时尚不存在；要立即比较样式请使用 `monitor --demo`。Demo Monitor 数据是确定性的，启动即有波动的内存历史，绝不调用 `ccusage`。
+省略 `--by` 时显示权威的**总 TPM**；`--by model` 显示各模型 TPM；`--by agent` 和 `--by project` 显示从可见窗口左边界开始的累计 Token 增长。分组视图可用 `--legend values` 显示无标记的紧凑列表，列出各可见项及其最新显示值。紧凑 Monitor 排名只用排名旁的箭头表示真实名次变化，并用数值旁的 `↑`、`↓` 和 `—` 表示增长、下降和持平（`--ascii` 下为 `^`、`v` 和 `=`）；由于 Monitor 中每个序列都持续活跃，因此不显示活动点。初始基线不显示标记，之后首次出现的序列只显示数值上升，不伪造排名箭头。分组 Monitor 默认保留 Top 3，其余合并到 `Other`。`--agent`、`--model` 与 `--project` 都是仅启动时生效的数据源筛选。按 `Ctrl-C` 退出；`r` 立即采样，Space 暂停/恢复，`v` 按图表 → 精简命令 → 完整命令 → Markdown 数据表 → JSON 数据 → 图表循环。精简命令省略默认参数，完整命令显式列出所有生效设置。图表视图可用 `m` 调整但不可复制；其余视图可用 `y` 复制但不可调整。数据表和 JSON 都只序列化当前显示的桶（包括分组、Top N 与 `Other`），不暴露原始计数器。`h` 隐藏或恢复仅当前会话的控制栏以归还图表行数，`m` 仅可从图表打开固定两行的运行时调整面板。快捷页可调整窗口、间隔、分组、Top、主题和样式，不会重新查询或丢失已保留历史；按 `a` 切换到高级页调整图例，`y` 会复制候选命令。启动时的 `--model` 筛选会保持不变，不作为运行时控制。调整引导始终可见，关闭面板后会恢复此前的控制栏偏好。Monitor 横轴使用 `HH:MM` 标签。可用 `--theme` 和 `--style` 指定初始外观；真实观测历史在启动时尚不存在；要立即比较样式请使用 `monitor --demo`。Demo Monitor 数据是确定性的，启动即有波动的内存历史，绝不调用 `ccusage`。
 
 观测 TPM 不等同于 QPM，也不等同于 API 速率限制 TPM；当前没有 QPM 指标。未来若加入外部 QPM，将统计逻辑请求，绝不会从 Token 或重试次数推断请求数。Monitor 的 `style=ranking` 是进程内观测窗口的当前值紧凑视图，不是累计历史数据的 `ranking` 子命令：总量与模型模式显示当前观测 TPM，Agent 与项目模式显示当前可见窗口内的 Token 增长。Monitor 不宣称提供历史逐分钟数据、任意日期范围的小时分布或启动前的滚动窗口。采样间隙、查询错误和计数器回退不会被伪装成零流量。
 
@@ -258,7 +258,7 @@ Dashboard 浏览模式有意只保留一行控制栏：`r` 刷新全部、`s`/�
 ```bash
 alias cct='ccuv timeline --watch'
 alias ccm='ccuv timeline --by model --period 30d'
-alias ccs='ccuv stack --period 30d --split-cache'
+alias ccs='ccuv stack --period 30d --cache split'
 alias ccp='ccuv ranking --by project --period 30d'
 ```
 

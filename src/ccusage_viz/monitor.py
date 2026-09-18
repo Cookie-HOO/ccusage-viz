@@ -927,7 +927,7 @@ def _render(
         ascii=terminal.ascii,
         color_scheme=options.color_scheme,
         style=options.style,
-        legend_position=options.legend_position,
+        legend_position=options.legend,
         hide_upper_right_axes=hide_upper_right_axes,
     )
     series = {name: [bucket.values.get(name, float("nan")) for bucket in buckets] for name in names}
@@ -943,9 +943,9 @@ def _render(
         return "\n".join(line for line in (compact_heading, rows) if line)
     # The default sole Total view stays compact, but explicit value and in-chart
     # presentations remain available while adjusting appearance.
-    show_legend = (len(names) > 1 or names != ("Total",)) and options.legend_position != "hidden"
-    show_legend = show_legend or options.legend_position in {"inside", "values"}
-    below_title = options.legend_position in {"below-title", "values"} and show_legend
+    show_legend = (len(names) > 1 or names != ("Total",)) and options.legend != "hidden"
+    show_legend = show_legend or options.legend in {"inside", "values"}
+    below_title = options.legend in {"below-title", "values"} and show_legend
     with isolated_plot():
         configure_plot(context)
         plt.figure.plot_size(
@@ -978,7 +978,7 @@ def _render(
                 signal = plt.figure.signal(x_values, values, marker=marker).lines(
                     options.style != "points"
                 )
-            if show_legend and options.legend_position == "inside":
+            if show_legend and options.legend == "inside":
                 signal.label(descriptor.label)
             plt.figure.draw(signal)
         positions, labels = _elapsed_labels(buckets)
@@ -990,10 +990,10 @@ def _render(
         plt.figure.ruler("y").ticks(
             y_positions, [format_tokens(round(position)) for position in y_positions]
         )
-        if options.legend_position != "inside":
+        if options.legend != "inside":
             plt.figure.legend(False)
         if below_title:
-            if options.legend_position == "values":
+            if options.legend == "values":
                 legend = " · ".join(
                     f"{colored_mark(descriptor.marker_glyph, descriptor.color, context)} "
                     f"{descriptor.label} {_monitor_value_with_unit(descriptor, observer, translator)}"
@@ -1071,7 +1071,7 @@ def run_monitor(options: CommandOptions, translator: Translator) -> int:
     interval = options.interval
     screen = InteractiveScreen()
     current = options
-    runner = QueryRunner(options.ccusage_bin, timeout=options.timeout)
+    runner = QueryRunner(options.ccusage_bin, timeout=options.query_timeout)
     observer = ObservedTPM(
         window_seconds=options.window_seconds,
         by=options.by,
@@ -1213,7 +1213,7 @@ def run_monitor(options: CommandOptions, translator: Translator) -> int:
         candidate_window = current.window_seconds or observer.window_seconds
         candidate_interval = interval
         style = current.style
-        candidate_legend_position = current.legend_position
+        candidate_legend = current.legend
         adjustment_page = "quick"
         preview = _copy_observer(observer)
         copied_status: str | None = None
@@ -1250,7 +1250,7 @@ def run_monitor(options: CommandOptions, translator: Translator) -> int:
                 interval=candidate_interval,
                 color_scheme=COLOR_SCHEMES[theme_index],
                 style=candidate_style,
-                legend_position=candidate_legend_position,
+                legend=candidate_legend,
             )
 
         def paint_picker() -> None:
@@ -1296,7 +1296,7 @@ def run_monitor(options: CommandOptions, translator: Translator) -> int:
                                 if adjustment_page == "quick"
                                 else {
                                     "legend_position": translator.text(
-                                        f"label.legend_{candidate.legend_position.replace('-', '_')}"
+                                        f"label.legend_{candidate.legend.replace('-', '_')}"
                                     )
                                 }
                             ),
@@ -1376,8 +1376,8 @@ def run_monitor(options: CommandOptions, translator: Translator) -> int:
                 paint_picker()
             elif adjustment_page == "advanced" and key in {"l", "L"}:
                 positions = ("below-title", "inside", "values", "hidden")
-                candidate_legend_position = positions[
-                    (positions.index(candidate_legend_position) + 1) % len(positions)
+                candidate_legend = positions[
+                    (positions.index(candidate_legend) + 1) % len(positions)
                 ]
                 paint_picker()
             elif adjustment_page == "quick" and key in {"b", "B"}:

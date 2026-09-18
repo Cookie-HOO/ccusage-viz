@@ -122,15 +122,14 @@ def _header_options(base: CommandOptions, interval: DateInterval | None = None) 
         date_range=DateRange(interval.since, interval.until, base.date_range.timezone),
         by=None,
         top=None,
-        show_other=False,
-        split_cache=False,
+        other="hide",
+        cache="combined",
         agents=(),
         models=(),
         projects=(),
         watch=None,
         interval=None,
-        no_summary=False,
-        legend_position="hidden",
+        legend="hidden",
     )
 
 
@@ -280,9 +279,7 @@ def _header_lines(
     ]
 
 
-def _panel_options(
-    fragment: str, base: CommandOptions, *, suppress_summary: bool = False
-) -> CommandOptions:
+def _panel_options(fragment: str, base: CommandOptions) -> CommandOptions:
     tokens = shlex.split(fragment)
     if not tokens:
         raise ValueError("empty panel fragment")
@@ -295,7 +292,7 @@ def _panel_options(
         parsed,
         ascii=base.ascii,
         ccusage_bin=base.ccusage_bin,
-        timeout=base.timeout,
+        query_timeout=base.query_timeout,
         demo=parsed.demo or base.demo,
         interval=(
             parsed.interval
@@ -305,7 +302,6 @@ def _panel_options(
             else base.interval
         ),
         watch=None,
-        no_summary=parsed.no_summary or (suppress_summary and parsed.command != "monitor"),
     )
 
 
@@ -534,7 +530,7 @@ def _new_pane(options: CommandOptions) -> TuiPane:
             model_selectors=options.models,
         )
     return TuiPane(
-        options, QueryRunner(options.ccusage_bin, timeout=options.timeout), observer=observer
+        options, QueryRunner(options.ccusage_bin, timeout=options.query_timeout), observer=observer
     )
 
 
@@ -774,14 +770,14 @@ def _choose_pane_type(
 
 
 def run_tui(options: CommandOptions, translator: Translator) -> int:
-    fragments = options.panels or DEFAULT_DASHBOARD_PANELS
+    fragments = options.panes or DEFAULT_DASHBOARD_PANELS
     panes = [
-        _new_pane(_panel_options(fragment, options, suppress_summary=True))
+        _new_pane(_panel_options(fragment, options))
         for fragment in fragments
     ]
     header_options = _header_options(options)
     header = DashboardHeader(
-        header_options, QueryRunner(header_options.ccusage_bin, timeout=header_options.timeout)
+        header_options, QueryRunner(header_options.ccusage_bin, timeout=header_options.query_timeout)
     )
     executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix="ccusage-viz-tui")
     focused: int | None = None
@@ -1257,10 +1253,9 @@ def run_tui(options: CommandOptions, translator: Translator) -> int:
                                         "color_scheme": updated.color_scheme,
                                         "no_color": updated.no_color,
                                         "style": updated.style,
-                                        "no_summary": updated.no_summary,
-                                        "legend_position": updated.legend_position,
-                                        "weekday_mode": updated.weekday_mode,
-                                        "split_cache": updated.split_cache,
+                                        "legend": updated.legend,
+                                        "weekdays": updated.weekdays,
+                                        "cache": updated.cache,
                                     }
                                     if pane.requested_options is not None:
                                         pane.requested_options = replace(
@@ -1365,7 +1360,7 @@ def run_tui(options: CommandOptions, translator: Translator) -> int:
                                 panes.append(
                                     _new_pane(
                                         _panel_options(
-                                            _panel_fragment(choice), options, suppress_summary=True
+                                            _panel_fragment(choice), options
                                         )
                                     )
                                 )
