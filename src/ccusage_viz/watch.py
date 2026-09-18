@@ -10,7 +10,6 @@ from collections.abc import Hashable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from shutil import get_terminal_size
-from typing import Literal, cast
 
 from ccusage_viz.acquisition import historical_provider_id, historical_query_intent
 from ccusage_viz.bootstrap import build_chart_registry, build_query_runtime
@@ -30,6 +29,12 @@ from ccusage_viz.diagnostics import color_enabled, format_error
 from ccusage_viz.domain import Notice, UsageRecord
 from ccusage_viz.errors import UsageError
 from ccusage_viz.formatting import clip_width
+from ccusage_viz.historical_component import (
+    HistoricalChartComponent,
+    HistoricalCompletion,
+    UsageSnapshot,
+    snapshot_from_result,
+)
 from ccusage_viz.i18n import Translator
 from ccusage_viz.options import (
     HistoricalChartConfig,
@@ -58,16 +63,6 @@ class RenderedChart:
 
 
 _EMPTY_COVERAGE = DateCoverage()
-
-
-@dataclass(frozen=True, slots=True)
-class UsageSnapshot:
-    records: tuple[UsageRecord, ...]
-    notices: tuple[Notice, ...]
-    elapsed: float
-    includes_project_attribution: bool = False
-    coverage: DateCoverage = _EMPTY_COVERAGE
-    summary_notices: tuple[Notice, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,6 +99,57 @@ def _adjustment_key_supported(command: str, page: str, key: str) -> bool:
     return key in keys[command]
 
 
+def historical_chart_config(options: StandaloneLaunch) -> HistoricalChartConfig:
+    if isinstance(options.chart, MonitorConfig):
+        raise TypeError("historical rendering does not support monitor configurations")
+    return options.chart
+
+
+def _render_component(
+    component: HistoricalChartComponent,
+    translator: Translator,
+    terminal: Terminal,
+    *,
+    reserve_prompt: bool = False,
+    control_rows: int = 0,
+    hide_upper_right_axes: bool = False,
+    ranking_deltas: Mapping[Hashable, float] | None = None,
+    ranking_rank_deltas: Mapping[Hashable, int] | None = None,
+    normalize_titles: bool = False,
+) -> RenderedChart:
+    options = component.candidate
+    model = component.model
+    if model is None:
+        raise RuntimeError("historical component has no accepted model")
+    chart = historical_chart_config(options)
+    title_content = (
+        translator.text(f"label.{options.chart.by or 'total'}")
+        if normalize_titles and options.chart.kind == "timeline"
+        else translator.text(f"label.{options.chart.by or 'project'}")
+        if normalize_titles and options.chart.kind == "ranking"
+        else None
+    )
+    context = RenderContext(
+        terminal.width,
+        max(1, terminal.height - 1 - len(model.notices) - int(reserve_prompt) - control_rows),
+        translator,
+        color=terminal.color,
+        ascii=terminal.ascii,
+        color_scheme=options.chart.presentation.theme,
+        style=options.chart.presentation.style,
+        legend_position=options.chart.presentation.legend,
+        hide_upper_right_axes=hide_upper_right_axes,
+        deltas=ranking_deltas,
+        rank_deltas=ranking_rank_deltas,
+        weekday_mode=getattr(options.chart, "weekdays", "show"),
+        period=chart.date_range.period if chart.date_range.relative_until else None,
+        title_content=title_content,
+    )
+    chart = component.render(context)
+    messages = tuple(translator.text(notice.key, **notice.values) for notice in model.notices)
+    return RenderedChart(chart, messages)
+
+
 def _render(
     options: StandaloneLaunch,
     translator: Translator,
@@ -120,55 +166,31 @@ def _render(
     summary_notices: tuple[Notice, ...] = (),
     normalize_titles: bool = False,
 ) -> RenderedChart:
-    if isinstance(options.chart, MonitorConfig):
-        raise TypeError("historical rendering does not support monitor configurations")
-    model = process_historical(
-        options.chart,
+    snapshot = UsageSnapshot(
         records,
-        notices=notices,
-        summary_notices=summary_notices,
+        notices,
+        0.0,
         coverage=coverage,
+        summary_notices=summary_notices,
     )
-
-    def context_for(notice_count: int) -> RenderContext:
-        title_content = (
-            translator.text(f"label.{options.chart.by or 'total'}")
-            if normalize_titles and options.chart.kind == "timeline"
-            else translator.text(f"label.{options.chart.by or 'project'}")
-            if normalize_titles and options.chart.kind == "ranking"
-            else None
-        )
-        return RenderContext(
-            terminal.width,
-            max(
-                1,
-                terminal.height - 1 - notice_count - int(reserve_prompt) - control_rows,
-            ),
-            translator,
-            color=terminal.color,
-            ascii=terminal.ascii,
-            color_scheme=options.chart.presentation.theme,
-            style=options.chart.presentation.style,
-            legend_position=options.chart.presentation.legend,
-            hide_upper_right_axes=hide_upper_right_axes,
-            deltas=ranking_deltas,
-            rank_deltas=ranking_rank_deltas,
-            weekday_mode=getattr(options.chart, "weekdays", "show"),
-            period=options.chart.date_range.period
-            if not isinstance(options.chart, MonitorConfig)
-            and options.chart.date_range.relative_until
-            else None,
-            title_content=title_content,
-        )
-
-    definition = build_chart_registry().get(options.chart.kind)
-    if not isinstance(options.chart, definition.config_type):
-        raise TypeError(f"{definition.chart_id} definition received incompatible configuration")
-    if not isinstance(model, definition.model_type):
-        raise TypeError(f"{definition.chart_id} definition produced incompatible model")
-    chart = definition.renderer(model, context_for(len(model.notices)))
-    messages = tuple(translator.text(notice.key, **notice.values) for notice in model.notices)
-    return RenderedChart(chart, messages)
+    component = HistoricalChartComponent(
+        options,
+        owner_id="render",
+        runtime=None,
+        registry=build_chart_registry(),
+    )
+    component.seed(options, snapshot)
+    return _render_component(
+        component,
+        translator,
+        terminal,
+        reserve_prompt=reserve_prompt,
+        control_rows=control_rows,
+        hide_upper_right_axes=hide_upper_right_axes,
+        ranking_deltas=ranking_deltas,
+        ranking_rank_deltas=ranking_rank_deltas,
+        normalize_titles=normalize_titles,
+    )
 
 
 def ranking_entries(
@@ -197,17 +219,6 @@ def ranking_keys(options: StandaloneLaunch, snapshot: UsageSnapshot) -> tuple[Ha
     return tuple(key for key, _, is_other in ranking_entries(options, snapshot) if not is_other)
 
 
-def snapshot_from_result(result: ProviderResult, elapsed: float) -> UsageSnapshot:
-    return UsageSnapshot(
-        result.records,
-        result.notices,
-        elapsed,
-        result.includes_project_attribution,
-        result.coverage,
-        result.summary_notices,
-    )
-
-
 def load_snapshot(
     options: StandaloneLaunch,
     runtime: QueryRuntime,
@@ -232,6 +243,41 @@ def load_snapshot(
     return snapshot_from_result(result, time.monotonic() - started)
 
 
+def render_component(
+    component: HistoricalChartComponent,
+    translator: Translator,
+    terminal: Terminal,
+    *,
+    reserve_prompt: bool = False,
+    control_rows: int = 0,
+    hide_upper_right_axes: bool = False,
+    ranking_deltas: Mapping[Hashable, float] | None = None,
+    ranking_rank_deltas: Mapping[Hashable, int] | None = None,
+    normalize_titles: bool = False,
+) -> RefreshResult:
+    snapshot = component.snapshot
+    if snapshot is None:
+        raise RuntimeError("historical component has no accepted snapshot")
+    rendered = _render_component(
+        component,
+        translator,
+        terminal,
+        reserve_prompt=reserve_prompt,
+        control_rows=control_rows,
+        hide_upper_right_axes=hide_upper_right_axes,
+        ranking_deltas=ranking_deltas,
+        ranking_rank_deltas=ranking_rank_deltas,
+        normalize_titles=normalize_titles,
+    )
+    return RefreshResult(
+        rendered.chart,
+        rendered.notices,
+        snapshot.elapsed,
+        snapshot,
+        component.candidate,
+    )
+
+
 def render_snapshot(
     options: StandaloneLaunch,
     translator: Translator,
@@ -245,22 +291,24 @@ def render_snapshot(
     ranking_rank_deltas: Mapping[Hashable, int] | None = None,
     normalize_titles: bool = False,
 ) -> RefreshResult:
-    rendered = _render(
+    component = HistoricalChartComponent(
         options,
+        owner_id="render",
+        runtime=None,
+        registry=build_chart_registry(),
+    )
+    component.seed(options, snapshot)
+    return render_component(
+        component,
         translator,
         terminal,
-        snapshot.records,
-        snapshot.notices,
         reserve_prompt=reserve_prompt,
         control_rows=control_rows,
         hide_upper_right_axes=hide_upper_right_axes,
         ranking_deltas=ranking_deltas,
         ranking_rank_deltas=ranking_rank_deltas,
-        coverage=snapshot.coverage,
-        summary_notices=snapshot.summary_notices,
         normalize_titles=normalize_titles,
     )
-    return RefreshResult(rendered.chart, rendered.notices, snapshot.elapsed, snapshot, options)
 
 
 def _refresh(
@@ -308,9 +356,22 @@ def run_once(options: StandaloneLaunch, translator: Translator) -> int:
         ascii=current.host.ascii,
     )
     runtime = build_query_runtime()
+    component = HistoricalChartComponent(
+        current,
+        owner_id="standalone",
+        runtime=runtime,
+        registry=build_chart_registry(),
+    )
     try:
-        result = _refresh(
-            current, translator, terminal, runtime, reserve_prompt=True, normalize_titles=True
+        completion = component.submit(QueryTrigger.STARTUP).result()
+        if not component.accept(completion):
+            raise RuntimeError("startup historical result was rejected")
+        result = render_component(
+            component,
+            translator,
+            terminal,
+            reserve_prompt=True,
+            normalize_titles=True,
         )
         status = (
             translator.text("status.demo", size=current.host.demo_size)
@@ -638,11 +699,17 @@ def run_watch(
     active_screen = screen or InteractiveScreen(sys.stdout)
     interval = options.host.interval or 10.0
     runtime = build_query_runtime()
-    results: queue.Queue[tuple[int, RefreshResult | BaseException]] = queue.Queue()
+    current = seed.options if seed and seed.options is not None else options
+    component = HistoricalChartComponent(
+        current,
+        owner_id="standalone",
+        runtime=runtime,
+        registry=build_chart_registry(),
+    )
+    results: queue.Queue[tuple[int, HistoricalCompletion | BaseException]] = queue.Queue()
     running = False
     pending_trigger: QueryTrigger | None = None
     active_handle: QueryHandle[ProviderResult] | None = None
-    refresh_generation = 0
     paused = False
     controls_hidden = False
     body_view: BodyView = "chart"
@@ -659,7 +726,8 @@ def run_watch(
         if seed
         else translator.text("status.loading")
     )
-    current = seed.options if seed and seed.options is not None else options
+    if seed is not None and seed.snapshot is not None:
+        component.seed(current, seed.snapshot)
 
     def historical_chart(config: StandaloneLaunch) -> HistoricalChartConfig:
         if isinstance(config.chart, MonitorConfig):
@@ -744,11 +812,10 @@ def run_watch(
         terminal_error = None
         if last_snapshot is not None:
             try:
-                rendered = render_snapshot(
-                    current,
+                rendered = render_component(
+                    component,
                     translator,
                     terminal,
-                    last_snapshot,
                     control_rows=0 if controls_hidden else 1,
                     ranking_deltas=ranking_deltas.current
                     if current.chart.kind == "ranking"
@@ -800,55 +867,24 @@ def run_watch(
 
     def start_refresh(trigger: QueryTrigger) -> None:
         nonlocal active_handle, running
-        generation = refresh_generation
+        chart = historical_chart(current)
+        submitted = replace(
+            current,
+            chart=replace(chart, date_range=refresh_date_range(chart.date_range)),
+        )
+        component.configure(submitted, data_affecting=True)
+        generation = component.generation
         try:
-            terminal = inspect_terminal(
-                current.chart.kind,
-                no_color=current.chart.presentation.theme == "no-color",
-                ascii=current.host.ascii,
-            )
+            submission = component.submit(trigger)
         except BaseException as exc:
             results.put((generation, exc))
             running = True
             return
+        active_handle = submission.handle
 
-        chart = historical_chart(current)
-        snapshot = replace(
-            current,
-            chart=replace(chart, date_range=refresh_date_range(chart.date_range)),
-        )
-
-        intent = historical_query_intent(
-            snapshot,
-            runtime.definition(historical_provider_id(snapshot)),
-            owner_id="standalone",
-            generation=generation,
-            trigger=trigger,
-        )
-        started = time.monotonic()
-        active_handle = runtime.submit(intent)
-
-        def work(
-            generation: int = generation,
-            snapshot: StandaloneLaunch = snapshot,
-            size: Terminal = terminal,
-            handle: QueryHandle[ProviderResult] = active_handle,
-        ) -> None:
+        def work() -> None:
             try:
-                result = snapshot_from_result(handle.result(), time.monotonic() - started)
-                results.put(
-                    (
-                        generation,
-                        render_snapshot(
-                            snapshot,
-                            translator,
-                            size,
-                            result,
-                            control_rows=1,
-                            normalize_titles=True,
-                        ),
-                    )
-                )
+                results.put((generation, submission.result()))
             except BaseException as exc:
                 results.put((generation, exc))
 
@@ -881,16 +917,30 @@ def run_watch(
                     running = False
                     active_handle = None
                     next_refresh = time.monotonic() + interval
-                    if outcome_generation != refresh_generation:
+                    if outcome_generation != component.generation:
                         next_refresh = time.monotonic()
                         continue
-                    if isinstance(outcome, RefreshResult):
+                    if isinstance(outcome, HistoricalCompletion):
                         previous_options = current
-                        if outcome.options is not None:
-                            current = outcome.options
-                        last_chart = outcome.chart
-                        last_notices = outcome.notices
-                        last_snapshot = outcome.snapshot
+                        try:
+                            accepted = component.accept(outcome)
+                        except BaseException as exc:
+                            component.fail(exc, generation=outcome_generation)
+                            base_status = format_error(
+                                exc,
+                                translator,
+                                color=style_enabled(),
+                                color_scheme=current.chart.presentation.theme,
+                            )
+                            if isinstance(exc, UsageError):
+                                terminal_error = exc
+                            paint()
+                            continue
+                        if not accepted:
+                            next_refresh = time.monotonic()
+                            continue
+                        current = component.candidate
+                        last_snapshot = component.snapshot
                         if isinstance(current.chart, RankingConfig) and last_snapshot is not None:
                             if not isinstance(previous_options.chart, RankingConfig) or (
                                 previous_options.chart.by,
@@ -917,10 +967,11 @@ def run_watch(
                             translator.text("status.demo", size=current.host.demo_size)
                             if current.host.demo_size
                             else translator.text(
-                                "status.query_time", seconds=f"{outcome.elapsed:.2f}"
+                                "status.query_time", seconds=f"{outcome.snapshot.elapsed:.2f}"
                             )
                         )
                     else:
+                        component.fail(outcome, generation=outcome_generation)
                         base_status = format_error(
                             outcome,
                             translator,
@@ -946,7 +997,7 @@ def run_watch(
                     controls_hidden = not controls_hidden
                     paint(force=True)
                 elif key in {"v", "V"}:
-                    body_view = next_body_view(cast(BodyView, body_view))
+                    body_view = next_body_view(body_view)
                     paint(force=True)
                 elif key in {"y", "Y"} and body_view != "chart":
                     terminal = inspect_terminal(
@@ -965,7 +1016,7 @@ def run_watch(
                             last_snapshot,
                             translator,
                             terminal,
-                            view=cast(Literal["data-table", "data-json"], body_view),
+                            view=body_view,
                             complete=True,
                         )
                     )
@@ -987,7 +1038,9 @@ def run_watch(
                         last_chart = picked.seed.chart
                         last_notices = picked.seed.notices
                         last_snapshot = picked.seed.snapshot
-                        refresh_generation += 1
+                        component.configure(current, data_affecting=True)
+                        if last_snapshot is not None:
+                            component.seed(current, last_snapshot)
                         pending_trigger = QueryTrigger.REFRESH
                         if running and active_handle is not None:
                             active_handle.cancel()
@@ -1002,7 +1055,7 @@ def run_watch(
                 elif current.host.demo_size and key in {"s", "d", "l"}:
                     size = {"s": "small", "d": "medium", "l": "large"}[key]
                     current = replace(current, host=replace(current.host, demo_size=size))
-                    refresh_generation += 1
+                    component.configure(current, data_affecting=True)
                     pending_trigger = QueryTrigger.REFRESH
                     if running and active_handle is not None:
                         active_handle.cancel()

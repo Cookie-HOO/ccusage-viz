@@ -135,7 +135,7 @@ def test_one_shot_paints_one_complete_interactive_frame(
         lambda *args, **kwargs: Terminal(100, 30, False, True),
     )
     monkeypatch.setattr(
-        "ccusage_viz.watch._refresh",
+        "ccusage_viz.watch.render_component",
         lambda *args, **kwargs: RefreshResult("complete chart", ("notice",), 0.25),
     )
     monkeypatch.setattr("ccusage_viz.watch.InteractiveScreen", Screen)

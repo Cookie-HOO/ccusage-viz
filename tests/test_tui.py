@@ -335,13 +335,13 @@ def test_dashboard_pane_retains_last_render_for_localized_renderer_warnings(
     )
     monkeypatch.setattr(
         tui_module,
-        "render_snapshot",
+        "render_component",
         lambda *args, **kwargs: tui_module.PaneRender("previous chart"),
     )
     first = _pane_render(pane, load_translator("en"), Terminal(58, 16, False, True))
     monkeypatch.setattr(
         tui_module,
-        "render_snapshot",
+        "render_component",
         lambda *args, **kwargs: (_ for _ in ()).throw(
             UsageError("error.stack_stacked_width", width=58)
         ),

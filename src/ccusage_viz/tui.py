@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from shutil import get_terminal_size
 
 from ccusage_viz.acquisition import historical_provider_id, historical_query_intent
-from ccusage_viz.bootstrap import build_query_runtime
+from ccusage_viz.bootstrap import build_chart_registry, build_query_runtime
 from ccusage_viz.command_copy import (
     copy_command,
     format_dashboard_pane_command,
@@ -29,6 +29,11 @@ from ccusage_viz.formatting import (
     display_width,
     pad_width,
     truncate_width,
+)
+from ccusage_viz.historical_component import (
+    HistoricalChartComponent,
+    HistoricalCompletion,
+    UsageSnapshot,
 )
 from ccusage_viz.i18n import Translator
 from ccusage_viz.monitor import load_monitor_sample, render_monitor_snapshot
@@ -56,13 +61,12 @@ from ccusage_viz.render.summary import render_summary, render_summary_placeholde
 from ccusage_viz.terminal import InteractiveScreen, Terminal
 from ccusage_viz.tui_input import KeyEvent, MouseEvent, read_event, tui_input_mode
 from ccusage_viz.watch import (
-    UsageSnapshot,
     _notice_lines,
     _read_key,
     load_snapshot,
     ranking_keys,
     ranking_values,
-    render_snapshot,
+    render_component,
     snapshot_from_result,
 )
 
@@ -74,8 +78,9 @@ class TuiPane:
     options: StandaloneLaunch
     monitor_runner: QueryRunner | None = None
     snapshot: UsageSnapshot | None = None
+    component: HistoricalChartComponent | None = None
     observer: ObservedTPM | None = None
-    future: Future[UsageSnapshot | tuple[UsageRecord, ...]] | None = None
+    future: Future[HistoricalCompletion | tuple[UsageRecord, ...]] | None = None
     query_handle: QueryHandle[ProviderResult] | None = None
     refreshed_at: float = 0.0
     demo_ordinal: int = 0
@@ -524,7 +529,11 @@ def compose_panels(
     return "\n".join(output)
 
 
-def _new_pane(options: StandaloneLaunch, owner_id: str) -> TuiPane:
+def _new_pane(
+    options: StandaloneLaunch,
+    owner_id: str,
+    runtime: QueryRuntime | None = None,
+) -> TuiPane:
     observer = None
     monitor_runner = None
     if isinstance(options.chart, MonitorConfig):
@@ -537,7 +546,23 @@ def _new_pane(options: StandaloneLaunch, owner_id: str) -> TuiPane:
         monitor_runner = QueryRunner(
             options.process.ccusage_bin, timeout=options.process.query_timeout
         )
-    return TuiPane(options, monitor_runner, observer=observer, owner_id=owner_id)
+    component = (
+        None
+        if isinstance(options.chart, MonitorConfig)
+        else HistoricalChartComponent(
+            options,
+            owner_id=owner_id,
+            runtime=runtime,
+            registry=build_chart_registry(),
+        )
+    )
+    return TuiPane(
+        options,
+        monitor_runner,
+        component=component,
+        observer=observer,
+        owner_id=owner_id,
+    )
 
 
 def _load_pane(
@@ -551,6 +576,15 @@ def _load_pane(
             raise ValueError("monitor panes require a query runner")
         return load_monitor_sample(options, monitor_runner, demo_ordinal=demo_ordinal)
     return load_snapshot(options, runtime)
+
+
+def _load_monitor_pane(
+    options: StandaloneLaunch,
+    monitor_runner: QueryRunner,
+    demo_ordinal: int,
+) -> tuple[UsageRecord, ...]:
+    loaded = load_monitor_sample(options, monitor_runner, demo_ordinal=demo_ordinal)
+    return loaded
 
 
 def _await_historical(
@@ -636,11 +670,20 @@ def _pane_render(pane: TuiPane, translator: Translator, terminal: Terminal) -> P
             label = translator.text(f"label.{active.chart.kind}")
             candidate = PaneRender(f"{label} · {translator.text('status.loading')}")
         else:
-            rendered = render_snapshot(
-                active,
+            component = pane.component
+            if component is None:
+                component = HistoricalChartComponent(
+                    active,
+                    owner_id=pane.owner_id,
+                    runtime=None,
+                    registry=build_chart_registry(),
+                )
+                component.seed(active, snapshot)
+                pane.component = component
+            rendered = render_component(
+                component,
                 translator,
                 terminal,
-                snapshot,
                 control_rows=0,
                 hide_upper_right_axes=True,
                 ranking_deltas=pane.deltas if active.chart.kind == "ranking" else None,
@@ -801,7 +844,11 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
 
     runtime = build_query_runtime()
     panes = [
-        _new_pane(standalone_from_pane(options, pane), f"dashboard:pane:{index}")
+        _new_pane(
+            standalone_from_pane(options, pane),
+            f"dashboard:pane:{index}",
+            runtime,
+        )
         for index, pane in enumerate(options.panes)
     ]
     next_pane_id = len(panes)
@@ -862,20 +909,28 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         pane.submitted_options = submitted
         if isinstance(submitted.chart, MonitorConfig):
             pane.query_handle = None
+            if pane.monitor_runner is None:
+                raise ValueError("monitor panes require a query runner")
             pane.future = executor.submit(
-                _load_pane, submitted, runtime, pane.monitor_runner, pane.demo_ordinal
+                _load_monitor_pane,
+                submitted,
+                pane.monitor_runner,
+                pane.demo_ordinal,
             )
         else:
-            intent = historical_query_intent(
-                submitted,
-                runtime.definition(historical_provider_id(submitted)),
-                owner_id=pane.owner_id,
-                generation=pane.generation,
-                trigger=trigger,
-            )
-            started = time.monotonic()
-            pane.query_handle = runtime.submit(intent)
-            pane.future = executor.submit(_await_historical, pane.query_handle, started)
+            component = pane.component
+            if component is None:
+                component = HistoricalChartComponent(
+                    submitted,
+                    owner_id=pane.owner_id,
+                    runtime=runtime,
+                    registry=build_chart_registry(),
+                )
+                pane.component = component
+            submission = component.submit(trigger, options=submitted)
+            pane.query_handle = submission.handle
+            pane.submitted_generation = submission.generation
+            pane.future = executor.submit(submission.result)
 
     def refresh_header(
         *,
@@ -959,7 +1014,6 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     pane.pending_trigger = None
                     refresh(index, trigger=trigger)
                 continue
-            pane.refreshed_at = observed_at
             try:
                 loaded = future.result()
                 if submitted_options is None:
@@ -991,15 +1045,26 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         )
                     pane.demo_ordinal += 1
                 else:
-                    assert isinstance(loaded, UsageSnapshot)
-                    pane.snapshot = loaded
-                    if pane.options.chart.kind == "ranking":
-                        _refresh_deltas(pane, _ranking_values(pane.options, loaded))
-                        _refresh_ranks(pane, ranking_keys(pane.options, loaded))
-                last_successful_update = datetime.now().astimezone()
+                    assert isinstance(loaded, HistoricalCompletion)
+                    component = pane.component
+                    assert component is not None
+                    if not component.accept(loaded):
+                        continue
+                    pane.options = component.candidate
+                    pane.snapshot = component.snapshot
+                    if pane.snapshot is not None and pane.options.chart.kind == "ranking":
+                        _refresh_deltas(pane, _ranking_values(pane.options, pane.snapshot))
+                        _refresh_ranks(pane, ranking_keys(pane.options, pane.snapshot))
+                pane.refreshed_at = observed_at
+                last_successful_update = (
+                    pane.component.accepted_at
+                    if pane.component is not None
+                    else datetime.now().astimezone()
+                )
                 changed = True
             except Exception as exc:
                 if submitted_generation == pane.generation:
+                    pane.refreshed_at = observed_at
                     pane.requested_options = None
                     pane.error = str(exc)
                     changed = True
@@ -1342,6 +1407,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                 if _query_affecting_adjustment(base.chart.kind, key):
                                     pane.requested_options = updated
                                     pane.generation += 1
+                                    if pane.component is not None:
+                                        pane.component.configure(updated, data_affecting=True)
+                                        pane.generation = pane.component.generation
                                     if pane.observer is not None:
                                         pane.rebaseline_pending = True
                                     refresh(
@@ -1351,6 +1419,8 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                     )
                                 else:
                                     pane.options = updated
+                                    if pane.component is not None:
+                                        pane.component.configure(updated, data_affecting=False)
                                     if pane.observer is not None and key in {"w", "W", "i", "I"}:
                                         pane.rebaseline_pending = True
                                     if pane.requested_options is not None:
@@ -1460,6 +1530,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                     _new_pane(
                                         _new_pane_options(choice, options),
                                         allocate_pane_owner_id(),
+                                        runtime,
                                     )
                                 )
                                 focused = len(panes) - 1
