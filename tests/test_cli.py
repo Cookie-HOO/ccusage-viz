@@ -1,9 +1,18 @@
 import math
 from argparse import Namespace
+from pathlib import Path
 
 import pytest
 
-from ccusage_viz.cli import _inject_default_command, _to_options, build_parser
+from ccusage_viz import __version__
+from ccusage_viz.cli import (
+    ShortCircuitKind,
+    _inject_default_command,
+    _to_options,
+    build_parser,
+    main,
+    probe_short_circuit,
+)
 from ccusage_viz.errors import UsageError
 from ccusage_viz.i18n import load_translator
 from ccusage_viz.options import DEFAULT_STYLES
@@ -25,6 +34,46 @@ def test_subcommand_help_is_localized(
         parser.parse_args([command, "--help"])
     assert caught.value.code == 0
     assert description in capsys.readouterr().out
+
+
+def test_route_probe_identifies_only_help_and_version() -> None:
+    assert probe_short_circuit(["--version"]).kind is ShortCircuitKind.VERSION
+    route = probe_short_circuit(["timeline", "--lang", "zh", "--help"])
+    assert route is not None
+    assert route.kind is ShortCircuitKind.HELP
+    assert route.command == "timeline"
+    assert route.language == "zh"
+    assert probe_short_circuit(["timeline", "--period", "14d"]) is None
+
+
+def test_version_short_circuits_before_translation_or_runtime(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(
+        "ccusage_viz.cli.load_translator",
+        lambda *_args, **_kwargs: pytest.fail("translator must not load"),
+    )
+    monkeypatch.setattr(
+        "ccusage_viz.cli.run", lambda *_args, **_kwargs: pytest.fail("runtime must not start")
+    )
+
+    assert main(["--version"]) == 0
+    assert capsys.readouterr().out.strip() == f"ccusage-viz {__version__}"
+
+
+def test_help_ignores_language_file_before_runtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    missing = tmp_path / "missing.json"
+    monkeypatch.setattr(
+        "ccusage_viz.cli.run", lambda *_args, **_kwargs: pytest.fail("runtime must not start")
+    )
+
+    with pytest.raises(SystemExit) as caught:
+        main(["timeline", "--lang-file", str(missing), "--lang", "zh", "--help"])
+
+    assert caught.value.code == 0
+    assert "将每日 Token 用量绘制为折线图" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("command", ("timeline", "monitor"))

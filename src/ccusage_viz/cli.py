@@ -5,7 +5,8 @@ import math
 import re
 import shlex
 import sys
-from dataclasses import replace
+from dataclasses import dataclass, replace
+from enum import StrEnum
 from pathlib import Path
 from typing import Never
 
@@ -35,6 +36,44 @@ _DURATION_PATTERN = re.compile(r"(?P<value>[1-9][0-9]*)(?P<unit>[mh])$")
 class LocalizedParser(argparse.ArgumentParser):
     def error(self, message: str) -> Never:
         raise UsageError("error.arguments", detail=message)
+
+
+class ShortCircuitKind(StrEnum):
+    HELP = "help"
+    VERSION = "version"
+
+
+@dataclass(frozen=True, slots=True)
+class ShortCircuitRoute:
+    kind: ShortCircuitKind
+    command: str | None = None
+    language: str | None = None
+
+
+def probe_short_circuit(argv: list[str]) -> ShortCircuitRoute | None:
+    """Identify side-effect-free routes before configuration or runtime setup."""
+    if argv == ["--version"]:
+        return ShortCircuitRoute(ShortCircuitKind.VERSION)
+    help_flags = {"-h", "--help"}
+    if not any(argument in help_flags for argument in argv):
+        return None
+    command = next((argument for argument in argv if argument in _COMMANDS), None)
+    language = None
+    for index, argument in enumerate(argv[:-1]):
+        if argument == "--lang" and argv[index + 1] in {"en", "zh"}:
+            language = argv[index + 1]
+            break
+    return ShortCircuitRoute(ShortCircuitKind.HELP, command, language)
+
+
+def _render_short_circuit(route: ShortCircuitRoute) -> int:
+    if route.kind is ShortCircuitKind.VERSION:
+        print(f"ccusage-viz {__version__}")
+        return 0
+    tr = load_translator(route.language or detect_language())
+    parser = build_parser(tr)
+    parser.parse_args([route.command, "--help"] if route.command else ["--help"])
+    raise AssertionError("argparse help did not exit")
 
 
 def _preparse_language(argv: list[str]) -> tuple[str, str | None]:
@@ -417,7 +456,11 @@ def _to_options(namespace: argparse.Namespace) -> CommandOptions:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = _inject_default_command(list(sys.argv[1:] if argv is None else argv))
+    raw_args = list(sys.argv[1:] if argv is None else argv)
+    short_circuit = probe_short_circuit(raw_args)
+    if short_circuit is not None:
+        return _render_short_circuit(short_circuit)
+    args = _inject_default_command(raw_args)
     ccusage_bin_explicit = any(
         argument == "--ccusage-bin" or argument.startswith("--ccusage-bin=") for argument in args
     )
