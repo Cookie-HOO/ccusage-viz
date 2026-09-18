@@ -194,7 +194,10 @@ def test_dashboard_adjustment_status_only_advertises_navigation_when_available()
 def test_dashboard_panes_have_no_details_state() -> None:
     parser = build_parser(load_translator("en"))
     options = _to_options(parser.parse_args(["dashboard", "--demo"]))
-    pane = TuiPane(parse_dashboard_pane("timeline", host=options), owner_id="pane:test")
+    pane = _new_pane(
+        standalone_from_pane(options, parse_dashboard_pane("timeline", host=options)),
+        "pane:test",
+    )
 
     assert not hasattr(pane, "show_details")
 
@@ -237,9 +240,12 @@ def test_dashboard_pane_render_retains_chart_notices_and_deduplicates_them() -> 
         summary_notices=(Notice("notice.summary_excludes_session_agent", {"agent": "Codex"}),),
     )
     panes = [
-        TuiPane(ranking, snapshot=snapshot),
-        TuiPane(ranking, snapshot=snapshot),
+        _new_pane(standalone_from_pane(options, ranking), f"pane:{index}")
+        for index in range(2)
     ]
+    for pane in panes:
+        assert pane.component is not None
+        pane.component.seed(pane.component.candidate, snapshot)
 
     rendered = [
         _pane_render(pane, load_translator("en"), Terminal(58, 16, False, True)) for pane in panes
@@ -255,8 +261,12 @@ def test_dashboard_pane_render_retains_chart_notices_and_deduplicates_them() -> 
 def test_dashboard_monitor_forwards_value_and_rank_deltas(monkeypatch: pytest.MonkeyPatch) -> None:
     parser = build_parser(load_translator("en"))
     options = _to_options(parser.parse_args(["dashboard", "--demo"]))
-    monitor = TuiPane(
-        parse_dashboard_pane("monitor --by model --style ranking", host=options), QueryRunner()
+    monitor = _new_pane(
+        standalone_from_pane(
+            options,
+            parse_dashboard_pane("monitor --by model --style ranking", host=options),
+        ),
+        "pane:monitor",
     )
     monitor.observer = ObservedTPM(window_seconds=3600, by="model", top=3)
     monitor.deltas = {"sonnet": 4.0}
@@ -279,9 +289,11 @@ def test_dashboard_monitor_forwards_value_and_rank_deltas(monkeypatch: pytest.Mo
 def test_dashboard_monitor_and_error_panes_do_not_contribute_chart_notices() -> None:
     parser = build_parser(load_translator("en"))
     options = _to_options(parser.parse_args(["dashboard", "--demo"]))
-    monitor = TuiPane(
-        parse_dashboard_pane("monitor", host=options), QueryRunner(), error="pane failed"
+    monitor = _new_pane(
+        standalone_from_pane(options, parse_dashboard_pane("monitor", host=options)),
+        "pane:monitor",
     )
+    monitor.monitor_error = "pane failed"
 
     rendered = _pane_render(monitor, load_translator("en"), Terminal(58, 16, False, True))
 
@@ -294,10 +306,12 @@ def test_dashboard_pane_retains_last_render_for_localized_renderer_warnings(
 ) -> None:
     parser = build_parser(load_translator("en"))
     options = _to_options(parser.parse_args(["dashboard", "--demo"]))
-    pane = TuiPane(
-        parse_dashboard_pane("stack", host=options),
-        snapshot=UsageSnapshot((), (), 0.25),
+    pane = _new_pane(
+        standalone_from_pane(options, parse_dashboard_pane("stack", host=options)),
+        "pane:stack",
     )
+    assert pane.component is not None
+    pane.component.seed(pane.component.candidate, UsageSnapshot((), (), 0.25))
     monkeypatch.setattr(
         tui_module,
         "render_component",

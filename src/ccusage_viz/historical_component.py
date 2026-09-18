@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Hashable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import datetime
 
 from ccusage_viz.acquisition import historical_provider_id, historical_query_intent
@@ -62,6 +62,7 @@ class HistoricalChartComponent:
 
     __slots__ = (
         "accepted_at",
+        "accepted_options",
         "candidate",
         "definition",
         "error",
@@ -92,6 +93,7 @@ class HistoricalChartComponent:
         self.owner_id = owner_id
         self.runtime: QueryRuntime | None = runtime
         self.candidate = options
+        self.accepted_options: StandaloneLaunch | None = None
         self.snapshot: UsageSnapshot | None = None
         self.model: HistoricalModel | None = None
         self.generation = 0
@@ -110,18 +112,17 @@ class HistoricalChartComponent:
             self.render_revision += 1
             if self.snapshot is not None:
                 self.model = self._process(options, self.snapshot)
+                self.accepted_options = options
 
     def submit(
         self,
         trigger: QueryTrigger,
         *,
-        options: StandaloneLaunch | None = None,
         coverage: DateCoverage | None = None,
     ) -> HistoricalSubmission:
         if self.runtime is None:
             raise RuntimeError("historical component has no query runtime")
-        submitted = options or self.candidate
-        self._validate_options(submitted)
+        submitted = self.candidate
         started = time.monotonic()
         intent = historical_query_intent(
             submitted,
@@ -131,10 +132,12 @@ class HistoricalChartComponent:
             trigger=trigger,
             coverage=coverage,
         )
+        handle = self.runtime.submit(intent)
+        self.error = None
         return HistoricalSubmission(
             self.generation,
             submitted,
-            self.runtime.submit(intent),
+            handle,
             started,
         )
 
@@ -147,9 +150,8 @@ class HistoricalChartComponent:
         if completion.generation != self.generation:
             return False
         self._validate_options(completion.options)
-        accepted = replace(self.candidate, chart=completion.options.chart)
-        model = self._process(accepted, completion.snapshot)
-        self.candidate = accepted
+        model = self._process(self.candidate, completion.snapshot)
+        self.accepted_options = self.candidate
         self.snapshot = completion.snapshot
         self.model = model
         self.error = None

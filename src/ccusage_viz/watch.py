@@ -108,9 +108,9 @@ def _render_component(
     ranking_rank_deltas: Mapping[Hashable, int] | None = None,
     normalize_titles: bool = False,
 ) -> RenderedChart:
-    options = component.candidate
+    options = component.accepted_options
     model = component.model
-    if model is None:
+    if options is None or model is None:
         raise RuntimeError("historical component has no accepted model")
     chart = historical_chart_config(options)
     title_content = (

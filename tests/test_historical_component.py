@@ -20,6 +20,7 @@ from ccusage_viz.options import (
     StandaloneLaunch,
     TimelineConfig,
 )
+from ccusage_viz.query.models import QueryTrigger
 
 
 def options() -> StandaloneLaunch:
@@ -88,13 +89,48 @@ def test_component_rejects_stale_success_and_failure_without_mutation() -> None:
 def test_component_keeps_render_only_candidate_when_query_completes() -> None:
     chart = component()
     submission_options = chart.candidate
-    updated = replace(chart.candidate, host=replace(chart.candidate.host, ascii=True))
+    presentation = replace(chart.candidate.chart.presentation, style="points")
+    updated = replace(
+        chart.candidate,
+        host=replace(chart.candidate.host, ascii=True),
+        chart=replace(chart.candidate.chart, presentation=presentation),
+    )
     chart.configure(updated, data_affecting=False)
 
     assert chart.accept(
         HistoricalCompletion(chart.generation, submission_options, UsageSnapshot((), (), 0.1))
     )
     assert chart.candidate.host.ascii
+    assert chart.candidate.chart.presentation.style == "points"
+    assert chart.accepted_options == chart.candidate
+
+
+def test_component_keeps_accepted_options_until_replacement_succeeds() -> None:
+    chart = component()
+    chart.seed(chart.candidate, UsageSnapshot((), (), 0.1))
+    accepted = chart.accepted_options
+    changed = replace(
+        chart.candidate,
+        chart=replace(
+            chart.candidate.chart,
+            date_range=DateRange(date(2026, 2, 1), date(2026, 2, 7), None),
+        ),
+    )
+
+    chart.configure(changed, data_affecting=True)
+
+    assert chart.candidate == changed
+    assert chart.accepted_options == accepted
+
+
+def test_component_clears_current_error_when_submitting_again() -> None:
+    chart = component()
+    assert chart.fail(RuntimeError("temporary"), generation=chart.generation)
+
+    submission = chart.submit(QueryTrigger.REFRESH)
+    submission.cancel()
+
+    assert chart.error is None
 
 
 def test_component_separates_data_generation_from_render_revision() -> None:

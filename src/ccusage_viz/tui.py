@@ -33,6 +33,7 @@ from ccusage_viz.formatting import (
 from ccusage_viz.historical_component import (
     HistoricalChartComponent,
     HistoricalCompletion,
+    HistoricalSubmission,
     UsageSnapshot,
 )
 from ccusage_viz.i18n import Translator
@@ -67,26 +68,32 @@ from ccusage_viz.watch import render_component, snapshot_from_result
 _PANE_COMMANDS = ("timeline", "calendar", "stack", "ranking", "monitor")
 
 
+@dataclass(frozen=True, slots=True)
+class HistoricalOutcome:
+    generation: int
+    completion: HistoricalCompletion | None = None
+    error: BaseException | None = None
+
+
 @dataclass(slots=True)
 class TuiPane:
-    options: StandaloneLaunch
-    monitor_runner: QueryRunner | None = None
-    snapshot: UsageSnapshot | None = None
     component: HistoricalChartComponent | None = None
+    monitor_options: StandaloneLaunch | None = None
+    monitor_runner: QueryRunner | None = None
     observer: ObservedTPM | None = None
-    future: Future[HistoricalCompletion | tuple[UsageRecord, ...]] | None = None
+    future: Future[HistoricalOutcome | tuple[UsageRecord, ...]] | None = None
     query_handle: QueryHandle[ProviderResult] | None = None
     refreshed_at: float = 0.0
     demo_ordinal: int = 0
-    error: str | None = None
+    monitor_error: str | None = None
     render_warning: UsageError | None = None
     last_render: PaneRender | None = None
     copied: bool = False
-    generation: int = 0
-    submitted_generation: int | None = None
-    submitted_options: StandaloneLaunch | None = None
+    monitor_generation: int = 0
+    monitor_submitted_generation: int | None = None
+    monitor_submitted_options: StandaloneLaunch | None = None
     pending_trigger: QueryTrigger | None = None
-    requested_options: StandaloneLaunch | None = None
+    monitor_requested_options: StandaloneLaunch | None = None
     rebaseline_pending: bool = False
     previous_values: dict[Hashable, float] = field(default_factory=dict)
     deltas: dict[Hashable, float] = field(default_factory=dict)
@@ -97,7 +104,15 @@ class TuiPane:
 
     @property
     def interval(self) -> float:
-        return self.options.host.interval
+        return _pane_options(self).host.interval
+
+
+def _pane_options(pane: TuiPane) -> StandaloneLaunch:
+    if pane.component is not None:
+        return pane.component.accepted_options or pane.component.candidate
+    if pane.monitor_options is None:
+        raise RuntimeError("pane has neither historical nor monitor configuration")
+    return pane.monitor_options
 
 
 @dataclass(slots=True)
@@ -551,9 +566,9 @@ def _new_pane(
         )
     )
     return TuiPane(
-        options,
-        monitor_runner,
         component=component,
+        monitor_options=options if isinstance(options.chart, MonitorConfig) else None,
+        monitor_runner=monitor_runner,
         observer=observer,
         owner_id=owner_id,
     )
@@ -572,6 +587,13 @@ def _await_historical(
     handle: QueryHandle[ProviderResult], started: float
 ) -> UsageSnapshot:
     return snapshot_from_result(handle.result(), time.monotonic() - started)
+
+
+def _await_historical_submission(submission: HistoricalSubmission) -> HistoricalOutcome:
+    try:
+        return HistoricalOutcome(submission.generation, completion=submission.result())
+    except BaseException as exc:
+        return HistoricalOutcome(submission.generation, error=exc)
 
 
 def _refresh_deltas(pane: TuiPane, values: dict[Hashable, float]) -> None:
@@ -623,13 +645,23 @@ class PaneRender:
 
 
 def _pane_render(pane: TuiPane, translator: Translator, terminal: Terminal) -> PaneRender:
-    active = pane.options
+    active = _pane_options(pane)
     observer = pane.observer
-    snapshot = pane.snapshot
-    if pane.error:
-        return PaneRender(pane.error)
+    component = pane.component
+    error = component.error if component is not None else pane.monitor_error
+    if error is not None:
+        return PaneRender(
+            format_error(
+                error,
+                translator,
+                color=terminal.color,
+                color_scheme=active.chart.presentation.theme,
+            )
+            if isinstance(error, UsageError)
+            else str(error)
+        )
     try:
-        if active.chart.kind == "monitor":
+        if isinstance(active.chart, MonitorConfig):
             assert observer is not None
             candidate = PaneRender(
                 render_monitor_snapshot(
@@ -643,20 +675,12 @@ def _pane_render(pane: TuiPane, translator: Translator, terminal: Terminal) -> P
                     rank_deltas={str(key): value for key, value in pane.rank_deltas.items()},
                 )
             )
-        elif snapshot is None:
+        elif component is None:
+            raise RuntimeError("historical pane has no chart component")
+        elif component.snapshot is None:
             label = translator.text(f"label.{active.chart.kind}")
             candidate = PaneRender(f"{label} · {translator.text('status.loading')}")
         else:
-            component = pane.component
-            if component is None:
-                component = HistoricalChartComponent(
-                    active,
-                    owner_id=pane.owner_id,
-                    runtime=None,
-                    registry=build_chart_registry(),
-                )
-                component.seed(active, snapshot)
-                pane.component = component
             rendered = render_component(
                 component,
                 translator,
@@ -869,45 +893,38 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 if pane.query_handle is not None:
                     pane.query_handle.cancel()
             return
-        pane.error = None
-        pane.submitted_generation = pane.generation
-        requested = pane.requested_options or pane.options
-        submitted = (
-            requested
-            if isinstance(requested.chart, MonitorConfig)
-            else replace(
-                requested,
-                chart=replace(
-                    requested.chart,
-                    date_range=refresh_date_range(requested.chart.date_range),
-                ),
-            )
-        )
-        pane.submitted_options = submitted
-        if isinstance(submitted.chart, MonitorConfig):
+        component = pane.component
+        if component is None:
+            pane.monitor_error = None
+            pane.monitor_submitted_generation = pane.monitor_generation
+            requested = pane.monitor_requested_options or pane.monitor_options
+            if requested is None or not isinstance(requested.chart, MonitorConfig):
+                raise ValueError("monitor panes require monitor configuration")
+            pane.monitor_submitted_options = requested
             pane.query_handle = None
             if pane.monitor_runner is None:
                 raise ValueError("monitor panes require a query runner")
             pane.future = executor.submit(
                 _load_monitor_pane,
-                submitted,
+                requested,
                 pane.monitor_runner,
                 pane.demo_ordinal,
             )
-        else:
-            component = pane.component
-            if component is None:
-                component = HistoricalChartComponent(
-                    submitted,
-                    owner_id=pane.owner_id,
-                    runtime=runtime,
-                    registry=build_chart_registry(),
-                )
-                pane.component = component
-            submission = component.submit(trigger, options=submitted)
-            pane.query_handle = submission.handle
-            pane.submitted_generation = submission.generation
-            pane.future = executor.submit(submission.result)
+            return
+        current = component.candidate
+        if isinstance(current.chart, MonitorConfig):
+            raise TypeError("historical pane component has monitor configuration")
+        submitted = replace(
+            current,
+            chart=replace(
+                current.chart,
+                date_range=refresh_date_range(current.chart.date_range),
+            ),
+        )
+        component.configure(submitted, data_affecting=True)
+        submission = component.submit(trigger)
+        pane.query_handle = submission.handle
+        pane.future = executor.submit(_await_historical_submission, submission)
 
     def refresh_header(
         *,
@@ -978,34 +995,37 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             future = pane.future
             if future is None or not future.done():
                 continue
-            submitted_generation = pane.submitted_generation
-            submitted_options = pane.submitted_options
+            component = pane.component
+            submitted_generation = pane.monitor_submitted_generation
+            submitted_options = pane.monitor_submitted_options
             pane.future = None
             pane.query_handle = None
-            pane.submitted_generation = None
-            pane.submitted_options = None
+            pane.monitor_submitted_generation = None
+            pane.monitor_submitted_options = None
             observed_at = time.monotonic()
-            if submitted_generation != pane.generation:
+            if component is None and submitted_generation != pane.monitor_generation:
                 if pane.pending_trigger is not None:
                     trigger = pane.pending_trigger
                     pane.pending_trigger = None
                     refresh(index, trigger=trigger)
                 continue
+            outcome_generation: int | None = None
             try:
                 loaded = future.result()
-                if submitted_options is None:
-                    continue
-                pane.options = submitted_options
-                pane.requested_options = None
-                if pane.options.chart.kind == "monitor":
-                    assert pane.observer is not None and isinstance(loaded, tuple)
+                if component is None:
+                    if submitted_options is None or not isinstance(loaded, tuple):
+                        continue
+                    pane.monitor_options = submitted_options
+                    pane.monitor_requested_options = None
+                    assert pane.observer is not None
+                    assert isinstance(submitted_options.chart, MonitorConfig)
                     pane.observer.window_seconds = (
-                        pane.options.chart.window_seconds or pane.observer.window_seconds
+                        submitted_options.chart.window_seconds or pane.observer.window_seconds
                     )
-                    pane.observer.by = pane.options.chart.by
-                    pane.observer.top = pane.options.chart.top
-                    pane.observer.model_selectors = pane.options.chart.filters.models
-                    counters = monitor_counters(pane.options, loaded)
+                    pane.observer.by = submitted_options.chart.by
+                    pane.observer.top = submitted_options.chart.top
+                    pane.observer.model_selectors = submitted_options.chart.filters.models
+                    counters = monitor_counters(submitted_options, loaded)
                     observed_wall = datetime.now().astimezone()
                     if pane.rebaseline_pending or pane.observer.is_discontinuous(
                         observed_at, observed_wall, pane.interval * 2
@@ -1021,29 +1041,36 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                             pane, monitor_rank_keys({str(k): v for k, v in values.items()})
                         )
                     pane.demo_ordinal += 1
-                else:
-                    assert isinstance(loaded, HistoricalCompletion)
-                    component = pane.component
-                    assert component is not None
-                    if not component.accept(loaded):
-                        continue
-                    pane.options = component.candidate
-                    pane.snapshot = component.snapshot
-                    if pane.options.chart.kind == "ranking":
-                        _refresh_deltas(pane, component.ranking_values())
-                        _refresh_ranks(pane, component.ranking_keys())
-                pane.refreshed_at = observed_at
-                last_successful_update = (
-                    pane.component.accepted_at
-                    if pane.component is not None
-                    else datetime.now().astimezone()
-                )
-                changed = True
-            except Exception as exc:
-                if submitted_generation == pane.generation:
                     pane.refreshed_at = observed_at
-                    pane.requested_options = None
-                    pane.error = str(exc)
+                    last_successful_update = datetime.now().astimezone()
+                    changed = True
+                else:
+                    assert isinstance(loaded, HistoricalOutcome)
+                    outcome_generation = loaded.generation
+                    if loaded.error is not None:
+                        if component.fail(loaded.error, generation=loaded.generation):
+                            pane.refreshed_at = observed_at
+                            changed = True
+                    else:
+                        assert loaded.completion is not None
+                        if component.accept(loaded.completion):
+                            if component.candidate.chart.kind == "ranking":
+                                _refresh_deltas(pane, component.ranking_values())
+                                _refresh_ranks(pane, component.ranking_keys())
+                            pane.refreshed_at = observed_at
+                            last_successful_update = component.accepted_at
+                            changed = True
+            except Exception as exc:
+                if component is None:
+                    if submitted_generation == pane.monitor_generation:
+                        pane.refreshed_at = observed_at
+                        pane.monitor_requested_options = None
+                        pane.monitor_error = str(exc)
+                        changed = True
+                elif outcome_generation is not None and component.fail(
+                    exc, generation=outcome_generation
+                ):
+                    pane.refreshed_at = observed_at
                     changed = True
             if pane.pending_trigger is not None:
                 trigger = pane.pending_trigger
@@ -1054,7 +1081,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
     def full_dashboard_command() -> str:
         return format_full_dashboard_command(
             replace(options, host=replace(options.host, theme=dashboard_theme)),
-            tuple(PaneConfig(pane.options.chart) for pane in panes),
+            tuple(PaneConfig(_pane_options(pane).chart) for pane in panes),
             grid=active_grid,
             header_style=header_style,
             header_summary=header.summary_period,
@@ -1065,7 +1092,10 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         width = get_terminal_size().columns
         if adjustment_mode == "pane" and focused is not None:
             return _adjustment_footer(
-                panes[focused].options.chart.kind, adjustment_page, translator, width
+                _pane_options(panes[focused]).chart.kind,
+                adjustment_page,
+                translator,
+                width
             )[0]
         if adjustment_mode == "global":
             keys = translator.text(f"status.tui_global_{adjustment_page}_controls")
@@ -1131,7 +1161,15 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             body = format_full_command_display(full_dashboard_command(), size.columns)
             screen.paint(body, status, controls(), height=size.lines, force=force)
             return
-        initial_pending = all(pane.refreshed_at == 0.0 and pane.error is None for pane in panes)
+        initial_pending = all(
+            pane.refreshed_at == 0.0
+            and (
+                pane.component.error is None
+                if pane.component is not None
+                else pane.monitor_error is None
+            )
+            for pane in panes
+        )
         if initial_pending:
             completed = sum(pane.future is None for pane in panes)
             loading = center_text(
@@ -1150,11 +1188,12 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 # The active frame-less pane gets a selection ring, so reserve its
                 # interior too; its content is never overwritten by the indicator.
                 framed = frame_style != "none" or index == focused
+                pane_options = _pane_options(pane)
                 terminal = Terminal(
                     max(1, cell_width - 2 if framed else cell_width),
                     max(1, cell_height - 2 if framed else cell_height),
-                    pane.options.chart.presentation.theme != "no-color",
-                    pane.options.host.ascii,
+                    pane_options.chart.presentation.theme != "no-color",
+                    pane_options.host.ascii,
                 )
                 rendered_panes.append(_pane_render(pane, translator, terminal))
             return rendered_panes
@@ -1255,7 +1294,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         size = get_terminal_size()
                         if adjustment_mode == "pane" and focused is not None:
                             _, finish_target = _adjustment_footer(
-                                panes[focused].options.chart.kind,
+                                _pane_options(panes[focused]).chart.kind,
                                 adjustment_page,
                                 translator,
                                 size.columns,
@@ -1369,25 +1408,31 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         elif key in {"y", "Y"}:
                             pane.copied = copy_command(
                                 format_dashboard_pane_command(
-                                    pane.options,
+                                    _pane_options(pane),
                                     refresh_interval=options.host.refresh_interval,
                                     sampling_interval=options.host.sampling_interval,
                                 )
                             )
                         elif key is not None and _adjustment_key_supported(
-                            pane.options.chart.kind, adjustment_page, key
+                            _pane_options(pane).chart.kind, adjustment_page, key
                         ):
-                            base = pane.requested_options or pane.options
+                            component = pane.component
+                            base = (
+                                component.candidate
+                                if component is not None
+                                else pane.monitor_requested_options or pane.monitor_options
+                            )
+                            if base is None:
+                                raise RuntimeError("pane has no adjustable configuration")
                             updated = adjust_standalone(base, key)
                             if updated != base:
                                 _clear_changes(pane)
                                 if _query_affecting_adjustment(base.chart.kind, key):
-                                    pane.requested_options = updated
-                                    pane.generation += 1
-                                    if pane.component is not None:
-                                        pane.component.configure(updated, data_affecting=True)
-                                        pane.generation = pane.component.generation
-                                    if pane.observer is not None:
+                                    if component is not None:
+                                        component.configure(updated, data_affecting=True)
+                                    else:
+                                        pane.monitor_requested_options = updated
+                                        pane.monitor_generation += 1
                                         pane.rebaseline_pending = True
                                     refresh(
                                         focused,
@@ -1395,22 +1440,24 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                         queue_if_running=True,
                                     )
                                 else:
-                                    pane.options = updated
-                                    if pane.component is not None:
-                                        pane.component.configure(updated, data_affecting=False)
-                                    if pane.observer is not None and key in {"w", "W", "i", "I"}:
-                                        pane.rebaseline_pending = True
-                                    if pane.requested_options is not None:
-                                        pane.requested_options = replace(
-                                            pane.requested_options, chart=updated.chart
-                                        )
-                                    if pane.submitted_options is not None:
-                                        pane.submitted_options = replace(
-                                            pane.submitted_options, chart=updated.chart
-                                        )
-                                    if pane.observer is not None and isinstance(
-                                        updated.chart, MonitorConfig
-                                    ):
+                                    if component is not None:
+                                        component.configure(updated, data_affecting=False)
+                                    else:
+                                        pane.monitor_options = updated
+                                        if key in {"w", "W", "i", "I"}:
+                                            pane.rebaseline_pending = True
+                                        if pane.monitor_requested_options is not None:
+                                            pane.monitor_requested_options = replace(
+                                                pane.monitor_requested_options,
+                                                chart=updated.chart,
+                                            )
+                                        if pane.monitor_submitted_options is not None:
+                                            pane.monitor_submitted_options = replace(
+                                                pane.monitor_submitted_options,
+                                                chart=updated.chart,
+                                            )
+                                        assert pane.observer is not None
+                                        assert isinstance(updated.chart, MonitorConfig)
                                         pane.observer.window_seconds = updated.chart.window_seconds
                                         pane.observer.by = updated.chart.by
                                         pane.observer.top = updated.chart.top

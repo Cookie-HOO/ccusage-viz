@@ -61,6 +61,33 @@ def test_chart_catalog_does_not_import_hosts_or_data_adapters() -> None:
     ) == []
 
 
+def test_dashboard_panes_do_not_mirror_historical_component_state() -> None:
+    tree = ast.parse((PACKAGE_ROOT / "tui.py").read_text())
+    pane = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.ClassDef) and node.name == "TuiPane"
+    )
+    fields = {
+        target.id
+        for statement in pane.body
+        if isinstance(statement, ast.AnnAssign)
+        and isinstance((target := statement.target), ast.Name)
+    }
+
+    assert fields.isdisjoint(
+        {
+            "options",
+            "snapshot",
+            "error",
+            "generation",
+            "submitted_generation",
+            "submitted_options",
+            "requested_options",
+        }
+    )
+
+
 def test_processing_package_does_not_import_runtime_or_adapter_layers() -> None:
     assert _forbidden_imports(
         PACKAGE_ROOT / "processing",
