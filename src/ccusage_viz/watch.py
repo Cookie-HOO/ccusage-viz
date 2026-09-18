@@ -11,7 +11,6 @@ from shutil import get_terminal_size
 
 from ccusage_viz.acquisition import historical_provider_id, historical_query_intent
 from ccusage_viz.bootstrap import build_chart_registry, build_query_runtime
-from ccusage_viz.chart_models import RankingModel
 from ccusage_viz.command_copy import (
     copy_command,
     format_command,
@@ -43,7 +42,6 @@ from ccusage_viz.options import (
     adjust_standalone,
     compatible_styles,
 )
-from ccusage_viz.processing import process_historical
 from ccusage_viz.query.coordinator import QueryHandle
 from ccusage_viz.query.models import ProviderResult, QueryTrigger
 from ccusage_viz.query.runtime import QueryRuntime
@@ -188,32 +186,6 @@ def _render(
         ranking_rank_deltas=ranking_rank_deltas,
         normalize_titles=normalize_titles,
     )
-
-
-def ranking_entries(
-    options: StandaloneLaunch, snapshot: UsageSnapshot
-) -> tuple[tuple[Hashable, float, bool], ...]:
-    if not isinstance(options.chart, RankingConfig):
-        raise TypeError("ranking entries require a ranking configuration")
-    model = process_historical(
-        options.chart,
-        snapshot.records,
-        notices=snapshot.notices,
-        summary_notices=snapshot.summary_notices,
-        coverage=snapshot.coverage,
-        include_summary=False,
-    )
-    if not isinstance(model, RankingModel):
-        raise TypeError("ranking processing must produce a ranking model")
-    return tuple((entry.key, float(entry.usage.total), entry.is_other) for entry in model.entries)
-
-
-def ranking_values(options: StandaloneLaunch, snapshot: UsageSnapshot) -> dict[Hashable, float]:
-    return {key: value for key, value, _ in ranking_entries(options, snapshot)}
-
-
-def ranking_keys(options: StandaloneLaunch, snapshot: UsageSnapshot) -> tuple[Hashable, ...]:
-    return tuple(key for key, _, is_other in ranking_entries(options, snapshot) if not is_other)
 
 
 def load_snapshot(
@@ -665,9 +637,9 @@ def run_watch(
     historical_chart(current)
     ranking_deltas = RefreshDeltas()
     ranking_ranks = RefreshRanks()
-    if current.chart.kind == "ranking" and last_snapshot is not None:
-        ranking_deltas.accept(ranking_values(current, last_snapshot))
-        ranking_ranks.accept(ranking_keys(current, last_snapshot))
+    if current.chart.kind == "ranking" and component.model is not None:
+        ranking_deltas.accept(component.ranking_values())
+        ranking_ranks.accept(component.ranking_keys())
     next_refresh = time.monotonic() + interval if seed else time.monotonic()
 
     def style_enabled() -> bool:
@@ -889,8 +861,8 @@ def run_watch(
                             ):
                                 ranking_deltas.clear()
                                 ranking_ranks.clear()
-                            ranking_deltas.accept(ranking_values(current, last_snapshot))
-                            ranking_ranks.accept(ranking_keys(current, last_snapshot))
+                            ranking_deltas.accept(component.ranking_values())
+                            ranking_ranks.accept(component.ranking_keys())
                         base_status = (
                             translator.text("status.demo", size=current.host.demo_size)
                             if current.host.demo_size

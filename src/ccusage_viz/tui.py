@@ -64,8 +64,6 @@ from ccusage_viz.terminal_ui import read_key
 from ccusage_viz.tui_input import KeyEvent, MouseEvent, read_event, tui_input_mode
 from ccusage_viz.watch import (
     load_snapshot,
-    ranking_keys,
-    ranking_values,
     render_component,
     snapshot_from_result,
 )
@@ -593,10 +591,6 @@ def _await_historical(
     return snapshot_from_result(handle.result(), time.monotonic() - started)
 
 
-def _ranking_values(options: StandaloneLaunch, snapshot: UsageSnapshot) -> dict[Hashable, float]:
-    return ranking_values(options, snapshot)
-
-
 def _refresh_deltas(pane: TuiPane, values: dict[Hashable, float]) -> None:
     tracker = RefreshDeltas(
         pane.previous_values,
@@ -1052,9 +1046,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         continue
                     pane.options = component.candidate
                     pane.snapshot = component.snapshot
-                    if pane.snapshot is not None and pane.options.chart.kind == "ranking":
-                        _refresh_deltas(pane, _ranking_values(pane.options, pane.snapshot))
-                        _refresh_ranks(pane, ranking_keys(pane.options, pane.snapshot))
+                    if pane.options.chart.kind == "ranking":
+                        _refresh_deltas(pane, component.ranking_values())
+                        _refresh_ranks(pane, component.ranking_keys())
                 pane.refreshed_at = observed_at
                 last_successful_update = (
                     pane.component.accepted_at

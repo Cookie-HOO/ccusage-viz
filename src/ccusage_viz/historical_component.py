@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Hashable
 from dataclasses import dataclass, replace
 from datetime import datetime
 
 from ccusage_viz.acquisition import historical_provider_id, historical_query_intent
+from ccusage_viz.chart_models import RankingModel
 from ccusage_viz.charts.definition import ChartDefinition
 from ccusage_viz.charts.registry import ChartRegistry
 from ccusage_viz.coverage import DateCoverage
@@ -176,6 +178,19 @@ class HistoricalChartComponent:
         if self.model is None:
             raise RuntimeError("historical component has no accepted model")
         return self.definition.renderer(self.model, context)
+
+    def ranking_values(self) -> dict[Hashable, float]:
+        model = self._ranking_model()
+        return {entry.key: float(entry.usage.total) for entry in model.entries}
+
+    def ranking_keys(self) -> tuple[Hashable, ...]:
+        model = self._ranking_model()
+        return tuple(entry.key for entry in model.entries if not entry.is_other)
+
+    def _ranking_model(self) -> RankingModel:
+        if not isinstance(self.model, RankingModel):
+            raise TypeError("ranking state requires an accepted ranking model")
+        return self.model
 
     def _validate_options(self, options: StandaloneLaunch) -> None:
         if isinstance(options.chart, MonitorConfig) or not isinstance(

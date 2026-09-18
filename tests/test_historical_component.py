@@ -6,6 +6,7 @@ import pytest
 from ccusage_viz.bootstrap import build_chart_registry, build_query_runtime
 from ccusage_viz.core.time import DateRange
 from ccusage_viz.coverage import DateCoverage, DateInterval
+from ccusage_viz.domain import ProjectRef, SourceKind, TokenUsage, UsageRecord
 from ccusage_viz.historical_component import (
     HistoricalChartComponent,
     HistoricalCompletion,
@@ -14,6 +15,7 @@ from ccusage_viz.historical_component import (
 from ccusage_viz.options import (
     ChartPresentation,
     ProcessConfig,
+    RankingConfig,
     StandaloneHostConfig,
     StandaloneLaunch,
     TimelineConfig,
@@ -110,6 +112,54 @@ def test_component_separates_data_generation_from_render_revision() -> None:
     assert chart.generation == generation
     assert chart.render_revision == revision + 1
     assert chart.model is not None
+
+
+def test_component_exposes_ranking_refresh_state_from_accepted_model() -> None:
+    selected = replace(
+        options(),
+        chart=RankingConfig(
+            "ranking",
+            options().chart.date_range,
+            presentation=ChartPresentation(theme="no-color", style="bar"),
+        ),
+    )
+    chart = HistoricalChartComponent(
+        selected,
+        owner_id="test:ranking",
+        runtime=None,
+        registry=build_chart_registry(),
+    )
+    records = (
+        UsageRecord(
+            date(2026, 1, 1),
+            "claude",
+            TokenUsage(20, 20, 0, 0, 0),
+            SourceKind.UNIFIED_DAILY,
+            ProjectRef("claude", "api", "API"),
+        ),
+        UsageRecord(
+            date(2026, 1, 1),
+            "claude",
+            TokenUsage(10, 10, 0, 0, 0),
+            SourceKind.UNIFIED_DAILY,
+            ProjectRef("claude", "web", "Web"),
+        ),
+    )
+    chart.seed(selected, UsageSnapshot(records, (), 0.1))
+
+    assert chart.ranking_values() == {
+        ("claude", "api"): 20.0,
+        ("claude", "web"): 10.0,
+    }
+    assert chart.ranking_keys() == (("claude", "api"), ("claude", "web"))
+
+
+def test_component_rejects_ranking_state_for_another_chart() -> None:
+    chart = component()
+    chart.seed(chart.candidate, UsageSnapshot((), (), 0.1))
+
+    with pytest.raises(TypeError, match="accepted ranking model"):
+        chart.ranking_values()
 
 
 def test_component_rejects_monitor_configuration() -> None:
