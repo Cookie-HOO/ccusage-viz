@@ -78,8 +78,10 @@ class CommandOptions:
     window_seconds: int | None = None
     interval: float | None = None
     legend: str = "below-title"
-    panes: tuple[str, ...] = ()
+    panes: tuple[CommandOptions, ...] = ()
     grid: str = "2x2"
+    refresh_interval: float = 15.0
+    sampling_interval: float = 15.0
     header_style: str = "panel"
     header_summary: str = "day"
     header_interval: float = 60.0

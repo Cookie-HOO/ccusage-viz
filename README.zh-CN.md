@@ -176,14 +176,17 @@ ccuv monitor --demo small
 ccuv dashboard
 
 # 选择任意支持的子图和启动网格
-ccuv dashboard --panel "timeline --period 7d" --panel "stack" \
-  --panel "ranking --by agent" --panel "monitor --by model --top 5" --grid 2x2
+ccuv dashboard --pane "timeline --period 7d" --pane "stack" \
+  --pane "ranking --by agent" --pane "monitor --by model --top 5" --grid 2x2
 
-# 选择页眉样式、摘要粒度及其独立刷新间隔
+# 设置 Dashboard 拥有的 Historical 刷新与 Monitor 采样间隔
+ccuv dashboard --refresh-interval 30 --sampling-interval 5
+
+# 选择页眉样式、摘要粒度及其独立摘要刷新间隔
 ccuv dashboard --header-style panel --header-summary quarter --header-interval 90
 ```
 
-`dashboard` 使用一个终端输入循环和合成器；每个子图保留各自的调度、最近结果、失败状态，以及 Monitor 子图自己的内存观测历史。默认是填满的 2×2 总览，包含时间趋势、Token 构成、排名，以及按模型分组的监测。自动生成的 Monitor 等同于 `monitor --by model`；独立运行 `monitor` 或显式指定 `--panel "monitor"` 时仍显示权威的总体 TPM。`--panel` 可重复，值是以 `timeline`、`calendar`、`stack`、`ranking` 或 `monitor` 开头的普通命令片段；`--grid ROWSxCOLUMNS` 设置启动网格，`auto` 最多使用两列。
+`dashboard` 使用一个终端输入循环和合成器；每个 Pane 保留最近结果、失败状态，Monitor Pane 还保留自己的内存观测历史。默认 Dashboard 是填满的 2×2 总览，包含 Timeline、Stack、Ranking，以及按模型分组的 Monitor。自动生成的 Monitor 等同于 `monitor --by model`；独立运行 `monitor` 或显式指定 `--pane "monitor"` 时仍显示权威的总体 TPM。`--pane` 可重复，值是以 `timeline`、`calendar`、`stack`、`ranking` 或 `monitor` 开头的图表片段；片段内禁止 Host、进程和生命周期选项。Dashboard 拥有调度：`--refresh-interval` 控制 Historical Pane 刷新，`--sampling-interval` 控制 Monitor Pane 采样。`--grid ROWSxCOLUMNS` 设置启动网格，`auto` 最多使用两列。
 
 Dashboard 页眉与子图摘要彼此独立。`--header-style` 支持 `hidden`、`compact`、`banner` 和默认的 `panel`。`--header-summary` 独立选择 `day`、`month`、`quarter`、`year` 或 `none`（默认 `day`）；`none` 保留标题与更新时间但省略详情，`hidden` 隐藏整个页眉。冷切换粒度时会立即显示完整的本地化结构和 `??` 占位，只有已接受的数据才会替换它。页眉使用未筛选的全部 Agent 总量，默认每 60 秒独立刷新；失败或过期结果不会推进成功更新时间。Dashboard 的 `--theme` 只控制外壳、大标题、页眉摘要、占位和分隔，子图保留各自独立的 `--theme`。Dashboard 的 `--style` 将外壳结构统一为 `minimal`、默认的 `split`、`framed` 或 `accent`，不会改变子图图表样式或 Header Style。按 `s` 从第一个子图开始调整，或点击任意子图直接调整；浏览时 `Tab` 不执行操作，子图调整时循环切换子图。
 

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import shlex
 import sys
 import time
 from collections.abc import Hashable
@@ -17,7 +16,7 @@ from ccusage_viz.command_copy import (
 )
 from ccusage_viz.core.time import DateRange, refresh_date_range, today_for_timezone
 from ccusage_viz.coverage import DateCoverage, DateInterval
-from ccusage_viz.dashboard import DEFAULT_DASHBOARD_MONITOR_PANEL, DEFAULT_DASHBOARD_PANELS
+from ccusage_viz.dashboard import DEFAULT_DASHBOARD_MONITOR_PANEL
 from ccusage_viz.data_view import DashboardBodyView, next_dashboard_body_view
 from ccusage_viz.deltas import RefreshDeltas, RefreshRanks
 from ccusage_viz.diagnostics import format_error
@@ -31,7 +30,6 @@ from ccusage_viz.formatting import (
     truncate_width,
 )
 from ccusage_viz.i18n import Translator
-from ccusage_viz.locales import CATALOGS
 from ccusage_viz.monitor import (
     ObservedTPM,
     load_monitor_sample,
@@ -276,51 +274,6 @@ def _header_lines(
         center_text(detail, terminal.width),
         styled_rule,
     ]
-
-
-def _panel_options(fragment: str, base: CommandOptions) -> CommandOptions:
-    try:
-        tokens = shlex.split(fragment)
-    except ValueError as exc:
-        raise UsageError("error.arguments", detail=f"invalid panel: {exc}") from exc
-    if not tokens:
-        raise UsageError("error.arguments", detail="panel cannot be empty")
-    from ccusage_viz.cli import (
-        _explicit_fields,
-        _to_options,
-        _validate_configuration,
-        build_parser,
-    )
-
-    explicit = _explicit_fields(tokens)
-    try:
-        parsed = _to_options(
-            build_parser(Translator("en", dict(CATALOGS["en"]))).parse_args(tokens),
-            explicit=explicit,
-        )
-    except SystemExit as exc:
-        raise UsageError("error.arguments", detail="invalid panel options") from exc
-    if base.ascii and parsed.was_explicit("color_scheme"):
-        raise UsageError(
-            "error.arguments", detail="Dashboard --ascii conflicts with an explicit Pane --theme"
-        )
-    _validate_configuration(parsed)
-    has_interval = any(token == "--interval" or token.startswith("--interval=") for token in tokens)
-    return replace(
-        parsed,
-        ascii=base.ascii,
-        ccusage_bin=base.ccusage_bin,
-        query_timeout=base.query_timeout,
-        demo=parsed.demo or base.demo,
-        interval=parsed.interval if has_interval else base.interval,
-        no_watch=False,
-    )
-
-
-def validate_panel_fragments(options: CommandOptions) -> None:
-    """Validate every startup Pane before dependency or terminal side effects."""
-    for fragment in options.panes or DEFAULT_DASHBOARD_PANELS:
-        _panel_options(fragment, options)
 
 
 def _grid_shape(grid: str, count: int) -> tuple[int, int]:
@@ -669,8 +622,11 @@ def _cycle(values: tuple[str, ...], current: str, step: int) -> str:
     return values[(values.index(current) + step) % len(values)]
 
 
-def _panel_fragment(command: str) -> str:
-    return DEFAULT_DASHBOARD_MONITOR_PANEL if command == "monitor" else command
+def _new_pane_options(command: str, base: CommandOptions) -> CommandOptions:
+    from ccusage_viz.configuration import parse_dashboard_pane
+
+    fragment = DEFAULT_DASHBOARD_MONITOR_PANEL if command == "monitor" else command
+    return parse_dashboard_pane(fragment, host=base)
 
 
 _QUICK_KEYS = {
@@ -788,8 +744,7 @@ def _choose_pane_type(
 
 
 def run_tui(options: CommandOptions, translator: Translator) -> int:
-    fragments = options.panes or DEFAULT_DASHBOARD_PANELS
-    panes = [_new_pane(_panel_options(fragment, options)) for fragment in fragments]
+    panes = [_new_pane(pane_options) for pane_options in options.panes]
     header_options = _header_options(options)
     header = DashboardHeader(
         header_options,
@@ -1245,7 +1200,9 @@ def run_tui(options: CommandOptions, translator: Translator) -> int:
                         elif key in {"y", "Y"}:
                             pane.copied = copy_command(
                                 format_dashboard_pane_command(
-                                    pane.options, refresh_interval=pane.interval
+                                    pane.options,
+                                    refresh_interval=options.refresh_interval,
+                                    sampling_interval=options.sampling_interval,
                                 )
                             )
                         elif key is not None and _adjustment_key_supported(
@@ -1373,9 +1330,7 @@ def run_tui(options: CommandOptions, translator: Translator) -> int:
                                 screen, translator, height=get_terminal_size().lines
                             )
                             if choice:
-                                panes.append(
-                                    _new_pane(_panel_options(_panel_fragment(choice), options))
-                                )
+                                panes.append(_new_pane(_new_pane_options(choice, options)))
                                 focused = len(panes) - 1
                                 refresh(focused)
                     else:

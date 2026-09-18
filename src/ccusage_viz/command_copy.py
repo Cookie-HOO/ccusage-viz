@@ -183,17 +183,23 @@ def wrap_command(command: str, width: int) -> str:
 
 
 def format_dashboard_pane_command(
-    options: CommandOptions, *, refresh_interval: float | None
+    options: CommandOptions,
+    *,
+    refresh_interval: float,
+    sampling_interval: float | None = None,
 ) -> str:
-    """Serialize a Dashboard pane as its equivalent standalone live command."""
-    if options.command == "monitor":
-        return format_command(options)
-    return format_command(replace(options, interval=refresh_interval or 15.0, no_watch=False))
+    """Serialize a Dashboard Pane as its equivalent standalone live command."""
+    interval = (
+        (sampling_interval if sampling_interval is not None else options.interval)
+        if options.command == "monitor"
+        else refresh_interval
+    )
+    return format_command(replace(options, interval=interval, no_watch=False))
 
 
 def format_full_dashboard_command(
     options: CommandOptions,
-    panels: tuple[CommandOptions, ...],
+    panes: tuple[CommandOptions, ...],
     *,
     grid: str,
     header_style: str,
@@ -202,10 +208,33 @@ def format_full_dashboard_command(
 ) -> str:
     """Serialize the complete Dashboard state, including local configuration."""
     args = ["ccuv", "dashboard"]
-    for panel in panels:
-        panel_args = shlex.split(format_full_command(panel))
-        args.extend(("--panel", shlex.join(panel_args[1:])))
+    for pane in panes:
+        pane_args = shlex.split(format_full_command(pane))
+        forbidden = {
+            "--interval",
+            "--no-watch",
+            "--ccusage-bin",
+            "--query-timeout",
+            "--ascii",
+            "--demo",
+        }
+        payload: list[str] = [pane_args[1]]
+        index = 2
+        while index < len(pane_args):
+            option = pane_args[index]
+            if option in forbidden:
+                index += 1 if option in {"--no-watch", "--ascii"} else 2
+                continue
+            payload.append(option)
+            if option.startswith("--") and index + 1 < len(pane_args):
+                payload.append(pane_args[index + 1])
+                index += 2
+            else:
+                index += 1
+        args.extend(("--pane", shlex.join(payload)))
     args.extend(("--grid", grid))
+    args.extend(("--refresh-interval", f"{options.refresh_interval:g}"))
+    args.extend(("--sampling-interval", f"{options.sampling_interval:g}"))
     args.extend(("--header-style", header_style))
     args.extend(("--header-summary", header_summary))
     args.extend(("--header-interval", f"{options.header_interval:g}"))

@@ -359,6 +359,90 @@ def test_dashboard_rejects_non_positive_or_non_finite_timeout(timeout: str) -> N
     assert caught.value.key == "error.arguments"
 
 
+def test_dashboard_owns_distinct_pane_cadences() -> None:
+    parser = build_parser(load_translator("en"))
+    options = _to_options(
+        parser.parse_args(
+            [
+                "dashboard",
+                "--refresh-interval",
+                "30",
+                "--sampling-interval",
+                "5",
+                "--pane",
+                "timeline --period 7d",
+                "--pane",
+                "monitor",
+            ]
+        )
+    )
+    assert options.refresh_interval == 30
+    assert options.sampling_interval == 5
+    assert options.panes[0].interval == 30
+    assert options.panes[1].interval == 5
+
+
+@pytest.mark.parametrize(
+    "fragment",
+    [
+        "timeline --interval 10",
+        "timeline --interval=10",
+        "timeline --inter=10",
+        "timeline --no-watch",
+        "timeline --no-wat",
+        "timeline --watch",
+        "timeline --ascii",
+        "timeline --demo small",
+        "timeline --lang zh",
+        "timeline --ccusage-bin custom",
+        "timeline --ccusage-b custom",
+        "timeline --query-timeout 5",
+        "timeline --query-time 5",
+        "timeline --pane stack",
+        "timeline --grid 1x1",
+        "timeline --refresh-interval 5",
+        "monitor --sampling-interval 5",
+        "timeline --header-style compact",
+        "timeline --header-summary month",
+        "timeline --header-interval 5",
+        "dashboard",
+        "timeline 'unterminated",
+    ],
+)
+def test_dashboard_pane_rejects_host_process_and_lifecycle_options(fragment: str) -> None:
+    parser = build_parser(load_translator("en"))
+    with pytest.raises(UsageError) as caught:
+        _to_options(parser.parse_args(["dashboard", "--pane", fragment]))
+    assert caught.value.key == "error.tui_panel"
+
+
+@pytest.mark.parametrize("theme_option", ("--theme", "--the"))
+def test_dashboard_ascii_rejects_explicit_or_abbreviated_pane_theme(
+    theme_option: str,
+) -> None:
+    parser = build_parser(load_translator("en"))
+    with pytest.raises(UsageError):
+        _to_options(
+            parser.parse_args(["dashboard", "--ascii", "--pane", f"timeline {theme_option} nord"])
+        )
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["dashboard", "--panel", "timeline"],
+        ["dashboard", "--pan", "timeline"],
+        ["dashboard", "--interval", "10"],
+        ["dashboard", "--watch"],
+        ["dashboard", "--no-watch"],
+    ],
+)
+def test_dashboard_rejects_removed_or_ambiguous_options(arguments: list[str]) -> None:
+    parser = build_parser(load_translator("en"))
+    with pytest.raises(UsageError):
+        parser.parse_args(arguments)
+
+
 @pytest.mark.parametrize(
     "flag", ["--pick", "--pick-theme", "--color-scheme", "--preview-schemes", "--no-color"]
 )

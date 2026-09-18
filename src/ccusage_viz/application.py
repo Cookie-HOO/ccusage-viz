@@ -10,10 +10,6 @@ from ccusage_viz.options import CommandOptions
 
 
 def _preflight_runtime(options: CommandOptions) -> None:
-    if options.command == "dashboard":
-        from ccusage_viz.tui import validate_panel_fragments
-
-        validate_panel_fragments(options)
     if not interactive_streams():
         raise UsageError("error.tty")
     if options.was_explicit("interval") and options.command == "dashboard":

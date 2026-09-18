@@ -1,3 +1,4 @@
+import shlex
 from dataclasses import replace
 from datetime import date
 
@@ -6,6 +7,7 @@ import pytest
 import ccusage_viz.tui as tui_module
 from ccusage_viz.cli import _to_options, build_parser
 from ccusage_viz.command_copy import format_dashboard_pane_command, format_full_dashboard_command
+from ccusage_viz.configuration import parse_dashboard_pane
 from ccusage_viz.coverage import DateCoverage, DateInterval
 from ccusage_viz.deltas import RefreshRanks
 from ccusage_viz.domain import Notice, SourceKind, TokenUsage, UsageRecord
@@ -28,10 +30,9 @@ from ccusage_viz.tui import (
     _header_lines,
     _header_options,
     _header_refresh_interval,
+    _new_pane_options,
     _next_header_summary,
     _pane_render,
-    _panel_fragment,
-    _panel_options,
     _query_affecting_adjustment,
     _refresh_deltas,
     _refresh_ranks,
@@ -51,7 +52,15 @@ def test_dashboard_defaults_to_a_filled_four_pane_dashboard() -> None:
     parser = build_parser(load_translator("en"))
     options = _to_options(parser.parse_args(["dashboard"]))
     assert options.command == "dashboard"
-    assert options.panes == ("timeline", "stack", "ranking", "monitor --by model")
+    assert tuple(pane.command for pane in options.panes) == (
+        "timeline",
+        "stack",
+        "ranking",
+        "monitor",
+    )
+    assert options.panes[-1].by == "model"
+    assert options.refresh_interval == 15.0
+    assert options.sampling_interval == 15.0
     assert options.grid == "2x2"
     assert options.header_style == "panel"
     assert options.header_summary == "day"
@@ -69,33 +78,36 @@ def test_full_dashboard_command_includes_private_and_runtime_configuration() -> 
                 "/opt/ccusage",
                 "--query-timeout",
                 "42",
-                "--panel",
+                "--pane",
                 "timeline --project /private/project",
             ]
         )
     )
-    panels = tuple(_panel_options(fragment, dashboard) for fragment in dashboard.panes)
-
     full = format_full_dashboard_command(
         dashboard,
-        panels,
+        dashboard.panes,
         grid="auto",
         header_style="compact",
-        header_summary="week",
+        header_summary="month",
         dashboard_style="split",
     )
 
+    tokens = shlex.split(full)
     assert "/private/project" in full
     assert "--ccusage-bin /opt/ccusage" in full
     assert "--query-timeout 42" in full
+    assert "--pane" in tokens
+    assert "--interval" not in tokens
+    reparsed = _to_options(parser.parse_args(tokens[1:]))
+    assert reparsed.panes[0].projects == ("/private/project",)
 
 
 def test_dashboard_pane_copy_materializes_canonical_standalone_interval() -> None:
     parser = build_parser(load_translator("en"))
     base = _to_options(parser.parse_args(["dashboard"]))
-    timeline = _panel_options("timeline --period 7d", base)
-    stack = _panel_options("stack", base)
-    monitor = _panel_options("monitor --by model", base)
+    timeline = parse_dashboard_pane("timeline --period 7d", host=base)
+    stack = parse_dashboard_pane("stack", host=base)
+    monitor = parse_dashboard_pane("monitor --by model", host=base)
 
     assert format_dashboard_pane_command(timeline, refresh_interval=30) == (
         "ccuv timeline --period 7d --interval 30"
@@ -110,11 +122,11 @@ def test_dashboard_pane_copy_materializes_canonical_standalone_interval() -> Non
 
 def test_dashboard_monitor_default_does_not_change_explicit_or_standalone_total() -> None:
     parser = build_parser(load_translator("en"))
-    dashboard = _to_options(parser.parse_args(["dashboard", "--panel", "monitor"]))
-    panel = _panel_options("monitor", dashboard)
+    dashboard = _to_options(parser.parse_args(["dashboard", "--pane", "monitor"]))
+    panel = dashboard.panes[0]
     standalone = _to_options(parser.parse_args(["monitor"]))
 
-    assert _panel_fragment("monitor") == "monitor --by model"
+    assert _new_pane_options("monitor", dashboard).by == "model"
     assert panel.by is None
     assert standalone.by is None
 
@@ -161,7 +173,7 @@ def test_dashboard_adjustment_status_only_advertises_navigation_when_available()
 def test_dashboard_panes_have_no_details_state() -> None:
     parser = build_parser(load_translator("en"))
     options = _to_options(parser.parse_args(["dashboard", "--demo"]))
-    pane = TuiPane(_panel_options("timeline", options), QueryRunner())
+    pane = TuiPane(parse_dashboard_pane("timeline", host=options), QueryRunner())
 
     assert not hasattr(pane, "show_details")
 
@@ -169,7 +181,7 @@ def test_dashboard_panes_have_no_details_state() -> None:
 def test_dashboard_pane_render_retains_chart_notices_and_deduplicates_them() -> None:
     parser = build_parser(load_translator("en"))
     options = _to_options(parser.parse_args(["dashboard", "--demo"]))
-    ranking = _panel_options("ranking --by project", options)
+    ranking = parse_dashboard_pane("ranking --by project", host=options)
     snapshot = UsageSnapshot(
         (
             UsageRecord(
@@ -203,7 +215,9 @@ def test_dashboard_pane_render_retains_chart_notices_and_deduplicates_them() -> 
 def test_dashboard_monitor_forwards_value_and_rank_deltas(monkeypatch: pytest.MonkeyPatch) -> None:
     parser = build_parser(load_translator("en"))
     options = _to_options(parser.parse_args(["dashboard", "--demo"]))
-    monitor = TuiPane(_panel_options("monitor --by model --style ranking", options), QueryRunner())
+    monitor = TuiPane(
+        parse_dashboard_pane("monitor --by model --style ranking", host=options), QueryRunner()
+    )
     monitor.observer = ObservedTPM(window_seconds=3600, by="model", top=3)
     monitor.deltas = {"sonnet": 4.0}
     monitor.rank_deltas = {"sonnet": 1}
@@ -225,7 +239,9 @@ def test_dashboard_monitor_forwards_value_and_rank_deltas(monkeypatch: pytest.Mo
 def test_dashboard_monitor_and_error_panes_do_not_contribute_chart_notices() -> None:
     parser = build_parser(load_translator("en"))
     options = _to_options(parser.parse_args(["dashboard", "--demo"]))
-    monitor = TuiPane(_panel_options("monitor", options), QueryRunner(), error="pane failed")
+    monitor = TuiPane(
+        parse_dashboard_pane("monitor", host=options), QueryRunner(), error="pane failed"
+    )
 
     rendered = _pane_render(monitor, load_translator("en"), Terminal(58, 16, False, True))
 
@@ -239,7 +255,7 @@ def test_dashboard_pane_retains_last_render_for_localized_renderer_warnings(
     parser = build_parser(load_translator("en"))
     options = _to_options(parser.parse_args(["dashboard", "--demo"]))
     pane = TuiPane(
-        _panel_options("stack", options),
+        parse_dashboard_pane("stack", host=options),
         QueryRunner(),
         snapshot=UsageSnapshot((), (), 0.25),
     )
@@ -454,14 +470,15 @@ def test_header_successful_empty_interval_removes_stale_covered_rows() -> None:
     assert _replace_header_interval((stale,), snapshot) == ()
 
 
-def test_tui_accepts_repeatable_panel_fragments_and_grid() -> None:
+def test_tui_accepts_repeatable_pane_fragments_and_grid() -> None:
     parser = build_parser(load_translator("en"))
     options = _to_options(
         parser.parse_args(
-            ["dashboard", "--panel", "timeline --period 7d", "--panel", "ranking", "--grid", "1x2"]
+            ["dashboard", "--pane", "timeline --period 7d", "--pane", "ranking", "--grid", "1x2"]
         )
     )
-    assert options.panes == ("timeline --period 7d", "ranking")
+    assert tuple(pane.command for pane in options.panes) == ("timeline", "ranking")
+    assert options.panes[0].date_range.period == "7d"
     assert options.grid == "1x2"
 
 

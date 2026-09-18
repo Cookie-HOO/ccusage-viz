@@ -70,44 +70,6 @@ def test_preflight_requires_explicit_ascii_for_dumb_terminal(
         assert dependency_calls == []
 
 
-def test_invalid_dashboard_panel_fails_before_dependency_check(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(application, "interactive_streams", lambda: True)
-
-    def unexpected_dependency_check(*_args: object) -> None:
-        raise AssertionError("dependency check must not run")
-
-    monkeypatch.setattr(application, "ensure_ccusage", unexpected_dependency_check)
-
-    with pytest.raises(UsageError, match="error.arguments"):
-        application.run(
-            options(command="dashboard", panes=("'",)),
-            load_translator("en"),
-        )
-
-
-def test_dashboard_ascii_conflict_fails_before_dependency_check(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(application, "interactive_streams", lambda: True)
-
-    def unexpected_dependency_check(*_args: object) -> None:
-        raise AssertionError("dependency check must not run")
-
-    monkeypatch.setattr(application, "ensure_ccusage", unexpected_dependency_check)
-
-    with pytest.raises(UsageError, match="error.arguments"):
-        application.run(
-            options(
-                command="dashboard",
-                ascii=True,
-                panes=("timeline --theme nord",),
-            ),
-            load_translator("en"),
-        )
-
-
 def test_historical_lifecycle_dispatches_from_no_watch(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(application, "interactive_streams", lambda: True)
     monkeypatch.delenv("TERM", raising=False)

@@ -176,14 +176,17 @@ Observed TPM is neither QPM nor API rate-limit TPM. There is no QPM metric. Exte
 ccuv dashboard
 
 # Choose any supported pane types and a startup grid
-ccuv dashboard --panel "timeline --period 7d" --panel "stack" \
-  --panel "ranking --by agent" --panel "monitor --by model --top 5" --grid 2x2
+ccuv dashboard --pane "timeline --period 7d" --pane "stack" \
+  --pane "ranking --by agent" --pane "monitor --by model --top 5" --grid 2x2
 
-# Choose header presentation, summary period, and independent refresh cadence
+# Set Dashboard-owned Historical refresh and Monitor sampling cadences
+ccuv dashboard --refresh-interval 30 --sampling-interval 5
+
+# Choose header presentation, summary period, and independent summary cadence
 ccuv dashboard --header-style panel --header-summary quarter --header-interval 90
 ```
 
-`dashboard` owns one terminal input loop and compositor while each pane keeps its own schedule, latest result, failure state, and—when it is a Monitor pane—its own in-memory observation history. It starts with a compact loading state rather than an empty framed grid. The default dashboard is a filled 2×2 overview: Timeline, Stack, Ranking, and Monitor grouped by Model. This generated Monitor default is equivalent to `monitor --by model`; standalone `monitor` and an explicit `--panel "monitor"` still show authoritative Total TPM. `--panel` is repeatable and takes a quoted normal command fragment beginning with `timeline`, `calendar`, `stack`, `ranking`, or `monitor`; `--grid ROWSxCOLUMNS` selects the startup grid (`auto` uses up to two columns).
+`dashboard` owns one terminal input loop and compositor while each Pane keeps its latest result, failure state, and—when it is a Monitor Pane—its own in-memory observation history. It starts with a compact loading state rather than an empty framed grid. The default Dashboard is a filled 2×2 overview: Timeline, Stack, Ranking, and Monitor grouped by Model. This generated Monitor default is equivalent to `monitor --by model`; standalone `monitor` and an explicit `--pane "monitor"` still show authoritative Total TPM. `--pane` is repeatable and takes a quoted chart fragment beginning with `timeline`, `calendar`, `stack`, `ranking`, or `monitor`; Host, process, and lifecycle options are rejected inside fragments. Dashboard owns cadence: `--refresh-interval` refreshes Historical Panes and `--sampling-interval` samples Monitor Panes. `--grid ROWSxCOLUMNS` selects the startup grid (`auto` uses up to two columns).
 
 The Dashboard Header is independent from pane summaries. `--header-style` accepts `hidden`, `compact`, `banner`, or `panel` (the default). `--header-summary` independently selects `day`, `month`, `quarter`, `year`, or `none` (default `day`); `none` keeps the title and freshness but omits detail, while `hidden` removes the entire Header. During a cold period switch, the full localized structure appears immediately with `??` values and is replaced only by accepted data. Header data is an unfiltered all-agent total refreshed separately every 60 seconds by default (`--header-interval`). The title row right-aligns the last successfully accepted update time; failed or stale refreshes do not advance it. Dashboard `--theme` colors only the shell, title, Header summary, placeholders, and separators; every pane keeps its own `--theme`. Dashboard `--style` consolidates shell structure into `minimal`, `split` (default), `framed`, or `accent`; it never changes pane chart styles or Header Style. Press `s` to adjust pane 1 or click a pane directly; `Tab` is inert while browsing and wraps between panes during pane adjustment.
 

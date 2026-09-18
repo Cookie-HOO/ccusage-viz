@@ -5,9 +5,9 @@ import math
 import re
 import shlex
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
-from typing import Never
+from typing import Any, Never
 
 from ccusage_viz import __version__
 from ccusage_viz.application import run
@@ -15,6 +15,7 @@ from ccusage_viz.dashboard import DEFAULT_DASHBOARD_PANELS
 from ccusage_viz.diagnostics import color_enabled, format_error
 from ccusage_viz.errors import UsageError, VizError
 from ccusage_viz.i18n import Translator, detect_language, load_translator
+from ccusage_viz.locales import CATALOGS
 from ccusage_viz.options import (
     CACHE_MODES,
     COMMAND_STYLES,
@@ -33,9 +34,35 @@ from ccusage_viz.render.palette import COLOR_SCHEMES
 _COMMANDS = ("timeline", "calendar", "stack", "ranking", "monitor", "dashboard")
 _TUI_COMMANDS = ("timeline", "calendar", "stack", "ranking", "monitor")
 _DURATION_PATTERN = re.compile(r"(?P<value>[1-9][0-9]*)(?P<unit>[mh])$")
+_PANE_FORBIDDEN_OPTIONS = frozenset(
+    {
+        "--interval",
+        "--no-watch",
+        "--watch",
+        "--ascii",
+        "--demo",
+        "--lang",
+        "--ccusage-bin",
+        "--query-timeout",
+        "--pane",
+        "--grid",
+        "--refresh-interval",
+        "--sampling-interval",
+        "--header-style",
+        "--header-summary",
+        "--header-interval",
+        "--help",
+        "--version",
+        "-h",
+    }
+)
 
 
 class LocalizedParser(argparse.ArgumentParser):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        kwargs.setdefault("allow_abbrev", False)
+        super().__init__(*args, **kwargs)
+
     def error(self, message: str) -> Never:
         raise UsageError("error.arguments", detail=message)
 
@@ -157,9 +184,21 @@ def _add_history_shared(
 
 def _add_tui(parser: argparse.ArgumentParser, tr: Translator) -> None:
     parser.add_argument(
-        "--panel", dest="panels", action="append", default=[], help=tr.text("help.panel")
+        "--pane", dest="panes", action="append", default=[], help=tr.text("help.pane")
     )
     parser.add_argument("--grid", default="2x2", help=tr.text("help.grid"))
+    parser.add_argument(
+        "--refresh-interval",
+        type=float,
+        default=15.0,
+        help=tr.text("help.refresh_interval"),
+    )
+    parser.add_argument(
+        "--sampling-interval",
+        type=float,
+        default=15.0,
+        help=tr.text("help.sampling_interval"),
+    )
     parser.add_argument(
         "--header-style",
         choices=("hidden", "compact", "banner", "panel"),
@@ -306,37 +345,72 @@ def _inject_default_command(argv: list[str]) -> list[str]:
     return ["timeline", *argv]
 
 
+def parse_pane_fragment(
+    fragment: str,
+    *,
+    base: CommandOptions | None = None,
+    refresh_interval: float = 15.0,
+    sampling_interval: float = 15.0,
+) -> CommandOptions:
+    try:
+        tokens = shlex.split(fragment)
+    except ValueError as exc:
+        raise UsageError("error.tui_panel", value=fragment) from exc
+    if not tokens or tokens[0] not in _TUI_COMMANDS:
+        raise UsageError("error.tui_panel", value=fragment)
+    for token in tokens[1:]:
+        option = token.split("=", 1)[0]
+        if option in _PANE_FORBIDDEN_OPTIONS or option.startswith("--header-"):
+            raise UsageError("error.tui_panel", value=fragment)
+    explicit = _explicit_fields(tokens)
+    try:
+        parsed = _to_options(
+            build_parser(Translator("en", dict(CATALOGS["en"]))).parse_args(tokens),
+            explicit=explicit,
+        )
+        _validate_configuration(parsed)
+    except UsageError as exc:
+        raise UsageError("error.tui_panel", value=fragment) from exc
+    if base is not None and base.ascii and parsed.was_explicit("color_scheme"):
+        raise UsageError(
+            "error.arguments", detail="Dashboard --ascii conflicts with an explicit Pane --theme"
+        )
+    return replace(
+        parsed,
+        ascii=base.ascii if base is not None else False,
+        ccusage_bin=base.ccusage_bin if base is not None else parsed.ccusage_bin,
+        query_timeout=base.query_timeout if base is not None else parsed.query_timeout,
+        demo=base.demo if base is not None else None,
+        interval=sampling_interval if parsed.command == "monitor" else refresh_interval,
+        no_watch=False,
+    )
+
+
 def _to_options(
     namespace: argparse.Namespace, *, explicit: frozenset[str] = frozenset()
 ) -> CommandOptions:
     command = namespace.command or "timeline"
     if command == "dashboard":
-        if not namespace.panels:
-            namespace.panels = list(DEFAULT_DASHBOARD_PANELS)
-        parsed_panels = []
-        for fragment in namespace.panels:
-            try:
-                tokens = shlex.split(fragment)
-            except ValueError as exc:
-                raise UsageError("error.tui_panel", value=fragment) from exc
-            if not tokens or tokens[0] not in _TUI_COMMANDS:
-                raise UsageError("error.tui_panel", value=fragment)
-            parsed_panels.append(fragment)
-        namespace.panels = parsed_panels
+        pane_fragments = namespace.panes or list(DEFAULT_DASHBOARD_PANELS)
         if namespace.grid != "auto":
             try:
                 rows, columns = (int(item) for item in namespace.grid.lower().split("x", 1))
             except (ValueError, AttributeError):
                 raise UsageError("error.tui_grid", value=namespace.grid) from None
-            if rows < 1 or columns < 1 or rows * columns < len(namespace.panels):
+            if rows < 1 or columns < 1 or rows * columns < len(pane_fragments):
                 raise UsageError("error.tui_grid", value=namespace.grid)
-        if not math.isfinite(namespace.header_interval) or namespace.header_interval < 1:
-            raise UsageError("error.interval_min", minimum=1)
+        for cadence in (
+            namespace.refresh_interval,
+            namespace.sampling_interval,
+            namespace.header_interval,
+        ):
+            if not math.isfinite(cadence) or cadence < 1:
+                raise UsageError("error.interval_min", minimum=1)
         if not math.isfinite(namespace.query_timeout) or namespace.query_timeout <= 0:
             raise UsageError(
                 "error.arguments", detail="--query-timeout must be positive and finite"
             )
-        return CommandOptions(
+        dashboard = CommandOptions(
             command="dashboard",
             date_range=resolve_date_range(
                 "timeline", period="14d", since=None, until=None, timezone=None
@@ -354,15 +428,25 @@ def _to_options(
             no_color=namespace.color_scheme == "no-color",
             ascii=namespace.ascii,
             color_scheme=namespace.color_scheme,
-            panes=tuple(namespace.panels),
             grid=namespace.grid,
-            interval=15.0,
+            refresh_interval=namespace.refresh_interval,
+            sampling_interval=namespace.sampling_interval,
             header_style=namespace.header_style,
             header_summary=namespace.header_summary,
             header_interval=namespace.header_interval,
             dashboard_style=namespace.dashboard_style,
             explicit=explicit,
         )
+        panes = tuple(
+            parse_pane_fragment(
+                fragment,
+                base=dashboard,
+                refresh_interval=dashboard.refresh_interval,
+                sampling_interval=dashboard.sampling_interval,
+            )
+            for fragment in pane_fragments
+        )
+        return replace(dashboard, panes=panes)
     top = getattr(namespace, "top", None)
     if command == "timeline" and namespace.by is not None and top is None:
         top = 3
