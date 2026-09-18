@@ -3,7 +3,7 @@ from __future__ import annotations
 import sys
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import FrozenInstanceError, dataclass
 from datetime import date
 from threading import Event, Lock
 
@@ -179,6 +179,114 @@ def test_handle_cancellation_detaches_only_its_plan_on_shared_coordinator() -> N
     assert caught.value.key == "error.ccusage_cancelled"
     assert active.result(1).records
     assert calls == ["shared"]
+
+
+def test_last_subscriber_cancellation_reaches_physical_execution() -> None:
+    cancellation_observed = Event()
+
+    @dataclass(frozen=True, slots=True)
+    class CancellationProvider(RecordingProvider):
+        def execute(self, query: PhysicalQuery, cancelled: Event) -> PhysicalResult:
+            with self.lock:
+                self.calls.append(query.operation)
+                self.started.set()
+            assert cancelled.wait(1)
+            cancellation_observed.set()
+            raise QueryError("error.ccusage_cancelled", query=query.operation)
+
+    provider = CancellationProvider([], Lock(), Event(), Event())
+    handle = QueryCoordinator().submit(
+        PhysicalPlan("plan", (PhysicalQuery(provider.provider, "shared"),)), provider
+    )
+    assert provider.started.wait(1)
+
+    handle.cancel()
+
+    with pytest.raises(QueryError) as caught:
+        handle.result(0.1)
+    assert caught.value.key == "error.ccusage_cancelled"
+    assert cancellation_observed.wait(1)
+
+
+@pytest.mark.parametrize(
+    ("first", "second"),
+    (
+        (
+            PhysicalQuery(ProviderRef("recording", "first"), "shared"),
+            PhysicalQuery(ProviderRef("recording", "second"), "shared"),
+        ),
+        (
+            PhysicalQuery(ProviderRef("recording"), "shared", ("--since", "2026-01-02")),
+            PhysicalQuery(ProviderRef("recording"), "shared", ("--since", "2026-01-03")),
+        ),
+        (
+            PhysicalQuery(
+                ProviderRef("recording"),
+                "shared",
+                execution_context=ExecutionContext("first", 1, 1024),
+            ),
+            PhysicalQuery(
+                ProviderRef("recording"),
+                "shared",
+                execution_context=ExecutionContext("second", 1, 1024),
+            ),
+        ),
+    ),
+)
+def test_non_equivalent_physical_queries_do_not_share(
+    first: PhysicalQuery, second: PhysicalQuery
+) -> None:
+    calls: list[str] = []
+    provider = RecordingProvider(calls, Lock(), Event(), Event())
+    coordinator = QueryCoordinator(max_parallel=2)
+
+    first_handle = coordinator.submit(PhysicalPlan("first", (first,)), provider)
+    assert provider.started.wait(1)
+    second_handle = coordinator.submit(PhysicalPlan("second", (second,)), provider)
+    deadline = time.monotonic() + 1
+    while len(calls) < 2 and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert calls == ["shared", "shared"]
+    provider.release.set()
+
+    assert first_handle.result(1).records
+    assert second_handle.result(1).records
+
+
+def test_shared_physical_work_is_assembled_into_independent_owner_results() -> None:
+    @dataclass(frozen=True, slots=True)
+    class OwnerProvider(RecordingProvider):
+        def assemble(
+            self, plan: PhysicalPlan, fragments: tuple[ProviderResultFragment, ...]
+        ) -> ProviderResult:
+            assembled = RecordingProvider.assemble(self, plan, fragments)
+            return ProviderResult(
+                assembled.records,
+                assembled.provenance,
+                assembled.resolution,
+                assembled.coverage,
+                provider_metadata=(("owner", plan.plan_id),),
+            )
+
+    calls: list[str] = []
+    provider = OwnerProvider(calls, Lock(), Event(), Event())
+    query = PhysicalQuery(provider.provider, "shared")
+    coordinator = QueryCoordinator(max_parallel=1)
+
+    first = coordinator.submit(PhysicalPlan("first-owner", (query,)), provider)
+    assert provider.started.wait(1)
+    second = coordinator.submit(PhysicalPlan("second-owner", (query,)), provider)
+    time.sleep(0.05)
+    provider.release.set()
+
+    first_result = first.result(1)
+    second_result = second.result(1)
+    assert calls == ["shared"]
+    assert first_result is not second_result
+    assert first_result.provider_metadata == (("owner", "first-owner"),)
+    assert second_result.provider_metadata == (("owner", "second-owner"),)
+    with pytest.raises(FrozenInstanceError):
+        first_result.provider_metadata = ()  # type: ignore[misc]
 
 
 def test_plan_failure_does_not_cancel_an_unrelated_plan() -> None:
