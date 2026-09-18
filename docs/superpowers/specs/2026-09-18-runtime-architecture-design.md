@@ -148,7 +148,7 @@ All blocking configuration diagnostics occur before external dependencies or ter
 
 #### Logical query planning
 
-Standalone Components, Dashboard Summary, and Pane Components independently declare immutable `QueryIntent` values. An intent contains owner, generation, trigger, Provider ID, Data Scope, required resolution and dimensions, and execution options.
+A shared logical planner creates immutable `QueryIntent` values independently for Standalone Components, Dashboard Summary, and Pane Components. It combines the owner's resolved Host context, reusable chart payload, Chart Definition data requirements, generation, trigger, and current Coverage. The resulting intent contains owner, generation, trigger, Provider ID, Data Scope and missing intervals, required resolution and dimensions, and execution options. Standalone and Dashboard use the same planner rather than duplicating missing-Coverage logic.
 
 Chart Definitions declare requirements in Provider-neutral terms. They never emit subprocess argv.
 
@@ -161,11 +161,11 @@ The only initial cross-owner optimizations are:
 1. strict in-flight deduplication when Provider ID, physical fingerprint, and execution-affecting options are equal;
 2. explicit sharing of compatible Monitor raw cumulative snapshots.
 
-The Coordinator alone owns in-flight sharing and subscriber accounting. Each subscriber receives a detachable handle. Canceling or deleting one owner detaches only that subscriber; the physical operation is terminated only after its last subscriber detaches or the process-level shutdown cancels all work.
+The Coordinator alone owns in-flight sharing and subscriber accounting. Each subscriber receives a detachable handle. Canceling or deleting one owner detaches only that subscriber; the physical operation is terminated only after its last subscriber detaches or process-level shutdown cancels all work. When a required fragment fails, or an owner's generation becomes obsolete, that plan immediately detaches its subscriptions from every remaining queued or running physical query. A physical query shared with another live plan continues; an unshared queued query is removed and an unshared running query is cancelled.
 
-Even when physical work is shared, every owner retains independent generation checks, Coverage, previous Monitor snapshot, observation window, accepted time, business state, and error state. Stale payloads are discarded after delivery; no completed-result cache is introduced.
+Even when physical work is shared, every owner retains independent generation checks, Coverage, previous Monitor snapshot, observation window, accepted time, business state, and error state. Stale delivery updates neither accepted data nor Coverage: data and its corresponding Coverage are accepted atomically only for the current generation. No completed-result cache is introduced.
 
-The Coordinator does not own interval or Tick scheduling. Across independent owners it does not merge unlike requests or reuse completed stale work. One owner's logical planner may still combine adjacent missing Coverage intervals as allowed by the product contract.
+The Coordinator does not own interval or Tick scheduling. Across independent owners it does not merge unlike requests or reuse completed stale work. For one owner, the shared logical planner may still combine adjacent missing Coverage intervals as allowed by the product contract.
 
 ## Provider boundary
 
@@ -263,13 +263,15 @@ Representative effects:
 - Repaint;
 - Exit.
 
-Every data-affecting setting change creates a new generation immediately. The candidate configuration and visible structure update immediately. `??` is used only when required data is missing and its query/processing lifecycle is in debounce, pending, or execution. Real zero is valid only inside authoritative Coverage; no-data, error, unavailable, and not-applicable states remain distinct. Only current-generation query and processing results alter visible accepted content.
+Every data-affecting setting change creates a new generation immediately. The candidate configuration and visible structure update immediately. `??` is used only when required data is missing and its query/processing lifecycle is in debounce, pending, or execution. Real zero is valid only inside authoritative Coverage; no-data, error, unavailable, and not-applicable states remain distinct. Only current-generation query and processing results alter visible accepted content. Advancing the generation immediately detaches obsolete query subscriptions and requests cancellation of obsolete processing and queued render work so stale tasks do not retain bounded execution slots.
 
-Result Processing runs as bounded, cancellable, generation-tagged effects outside the reducer and terminal event loop. Completion returns a semantic action to the reducer. The first implementation does not add shared cross-owner indexes or pre-aggregations; this preserves the intentionally narrow optimization boundary, while bounded execution keeps one expensive projection from blocking input or another Component's result acceptance.
+Query, processing, and rendering activity are tracked independently rather than collapsed into one execution flag. Pending trigger state preserves trigger identity: at minimum periodic backlog, manual refresh, resume, and committed configuration/debounce work remain distinguishable. Pausing discards periodic backlog but does not erase an explicit manual refresh or the one completion required by a committed configuration change. Equivalent opportunities may coalesce within their own trigger class, while a Component still never overlaps the same pipeline stage for one generation.
 
-Historical Refresh, Monitor Sampling, Dashboard Refresh, and Dashboard Sampling use fixed monotonic baselines. Query duration, success, failure, manual refresh, pause, and resume do not shift the baseline. A Component never overlaps its own work and records at most one pending opportunity. Debounce is independent and can be satisfied by an earlier Tick, manual refresh, or resume.
+Result Processing runs as bounded, cancellable, generation-tagged effects outside the reducer and terminal event loop. Workers return immutable completion events through one serialized runtime action queue. Only the runtime owner mutates state, composes Frames, or invokes the Painter. The first implementation does not add shared cross-owner indexes or pre-aggregations; this preserves the intentionally narrow optimization boundary, while bounded execution keeps one expensive projection from blocking input or another Component's result acceptance.
 
-Historical no-Watch enters the same interactive TUI startup path, obtains the required result, paints one accepted Frame, and exits. Monitor and Dashboard reject no-Watch.
+Historical Refresh, Monitor Sampling, Dashboard Refresh, and Dashboard Sampling use fixed monotonic baselines. Query duration, success, failure, manual refresh, pause, and resume do not shift the baseline. Debounce is independent and can be satisfied by an earlier Tick, manual refresh, or resume according to the preserved trigger state.
+
+Historical no-Watch enters the same interactive TUI startup path, obtains the required result, paints one accepted Frame, and exits. Monitor and Dashboard reject no-Watch. Exit is ordered: stop admitting scheduler and debounce work; detach query subscriptions and cancel unshared work; cancel or drain processing and render work; suppress all late completion events; stop painting; restore terminal state last.
 
 ## Input and interaction
 
@@ -285,9 +287,9 @@ Chart processing produces immutable semantic models. A chart renderer receives a
 
 Host composition combines all visible content into one complete `Frame`. `FramePainter` compares the complete Frame with the previous Frame and writes changed rows. No status, error, chart, or query path may bypass the current Frame with partial stdout writes.
 
-Plotext remains isolated behind a serialized rendering adapter because of its process-global state. The adapter is invoked outside the reducer and terminal input loop; generation-tagged completion returns a `ChartRender` that the reducer may accept or discard. UI-thread-only terminal composition and painting therefore remain responsive while Plotext work is serialized.
+Plotext remains isolated behind a serialized rendering adapter because of its process-global state. The adapter is invoked outside the reducer and terminal input loop; completion is tagged with both data generation and `render_revision`, where `render_revision` also advances for Theme/Style, viewport, and transient-annotation changes that do not require new data. The adapter keeps at most the running job plus the latest queued request for each Component, replacing older queued revisions; obsolete work is cancelled where supported and otherwise allowed to finish only for its completion to be discarded. UI-thread-only terminal composition and painting therefore remain responsive without letting stale render jobs delay the latest revision indefinitely.
 
-The Dashboard Safety Minimum is derived before implementation from structural invariants: every Pane must retain a non-empty body row plus identity/focus and one compact diagnostic/status row; the Dashboard must also retain its always-present Header identity. Border and separator costs are added by the selected shell Style. Golden rendering cases determine the smallest width that preserves these invariants for the worst built-in compact renderer, and that derived width/height becomes the tested constant. It is a correctness threshold, not a comfort requirement.
+The Dashboard Safety Minimum is derived before implementation only from shared shell and Pane structural invariants: every Pane retains a non-empty body row plus identity/focus and one compact diagnostic/status row, and the Dashboard retains its always-present Header identity. Border and separator costs are added by the selected shell Style. These invariants determine the tested global width/height floor. A renderer-specific minimum is not folded into that global constant; when one renderer cannot represent useful content inside an otherwise structurally valid Pane, that Pane degrades locally and displays its compact notice.
 
 ## Theme and Style
 

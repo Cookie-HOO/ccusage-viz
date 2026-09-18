@@ -13,7 +13,7 @@
 | 术语 | 含义 |
 | --- | --- |
 | **Chart Definition** | 某类图表的无状态目录项。它向 bootstrap 提供稳定 ID，并引用彼此分离的配置、数据需求、结果处理、渲染、运行时设置和检查协作者。 |
-| **Chart Component** | 一个运行中的图表实例。独立拥有有效配置、generation、Coverage、已接受数据、等待/运行/错误状态、语义模型和渲染内容。 |
+| **Chart Component** | 一个运行中的图表实例。独立拥有可复用 chart payload 与生命周期状态——generation、Coverage、已接受数据、等待/运行/错误状态、语义模型和渲染内容；它接收已解析的 Host context，但不取得 Host 设置的所有权。 |
 | **Host** | 运行并呈现 Component 的产品外壳。Standalone Host 承载一个 Component；Dashboard Host 在 Pane 中承载多个有序 Component。 |
 | **Pane** | 一个 Component 在 Dashboard 中的位置与组合上下文。只增加几何、焦点、顺序和 Dashboard 拥有的节奏，不重新定义图表语义。 |
 | **Provider** | 将逻辑请求编译为物理查询、执行查询，并返回带 provenance、resolution 和 Coverage 的规范化用量数据。`ccusage` 与 Demo 都是内置 Provider。 |
@@ -81,7 +81,7 @@ Parse → Compose defaults and Presets → Validate → Resolve startup values �
 
 #### 逻辑查询规划
 
-每个数据消费者——Standalone Component、Dashboard Summary 或 Pane Component——独立产生逻辑请求，其中包含 owner、generation、trigger、scope、所需 resolution 与 dimensions、Provider 选择和执行选项。
+共享的逻辑规划器为每个数据消费者——Standalone Component、Dashboard Summary 或 Pane Component——分别产生逻辑请求。它把 owner 已解析的 Host context、可复用 chart payload、Chart Definition 数据需求、generation、trigger 与当前 Coverage 合并为 Provider-neutral scope、缺失区间、所需 resolution 与 dimensions、Provider 选择和执行选项。两种产品形态使用同一个规划器，因此 Standalone 与 Dashboard 的缺失 Coverage 规划不会发生分歧。
 
 Chart Definition 只声明需要什么数据，不构造 `ccusage` 命令，也不自行调用 Provider。
 
@@ -144,21 +144,23 @@ Action 包括 Tick、手动刷新、暂停/继续、Resize、输入、设置变�
 
 ```text
 Component State
-├── candidate configuration
+├── candidate chart payload + resolved Host context
 ├── accepted data
-├── generation
+├── data generation + render revision
 ├── Coverage
-├── execution: idle / running
+├── query / processing / rendering activity
 ├── debounce handle
-├── pending opportunity: yes / no
+├── pending triggers by kind
 ├── observer
 ├── accepted success time
 └── last error
 ```
 
-数据相关调整立即递增 generation。只有与当前 generation 匹配的结果才能更新可见状态。过时结果不能覆盖当前内容。本次重构在交付后丢弃其 payload，不引入已完成结果缓存；保留的 Coverage 记账也只限于当前有效 Scope，并且有界。
+数据相关调整立即递增 generation，并分离过时 effect。数据及其 Coverage 只会为当前 generation 原子接受；过时交付不会更新任何一项。Theme/Style、viewport 与仅 transient 的变化递增独立的 render revision。本次重构不引入已完成结果缓存。
 
-Refresh、Sampling 和 debounce 是彼此独立的触发来源。固定调度基线不因查询耗时、成功、失败、手动刷新、暂停或继续而移动。慢 Component 不重叠执行自身工作，最多保留一次 pending opportunity。
+Refresh、Sampling、debounce、手动刷新、继续和已提交配置工作保持为可区分的触发来源。固定调度基线不因查询耗时、成功、失败、手动刷新、暂停或继续而移动。慢 Component 不会为同一 generation 重叠执行同一管线阶段；等价的等待机会只在各自 trigger kind 内合并。
+
+Worker 通过一条串行 runtime queue 返回不可变 completion action。只有 runtime owner 可以修改状态、组合 Frame 与绘制。Plotext 串行层对每个 Component 只保留最新的排队 render revision。关闭时依次停止接纳新工作、分离或取消工作、抑制延迟 completion、停止绘制，最后恢复终端状态。
 
 Historical no-Watch 与 Historical Watch 使用相同的启动、查询、接受、处理、Frame 和 Painter 路径，只是在第一份已接受 Frame 后退出。
 

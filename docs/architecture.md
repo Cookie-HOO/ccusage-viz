@@ -13,7 +13,7 @@ This document describes the approved target architecture of `ccusage-viz`. The m
 | Term | Meaning |
 | --- | --- |
 | **Chart Definition** | Stateless catalog entry for one chart type. It gives bootstrap a stable ID and references to separate configuration, data-requirement, processing, rendering, runtime-setting, and inspection collaborators. |
-| **Chart Component** | One running chart instance. It owns its effective configuration, generation, Coverage, accepted data, pending/running/error state, processed model, and rendered content. |
+| **Chart Component** | One running chart instance. It owns its reusable chart payload and lifecycle state—generation, Coverage, accepted data, pending/running/error state, processed model, and rendered content—and receives resolved Host context without taking ownership of Host settings. |
 | **Host** | Product shell that runs and presents Components. Standalone hosts one Component; Dashboard hosts ordered Components in Panes. |
 | **Pane** | Dashboard placement and composition context for one Component. It adds geometry, focus, order, and Dashboard-owned cadence; it does not redefine chart semantics. |
 | **Provider** | Data capability that compiles logical requests, executes physical queries, and returns normalized usage data with provenance, resolution, and Coverage. `ccusage` and Demo are built-in Providers. |
@@ -81,7 +81,7 @@ It owns syntax, option conflicts, Preset composition, appended Panes, Pane owner
 
 #### Logical query planning
 
-Every data consumer—Standalone Component, Dashboard Summary, or Pane Component—produces an independent logical request containing owner, generation, trigger, scope, required resolution and dimensions, Provider selection, and execution options.
+A shared logical planner produces an independent request for every data consumer—Standalone Component, Dashboard Summary, or Pane Component. It combines the owner's resolved Host context, reusable chart payload, Chart Definition data requirements, generation, trigger, and current Coverage into Provider-neutral scope, missing intervals, required resolution and dimensions, Provider selection, and execution options. The same planner is used in both product forms, so missing-Coverage planning does not diverge between Standalone and Dashboard.
 
 A Chart Definition declares what data it needs. It never constructs a `ccusage` command or invokes a Provider itself.
 
@@ -144,21 +144,23 @@ Each data-owning Component keeps an independent lifecycle envelope:
 
 ```text
 Component State
-├── candidate configuration
+├── candidate chart payload + resolved Host context
 ├── accepted data
-├── generation
+├── data generation + render revision
 ├── Coverage
-├── execution: idle / running
+├── query / processing / rendering activity
 ├── debounce handle
-├── pending opportunity: yes / no
+├── pending triggers by kind
 ├── observer
 ├── accepted success time
 └── last error
 ```
 
-A data-affecting adjustment increments the generation immediately. Only a matching current-generation result may update the visible state. A stale result cannot overwrite current content. This redesign drops its payload after delivery; it does not introduce a completed-result cache. Any retained Coverage bookkeeping is bounded to the current effective scope.
+A data-affecting adjustment increments the generation immediately and detaches obsolete effects. Data and its Coverage are accepted atomically only for the current generation; stale delivery updates neither. Theme/Style, viewport, and transient-only changes advance a separate render revision. The redesign introduces no completed-result cache.
 
-Refresh, Sampling, and debounce are separate trigger sources. Fixed scheduler baselines do not move because of query duration, success, failure, manual refresh, pause, or resume. A slow Component never overlaps its own work and retains at most one pending opportunity.
+Refresh, Sampling, debounce, manual refresh, resume, and committed configuration work remain distinguishable trigger sources. Fixed scheduler baselines do not move because of query duration, success, failure, manual refresh, pause, or resume. A slow Component never overlaps one pipeline stage for the same generation, and equivalent pending opportunities coalesce within their own trigger kind.
+
+Workers return immutable completion actions through one serialized runtime queue. Only the runtime owner mutates state, composes Frames, and paints. Plotext serialization keeps only the latest queued render revision per Component. Shutdown stops admission, detaches/cancels work, suppresses late completions, stops painting, and restores terminal state last.
 
 Historical no-Watch uses the same startup, query, acceptance, processing, Frame, and Painter path as Historical Watch, then exits after the first accepted Frame.
 
