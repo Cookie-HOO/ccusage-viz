@@ -7,13 +7,7 @@ from typing import TYPE_CHECKING, Literal
 from ccusage_viz.chart_models import CalendarModel, RankingModel, StackModel, TimelineModel
 from ccusage_viz.domain import TokenUsage
 from ccusage_viz.formatting import format_tokens
-from ccusage_viz.transform import (
-    build_calendar,
-    build_ranking,
-    build_stack,
-    build_timeline,
-    filter_records,
-)
+from ccusage_viz.processing import process_historical
 
 if TYPE_CHECKING:
     from ccusage_viz.i18n import Translator
@@ -74,47 +68,12 @@ def _historical_model(options: StandaloneLaunch, snapshot: UsageSnapshot):
     chart = options.chart
     if isinstance(chart, MonitorConfig):
         raise TypeError("historical data views do not support monitor configurations")
-    filtered, filter_notices = filter_records(
+    return process_historical(
+        chart,
         snapshot.records,
-        chart.date_range,
-        agents=chart.filters.agents,
-        models=chart.filters.models,
-        projects=chart.filters.projects,
-    )
-    notices = (*snapshot.notices, *filter_notices)
-    common = {
-        "include_summary": True,
-        "notices": notices,
-        "coverage": snapshot.coverage,
-    }
-    if chart.kind == "timeline":
-        return build_timeline(
-            filtered,
-            chart.date_range,
-            by=chart.by,
-            top=chart.top,
-            show_other=chart.other == "show",
-            aggregation=chart.granularity,
-            **common,
-        )
-    if chart.kind == "calendar":
-        return build_calendar(filtered, chart.date_range, **common)
-    if chart.kind == "stack":
-        return build_stack(
-            filtered,
-            chart.date_range,
-            split_cache=chart.cache == "split",
-            aggregation=chart.granularity,
-            **common,
-        )
-    return build_ranking(
-        filtered,
-        chart.date_range,
-        by=chart.by,
-        top=chart.top,
-        show_other=chart.other == "show",
+        notices=snapshot.notices,
         summary_notices=snapshot.summary_notices,
-        **common,
+        coverage=snapshot.coverage,
     )
 
 

@@ -3,19 +3,12 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-QUERY_ROOT = Path(__file__).parents[1] / "src" / "ccusage_viz" / "query"
-FORBIDDEN_QUERY_IMPORTS = {
-    "ccusage_viz.cli",
-    "ccusage_viz.options",
-    "ccusage_viz.render",
-    "ccusage_viz.tui",
-    "ccusage_viz.watch",
-}
+PACKAGE_ROOT = Path(__file__).parents[1] / "src" / "ccusage_viz"
 
 
-def test_query_package_does_not_import_host_or_presentation_layers() -> None:
+def _forbidden_imports(root: Path, forbidden_imports: set[str]) -> list[str]:
     violations: list[str] = []
-    for path in sorted(QUERY_ROOT.rglob("*.py")):
+    for path in sorted(root.rglob("*.py")):
         tree = ast.parse(path.read_text())
         for node in ast.walk(tree):
             imported = (
@@ -31,8 +24,35 @@ def test_query_package_does_not_import_host_or_presentation_layers() -> None:
             for module in imported:
                 if any(
                     module == forbidden or module.startswith(f"{forbidden}.")
-                    for forbidden in FORBIDDEN_QUERY_IMPORTS
+                    for forbidden in forbidden_imports
                 ):
                     violations.append(f"{path.name}: {module}")
+    return violations
 
-    assert violations == []
+
+def test_query_package_does_not_import_host_or_presentation_layers() -> None:
+    assert _forbidden_imports(
+        PACKAGE_ROOT / "query",
+        {
+            "ccusage_viz.cli",
+            "ccusage_viz.options",
+            "ccusage_viz.render",
+            "ccusage_viz.tui",
+            "ccusage_viz.watch",
+        },
+    ) == []
+
+
+def test_processing_package_does_not_import_runtime_or_adapter_layers() -> None:
+    assert _forbidden_imports(
+        PACKAGE_ROOT / "processing",
+        {
+            "ccusage_viz.monitor",
+            "ccusage_viz.providers",
+            "ccusage_viz.query",
+            "ccusage_viz.render",
+            "ccusage_viz.terminal",
+            "ccusage_viz.tui",
+            "ccusage_viz.watch",
+        },
+    ) == []

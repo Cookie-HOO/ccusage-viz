@@ -6,14 +6,9 @@ from ccusage_viz.chart_models import ChangeDirection
 from ccusage_viz.core.time import DateRange
 from ccusage_viz.coverage import DateCoverage
 from ccusage_viz.domain import ModelBreakdown, Notice, SourceKind, TokenUsage, UsageRecord
+from ccusage_viz.processing import filter_records
 from ccusage_viz.project_identity import make_project_ref
-from ccusage_viz.transform import (
-    build_calendar,
-    build_ranking,
-    build_stack,
-    build_timeline,
-    filter_records,
-)
+from ccusage_viz.transform import build_calendar, build_ranking, build_stack, build_timeline
 
 
 def usage(total: int) -> TokenUsage:
@@ -47,17 +42,36 @@ def test_filters_or_within_dimension_and_and_across_dimensions() -> None:
     assert [item.usage.total for item in filtered] == [10, 20]
 
 
-def test_model_candidates_respect_agent_and_project_filters() -> None:
+def test_filter_candidates_are_independent_across_dimensions() -> None:
     records = (
         record(1, "claude", "/a/app", "sonnet", 10),
         record(1, "codex", "/b/tool", "codex", 20),
     )
     period = DateRange(date(2026, 1, 1), date(2026, 1, 2), None)
 
-    filtered, _ = filter_records(records, period, agents=("claude",), models=("son",))
-    assert [item.usage.total for item in filtered] == [10]
+    filtered, notices = filter_records(
+        records, period, agents=("claude",), models=("cod",)
+    )
+    assert filtered == ()
+    assert notices[-1].values == {"dimension": "model", "values": "codex"}
 
-    filtered, _ = filter_records(records, period, projects=("app",), models=("son",))
+    filtered, notices = filter_records(
+        records, period, agents=("claude",), projects=("ool",)
+    )
+    assert filtered == ()
+    assert notices[-1].values == {"dimension": "project", "values": "tool"}
+
+
+def test_filters_remain_and_across_independently_resolved_dimensions() -> None:
+    records = (
+        record(1, "claude", "/a/app", "sonnet", 10),
+        record(1, "codex", "/b/tool", "codex", 20),
+    )
+    period = DateRange(date(2026, 1, 1), date(2026, 1, 2), None)
+
+    filtered, _ = filter_records(
+        records, period, agents=("claude",), projects=("app",), models=("son",)
+    )
     assert [item.usage.total for item in filtered] == [10]
 
 

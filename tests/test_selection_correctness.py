@@ -6,8 +6,9 @@ from ccusage_viz.core.time import DateRange
 from ccusage_viz.domain import ModelBreakdown, SourceKind, TokenUsage, UsageRecord
 from ccusage_viz.errors import UsageError
 from ccusage_viz.i18n import load_translator
+from ccusage_viz.processing import filter_records
 from ccusage_viz.project_identity import make_project_ref, resolve_projects
-from ccusage_viz.transform import build_timeline, filter_records
+from ccusage_viz.transform import build_timeline
 
 
 def _record(day: int, agent: str, project: str, model: str, total: int) -> UsageRecord:
@@ -75,10 +76,6 @@ def test_selected_values_without_rows_emit_notices_and_keep_available_groups() -
         (
             "notice.selected_no_data",
             {"dimension": "agent", "values": "codex"},
-        ),
-        (
-            "notice.selected_no_data",
-            {"dimension": "project", "values": "app (codex)"},
         ),
         (
             "notice.selected_no_data",

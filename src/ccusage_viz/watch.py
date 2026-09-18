@@ -14,6 +14,7 @@ from typing import Literal, cast
 
 from ccusage_viz.acquisition import historical_provider_id, historical_query_intent
 from ccusage_viz.bootstrap import build_query_runtime
+from ccusage_viz.chart_models import CalendarModel, RankingModel, StackModel, TimelineModel
 from ccusage_viz.command_copy import (
     copy_command,
     format_command,
@@ -40,6 +41,7 @@ from ccusage_viz.options import (
     adjust_standalone,
     compatible_styles,
 )
+from ccusage_viz.processing import filter_records, process_historical
 from ccusage_viz.query.coordinator import QueryHandle
 from ccusage_viz.query.models import ProviderResult, QueryTrigger
 from ccusage_viz.query.runtime import QueryRuntime
@@ -53,13 +55,7 @@ from ccusage_viz.render import (
 from ccusage_viz.render.base import styled_text
 from ccusage_viz.render.palette import COLOR_SCHEMES, WARNING_COLOR
 from ccusage_viz.terminal import InteractiveScreen, Terminal, inspect_terminal
-from ccusage_viz.transform import (
-    build_calendar,
-    build_ranking,
-    build_stack,
-    build_timeline,
-    filter_records,
-)
+from ccusage_viz.transform import build_ranking
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,14 +129,13 @@ def _render(
 ) -> RenderedChart:
     if isinstance(options.chart, MonitorConfig):
         raise TypeError("historical rendering does not support monitor configurations")
-    filtered, filter_notices = filter_records(
+    model = process_historical(
+        options.chart,
         records,
-        options.chart.date_range,
-        agents=options.chart.filters.agents,
-        models=options.chart.filters.models,
-        projects=options.chart.filters.projects,
+        notices=notices,
+        summary_notices=summary_notices,
+        coverage=coverage,
     )
-    all_notices = (*notices, *filter_notices)
 
     def context_for(notice_count: int) -> RenderContext:
         title_content = (
@@ -173,51 +168,13 @@ def _render(
             title_content=title_content,
         )
 
-    if options.chart.kind == "timeline":
-        model = build_timeline(
-            filtered,
-            options.chart.date_range,
-            by=None if options.chart.by == "total" else options.chart.by,
-            top=options.chart.top,
-            show_other=options.chart.other == "show",
-            include_summary=True,
-            notices=all_notices,
-            aggregation=options.chart.granularity,
-            coverage=coverage,
-        )
+    if isinstance(model, TimelineModel):
         chart = render_timeline(model, context_for(len(model.notices)))
-    elif options.chart.kind == "calendar":
-        model = build_calendar(
-            filtered,
-            options.chart.date_range,
-            include_summary=True,
-            notices=all_notices,
-            coverage=coverage,
-        )
+    elif isinstance(model, CalendarModel):
         chart = render_calendar(model, context_for(len(model.notices)))
-    elif options.chart.kind == "stack":
-        model = build_stack(
-            filtered,
-            options.chart.date_range,
-            split_cache=options.chart.cache == "split",
-            include_summary=True,
-            notices=all_notices,
-            aggregation=options.chart.granularity,
-            coverage=coverage,
-        )
+    elif isinstance(model, StackModel):
         chart = render_stack(model, context_for(len(model.notices)))
-    else:
-        model = build_ranking(
-            filtered,
-            options.chart.date_range,
-            by=options.chart.by or "project",
-            top=options.chart.top,
-            show_other=options.chart.other == "show",
-            include_summary=True,
-            notices=all_notices,
-            summary_notices=summary_notices,
-            coverage=coverage,
-        )
+    elif isinstance(model, RankingModel):
         chart = render_ranking(model, context_for(len(model.notices)))
     messages = tuple(translator.text(notice.key, **notice.values) for notice in model.notices)
     return RenderedChart(chart, messages)
