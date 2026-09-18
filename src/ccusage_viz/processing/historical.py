@@ -25,6 +25,7 @@ def process_historical(
     notices: tuple[Notice, ...] = (),
     summary_notices: tuple[Notice, ...] = (),
     coverage: DateCoverage = _EMPTY_COVERAGE,
+    include_summary: bool = True,
 ) -> HistoricalModel:
     """Project accepted normalized records into one immutable chart model."""
     filtered, filter_notices = filter_records(
@@ -42,6 +43,7 @@ def process_historical(
             by=None if chart.by == "total" else chart.by,
             top=chart.top,
             show_other=chart.other == "show",
+            include_summary=include_summary,
             notices=all_notices,
             aggregation=chart.granularity,
             coverage=coverage,
@@ -50,6 +52,7 @@ def process_historical(
         return build_calendar(
             filtered,
             chart.date_range,
+            include_summary=include_summary,
             notices=all_notices,
             coverage=coverage,
         )
@@ -58,6 +61,7 @@ def process_historical(
             filtered,
             chart.date_range,
             split_cache=chart.cache == "split",
+            include_summary=include_summary,
             notices=all_notices,
             aggregation=chart.granularity,
             coverage=coverage,
@@ -68,6 +72,7 @@ def process_historical(
         by=chart.by,
         top=chart.top,
         show_other=chart.other == "show",
+        include_summary=include_summary,
         notices=all_notices,
         summary_notices=summary_notices,
         coverage=coverage,

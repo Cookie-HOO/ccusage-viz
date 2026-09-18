@@ -41,7 +41,7 @@ from ccusage_viz.options import (
     adjust_standalone,
     compatible_styles,
 )
-from ccusage_viz.processing import build_ranking, filter_records, process_historical
+from ccusage_viz.processing import process_historical
 from ccusage_viz.query.coordinator import QueryHandle
 from ccusage_viz.query.models import ProviderResult, QueryTrigger
 from ccusage_viz.query.runtime import QueryRuntime
@@ -184,22 +184,16 @@ def ranking_entries(
 ) -> tuple[tuple[Hashable, float, bool], ...]:
     if not isinstance(options.chart, RankingConfig):
         raise TypeError("ranking entries require a ranking configuration")
-    filtered, _ = filter_records(
+    model = process_historical(
+        options.chart,
         snapshot.records,
-        options.chart.date_range,
-        agents=options.chart.filters.agents,
-        models=options.chart.filters.models,
-        projects=options.chart.filters.projects,
-    )
-    model = build_ranking(
-        filtered,
-        options.chart.date_range,
-        by=options.chart.by or "project",
-        top=options.chart.top,
-        show_other=options.chart.other == "show",
-        include_summary=False,
         notices=snapshot.notices,
+        summary_notices=snapshot.summary_notices,
+        coverage=snapshot.coverage,
+        include_summary=False,
     )
+    if not isinstance(model, RankingModel):
+        raise TypeError("ranking processing must produce a ranking model")
     return tuple((entry.key, float(entry.usage.total), entry.is_other) for entry in model.entries)
 
 
