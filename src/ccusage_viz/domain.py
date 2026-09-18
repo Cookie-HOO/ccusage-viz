@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import date
 from enum import StrEnum
+from types import MappingProxyType
+from typing import TypeAlias
+
+NoticeValue: TypeAlias = str | int | float | bool | None
 
 
 class Agent(StrEnum):
@@ -116,4 +121,7 @@ class UsageRecord:
 @dataclass(frozen=True, slots=True)
 class Notice:
     key: str
-    values: dict[str, object] = field(default_factory=dict)
+    values: Mapping[str, NoticeValue] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "values", MappingProxyType(dict(self.values)))

@@ -39,9 +39,9 @@ from ccusage_viz.options import (
     adjust_standalone,
     compatible_styles,
 )
+from ccusage_viz.providers.ccusage import plan_ccusage_queries
 from ccusage_viz.query.client import QueryRunner
 from ccusage_viz.query.models import QueryKind
-from ccusage_viz.query.planner import plan_queries
 from ccusage_viz.render import (
     RenderContext,
     render_calendar,
@@ -267,7 +267,7 @@ def load_snapshot(options: StandaloneLaunch, runner: QueryRunner) -> UsageSnapsh
             options.chart.date_range.since, options.chart.date_range.until
         )
     else:
-        plan = plan_queries(options)
+        plan = plan_ccusage_queries(options)
         results = runner.run(plan)
         records = tuple(
             record for result in results for record in parse_usage_records(result.kind, result.data)
