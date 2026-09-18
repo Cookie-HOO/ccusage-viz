@@ -13,8 +13,8 @@ from shutil import get_terminal_size
 from typing import Literal, cast
 
 from ccusage_viz.acquisition import historical_provider_id, historical_query_intent
-from ccusage_viz.bootstrap import build_query_runtime
-from ccusage_viz.chart_models import CalendarModel, RankingModel, StackModel, TimelineModel
+from ccusage_viz.bootstrap import build_chart_registry, build_query_runtime
+from ccusage_viz.chart_models import RankingModel
 from ccusage_viz.command_copy import (
     copy_command,
     format_command,
@@ -45,13 +45,7 @@ from ccusage_viz.processing import process_historical
 from ccusage_viz.query.coordinator import QueryHandle
 from ccusage_viz.query.models import ProviderResult, QueryTrigger
 from ccusage_viz.query.runtime import QueryRuntime
-from ccusage_viz.render import (
-    RenderContext,
-    render_calendar,
-    render_ranking,
-    render_stack,
-    render_timeline,
-)
+from ccusage_viz.render import RenderContext
 from ccusage_viz.render.base import styled_text
 from ccusage_viz.render.palette import COLOR_SCHEMES, WARNING_COLOR
 from ccusage_viz.terminal import InteractiveScreen, Terminal, inspect_terminal
@@ -167,14 +161,12 @@ def _render(
             title_content=title_content,
         )
 
-    if isinstance(model, TimelineModel):
-        chart = render_timeline(model, context_for(len(model.notices)))
-    elif isinstance(model, CalendarModel):
-        chart = render_calendar(model, context_for(len(model.notices)))
-    elif isinstance(model, StackModel):
-        chart = render_stack(model, context_for(len(model.notices)))
-    elif isinstance(model, RankingModel):
-        chart = render_ranking(model, context_for(len(model.notices)))
+    definition = build_chart_registry().get(options.chart.kind)
+    if not isinstance(options.chart, definition.config_type):
+        raise TypeError(f"{definition.chart_id} definition received incompatible configuration")
+    if not isinstance(model, definition.model_type):
+        raise TypeError(f"{definition.chart_id} definition produced incompatible model")
+    chart = definition.renderer(model, context_for(len(model.notices)))
     messages = tuple(translator.text(notice.key, **notice.values) for notice in model.notices)
     return RenderedChart(chart, messages)
 

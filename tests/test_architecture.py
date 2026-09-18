@@ -43,6 +43,24 @@ def test_query_package_does_not_import_host_or_presentation_layers() -> None:
     ) == []
 
 
+def test_chart_catalog_does_not_import_hosts_or_data_adapters() -> None:
+    assert _forbidden_imports(
+        PACKAGE_ROOT / "charts",
+        {
+            "ccusage_viz.acquisition",
+            "ccusage_viz.application",
+            "ccusage_viz.cli",
+            "ccusage_viz.dependency",
+            "ccusage_viz.monitor",
+            "ccusage_viz.providers",
+            "ccusage_viz.query",
+            "ccusage_viz.terminal",
+            "ccusage_viz.tui",
+            "ccusage_viz.watch",
+        },
+    ) == []
+
+
 def test_processing_package_does_not_import_runtime_or_adapter_layers() -> None:
     assert _forbidden_imports(
         PACKAGE_ROOT / "processing",

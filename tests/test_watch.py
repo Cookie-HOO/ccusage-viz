@@ -9,6 +9,9 @@ from typing import cast
 
 import pytest
 
+from ccusage_viz.charts.builtins import RANKING_DEFINITION
+from ccusage_viz.charts.definition import HistoricalRenderer
+from ccusage_viz.charts.registry import ChartRegistry
 from ccusage_viz.core.time import DateRange
 from ccusage_viz.coverage import DateCoverage, DateInterval
 from ccusage_viz.domain import Notice
@@ -324,7 +327,12 @@ def test_one_shot_reserves_one_more_row_than_watch(monkeypatch: pytest.MonkeyPat
         heights.append(context.height)
         return "chart"
 
-    monkeypatch.setattr("ccusage_viz.watch.render_ranking", capture_height)
+    registry = ChartRegistry()
+    registry.register(
+        replace(RANKING_DEFINITION, renderer=cast(HistoricalRenderer, capture_height))
+    )
+    registry.freeze()
+    monkeypatch.setattr("ccusage_viz.watch.build_chart_registry", lambda: registry)
     runtime = cast(QueryRuntime, Runtime(provider_result()))
     terminal = Terminal(100, 30, False, True)
     translator = load_translator("en")
