@@ -64,8 +64,8 @@ from ccusage_viz.render.base import (
 from ccusage_viz.render.palette import COLOR_SCHEMES, categorical_colors, get_color_scheme
 from ccusage_viz.schema import parse_usage_records
 from ccusage_viz.terminal import InteractiveScreen, Terminal, inspect_terminal
+from ccusage_viz.terminal_ui import controls_line, dimmed, input_mode, read_key
 from ccusage_viz.trends import trend_glyph
-from ccusage_viz.watch import _controls_line, _dimmed, _input_mode, _read_key
 
 
 @dataclass(frozen=True, slots=True)
@@ -643,7 +643,7 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
             controls = (
                 ()
                 if controls_hidden
-                else _controls_line(
+                else controls_line(
                     translator.text(
                         {
                             "chart": "status.monitor_controls",
@@ -702,7 +702,7 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                 status,
                 ()
                 if controls_hidden
-                else _controls_line(
+                else controls_line(
                     translator.text("status.monitor_controls"),
                     width=terminal.width,
                     color=False,
@@ -795,7 +795,7 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                 if monitor_chart(candidate).top is not None
                 else translator.text("label.monitor_all")
             )
-            adjustment_state = _controls_line(
+            adjustment_state = controls_line(
                 " · ".join(
                     part
                     for part in (
@@ -825,7 +825,7 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                 width=terminal.width,
                 color=terminal.color,
             )
-            key_help = _controls_line(
+            key_help = controls_line(
                 translator.text(f"status.monitor_adjust_{adjustment_page}_keys"),
                 width=terminal.width,
                 color=terminal.color,
@@ -846,7 +846,7 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
 
         paint_picker()
         while True:
-            key = _read_key(0.1)
+            key = read_key(0.1)
             if key == "\x03":
                 raise KeyboardInterrupt
             if key == "\x1b":
@@ -966,7 +966,7 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
         threading.Thread(target=work, name="ccusage-viz-monitor", daemon=True).start()
 
     try:
-        with _input_mode():
+        with input_mode():
             paint()
             while True:
                 size = get_terminal_size()
@@ -988,7 +988,7 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                     )
                     screen.paint_status(
                         prefix
-                        + _dimmed(
+                        + dimmed(
                             translator.text("status.monitor_sampling_active"),
                             color=current.chart.presentation.theme != "no-color",
                         )
@@ -1036,7 +1036,7 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                             state="",
                         ).rstrip(" ·")
                     paint()
-                key = _read_key(0.05)
+                key = read_key(0.05)
                 if key == "\x03":
                     raise KeyboardInterrupt
                 if key == "r" and not running:

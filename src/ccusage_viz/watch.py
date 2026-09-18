@@ -2,12 +2,10 @@ from __future__ import annotations
 
 import os
 import queue
-import select
 import sys
 import threading
 import time
-from collections.abc import Hashable, Iterator, Mapping
-from contextlib import contextmanager
+from collections.abc import Hashable, Mapping
 from dataclasses import dataclass, replace
 from shutil import get_terminal_size
 
@@ -28,7 +26,6 @@ from ccusage_viz.deltas import RefreshDeltas, RefreshRanks
 from ccusage_viz.diagnostics import color_enabled, format_error
 from ccusage_viz.domain import Notice, UsageRecord
 from ccusage_viz.errors import UsageError
-from ccusage_viz.formatting import clip_width
 from ccusage_viz.historical_component import (
     HistoricalChartComponent,
     HistoricalCompletion,
@@ -51,9 +48,9 @@ from ccusage_viz.query.coordinator import QueryHandle
 from ccusage_viz.query.models import ProviderResult, QueryTrigger
 from ccusage_viz.query.runtime import QueryRuntime
 from ccusage_viz.render import RenderContext
-from ccusage_viz.render.base import styled_text
-from ccusage_viz.render.palette import COLOR_SCHEMES, WARNING_COLOR
+from ccusage_viz.render.palette import COLOR_SCHEMES
 from ccusage_viz.terminal import InteractiveScreen, Terminal, inspect_terminal
+from ccusage_viz.terminal_ui import controls_line, dimmed, input_mode, notice_lines, read_key
 
 
 @dataclass(frozen=True, slots=True)
@@ -383,7 +380,7 @@ def run_once(options: StandaloneLaunch, translator: Translator) -> int:
             result.chart,
             status,
             "",
-            _notice_lines(
+            notice_lines(
                 result.notices,
                 width=terminal.width,
                 color=terminal.color,
@@ -397,75 +394,6 @@ def run_once(options: StandaloneLaunch, translator: Translator) -> int:
         return 0
     finally:
         runtime.cancel()
-
-
-@contextmanager
-def _input_mode() -> Iterator[None]:
-    if os.name != "posix":
-        yield
-        return
-    import termios
-    import tty
-
-    if not sys.stdin.isatty():
-        raise UsageError("error.tty")
-    descriptor = sys.stdin.fileno()
-    previous = termios.tcgetattr(descriptor)
-    try:
-        tty.setcbreak(descriptor)
-        attributes = termios.tcgetattr(descriptor)
-        attributes[3] &= ~termios.ISIG
-        termios.tcsetattr(descriptor, termios.TCSADRAIN, attributes)
-        yield
-    finally:
-        termios.tcsetattr(descriptor, termios.TCSADRAIN, previous)
-
-
-def _read_key(timeout: float) -> str | None:
-    if os.name == "nt":
-        import msvcrt
-
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            if msvcrt.kbhit():
-                return msvcrt.getwch()
-            time.sleep(min(0.05, timeout))
-        return None
-    readable, _, _ = select.select([sys.stdin], [], [], timeout)
-    return sys.stdin.read(1) if readable else None
-
-
-def _dimmed(text: str, *, color: bool) -> str:
-    return f"\x1b[2m{text}\x1b[0m" if color else text
-
-
-def _notice_lines(
-    notices: tuple[str, ...],
-    *,
-    width: int,
-    color: bool,
-    ascii: bool,
-    translator: Translator,
-    color_scheme: str = "classic",
-) -> tuple[str, ...]:
-    context = RenderContext(
-        width,
-        1,
-        translator,
-        color=color,
-        ascii=ascii,
-        color_scheme=color_scheme,
-    )
-    glyph = "!" if ascii else "⚠"
-    notice_color = 255 if color_scheme == "mono" else WARNING_COLOR
-    return tuple(
-        clip_width(styled_text(f"{glyph} {notice}", notice_color, context, bold=True), width)
-        for notice in notices
-    )
-
-
-def _controls_line(controls: str, *, width: int, color: bool) -> str:
-    return clip_width(_dimmed(controls, color=color), width)
 
 
 def _paint(
@@ -484,7 +412,7 @@ def _paint_status(status: str) -> None:
 
 
 def _refreshing_status(status: str, translator: Translator, *, color: bool) -> str:
-    refreshing = _dimmed(translator.text("status.refreshing"), color=color)
+    refreshing = dimmed(translator.text("status.refreshing"), color=color)
     return f"{status} · {refreshing}"
 
 
@@ -504,7 +432,7 @@ def _watch_status(
     )
     parts = [base, suffix]
     if running:
-        parts.append(_dimmed(translator.text("status.refreshing"), color=color))
+        parts.append(dimmed(translator.text("status.refreshing"), color=color))
     return " · ".join(parts)
 
 
@@ -622,12 +550,12 @@ def run_runtime_adjustment(
             translator.text("status.project_preview_missing") if project_preview_missing else None
         )
         controls: str | tuple[str, ...] = (
-            _controls_line(
+            controls_line(
                 " · ".join(part for part in (state, copied_status) if part is not None),
                 width=terminal.width,
                 color=terminal.color,
             ),
-            _controls_line(
+            controls_line(
                 f"{translator.text(f'status.tui_adjust_{adjustment_page}')} · "
                 f"{translator.messages[key_key]}",
                 width=terminal.width,
@@ -641,7 +569,7 @@ def run_runtime_adjustment(
             chart,
             status,
             controls,
-            _notice_lines(
+            notice_lines(
                 notices,
                 width=terminal.width,
                 color=terminal.color,
@@ -653,10 +581,10 @@ def run_runtime_adjustment(
         )
 
     try:
-        with _input_mode():
+        with input_mode():
             paint()
             while True:
-                key = _read_key(0.1)
+                key = read_key(0.1)
                 if get_terminal_size() != last_size:
                     paint()
                 if key == "\x03":
@@ -796,8 +724,8 @@ def run_watch(
                 status(),
                 ()
                 if controls_hidden
-                else _controls_line(controls(), width=size.columns, color=False),
-                _notice_lines(
+                else controls_line(controls(), width=size.columns, color=False),
+                notice_lines(
                     (*last_notices, warning) if last_chart else (),
                     width=size.columns,
                     color=False,
@@ -852,8 +780,8 @@ def run_watch(
         active_screen.paint(
             body,
             status(),
-            () if not footer else _controls_line(footer, width=size.columns, color=color),
-            _notice_lines(
+            () if not footer else controls_line(footer, width=size.columns, color=color),
+            notice_lines(
                 (*last_notices, render_warning) if render_warning is not None else last_notices,
                 width=size.columns,
                 color=color,
@@ -892,7 +820,7 @@ def run_watch(
         threading.Thread(target=work, name="ccusage-viz-refresh", daemon=True).start()
 
     try:
-        with _input_mode():
+        with input_mode():
             paint()
             while True:
                 size = terminal_size()
@@ -984,7 +912,7 @@ def run_watch(
                     if pending_trigger is not None:
                         next_refresh = time.monotonic()
 
-                key = _read_key(0.05)
+                key = read_key(0.05)
                 if key == "\x03":
                     raise KeyboardInterrupt
                 if key == "r":

@@ -32,12 +32,11 @@ from ccusage_viz.options import (
 from ccusage_viz.query.models import DataResolution, ProviderResult, QueryIntent
 from ccusage_viz.query.runtime import QueryRuntime
 from ccusage_viz.terminal import InteractiveScreen, Terminal
+from ccusage_viz.terminal_ui import controls_line, notice_lines
 from ccusage_viz.watch import (
     RefreshResult,
     RuntimeAdjustmentResult,
     UsageSnapshot,
-    _controls_line,
-    _notice_lines,
     _paint,
     _paint_status,
     _refresh,
@@ -235,14 +234,14 @@ def test_loading_status_can_show_pause_before_first_result() -> None:
 
 def test_notice_lines_use_redundant_glyph_color_and_width() -> None:
     translator = load_translator("en")
-    colored = _notice_lines(
+    colored = notice_lines(
         ("A warning that is intentionally much too long",),
         width=18,
         color=True,
         ascii=False,
         translator=translator,
     )[0]
-    plain = _notice_lines(
+    plain = notice_lines(
         ("warning",),
         width=18,
         color=False,
@@ -259,8 +258,8 @@ def test_notice_lines_use_redundant_glyph_color_and_width() -> None:
 
 
 def test_controls_are_dimmed_and_clipped_to_one_row() -> None:
-    colored = _controls_line("r refresh · m adjust · Space pause", width=20, color=True)
-    plain = _controls_line("r refresh · m adjust · Space pause", width=20, color=False)
+    colored = controls_line("r refresh · m adjust · Space pause", width=20, color=True)
+    plain = controls_line("r refresh · m adjust · Space pause", width=20, color=False)
 
     assert colored.startswith("\x1b[2m") and colored.endswith("\x1b[0m")
     assert display_width(colored) == 20
@@ -381,8 +380,8 @@ def test_runtime_adjustment_updates_display_options_from_retained_snapshot(
 
     inputs = iter(keys)
     rendered_snapshots: list[UsageSnapshot] = []
-    monkeypatch.setattr("ccusage_viz.watch._input_mode", nullcontext)
-    monkeypatch.setattr("ccusage_viz.watch._read_key", lambda timeout: next(inputs))
+    monkeypatch.setattr("ccusage_viz.watch.input_mode", nullcontext)
+    monkeypatch.setattr("ccusage_viz.watch.read_key", lambda timeout: next(inputs))
     monkeypatch.setattr(
         "ccusage_viz.watch.inspect_terminal",
         lambda *args, **kwargs: Terminal(100, 30, True, True),
@@ -427,8 +426,8 @@ def test_runtime_adjustment_retains_last_chart_until_an_invalid_draft_recovers(
 
     keys = iter(("s", "\n", "s", "\n"))
     calls = 0
-    monkeypatch.setattr("ccusage_viz.watch._input_mode", nullcontext)
-    monkeypatch.setattr("ccusage_viz.watch._read_key", lambda timeout: next(keys))
+    monkeypatch.setattr("ccusage_viz.watch.input_mode", nullcontext)
+    monkeypatch.setattr("ccusage_viz.watch.read_key", lambda timeout: next(keys))
     monkeypatch.setattr(
         "ccusage_viz.watch.inspect_terminal",
         lambda *args, **kwargs: Terminal(100, 30, False, True),
@@ -471,8 +470,8 @@ def test_runtime_adjustment_pages_match_dashboard_and_weekdays_work(
             controls.append(args[2])
 
     keys = iter(("k", "a", "k", "b", "a", "b", "\n"))
-    monkeypatch.setattr("ccusage_viz.watch._input_mode", nullcontext)
-    monkeypatch.setattr("ccusage_viz.watch._read_key", lambda timeout: next(keys))
+    monkeypatch.setattr("ccusage_viz.watch.input_mode", nullcontext)
+    monkeypatch.setattr("ccusage_viz.watch.read_key", lambda timeout: next(keys))
     monkeypatch.setattr(
         "ccusage_viz.watch.inspect_terminal",
         lambda *args, **kwargs: Terminal(100, 30, True, True),
@@ -504,8 +503,8 @@ def test_project_adjustment_explains_missing_retained_attribution(
             paints.append(args)
 
     keys = iter(("b", "b", "b", "\x1b"))
-    monkeypatch.setattr("ccusage_viz.watch._input_mode", nullcontext)
-    monkeypatch.setattr("ccusage_viz.watch._read_key", lambda timeout: next(keys))
+    monkeypatch.setattr("ccusage_viz.watch.input_mode", nullcontext)
+    monkeypatch.setattr("ccusage_viz.watch.read_key", lambda timeout: next(keys))
     monkeypatch.setattr(
         "ccusage_viz.watch.inspect_terminal",
         lambda *args, **kwargs: Terminal(100, 30, True, True),
@@ -531,8 +530,8 @@ def test_runtime_adjustment_copy_uses_adjusted_display_options(
 
     keys = iter(("b", "+", "a", "o", "y", "\x1b"))
     copied: list[str] = []
-    monkeypatch.setattr("ccusage_viz.watch._input_mode", nullcontext)
-    monkeypatch.setattr("ccusage_viz.watch._read_key", lambda timeout: next(keys))
+    monkeypatch.setattr("ccusage_viz.watch.input_mode", nullcontext)
+    monkeypatch.setattr("ccusage_viz.watch.read_key", lambda timeout: next(keys))
     monkeypatch.setattr(
         "ccusage_viz.watch.inspect_terminal",
         lambda *args, **kwargs: Terminal(100, 30, True, True),
@@ -573,8 +572,8 @@ def test_runtime_adjustment_normalizes_timeline_area_when_grouping_changes(
             pass
 
     keys = iter(("b", "\n"))
-    monkeypatch.setattr("ccusage_viz.watch._input_mode", nullcontext)
-    monkeypatch.setattr("ccusage_viz.watch._read_key", lambda timeout: next(keys))
+    monkeypatch.setattr("ccusage_viz.watch.input_mode", nullcontext)
+    monkeypatch.setattr("ccusage_viz.watch.read_key", lambda timeout: next(keys))
     monkeypatch.setattr(
         "ccusage_viz.watch.inspect_terminal",
         lambda *args, **kwargs: Terminal(100, 30, True, True),

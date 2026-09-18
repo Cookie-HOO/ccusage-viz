@@ -59,10 +59,10 @@ from ccusage_viz.render.base import RenderContext, styled_text
 from ccusage_viz.render.palette import COLOR_SCHEMES, get_color_scheme
 from ccusage_viz.render.summary import render_summary, render_summary_placeholder
 from ccusage_viz.terminal import InteractiveScreen, Terminal
+from ccusage_viz.terminal_ui import notice_lines as format_notice_lines
+from ccusage_viz.terminal_ui import read_key
 from ccusage_viz.tui_input import KeyEvent, MouseEvent, read_event, tui_input_mode
 from ccusage_viz.watch import (
-    _notice_lines,
-    _read_key,
     load_snapshot,
     ranking_keys,
     ranking_values,
@@ -828,7 +828,7 @@ def _choose_pane_type(
             translator.text("status.tui_add_controls"),
             height=height,
         )
-        key = _read_key(0.1)
+        key = read_key(0.1)
         if key in {"j", "\x1b[B"}:
             index = (index + 1) % len(_PANE_COMMANDS)
         elif key in {"k", "\x1b[A"}:
@@ -1187,7 +1187,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         )
         pane_renders = render_panes(layout, columns)
         notices = _unique_notices(pane_renders)
-        notice_lines = _notice_lines(
+        notice_lines = format_notice_lines(
             notices,
             width=size.columns,
             color=dashboard_theme != "no-color",
@@ -1205,7 +1205,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             )
             pane_renders = render_panes(layout, columns)
             notices = _unique_notices(pane_renders)
-            notice_lines = _notice_lines(
+            notice_lines = format_notice_lines(
                 notices,
                 width=size.columns,
                 color=dashboard_theme != "no-color",
