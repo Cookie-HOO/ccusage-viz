@@ -15,7 +15,17 @@ from ccusage_viz.domain import Notice
 from ccusage_viz.errors import UsageError
 from ccusage_viz.formatting import display_width, strip_ansi
 from ccusage_viz.i18n import load_translator
-from ccusage_viz.options import CommandOptions
+from ccusage_viz.options import (
+    CalendarConfig,
+    ChartPresentation,
+    MonitorConfig,
+    ProcessConfig,
+    RankingConfig,
+    StackConfig,
+    StandaloneHostConfig,
+    StandaloneLaunch,
+    TimelineConfig,
+)
 from ccusage_viz.query.client import QueryRunner
 from ccusage_viz.terminal import InteractiveScreen, Terminal
 from ccusage_viz.watch import (
@@ -36,23 +46,31 @@ from ccusage_viz.watch import (
 )
 
 
-def options(*, command: str = "ranking", demo: str | None = "small") -> CommandOptions:
-    return CommandOptions(
-        command=command,
-        date_range=DateRange(date(2026, 1, 1), date(2026, 1, 14), None),
-        by="project" if command == "ranking" else None,
-        top=10 if command == "ranking" else 3,
-        other="hide",
-        cache="combined",
-        agents=(),
-        models=(),
-        projects=(),
-        interval=None,
-        demo=demo,
-        ccusage_bin="/not/invoked",
-        query_timeout=2,
-        no_color=True,
-        ascii=True,
+def options(*, command: str = "ranking", demo: str | None = "small") -> StandaloneLaunch:
+    date_range = DateRange(date(2026, 1, 1), date(2026, 1, 14), None)
+    presentation = ChartPresentation(theme="no-color")
+    chart = (
+        TimelineConfig("timeline", date_range, presentation=presentation, top=3, other="hide")
+        if command == "timeline"
+        else CalendarConfig("calendar", date_range, presentation=presentation)
+        if command == "calendar"
+        else StackConfig("stack", date_range, presentation=replace(presentation, style="stacked"))
+        if command == "stack"
+        else RankingConfig(
+            "ranking",
+            date_range,
+            presentation=replace(presentation, style="bar"),
+            by="project",
+            top=10,
+            other="hide",
+        )
+        if command == "ranking"
+        else MonitorConfig("monitor", 3600, presentation=replace(presentation, style="bars"))
+    )
+    return StandaloneLaunch(
+        ProcessConfig(ccusage_bin="/not/invoked", query_timeout=2),
+        StandaloneHostConfig(ascii=True, demo_size=demo, watch=False),
+        chart,
     )
 
 
@@ -333,7 +351,9 @@ def test_runtime_adjustment_updates_display_options_from_retained_snapshot(
 
     monkeypatch.setattr("ccusage_viz.watch.render_snapshot", capture_render_snapshot)
     snapshot = UsageSnapshot((), (), 0.25)
-    current = replace(options(command=command), by=by)
+    current = options(command=command)
+    if command in {"timeline", "ranking"}:
+        current = replace(current, chart=replace(current.chart, by=None if by == "total" else by))
 
     result = run_runtime_adjustment(
         current,
@@ -343,11 +363,11 @@ def test_runtime_adjustment_updates_display_options_from_retained_snapshot(
     )
 
     assert isinstance(result, RuntimeAdjustmentResult)
-    assert all(getattr(result.options, field) == value for field, value in expected.items())
+    assert all(getattr(result.options.chart, field) == value for field, value in expected.items())
     assert rendered_snapshots and all(item is snapshot for item in rendered_snapshots)
-    assert result.options.agents == current.agents
-    assert result.options.models == current.models
-    assert result.options.projects == current.projects
+    assert result.options.chart.filters.agents == current.chart.filters.agents
+    assert result.options.chart.filters.models == current.chart.filters.models
+    assert result.options.chart.filters.projects == current.chart.filters.projects
 
 
 def test_runtime_adjustment_retains_last_chart_until_an_invalid_draft_recovers(
@@ -377,7 +397,11 @@ def test_runtime_adjustment_retains_last_chart_until_an_invalid_draft_recovers(
 
     monkeypatch.setattr("ccusage_viz.watch.render_snapshot", render)
     current = replace(
-        options(command="stack"), date_range=DateRange(date(2026, 1, 1), date(2026, 1, 7), "7d")
+        options(command="stack"),
+        chart=replace(
+            options(command="stack").chart,
+            date_range=DateRange(date(2026, 1, 1), date(2026, 1, 7), None),
+        ),
     )
     result = run_runtime_adjustment(
         current,
@@ -416,8 +440,8 @@ def test_runtime_adjustment_pages_match_dashboard_and_weekdays_work(
     )
 
     assert isinstance(result, RuntimeAdjustmentResult)
-    assert result.options.weekdays == "hide"
-    assert result.options.by == "agent"
+    assert result.options.chart.weekdays == "hide"
+    assert result.options.chart.by == "agent"
     assert "Quick settings" in str(controls[0])
     assert "Advanced settings" in str(controls[1])
     assert "k weekdays" in str(controls[1])
@@ -474,9 +498,14 @@ def test_runtime_adjustment_copy_uses_adjusted_display_options(
     result = run_runtime_adjustment(
         replace(
             options(command="timeline"),
-            by=None,
-            top=3,
-            color_scheme="no-color",
+            chart=replace(
+                options(command="timeline").chart,
+                by=None,
+                top=3,
+                presentation=replace(
+                    options(command="timeline").chart.presentation, theme="no-color"
+                ),
+            ),
         ),
         load_translator("en"),
         UsageSnapshot((), (), 0.25),
@@ -486,7 +515,7 @@ def test_runtime_adjustment_copy_uses_adjusted_display_options(
     assert result is None
     assert copied == [
         "ccuv timeline --since 2026-01-01 --until 2026-01-14 --by agent --top 4 "
-        "--demo small --ascii"
+        "--no-watch --demo small --ascii"
     ]
 
 
@@ -506,15 +535,22 @@ def test_runtime_adjustment_normalizes_timeline_area_when_grouping_changes(
     )
 
     result = run_runtime_adjustment(
-        replace(options(command="timeline"), by=None, style="area"),
+        replace(
+            options(command="timeline"),
+            chart=replace(
+                options(command="timeline").chart,
+                by=None,
+                presentation=replace(options(command="timeline").chart.presentation, style="area"),
+            ),
+        ),
         load_translator("en"),
         UsageSnapshot((), (), 0.25),
         cast(InteractiveScreen, Screen()),
     )
 
     assert isinstance(result, RuntimeAdjustmentResult)
-    assert result.options.by == "agent"
-    assert result.options.style == "linear"
+    assert result.options.chart.by == "agent"
+    assert result.options.chart.presentation.style == "linear"
 
 
 @pytest.mark.parametrize("size", ["small", "medium", "large"])
@@ -533,7 +569,10 @@ def test_demo_snapshot_uses_requested_size_once_without_query_runner(
 
     monkeypatch.setattr("ccusage_viz.watch.generate_demo", generate)
     snapshot = load_snapshot(
-        replace(options(command="timeline"), demo=size),
+        replace(
+            options(command="timeline"),
+            host=replace(options(command="timeline").host, demo_size=size),
+        ),
         cast(QueryRunner, Runner()),
     )
 
@@ -553,7 +592,10 @@ def test_successful_empty_daily_query_still_records_requested_coverage(
 
     monkeypatch.setattr("ccusage_viz.watch.parse_usage_records", lambda kind, data: ())
     snapshot = load_snapshot(
-        replace(options(command="timeline"), demo=None),
+        replace(
+            options(command="timeline"),
+            host=replace(options(command="timeline").host, demo_size=None),
+        ),
         cast(QueryRunner, Runner()),
     )
 
@@ -572,7 +614,10 @@ def test_snapshot_retains_daily_coverage_when_project_ranking_also_uses_sessions
 
     monkeypatch.setattr("ccusage_viz.watch.parse_usage_records", lambda kind, data: ())
     snapshot = load_snapshot(
-        replace(options(command="ranking"), demo=None),
+        replace(
+            options(command="ranking"),
+            host=replace(options(command="ranking").host, demo_size=None),
+        ),
         cast(QueryRunner, Runner()),
     )
 

@@ -8,7 +8,16 @@ from pathlib import PurePath
 from shutil import which
 
 from ccusage_viz.formatting import char_width, display_width
-from ccusage_viz.options import DEFAULT_STYLES, CommandOptions
+from ccusage_viz.options import (
+    DEFAULT_STYLES,
+    DashboardLaunch,
+    MonitorConfig,
+    PaneConfig,
+    RankingConfig,
+    StackConfig,
+    StandaloneLaunch,
+    TimelineConfig,
+)
 
 _WINDOWS_PATH = re.compile(r"^[A-Za-z]:[\\/]")
 
@@ -21,127 +30,160 @@ def _is_private_path(value: str) -> bool:
     )
 
 
-def _window_duration(seconds: int | None) -> str:
-    value = seconds or 3600
-    unit = "h" if value % 3600 == 0 else "m"
-    return f"{value // (3600 if unit == 'h' else 60)}{unit}"
+def _window_duration(seconds: int) -> str:
+    unit = "h" if seconds % 3600 == 0 else "m"
+    return f"{seconds // (3600 if unit == 'h' else 60)}{unit}"
 
 
-def _format_args(args: list[str]) -> str:
+def _chart_args(config: StandaloneLaunch, *, full: bool, pane: bool = False) -> list[str]:
+    chart = config.chart
+    args = [chart.kind]
+    if isinstance(chart, MonitorConfig):
+        args.extend(("--window", _window_duration(chart.window_seconds)))
+        if not pane and (full or config.host.interval != 15.0):
+            args.extend(("--interval", f"{config.host.interval:g}"))
+    else:
+        date_range = chart.date_range
+        if date_range.relative_until and date_range.period is not None:
+            args.extend(("--period", date_range.period))
+        else:
+            args.extend(("--since", date_range.since.isoformat()))
+            if not date_range.implicit_until:
+                args.extend(("--until", date_range.until.isoformat()))
+        if not pane and config.host.timezone:
+            args.extend(("--timezone", config.host.timezone))
+        if isinstance(chart, (TimelineConfig, StackConfig)):
+            if full or chart.granularity != "day":
+                args.extend(("--granularity", chart.granularity))
+            if full or chart.weekdays != "show":
+                args.extend(("--weekdays", chart.weekdays))
+    by, top = getattr(chart, "by", None), getattr(chart, "top", None)
+    if by is not None:
+        args.extend(("--by", by))
+    if top is not None:
+        args.extend(("--top", str(top)))
+    if isinstance(chart, (TimelineConfig, RankingConfig)) and (full or chart.other != "show"):
+        args.extend(("--other", chart.other))
+    if isinstance(chart, StackConfig) and (full or chart.cache != "combined"):
+        args.extend(("--cache", chart.cache))
+    for value in chart.filters.agents:
+        args.extend(("--agent", value))
+    for value in chart.filters.models:
+        args.extend(("--model", value))
+    for value in chart.filters.projects:
+        if full or not _is_private_path(value):
+            args.extend(("--project", value))
+    if not pane and not isinstance(chart, MonitorConfig):
+        if not config.host.watch:
+            args.append("--no-watch")
+        elif full or config.host.interval != 10.0:
+            args.extend(("--interval", f"{config.host.interval:g}"))
+    if not pane and config.host.demo_size is not None:
+        args.extend(("--demo", config.host.demo_size))
+    if full and not pane:
+        args.extend(
+            (
+                "--ccusage-bin",
+                config.process.ccusage_bin,
+                "--query-timeout",
+                f"{config.process.query_timeout:g}",
+            )
+        )
+    theme = chart.presentation.theme
+    if not config.host.ascii and (full or theme != "classic"):
+        args.extend(("--theme", theme))
+    if full or chart.presentation.style != DEFAULT_STYLES[chart.kind]:
+        args.extend(("--style", chart.presentation.style))
+    if chart.kind in {"timeline", "stack", "monitor"} and (
+        full or chart.presentation.legend != "below-title"
+    ):
+        args.extend(("--legend", chart.presentation.legend))
+    if not pane and config.host.ascii:
+        args.append("--ascii")
+    return args
+
+
+def format_command(options: StandaloneLaunch) -> str:
+    return shlex.join(["ccuv", *_chart_args(options, full=False)])
+
+
+def format_full_command(options: StandaloneLaunch) -> str:
+    return shlex.join(["ccuv", *_chart_args(options, full=True)])
+
+
+def format_dashboard_pane_command(
+    options: StandaloneLaunch, *, refresh_interval: float, sampling_interval: float | None = None
+) -> str:
+    interval = (
+        sampling_interval
+        if isinstance(options.chart, MonitorConfig) and sampling_interval is not None
+        else refresh_interval
+    )
+    return format_command(
+        replace(options, host=replace(options.host, interval=interval, watch=True))
+    )
+
+
+def format_full_dashboard_command(
+    options: DashboardLaunch,
+    panes: tuple[PaneConfig, ...] | None = None,
+    *,
+    grid: str | None = None,
+    header_style: str | None = None,
+    dashboard_style: str | None = None,
+    header_summary: str | None = None,
+) -> str:
+    host = options.host
+    args = ["ccuv", "dashboard"]
+    from ccusage_viz.configuration import standalone_from_pane
+
+    for pane_config in panes or options.panes:
+        args.extend(
+            (
+                "--pane",
+                shlex.join(
+                    _chart_args(standalone_from_pane(options, pane_config), full=True, pane=True)
+                ),
+            )
+        )
+    args.extend(
+        (
+            "--grid",
+            grid or host.grid,
+            "--refresh-interval",
+            f"{host.refresh_interval:g}",
+            "--sampling-interval",
+            f"{host.sampling_interval:g}",
+            "--header-style",
+            header_style or host.header_style,
+            "--header-summary",
+            header_summary or host.header_summary,
+            "--header-interval",
+            f"{host.header_interval:g}",
+            "--style",
+            dashboard_style or host.style,
+        )
+    )
+    if host.timezone is not None:
+        args.extend(("--timezone", host.timezone))
+    if host.demo_size is not None:
+        args.extend(("--demo", host.demo_size))
+    args.extend(
+        (
+            "--ccusage-bin",
+            options.process.ccusage_bin,
+            "--query-timeout",
+            f"{options.process.query_timeout:g}",
+        )
+    )
+    if host.ascii:
+        args.append("--ascii")
+    else:
+        args.extend(("--theme", host.theme))
     return shlex.join(args)
 
 
-def format_command(options: CommandOptions) -> str:
-    """Return a safe, reproducible public command for the active view."""
-    args = ["ccuv", options.command]
-    if options.command == "monitor":
-        if options.window_seconds is not None:
-            args.extend(("--window", _window_duration(options.window_seconds)))
-        if options.interval is not None:
-            args.extend(("--interval", f"{options.interval:g}"))
-    else:
-        if options.date_range.relative_until and options.date_range.period is not None:
-            args.extend(("--period", options.date_range.period))
-        else:
-            args.extend(("--since", options.date_range.since.isoformat()))
-            if not options.date_range.implicit_until:
-                args.extend(("--until", options.date_range.until.isoformat()))
-        if options.date_range.timezone:
-            args.extend(("--timezone", options.date_range.timezone))
-        if options.command in {"timeline", "stack"}:
-            if options.granularity != "day":
-                args.extend(("--granularity", options.granularity))
-            if options.weekdays != "show":
-                args.extend(("--weekdays", options.weekdays))
-    if options.by is not None:
-        args.extend(("--by", options.by))
-    if options.top is not None:
-        args.extend(("--top", str(options.top)))
-    if options.command in {"timeline", "ranking"} and options.other != "show":
-        args.extend(("--other", options.other))
-    if options.command == "stack" and options.cache != "combined":
-        args.extend(("--cache", options.cache))
-    for agent in options.agents:
-        args.extend(("--agent", agent))
-    for model in options.models:
-        args.extend(("--model", model))
-    for project in options.projects:
-        if not _is_private_path(project):
-            args.extend(("--project", project))
-    if options.command != "monitor":
-        if options.no_watch:
-            args.append("--no-watch")
-        elif options.interval is not None and options.interval != 10.0:
-            args.extend(("--interval", f"{options.interval:g}"))
-    if options.demo is not None:
-        args.extend(("--demo", options.demo))
-    if options.color_scheme != "classic" and not options.ascii:
-        args.extend(("--theme", options.color_scheme))
-    if options.style != DEFAULT_STYLES[options.command]:
-        args.extend(("--style", options.style))
-    if options.legend != "below-title":
-        args.extend(("--legend", options.legend))
-    if options.ascii:
-        args.append("--ascii")
-    return _format_args(args)
-
-
-def format_full_command(options: CommandOptions) -> str:
-    """Return an executable command with every effective setting made explicit.
-
-    Unlike :func:`format_command`, this deliberate audit view includes local
-    project paths, the configured executable, and the query timeout.
-    """
-    args = ["ccuv", options.command]
-    if options.command == "monitor":
-        args.extend(("--window", _window_duration(options.window_seconds)))
-        args.extend(("--interval", f"{(options.interval or 15.0):g}"))
-    else:
-        if options.date_range.relative_until and options.date_range.period is not None:
-            args.extend(("--period", options.date_range.period))
-        else:
-            args.extend(("--since", options.date_range.since.isoformat()))
-            args.extend(("--until", options.date_range.until.isoformat()))
-        if options.date_range.timezone:
-            args.extend(("--timezone", options.date_range.timezone))
-        if options.command in {"timeline", "stack"}:
-            args.extend(("--granularity", options.granularity))
-            args.extend(("--weekdays", options.weekdays))
-    if options.by is not None:
-        args.extend(("--by", options.by))
-    if options.top is not None:
-        args.extend(("--top", str(options.top)))
-    if options.command in {"timeline", "ranking"} and options.other != "show":
-        args.extend(("--other", options.other))
-    if options.command == "stack" and options.cache != "combined":
-        args.extend(("--cache", options.cache))
-    for agent in options.agents:
-        args.extend(("--agent", agent))
-    for model in options.models:
-        args.extend(("--model", model))
-    for project in options.projects:
-        args.extend(("--project", project))
-    if options.command != "monitor":
-        if options.no_watch:
-            args.append("--no-watch")
-        elif options.interval is not None and options.interval != 10.0:
-            args.extend(("--interval", f"{options.interval:g}"))
-    if options.demo is not None:
-        args.extend(("--demo", options.demo))
-    args.extend(("--ccusage-bin", options.ccusage_bin))
-    args.extend(("--query-timeout", f"{options.query_timeout:g}"))
-    if not options.ascii:
-        args.extend(("--theme", options.color_scheme))
-    args.extend(("--style", options.style))
-    if options.command in {"timeline", "stack", "monitor"}:
-        args.extend(("--legend", options.legend))
-    if options.ascii:
-        args.append("--ascii")
-    return _format_args(args)
-
-
 def format_full_command_display(command: str, width: int) -> str:
-    """Lay out a full command in short semantic lines without changing it."""
     if width <= 0:
         return ""
     tokens = shlex.split(command)
@@ -154,11 +196,9 @@ def format_full_command_display(command: str, width: int) -> str:
 
 
 def wrap_command(command: str, width: int) -> str:
-    """Wrap a normalized command at token boundaries for terminal display."""
     if width <= 0:
         return ""
-    lines: list[str] = []
-    line = ""
+    lines, line = [], ""
     for token in command.split(" "):
         candidate = token if not line else f"{line} {token}"
         if line and display_width(candidate) > width:
@@ -167,8 +207,7 @@ def wrap_command(command: str, width: int) -> str:
         else:
             line = candidate
         while display_width(line) > width:
-            split_at = 0
-            used = 0
+            split_at = used = 0
             for index, char in enumerate(line):
                 size = char_width(char)
                 if used + size > width:
@@ -182,76 +221,7 @@ def wrap_command(command: str, width: int) -> str:
     return "\n".join(lines)
 
 
-def format_dashboard_pane_command(
-    options: CommandOptions,
-    *,
-    refresh_interval: float,
-    sampling_interval: float | None = None,
-) -> str:
-    """Serialize a Dashboard Pane as its equivalent standalone live command."""
-    interval = (
-        (sampling_interval if sampling_interval is not None else options.interval)
-        if options.command == "monitor"
-        else refresh_interval
-    )
-    return format_command(replace(options, interval=interval, no_watch=False))
-
-
-def format_full_dashboard_command(
-    options: CommandOptions,
-    panes: tuple[CommandOptions, ...],
-    *,
-    grid: str,
-    header_style: str,
-    dashboard_style: str,
-    header_summary: str = "day",
-) -> str:
-    """Serialize the complete Dashboard state, including local configuration."""
-    args = ["ccuv", "dashboard"]
-    for pane in panes:
-        pane_args = shlex.split(format_full_command(pane))
-        forbidden = {
-            "--interval",
-            "--no-watch",
-            "--ccusage-bin",
-            "--query-timeout",
-            "--ascii",
-            "--demo",
-        }
-        payload: list[str] = [pane_args[1]]
-        index = 2
-        while index < len(pane_args):
-            option = pane_args[index]
-            if option in forbidden:
-                index += 1 if option in {"--no-watch", "--ascii"} else 2
-                continue
-            payload.append(option)
-            if option.startswith("--") and index + 1 < len(pane_args):
-                payload.append(pane_args[index + 1])
-                index += 2
-            else:
-                index += 1
-        args.extend(("--pane", shlex.join(payload)))
-    args.extend(("--grid", grid))
-    args.extend(("--refresh-interval", f"{options.refresh_interval:g}"))
-    args.extend(("--sampling-interval", f"{options.sampling_interval:g}"))
-    args.extend(("--header-style", header_style))
-    args.extend(("--header-summary", header_summary))
-    args.extend(("--header-interval", f"{options.header_interval:g}"))
-    args.extend(("--style", dashboard_style))
-    if options.demo is not None:
-        args.extend(("--demo", options.demo))
-    args.extend(("--ccusage-bin", options.ccusage_bin))
-    args.extend(("--query-timeout", f"{options.query_timeout:g}"))
-    if not options.ascii:
-        args.extend(("--theme", options.color_scheme))
-    if options.ascii:
-        args.append("--ascii")
-    return shlex.join(args)
-
-
 def copy_command(command: str) -> bool:
-    """Copy through a local clipboard program without invoking a shell."""
     executable = which("pbcopy")
     if executable is None:
         return False

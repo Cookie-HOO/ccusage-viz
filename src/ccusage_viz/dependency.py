@@ -6,17 +6,17 @@ import sys
 
 from ccusage_viz.errors import QueryError
 from ccusage_viz.i18n import Translator
-from ccusage_viz.options import CommandOptions
+from ccusage_viz.options import LaunchConfig
 
 _DEFAULT_CCUSAGE = "ccusage"
 _INSTALL_COMMAND = "npm install -g ccusage"
 
 
-def ensure_ccusage(options: CommandOptions, translator: Translator) -> None:
+def ensure_ccusage(options: LaunchConfig, translator: Translator) -> None:
     if (
-        options.demo is not None
+        options.host.demo_size is not None
         or options.was_explicit("ccusage_bin")
-        or options.ccusage_bin != _DEFAULT_CCUSAGE
+        or options.process.ccusage_bin != _DEFAULT_CCUSAGE
     ):
         return
     if shutil.which(_DEFAULT_CCUSAGE) is not None:

@@ -125,6 +125,7 @@ MESSAGES = {
     "status.tui_adjust_ranking_quick_controls": "p period · b group · +/- Top · t/T theme · s/S style · a Advanced",
     "status.tui_adjust_ranking_advanced_controls": "o Other · a Quick",
     "status.tui_adjust_monitor_quick_controls": "w window · i interval · b group · +/- Top · t/T theme · s/S style · a Advanced",
+    "status.tui_adjust_monitor_pane_quick_controls": "w window · b group · +/- Top · t/T theme · s/S style · a Advanced",
     "status.tui_adjust_monitor_advanced_controls": "l legend · a Quick",
     "status.tui_adjust_management": "[ previous · ] next · x delete · Tab next pane · y copy",
     "status.tui_global_quick_controls": "t/T theme · s/S style · w header · u summary · z layout · a Advanced",

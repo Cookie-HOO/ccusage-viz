@@ -86,7 +86,7 @@ def content_heading(name: str, since: date, until: date, context: RenderContext)
     return f"{context.title_content} · {heading}" if context.title_content else heading
 
 
-def y_tick_spec(values: Iterable[int], *, count: int = 5) -> tuple[list[float], list[str]]:
+def y_tick_spec(values: Iterable[int | float], *, count: int = 5) -> tuple[list[float], list[str]]:
     """Return stable decimal token positions and labels for a y-axis."""
     maximum = max(values, default=0)
     positions = [0] if maximum <= 0 else [maximum * index / (count - 1) for index in range(count)]

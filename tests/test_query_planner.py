@@ -4,31 +4,35 @@ from datetime import date
 from ccusage_viz.core.time import DateRange
 from ccusage_viz.coverage import DateInterval
 from ccusage_viz.domain import Notice
-from ccusage_viz.options import CommandOptions
+from ccusage_viz.options import (
+    CalendarConfig,
+    Filters,
+    ProcessConfig,
+    RankingConfig,
+    StackConfig,
+    StandaloneHostConfig,
+    StandaloneLaunch,
+    TimelineConfig,
+)
 from ccusage_viz.query.models import QueryKind
 from ccusage_viz.query.planner import plan_queries
 
 
 def options(
     command: str, *, by: str | None = None, projects: tuple[str, ...] = ()
-) -> CommandOptions:
-    return CommandOptions(
-        command=command,
-        date_range=DateRange(date(2026, 1, 2), date(2026, 1, 3), "UTC"),
-        by=by,
-        top=None,
-        other="hide",
-        cache="combined",
-        agents=(),
-        models=(),
-        projects=projects,
-        interval=None,
-        demo=None,
-        ccusage_bin="ccusage",
-        query_timeout=30,
-        no_color=False,
-        ascii=False,
+) -> StandaloneLaunch:
+    date_range = DateRange(date(2026, 1, 2), date(2026, 1, 3), "UTC")
+    filters = Filters(projects=projects)
+    chart = (
+        TimelineConfig("timeline", date_range, filters=filters, by=by)
+        if command == "timeline"
+        else CalendarConfig("calendar", date_range, filters=filters)
+        if command == "calendar"
+        else StackConfig("stack", date_range, filters=filters)
+        if command == "stack"
+        else RankingConfig("ranking", date_range, filters=filters, by=by or "project")
     )
+    return StandaloneLaunch(ProcessConfig(), StandaloneHostConfig(), chart)
 
 
 def test_default_plan_uses_unified_by_agent_query() -> None:
@@ -63,5 +67,5 @@ def test_daily_project_view_omits_codex_with_notice() -> None:
 
 
 def test_demo_plan_never_queries() -> None:
-    demo = replace(options("timeline"), demo="small")
+    demo = replace(options("timeline"), host=replace(options("timeline").host, demo_size="small"))
     assert not plan_queries(demo).queries

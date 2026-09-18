@@ -16,7 +16,6 @@ from ccusage_viz.command_copy import (
 )
 from ccusage_viz.core.time import DateRange, refresh_date_range, today_for_timezone
 from ccusage_viz.coverage import DateCoverage, DateInterval
-from ccusage_viz.dashboard import DEFAULT_DASHBOARD_MONITOR_PANEL
 from ccusage_viz.data_view import DashboardBodyView, next_dashboard_body_view
 from ccusage_viz.deltas import RefreshDeltas, RefreshRanks
 from ccusage_viz.diagnostics import format_error
@@ -40,8 +39,14 @@ from ccusage_viz.monitor import (
 from ccusage_viz.options import (
     DASHBOARD_STYLES,
     HEADER_SUMMARIES,
-    CommandOptions,
-    adjust_option,
+    ChartPresentation,
+    DashboardLaunch,
+    MonitorConfig,
+    PaneConfig,
+    StandaloneHostConfig,
+    StandaloneLaunch,
+    TimelineConfig,
+    adjust_standalone,
 )
 from ccusage_viz.query.client import QueryRunner
 from ccusage_viz.render.base import RenderContext, styled_text
@@ -65,7 +70,7 @@ _PANE_COMMANDS = ("timeline", "calendar", "stack", "ranking", "monitor")
 
 @dataclass(slots=True)
 class TuiPane:
-    options: CommandOptions
+    options: StandaloneLaunch
     runner: QueryRunner
     snapshot: UsageSnapshot | None = None
     observer: ObservedTPM | None = None
@@ -78,9 +83,9 @@ class TuiPane:
     copied: bool = False
     generation: int = 0
     submitted_generation: int | None = None
-    submitted_options: CommandOptions | None = None
+    submitted_options: StandaloneLaunch | None = None
     refresh_pending: bool = False
-    requested_options: CommandOptions | None = None
+    requested_options: StandaloneLaunch | None = None
     rebaseline_pending: bool = False
     previous_values: dict[Hashable, float] = field(default_factory=dict)
     deltas: dict[Hashable, float] = field(default_factory=dict)
@@ -90,12 +95,12 @@ class TuiPane:
 
     @property
     def interval(self) -> float:
-        return self.options.interval or 15.0
+        return self.options.host.interval
 
 
 @dataclass(slots=True)
 class DashboardHeader:
-    options: CommandOptions
+    options: StandaloneLaunch
     runner: QueryRunner
     snapshot: UsageSnapshot | None = None
     future: Future[UsageSnapshot] | None = None
@@ -103,30 +108,57 @@ class DashboardHeader:
     error: str | None = None
     generation: int = 0
     submitted_generation: int | None = None
-    submitted_options: CommandOptions | None = None
+    submitted_options: StandaloneLaunch | None = None
     refresh_pending: bool = False
     records: tuple[UsageRecord, ...] = ()
     coverage: DateCoverage = field(default_factory=DateCoverage)
     accepted_at: datetime | None = None
+    summary_period: str = "day"
 
 
-def _header_options(base: CommandOptions, interval: DateInterval | None = None) -> CommandOptions:
+def _header_options(
+    base: DashboardLaunch, interval: DateInterval | None = None
+) -> StandaloneLaunch:
     """Build the dashboard's deliberately unfiltered, all-agent daily query."""
-    today = today_for_timezone(base.date_range.timezone)
+    today = today_for_timezone(base.host.timezone)
     interval = interval or DateInterval(today - timedelta(days=7), today)
-    return replace(
-        base,
-        command="timeline",
-        date_range=DateRange(interval.since, interval.until, base.date_range.timezone),
-        by=None,
-        top=None,
+    chart = TimelineConfig(
+        "timeline",
+        DateRange(interval.since, interval.until, base.host.timezone),
+        presentation=ChartPresentation(theme=base.host.theme, style="linear", legend="hidden"),
         other="hide",
-        cache="combined",
-        agents=(),
-        models=(),
-        projects=(),
-        interval=None,
-        legend="hidden",
+    )
+    return StandaloneLaunch(
+        base.process,
+        StandaloneHostConfig(
+            provider=base.host.provider,
+            timezone=base.host.timezone,
+            ascii=base.host.ascii,
+            demo_size=base.host.demo_size,
+            interval=base.host.header_interval,
+        ),
+        chart,
+    )
+
+
+def _new_header(options: DashboardLaunch) -> DashboardHeader:
+    header_options = _header_options(options)
+    return DashboardHeader(
+        header_options,
+        QueryRunner(
+            header_options.process.ccusage_bin, timeout=header_options.process.query_timeout
+        ),
+        summary_period=options.host.header_summary,
+    )
+
+
+def _set_header_theme(header: DashboardHeader, theme: str) -> None:
+    header.options = replace(
+        header.options,
+        chart=replace(
+            header.options.chart,
+            presentation=replace(header.options.chart.presentation, theme=theme),
+        ),
     )
 
 
@@ -137,10 +169,10 @@ def _next_header_summary(period: str) -> str:
 def _header_refresh_interval(
     header: DashboardHeader, *, aggressive: bool = False, today=None
 ) -> DateInterval | None:
-    period = header.options.header_summary
+    period = header.summary_period
     if period == "none":
         return None
-    current = today or today_for_timezone(header.options.date_range.timezone)
+    current = today or today_for_timezone(header.options.host.timezone)
     required = required_summary_coverage(current, period)
     uncovered = tuple(
         missing for interval in required.intervals for missing in header.coverage.missing(interval)
@@ -158,7 +190,7 @@ def _header_summary(header: DashboardHeader, period: str):
         return None
     summary = build_period_summary(
         header.records,
-        today_for_timezone(header.options.date_range.timezone),
+        today_for_timezone(header.options.host.timezone),
         period,
         header.coverage,
     )
@@ -201,20 +233,20 @@ def _header_lines(
 ) -> list[str]:
     if style == "hidden":
         return []
-    summary = _header_summary(header, header.options.header_summary)
-    if header.options.header_summary == "none":
+    summary = _header_summary(header, header.summary_period)
+    if header.summary_period == "none":
         detail = ""
     elif summary is None:
         detail = render_summary_placeholder(
-            header.options.header_summary,
-            today_for_timezone(header.options.date_range.timezone),
+            header.summary_period,
+            today_for_timezone(header.options.host.timezone),
             RenderContext(
                 terminal.width,
                 1,
                 translator,
                 color=terminal.color,
                 ascii=terminal.ascii,
-                color_scheme=header.options.color_scheme,
+                color_scheme=header.options.chart.presentation.theme,
             ),
             all_agents=True,
         )
@@ -227,10 +259,10 @@ def _header_lines(
                 translator,
                 color=terminal.color,
                 ascii=terminal.ascii,
-                color_scheme=header.options.color_scheme,
+                color_scheme=header.options.chart.presentation.theme,
             ),
         )
-    scheme = get_color_scheme(header.options.color_scheme)
+    scheme = get_color_scheme(header.options.chart.presentation.theme)
     title = styled_text(
         translator.text("label.dashboard"),
         scheme.highlight,
@@ -240,7 +272,7 @@ def _header_lines(
             translator,
             color=terminal.color,
             ascii=terminal.ascii,
-            color_scheme=header.options.color_scheme,
+            color_scheme=header.options.chart.presentation.theme,
         ),
         bold=True,
     )
@@ -265,7 +297,7 @@ def _header_lines(
             translator,
             color=terminal.color,
             ascii=terminal.ascii,
-            color_scheme=header.options.color_scheme,
+            color_scheme=header.options.chart.presentation.theme,
         ),
     )
     return [
@@ -491,29 +523,31 @@ def compose_panels(
     return "\n".join(output)
 
 
-def _new_pane(options: CommandOptions) -> TuiPane:
+def _new_pane(options: StandaloneLaunch) -> TuiPane:
     observer = None
-    if options.command == "monitor":
+    if options.chart.kind == "monitor":
         observer = ObservedTPM(
-            window_seconds=options.window_seconds or 3600,
-            by=options.by,
-            top=options.top,
-            model_selectors=options.models,
+            window_seconds=options.chart.window_seconds or 3600,
+            by=options.chart.by,
+            top=options.chart.top,
+            model_selectors=options.chart.filters.models,
         )
     return TuiPane(
-        options, QueryRunner(options.ccusage_bin, timeout=options.query_timeout), observer=observer
+        options,
+        QueryRunner(options.process.ccusage_bin, timeout=options.process.query_timeout),
+        observer=observer,
     )
 
 
 def _load_pane(
-    options: CommandOptions, runner: QueryRunner, demo_ordinal: int
+    options: StandaloneLaunch, runner: QueryRunner, demo_ordinal: int
 ) -> UsageSnapshot | tuple[UsageRecord, ...]:
-    if options.command == "monitor":
+    if options.chart.kind == "monitor":
         return load_monitor_sample(options, runner, demo_ordinal=demo_ordinal)
     return load_snapshot(options, runner)
 
 
-def _ranking_values(options: CommandOptions, snapshot: UsageSnapshot) -> dict[Hashable, float]:
+def _ranking_values(options: StandaloneLaunch, snapshot: UsageSnapshot) -> dict[Hashable, float]:
     return ranking_values(options, snapshot)
 
 
@@ -572,7 +606,7 @@ def _pane_render(pane: TuiPane, translator: Translator, terminal: Terminal) -> P
     if pane.error:
         return PaneRender(pane.error)
     try:
-        if active.command == "monitor":
+        if active.chart.kind == "monitor":
             assert observer is not None
             candidate = PaneRender(
                 render_monitor_snapshot(
@@ -587,7 +621,7 @@ def _pane_render(pane: TuiPane, translator: Translator, terminal: Terminal) -> P
                 )
             )
         elif snapshot is None:
-            label = translator.text(f"label.{active.command}")
+            label = translator.text(f"label.{active.chart.kind}")
             candidate = PaneRender(f"{label} · {translator.text('status.loading')}")
         else:
             rendered = render_snapshot(
@@ -597,14 +631,14 @@ def _pane_render(pane: TuiPane, translator: Translator, terminal: Terminal) -> P
                 snapshot,
                 control_rows=0,
                 hide_upper_right_axes=True,
-                ranking_deltas=pane.deltas if active.command == "ranking" else None,
-                ranking_rank_deltas=pane.rank_deltas if active.command == "ranking" else None,
+                ranking_deltas=pane.deltas if active.chart.kind == "ranking" else None,
+                ranking_rank_deltas=pane.rank_deltas if active.chart.kind == "ranking" else None,
             )
             candidate = PaneRender(rendered.chart, rendered.notices)
     except UsageError as exc:
         pane.render_warning = exc
         warning = format_error(
-            exc, translator, color=terminal.color, color_scheme=active.color_scheme
+            exc, translator, color=terminal.color, color_scheme=active.chart.presentation.theme
         )
         if pane.last_render is None:
             return PaneRender(warning)
@@ -622,11 +656,13 @@ def _cycle(values: tuple[str, ...], current: str, step: int) -> str:
     return values[(values.index(current) + step) % len(values)]
 
 
-def _new_pane_options(command: str, base: CommandOptions) -> CommandOptions:
-    from ccusage_viz.configuration import parse_dashboard_pane
+def _new_pane_options(command: str, base: DashboardLaunch) -> StandaloneLaunch:
+    from ccusage_viz.configuration import default_pane, standalone_from_pane
 
-    fragment = DEFAULT_DASHBOARD_MONITOR_PANEL if command == "monitor" else command
-    return parse_dashboard_pane(fragment, host=base)
+    pane = default_pane(command, dashboard=base)
+    if command == "monitor":
+        pane = replace(pane, chart=replace(pane.chart, by="model", top=3))
+    return standalone_from_pane(base, pane)
 
 
 _QUICK_KEYS = {
@@ -634,7 +670,7 @@ _QUICK_KEYS = {
     "calendar": frozenset("pPtTsS"),
     "stack": frozenset("pPgtTsS"),
     "ranking": frozenset("pPbB+-=tTsS"),
-    "monitor": frozenset("wWiIbB+-=tTsS"),
+    "monitor": frozenset("wWbB+-=tTsS"),
 }
 _ADVANCED_KEYS = {
     "timeline": frozenset("olkuOLKU"),
@@ -646,7 +682,12 @@ _ADVANCED_KEYS = {
 
 
 def _adjustment_controls(command: str, page: str, translator: Translator) -> str:
-    return translator.text(f"status.tui_adjust_{command}_{page}_controls")
+    key = (
+        "status.tui_adjust_monitor_pane_quick_controls"
+        if command == "monitor" and page == "quick"
+        else f"status.tui_adjust_{command}_{page}_controls"
+    )
+    return translator.text(key)
 
 
 def _adjustment_key_supported(command: str, page: str, key: str) -> bool:
@@ -743,19 +784,17 @@ def _choose_pane_type(
             return None
 
 
-def run_tui(options: CommandOptions, translator: Translator) -> int:
-    panes = [_new_pane(pane_options) for pane_options in options.panes]
-    header_options = _header_options(options)
-    header = DashboardHeader(
-        header_options,
-        QueryRunner(header_options.ccusage_bin, timeout=header_options.query_timeout),
-    )
+def run_tui(options: DashboardLaunch, translator: Translator) -> int:
+    from ccusage_viz.configuration import standalone_from_pane
+
+    panes = [_new_pane(standalone_from_pane(options, pane)) for pane in options.panes]
+    header = _new_header(options)
     executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix="ccusage-viz-tui")
     focused: int | None = None
-    active_grid = options.grid
-    header_style = options.header_style
-    dashboard_style = options.dashboard_style
-    dashboard_theme = options.color_scheme
+    active_grid = options.host.grid
+    header_style = options.host.header_style
+    dashboard_style = options.host.style
+    dashboard_theme = options.host.theme
     divider_style, frame_style = _dashboard_structure(dashboard_style)
     grid_draft: str | None = None
     grid_error: str | None = None
@@ -780,8 +819,14 @@ def run_tui(options: CommandOptions, translator: Translator) -> int:
         requested = pane.requested_options or pane.options
         submitted = (
             requested
-            if requested.command == "monitor"
-            else replace(requested, date_range=refresh_date_range(requested.date_range))
+            if isinstance(requested.chart, MonitorConfig)
+            else replace(
+                requested,
+                chart=replace(
+                    requested.chart,
+                    date_range=refresh_date_range(requested.chart.date_range),
+                ),
+            )
         )
         pane.submitted_options = submitted
         pane.future = executor.submit(_load_pane, submitted, pane.runner, pane.demo_ordinal)
@@ -795,7 +840,13 @@ def run_tui(options: CommandOptions, translator: Translator) -> int:
             return
         header.error = None
         header.submitted_generation = header.generation
-        submitted = _header_options(header.options, requested)
+        submitted = replace(
+            header.options,
+            chart=replace(
+                header.options.chart,
+                date_range=DateRange(requested.since, requested.until, options.host.timezone),
+            ),
+        )
         header.submitted_options = submitted
         header.refreshed_at = time.monotonic()
         header.future = executor.submit(load_snapshot, submitted, header.runner)
@@ -848,14 +899,14 @@ def run_tui(options: CommandOptions, translator: Translator) -> int:
                     continue
                 pane.options = submitted_options
                 pane.requested_options = None
-                if pane.options.command == "monitor":
+                if pane.options.chart.kind == "monitor":
                     assert pane.observer is not None and isinstance(loaded, tuple)
                     pane.observer.window_seconds = (
-                        pane.options.window_seconds or pane.observer.window_seconds
+                        pane.options.chart.window_seconds or pane.observer.window_seconds
                     )
-                    pane.observer.by = pane.options.by
-                    pane.observer.top = pane.options.top
-                    pane.observer.model_selectors = pane.options.models
+                    pane.observer.by = pane.options.chart.by
+                    pane.observer.top = pane.options.chart.top
+                    pane.observer.model_selectors = pane.options.chart.filters.models
                     counters = monitor_counters(pane.options, loaded)
                     observed_wall = datetime.now().astimezone()
                     if pane.rebaseline_pending or pane.observer.is_discontinuous(
@@ -875,7 +926,7 @@ def run_tui(options: CommandOptions, translator: Translator) -> int:
                 else:
                     assert isinstance(loaded, UsageSnapshot)
                     pane.snapshot = loaded
-                    if pane.options.command == "ranking":
+                    if pane.options.chart.kind == "ranking":
                         _refresh_deltas(pane, _ranking_values(pane.options, loaded))
                         _refresh_ranks(pane, ranking_keys(pane.options, loaded))
                 last_successful_update = datetime.now().astimezone()
@@ -892,15 +943,11 @@ def run_tui(options: CommandOptions, translator: Translator) -> int:
 
     def full_dashboard_command() -> str:
         return format_full_dashboard_command(
-            replace(
-                options,
-                color_scheme=dashboard_theme,
-                no_color=dashboard_theme == "no-color",
-            ),
-            tuple(pane.options for pane in panes),
+            replace(options, host=replace(options.host, theme=dashboard_theme)),
+            tuple(PaneConfig(pane.options.chart) for pane in panes),
             grid=active_grid,
             header_style=header_style,
-            header_summary=header.options.header_summary,
+            header_summary=header.summary_period,
             dashboard_style=dashboard_style,
         )
 
@@ -908,7 +955,7 @@ def run_tui(options: CommandOptions, translator: Translator) -> int:
         width = get_terminal_size().columns
         if adjustment_mode == "pane" and focused is not None:
             return _adjustment_footer(
-                panes[focused].options.command, adjustment_page, translator, width
+                panes[focused].options.chart.kind, adjustment_page, translator, width
             )[0]
         if adjustment_mode == "global":
             keys = translator.text(f"status.tui_global_{adjustment_page}_controls")
@@ -957,7 +1004,9 @@ def run_tui(options: CommandOptions, translator: Translator) -> int:
         nonlocal footer_notice_rows, last_size
         size = get_terminal_size()
         last_size = (size.columns, size.lines)
-        header_terminal = Terminal(size.columns, 4, dashboard_theme != "no-color", options.ascii)
+        header_terminal = Terminal(
+            size.columns, 4, dashboard_theme != "no-color", options.host.ascii
+        )
         header_lines = _header_lines(
             header, header_style, translator, header_terminal, last_successful_update
         )
@@ -994,8 +1043,8 @@ def run_tui(options: CommandOptions, translator: Translator) -> int:
                 terminal = Terminal(
                     max(1, cell_width - 2 if framed else cell_width),
                     max(1, cell_height - 2 if framed else cell_height),
-                    not pane.options.no_color,
-                    pane.options.ascii,
+                    pane.options.chart.presentation.theme != "no-color",
+                    pane.options.host.ascii,
                 )
                 rendered_panes.append(_pane_render(pane, translator, terminal))
             return rendered_panes
@@ -1009,7 +1058,7 @@ def run_tui(options: CommandOptions, translator: Translator) -> int:
             notices,
             width=size.columns,
             color=dashboard_theme != "no-color",
-            ascii=options.ascii,
+            ascii=options.host.ascii,
             translator=translator,
             color_scheme=dashboard_theme,
         )
@@ -1027,7 +1076,7 @@ def run_tui(options: CommandOptions, translator: Translator) -> int:
                 notices,
                 width=size.columns,
                 color=dashboard_theme != "no-color",
-                ascii=options.ascii,
+                ascii=options.host.ascii,
                 translator=translator,
                 color_scheme=dashboard_theme,
             )
@@ -1039,7 +1088,7 @@ def run_tui(options: CommandOptions, translator: Translator) -> int:
             rows,
             columns,
             focused=focused if focused is not None else -1,
-            ascii=options.ascii,
+            ascii=options.host.ascii,
             divider_style=divider_style,
             frame_style=frame_style,
             shell_context=RenderContext(
@@ -1047,7 +1096,7 @@ def run_tui(options: CommandOptions, translator: Translator) -> int:
                 layout.height,
                 translator,
                 color=dashboard_theme != "no-color",
-                ascii=options.ascii,
+                ascii=options.host.ascii,
                 color_scheme=dashboard_theme,
             ),
         )
@@ -1078,7 +1127,7 @@ def run_tui(options: CommandOptions, translator: Translator) -> int:
                     not scheduling_paused
                     and header_style != "hidden"
                     and header.future is None
-                    and now - header.refreshed_at >= options.header_interval
+                    and now - header.refreshed_at >= options.host.header_interval
                 ):
                     refresh_header()
                 for index, pane in enumerate(panes):
@@ -1096,7 +1145,7 @@ def run_tui(options: CommandOptions, translator: Translator) -> int:
                         size = get_terminal_size()
                         if adjustment_mode == "pane" and focused is not None:
                             _, finish_target = _adjustment_footer(
-                                panes[focused].options.command,
+                                panes[focused].options.chart.kind,
                                 adjustment_page,
                                 translator,
                                 size.columns,
@@ -1118,7 +1167,10 @@ def run_tui(options: CommandOptions, translator: Translator) -> int:
                                 header_style,
                                 translator,
                                 Terminal(
-                                    size.columns, 4, dashboard_theme != "no-color", options.ascii
+                                    size.columns,
+                                    4,
+                                    dashboard_theme != "no-color",
+                                    options.host.ascii,
                                 ),
                                 last_successful_update,
                             )
@@ -1205,18 +1257,18 @@ def run_tui(options: CommandOptions, translator: Translator) -> int:
                             pane.copied = copy_command(
                                 format_dashboard_pane_command(
                                     pane.options,
-                                    refresh_interval=options.refresh_interval,
-                                    sampling_interval=options.sampling_interval,
+                                    refresh_interval=options.host.refresh_interval,
+                                    sampling_interval=options.host.sampling_interval,
                                 )
                             )
                         elif key is not None and _adjustment_key_supported(
-                            pane.options.command, adjustment_page, key
+                            pane.options.chart.kind, adjustment_page, key
                         ):
                             base = pane.requested_options or pane.options
-                            updated = adjust_option(base, key)
+                            updated = adjust_standalone(base, key)
                             if updated != base:
                                 _clear_changes(pane)
-                                if _query_affecting_adjustment(base.command, key):
+                                if _query_affecting_adjustment(base.chart.kind, key):
                                     pane.requested_options = updated
                                     pane.generation += 1
                                     if pane.observer is not None:
@@ -1226,29 +1278,21 @@ def run_tui(options: CommandOptions, translator: Translator) -> int:
                                     pane.options = updated
                                     if pane.observer is not None and key in {"w", "W", "i", "I"}:
                                         pane.rebaseline_pending = True
-                                    presentation = {
-                                        "color_scheme": updated.color_scheme,
-                                        "no_color": updated.no_color,
-                                        "style": updated.style,
-                                        "legend": updated.legend,
-                                        "weekdays": updated.weekdays,
-                                        "cache": updated.cache,
-                                    }
                                     if pane.requested_options is not None:
                                         pane.requested_options = replace(
-                                            pane.requested_options, **presentation
+                                            pane.requested_options, chart=updated.chart
                                         )
                                     if pane.submitted_options is not None:
                                         pane.submitted_options = replace(
-                                            pane.submitted_options, **presentation
+                                            pane.submitted_options, chart=updated.chart
                                         )
-                                    if pane.observer is not None:
-                                        pane.observer.window_seconds = (
-                                            updated.window_seconds or pane.observer.window_seconds
-                                        )
-                                        pane.observer.by = updated.by
-                                        pane.observer.top = updated.top
-                                        pane.observer.model_selectors = updated.models
+                                    if pane.observer is not None and isinstance(
+                                        updated.chart, MonitorConfig
+                                    ):
+                                        pane.observer.window_seconds = updated.chart.window_seconds
+                                        pane.observer.by = updated.chart.by
+                                        pane.observer.top = updated.chart.top
+                                        pane.observer.model_selectors = updated.chart.filters.models
                     paint()
                     continue
                 if adjustment_mode == "global":
@@ -1263,11 +1307,7 @@ def run_tui(options: CommandOptions, translator: Translator) -> int:
                         dashboard_theme = _cycle(
                             COLOR_SCHEMES, dashboard_theme, 1 if key == "t" else -1
                         )
-                        header.options = replace(
-                            header.options,
-                            color_scheme=dashboard_theme,
-                            no_color=dashboard_theme == "no-color",
-                        )
+                        _set_header_theme(header, dashboard_theme)
                     elif adjustment_page == "quick" and key in {"s", "S"}:
                         dashboard_style = _cycle(
                             DASHBOARD_STYLES, dashboard_style, 1 if key == "s" else -1
@@ -1277,20 +1317,20 @@ def run_tui(options: CommandOptions, translator: Translator) -> int:
                         header_style = _cycle(
                             ("hidden", "compact", "banner", "panel"), header_style, 1
                         )
-                        if header_style != "hidden" and header.options.header_summary != "none":
+                        if header_style != "hidden" and header.summary_period != "none":
                             required = required_summary_coverage(
-                                today_for_timezone(header.options.date_range.timezone),
-                                header.options.header_summary,
+                                today_for_timezone(header.options.host.timezone),
+                                header.summary_period,
                             )
                             if any(not header.coverage.covers(item) for item in required.intervals):
                                 refresh_header(queue_if_running=True)
                     elif adjustment_page == "quick" and key == "u":
-                        next_summary = _next_header_summary(header.options.header_summary)
-                        header.options = replace(header.options, header_summary=next_summary)
+                        next_summary = _next_header_summary(header.summary_period)
+                        header.summary_period = next_summary
                         header.generation += 1
                         if header_style != "hidden" and next_summary != "none":
                             required = required_summary_coverage(
-                                today_for_timezone(header.options.date_range.timezone), next_summary
+                                today_for_timezone(header.options.host.timezone), next_summary
                             )
                             if any(not header.coverage.covers(item) for item in required.intervals):
                                 refresh_header(queue_if_running=True)

@@ -1,7 +1,6 @@
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
-from ccusage_viz.core.time import DateRange
 from ccusage_viz.domain import ProjectRef, SourceKind, TokenUsage, UsageRecord
 from ccusage_viz.formatting import display_width
 from ccusage_viz.i18n import load_translator
@@ -20,7 +19,13 @@ from ccusage_viz.monitor import (
     _series_descriptors,
     _stable_y_max,
 )
-from ccusage_viz.options import CommandOptions
+from ccusage_viz.options import (
+    ChartPresentation,
+    MonitorConfig,
+    ProcessConfig,
+    StandaloneHostConfig,
+    StandaloneLaunch,
+)
 from ccusage_viz.render.base import RenderContext
 from ccusage_viz.render.palette import get_color_scheme
 from ccusage_viz.terminal import Terminal
@@ -40,25 +45,16 @@ def snapshot(total: int, **models: int) -> CounterSnapshot:
     return CounterSnapshot(usage(total), {name: usage(value) for name, value in models.items()})
 
 
-def monitor_options(*, by: str | None = None) -> CommandOptions:
-    day = datetime(2026, 1, 1, tzinfo=UTC).date()
-    return CommandOptions(
-        command="monitor",
-        date_range=DateRange(day, day, None),
-        by=by,
-        top=None,
-        other="show",
-        cache="combined",
-        agents=(),
-        models=(),
-        projects=(),
-        demo=None,
-        ccusage_bin="ccusage",
-        query_timeout=1,
-        no_color=True,
-        ascii=True,
-        window_seconds=3600,
-        interval=15,
+def monitor_options(*, by: str | None = None) -> StandaloneLaunch:
+    return StandaloneLaunch(
+        ProcessConfig(query_timeout=1),
+        StandaloneHostConfig(ascii=True, interval=15),
+        MonitorConfig(
+            "monitor",
+            3600,
+            presentation=ChartPresentation(theme="no-color", style="bars"),
+            by=by,
+        ),
     )
 
 
@@ -155,7 +151,15 @@ def test_monitor_uniform_point_styles_use_the_same_marker_for_every_series() -> 
         descriptors = _series_descriptors(
             tuple(series),
             series,
-            replace(monitor_options(by="model"), style=style),
+            replace(
+                monitor_options(by="model"),
+                chart=replace(
+                    monitor_options(by="model").chart,
+                    presentation=replace(
+                        monitor_options(by="model").chart.presentation, style=style
+                    ),
+                ),
+            ),
             terminal,
             load_translator("en"),
         )
@@ -174,7 +178,13 @@ def test_monitor_titles_keep_filters_and_transitional_states_only() -> None:
         0.0,
         terminal,
         translator,
-        replace(monitor_options(), agents=("claude",)),
+        replace(
+            monitor_options(),
+            chart=replace(
+                monitor_options().chart,
+                filters=replace(monitor_options().chart.filters, agents=("claude",)),
+            ),
+        ),
     )
     observer.add(snapshot(0), 0.0)
     collecting = _render(observer, 0.0, terminal, translator, monitor_options())
@@ -242,7 +252,13 @@ def test_monitor_values_display_lists_each_visible_model_observation() -> None:
     observer = ObservedTPM(window_seconds=3600, by="model", top=None)
     observer.add(snapshot(0, sonnet=0, opus=0, haiku=0), 0.0)
     observer.add(snapshot(600, sonnet=300, opus=200, haiku=100), 60.0)
-    options = replace(monitor_options(by="model"), legend="values")
+    options = replace(
+        monitor_options(by="model"),
+        chart=replace(
+            monitor_options(by="model").chart,
+            presentation=replace(monitor_options(by="model").chart.presentation, legend="values"),
+        ),
+    )
 
     output = _render(
         observer,
@@ -262,7 +278,13 @@ def test_monitor_values_display_uses_tokens_for_agent_and_project_growth() -> No
     observer = ObservedTPM(window_seconds=3600, by="agent", top=None)
     observer.add(CounterSnapshot(usage(0), agents={"Claude": usage(0)}), 0.0)
     observer.add(CounterSnapshot(usage(60), agents={"Claude": usage(60)}), 60.0)
-    options = replace(monitor_options(by="agent"), legend="values")
+    options = replace(
+        monitor_options(by="agent"),
+        chart=replace(
+            monitor_options(by="agent").chart,
+            presentation=replace(monitor_options(by="agent").chart.presentation, legend="values"),
+        ),
+    )
 
     output = _render(
         observer,
@@ -280,7 +302,13 @@ def test_monitor_ranking_style_orders_current_values_without_chart() -> None:
     observer = ObservedTPM(window_seconds=3600, by="model", top=None)
     observer.add(snapshot(0, alpha=0, beta=0, gamma=0), 0.0)
     observer.add(snapshot(600, alpha=100, beta=300, gamma=200), 60.0)
-    options = replace(monitor_options(by="model"), style="ranking")
+    options = replace(
+        monitor_options(by="model"),
+        chart=replace(
+            monitor_options(by="model").chart,
+            presentation=replace(monitor_options(by="model").chart.presentation, style="ranking"),
+        ),
+    )
 
     output = _render(
         observer,
@@ -309,8 +337,14 @@ def test_monitor_ranking_style_ignores_legend_positions() -> None:
     for legend_position in ("inside", "values"):
         options = replace(
             monitor_options(by="model"),
-            style="ranking",
-            legend=legend_position,
+            chart=replace(
+                monitor_options(by="model").chart,
+                presentation=replace(
+                    monitor_options(by="model").chart.presentation,
+                    style="ranking",
+                    legend=legend_position,
+                ),
+            ),
         )
         outputs.append(
             _render(
@@ -331,7 +365,13 @@ def test_monitor_ranking_style_uses_tokens_for_project_growth() -> None:
     observer = ObservedTPM(window_seconds=3600, by="project", top=None)
     observer.add(CounterSnapshot(usage(0), projects={"app": usage(0)}), 0.0)
     observer.add(CounterSnapshot(usage(60), projects={"app": usage(60)}), 60.0)
-    options = replace(monitor_options(by="project"), style="ranking")
+    options = replace(
+        monitor_options(by="project"),
+        chart=replace(
+            monitor_options(by="project").chart,
+            presentation=replace(monitor_options(by="project").chart.presentation, style="ranking"),
+        ),
+    )
 
     output = _render(
         observer,
@@ -351,7 +391,13 @@ def test_monitor_ranking_style_fits_narrow_pane_width() -> None:
     observer = ObservedTPM(window_seconds=3600, by="model", top=None)
     observer.add(snapshot(0, 宽模型名称=0, another_very_long_model_name=0), 0.0)
     observer.add(snapshot(300, 宽模型名称=200, another_very_long_model_name=100), 60.0)
-    options = replace(monitor_options(by="model"), style="ranking")
+    options = replace(
+        monitor_options(by="model"),
+        chart=replace(
+            monitor_options(by="model").chart,
+            presentation=replace(monitor_options(by="model").chart.presentation, style="ranking"),
+        ),
+    )
     terminal = Terminal(22, 8, color=False, ascii=True)
 
     output = _render(observer, 60.0, terminal, load_translator("en"), options)
@@ -602,7 +648,13 @@ def test_project_title_names_token_growth_without_tpm() -> None:
 
 
 def test_monitor_project_plan_uses_bounded_claude_instances_query() -> None:
-    options = replace(monitor_options(by="project"), projects=("app",))
+    options = replace(
+        monitor_options(by="project"),
+        chart=replace(
+            monitor_options(by="project").chart,
+            filters=replace(monitor_options(by="project").chart.filters, projects=("app",)),
+        ),
+    )
     query = _monitor_plan(options).queries[0]
 
     assert query.kind.value == "Claude daily projects"

@@ -19,7 +19,7 @@ from ccusage_viz.command_copy import (
     format_full_command_display,
     wrap_command,
 )
-from ccusage_viz.core.time import DateRange, refresh_date_range
+from ccusage_viz.core.time import DateRange
 from ccusage_viz.data_view import BodyView, next_body_view, render_monitor_data
 from ccusage_viz.deltas import RefreshDeltas, RefreshRanks
 from ccusage_viz.demo import generate_demo
@@ -35,7 +35,12 @@ from ccusage_viz.formatting import (
     truncate_width,
 )
 from ccusage_viz.i18n import Translator
-from ccusage_viz.options import CommandOptions, adjust_option, compatible_styles
+from ccusage_viz.options import (
+    MonitorConfig,
+    StandaloneLaunch,
+    adjust_standalone,
+    compatible_styles,
+)
 from ccusage_viz.project_identity import project_label, resolve_projects, unique_projects
 from ccusage_viz.query.client import QueryRunner
 from ccusage_viz.query.models import QueryKind, QueryPlan, QuerySpec
@@ -109,7 +114,7 @@ class MonitorSeries:
 @dataclass(frozen=True, slots=True)
 class MonitorSampleResult:
     generation: int
-    options: CommandOptions
+    options: StandaloneLaunch
     records: tuple[UsageRecord, ...]
     elapsed: float
 
@@ -594,12 +599,14 @@ def _project_records(
     )
 
 
-def _monitor_plan(options: CommandOptions) -> QueryPlan:
-    current = refresh_date_range(options.date_range)
+def _monitor_plan(options: StandaloneLaunch) -> QueryPlan:
+    if not isinstance(options.chart, MonitorConfig):
+        raise TypeError("monitor query planning requires a monitor configuration")
     # A monitor begins with no observed history, but includes a one-day rollover
     # margin so cumulative counters remain comparable across midnight.
-    since = current.until - timedelta(days=1)
-    if options.by == "project" or options.projects:
+    current_day = datetime.now().astimezone().date()
+    since = current_day - timedelta(days=1)
+    if options.chart.by == "project" or options.chart.filters.projects:
         return QueryPlan(
             (
                 QuerySpec(
@@ -612,7 +619,7 @@ def _monitor_plan(options: CommandOptions) -> QueryPlan:
                         "--since",
                         since.strftime("%Y%m%d"),
                         "--until",
-                        current.until.strftime("%Y%m%d"),
+                        current_day.strftime("%Y%m%d"),
                         "--offline",
                     ),
                 ),
@@ -629,7 +636,7 @@ def _monitor_plan(options: CommandOptions) -> QueryPlan:
                     "--since",
                     since.isoformat(),
                     "--until",
-                    current.until.isoformat(),
+                    current_day.isoformat(),
                     "--offline",
                     "--no-cost",
                 ),
@@ -638,10 +645,10 @@ def _monitor_plan(options: CommandOptions) -> QueryPlan:
     )
 
 
-def _demo_snapshot(options: CommandOptions, ordinal: int) -> tuple[UsageRecord, ...]:
-    today = options.date_range.until
+def _demo_snapshot(options: StandaloneLaunch, ordinal: int) -> tuple[UsageRecord, ...]:
+    today = datetime.now().astimezone().date()
     records = generate_demo(
-        options.demo or "medium", DateRange(today - timedelta(days=1), today, None)
+        options.host.demo_size or "medium", DateRange(today - timedelta(days=1), today, None)
     )
     # Cumulative variation is deterministic and remains wholly in memory. The
     # repeating increments create low runs, bursts, and recovery for Demo charts.
@@ -690,17 +697,19 @@ def _elapsed_labels(buckets: tuple[ObservedBucket, ...]) -> tuple[list[int], lis
 def _series_descriptors(
     names: tuple[str, ...],
     series: dict[str, list[float]],
-    options: CommandOptions,
+    options: StandaloneLaunch,
     terminal: Terminal,
     translator: Translator,
 ) -> tuple[MonitorSeries, ...]:
-    colors = categorical_colors((name for name in names if name != "Other"), options.color_scheme)
-    scheme = get_color_scheme(options.color_scheme)
+    colors = categorical_colors(
+        (name for name in names if name != "Other"), options.chart.presentation.theme
+    )
+    scheme = get_color_scheme(options.chart.presentation.theme)
     marker_pairs = (("dot", "•"), ("circle", "○"), ("square", "■"), ("diamond", "◆"))
     if terminal.ascii:
         marker_pairs = (("#", "."), ("#", "o"), ("#", "#"), ("#", "D"))
     descriptors = []
-    uniform_points = options.style in {"points", "line-points"}
+    uniform_points = options.chart.presentation.style in {"points", "line-points"}
     for name in names:
         # Stable key ordering prevents a surviving series from changing marker when Top changes.
         index = sum(ord(character) for character in name) % len(marker_pairs)
@@ -865,7 +874,7 @@ def _render(
     now: float,
     terminal: Terminal,
     translator: Translator,
-    options: CommandOptions,
+    options: StandaloneLaunch,
     *,
     buckets: tuple[ObservedBucket, ...] | None = None,
     reserved_rows: int = 2,
@@ -885,7 +894,11 @@ def _render(
         state = f" · {translator.text('label.monitor_samples')}"
     else:
         state = ""
-    agents = f" · Agent {', '.join(options.agents)}" if options.agents else ""
+    agents = (
+        f" · Agent {', '.join(options.chart.filters.agents)}"
+        if options.chart.filters.agents
+        else ""
+    )
     mode = translator.text(
         {
             None: "label.monitor_total_mode",
@@ -925,14 +938,14 @@ def _render(
         translator,
         color=terminal.color,
         ascii=terminal.ascii,
-        color_scheme=options.color_scheme,
-        style=options.style,
-        legend_position=options.legend,
+        color_scheme=options.chart.presentation.theme,
+        style=options.chart.presentation.style,
+        legend_position=options.chart.presentation.legend,
         hide_upper_right_axes=hide_upper_right_axes,
     )
     series = {name: [bucket.values.get(name, float("nan")) for bucket in buckets] for name in names}
     descriptors = _series_descriptors(names, series, options, terminal, translator)
-    if options.style == "ranking":
+    if options.chart.presentation.style == "ranking":
         compact_heading = _current_heading(mode, observer, translator, terminal.width)
         rows = _render_current_rows(
             descriptors,
@@ -943,9 +956,11 @@ def _render(
         return "\n".join(line for line in (compact_heading, rows) if line)
     # The default sole Total view stays compact, but explicit value and in-chart
     # presentations remain available while adjusting appearance.
-    show_legend = (len(names) > 1 or names != ("Total",)) and options.legend != "hidden"
-    show_legend = show_legend or options.legend in {"inside", "values"}
-    below_title = options.legend in {"below-title", "values"} and show_legend
+    show_legend = (
+        len(names) > 1 or names != ("Total",)
+    ) and options.chart.presentation.legend != "hidden"
+    show_legend = show_legend or options.chart.presentation.legend in {"inside", "values"}
+    below_title = options.chart.presentation.legend in {"below-title", "values"} and show_legend
     with isolated_plot():
         configure_plot(context)
         plt.figure.plot_size(
@@ -962,7 +977,7 @@ def _render(
                 pixel=plt.pixel(foreground=descriptor.color) if terminal.color else None,
             )
             x_values = list(range(len(buckets)))
-            if options.style == "bars":
+            if options.chart.presentation.style == "bars":
                 # A missing observation is not zero for lines, but Plotext cannot
                 # safely render NaN bar geometry. Keep known zeros intact.
                 signal = plt.figure.bar(
@@ -972,13 +987,13 @@ def _render(
                     width=0.75,
                 )
             else:
-                if options.style == "step":
+                if options.chart.presentation.style == "step":
                     x_values = [item for point in x_values for item in (point, point + 1)]
                     values = [item for value in values for item in (value, value)]
                 signal = plt.figure.signal(x_values, values, marker=marker).lines(
-                    options.style != "points"
+                    options.chart.presentation.style != "points"
                 )
-            if show_legend and options.legend == "inside":
+            if show_legend and options.chart.presentation.legend == "inside":
                 signal.label(descriptor.label)
             plt.figure.draw(signal)
         positions, labels = _elapsed_labels(buckets)
@@ -990,10 +1005,10 @@ def _render(
         plt.figure.ruler("y").ticks(
             y_positions, [format_tokens(round(position)) for position in y_positions]
         )
-        if options.legend != "inside":
+        if options.chart.presentation.legend != "inside":
             plt.figure.legend(False)
         if below_title:
-            if options.legend == "values":
+            if options.chart.presentation.legend == "values":
                 legend = " · ".join(
                     f"{colored_mark(descriptor.marker_glyph, descriptor.color, context)} "
                     f"{descriptor.label} {_monitor_value_with_unit(descriptor, observer, translator)}"
@@ -1011,10 +1026,10 @@ def _render(
 
 
 def load_monitor_sample(
-    options: CommandOptions, runner: QueryRunner, *, demo_ordinal: int = 0
+    options: StandaloneLaunch, runner: QueryRunner, *, demo_ordinal: int = 0
 ) -> tuple[UsageRecord, ...]:
     """Load one raw cumulative sample for a Monitor pane or standalone monitor."""
-    if options.demo:
+    if options.host.demo_size:
         return _demo_snapshot(options, demo_ordinal + 1)
     results = runner.run(_monitor_plan(options))
     return tuple(
@@ -1022,14 +1037,18 @@ def load_monitor_sample(
     )
 
 
-def monitor_counters(options: CommandOptions, records: tuple[UsageRecord, ...]) -> CounterSnapshot:
+def monitor_counters(
+    options: StandaloneLaunch, records: tuple[UsageRecord, ...]
+) -> CounterSnapshot:
     """Build the cumulative counters represented by one filtered Monitor sample."""
-    selected = _project_records(_agent_records(records, options.agents), options.projects)
+    selected = _project_records(
+        _agent_records(records, options.chart.filters.agents), options.chart.filters.projects
+    )
     return _counters(selected)
 
 
 def add_monitor_sample(
-    observer: ObservedTPM, options: CommandOptions, records: tuple[UsageRecord, ...], now: float
+    observer: ObservedTPM, options: StandaloneLaunch, records: tuple[UsageRecord, ...], now: float
 ) -> bool:
     """Apply Monitor filters and add a cumulative sample to one observer."""
     return observer.add(monitor_counters(options, records), now)
@@ -1037,7 +1056,7 @@ def add_monitor_sample(
 
 def render_monitor_snapshot(
     observer: ObservedTPM,
-    options: CommandOptions,
+    options: StandaloneLaunch,
     translator: Translator,
     terminal: Terminal,
     *,
@@ -1063,31 +1082,41 @@ def render_monitor_snapshot(
     )
 
 
-def run_monitor(options: CommandOptions, translator: Translator) -> int:
-    if options.window_seconds is None or options.interval is None:
+def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
+    if not isinstance(options.chart, MonitorConfig):
+        raise TypeError("monitor runtime requires a monitor configuration")
+    if options.chart.window_seconds is None or options.host.interval is None:
         raise UsageError(
             "error.arguments", detail="monitor requires an observation window and interval"
         )
-    interval = options.interval
+    interval = options.host.interval
     screen = InteractiveScreen()
     current = options
-    runner = QueryRunner(options.ccusage_bin, timeout=options.query_timeout)
+    runner = QueryRunner(options.process.ccusage_bin, timeout=options.process.query_timeout)
+
+    def monitor_chart(config: StandaloneLaunch) -> MonitorConfig:
+        if not isinstance(config.chart, MonitorConfig):
+            raise TypeError("monitor runtime requires a monitor configuration")
+        return config.chart
+
     observer = ObservedTPM(
-        window_seconds=options.window_seconds,
-        by=options.by,
-        top=options.top,
-        model_selectors=options.models,
+        window_seconds=options.chart.window_seconds,
+        by=options.chart.by,
+        top=options.chart.top,
+        model_selectors=options.chart.filters.models,
     )
-    demo_steps = min(24, max(8, options.window_seconds))
-    if options.demo:
+    demo_steps = min(24, max(8, options.chart.window_seconds))
+    if options.host.demo_size:
         demo_now = time.monotonic()
-        demo_seconds = options.window_seconds / max(1, demo_steps - 1)
+        demo_seconds = options.chart.window_seconds / max(1, demo_steps - 1)
         for ordinal in range(demo_steps):
             observer.add(
                 _counters(
                     _project_records(
-                        _agent_records(_demo_snapshot(options, ordinal + 1), options.agents),
-                        options.projects,
+                        _agent_records(
+                            _demo_snapshot(options, ordinal + 1), options.chart.filters.agents
+                        ),
+                        options.chart.filters.projects,
                     )
                 ),
                 demo_now - (demo_steps - 1 - ordinal) * demo_seconds,
@@ -1099,7 +1128,7 @@ def run_monitor(options: CommandOptions, translator: Translator) -> int:
     rebaseline_pending = False
     controls_hidden = False
     body_view: BodyView = "chart"
-    samples = demo_steps if options.demo else 0
+    samples = demo_steps if options.host.demo_size else 0
     status = translator.text("status.loading")
     next_sample = time.monotonic()
     last_elapsed: float | None = None
@@ -1123,7 +1152,7 @@ def run_monitor(options: CommandOptions, translator: Translator) -> int:
             is not None
         }
 
-    if options.demo:
+    if options.host.demo_size:
         initial_values = current_values(time.monotonic())
         refresh_deltas.accept(initial_values)
         refresh_ranks.accept(monitor_rank_keys(initial_values))
@@ -1134,7 +1163,10 @@ def run_monitor(options: CommandOptions, translator: Translator) -> int:
             size = get_terminal_size()
             last_size = (size.columns, size.lines)
             terminal = inspect_terminal(
-                current.command, no_color=current.no_color, ascii=current.ascii, size=size
+                current.chart.kind,
+                no_color=current.chart.presentation.theme == "no-color",
+                ascii=current.host.ascii,
+                size=size,
             )
             controls = (
                 ()
@@ -1176,7 +1208,7 @@ def run_monitor(options: CommandOptions, translator: Translator) -> int:
                 if body_view == "full-command"
                 else render_monitor_data(
                     buckets,
-                    by=current.by,
+                    by=monitor_chart(current).by,
                     translator=translator,
                     terminal=terminal,
                     view=body_view,
@@ -1190,9 +1222,11 @@ def run_monitor(options: CommandOptions, translator: Translator) -> int:
                 force=force,
             )
         except UsageError as exc:
-            terminal = Terminal(size.columns, size.lines, False, current.ascii)
+            terminal = Terminal(size.columns, size.lines, False, current.host.ascii)
             screen.paint(
-                format_error(exc, translator, color=False, color_scheme=current.color_scheme),
+                format_error(
+                    exc, translator, color=False, color_scheme=current.chart.presentation.theme
+                ),
                 status,
                 ()
                 if controls_hidden
@@ -1207,13 +1241,13 @@ def run_monitor(options: CommandOptions, translator: Translator) -> int:
 
     def pick_appearance() -> None:
         nonlocal current, interval, gap_limit, next_sample, sample_generation, rebaseline_pending
-        theme_index = COLOR_SCHEMES.index(current.color_scheme)
-        candidate_by = current.by
-        candidate_top = current.top
-        candidate_window = current.window_seconds or observer.window_seconds
+        theme_index = COLOR_SCHEMES.index(current.chart.presentation.theme)
+        candidate_by = monitor_chart(current).by
+        candidate_top = monitor_chart(current).top
+        candidate_window = monitor_chart(current).window_seconds
         candidate_interval = interval
-        style = current.style
-        candidate_legend = current.legend
+        style = current.chart.presentation.style
+        candidate_legend = current.chart.presentation.legend
         adjustment_page = "quick"
         preview = _copy_observer(observer)
         copied_status: str | None = None
@@ -1224,44 +1258,57 @@ def run_monitor(options: CommandOptions, translator: Translator) -> int:
                     _counters(
                         _project_records(
                             _agent_records(
-                                _demo_snapshot(replace(current, demo="small"), ordinal + 1),
-                                current.agents,
+                                _demo_snapshot(
+                                    replace(current, host=replace(current.host, demo_size="small")),
+                                    ordinal + 1,
+                                ),
+                                current.chart.filters.agents,
                             ),
-                            current.projects,
+                            current.chart.filters.projects,
                         )
                     ),
                     preview_now - (12 - ordinal),
                 )
         window_choices = (300, 900, 1800, 3600, 21600, 43200, 86400)
-        interval_choices = (1.0, 5.0, 15.0, 30.0, 60.0) if current.demo else (5.0, 15.0, 30.0, 60.0)
+        interval_choices = (
+            (1.0, 5.0, 15.0, 30.0, 60.0) if current.host.demo_size else (5.0, 15.0, 30.0, 60.0)
+        )
 
         def window_label(seconds: int) -> str:
             return f"{seconds // 3600}h" if seconds % 3600 == 0 else f"{seconds // 60}m"
 
-        def candidate_options() -> CommandOptions:
+        def candidate_options() -> StandaloneLaunch:
             styles = compatible_styles("monitor", candidate_by)
             candidate_style = style if style in styles else styles[0]
             return replace(
                 current,
-                by=candidate_by,
-                top=candidate_top if candidate_by is not None else None,
-                models=current.models,
-                window_seconds=candidate_window,
-                interval=candidate_interval,
-                color_scheme=COLOR_SCHEMES[theme_index],
-                style=candidate_style,
-                legend=candidate_legend,
+                host=replace(current.host, interval=candidate_interval),
+                chart=replace(
+                    current.chart,
+                    by=candidate_by,
+                    top=candidate_top if candidate_by is not None else None,
+                    window_seconds=candidate_window,
+                    presentation=replace(
+                        current.chart.presentation,
+                        theme=COLOR_SCHEMES[theme_index],
+                        style=candidate_style,
+                        legend=candidate_legend,
+                    ),
+                ),
             )
 
         def paint_picker() -> None:
             candidate = candidate_options()
-            preview.by = candidate.by
-            preview.top = candidate.top
-            preview.model_selectors = candidate.models
-            preview.window_seconds = candidate.window_seconds or preview.window_seconds
+            preview.by = monitor_chart(candidate).by
+            preview.top = monitor_chart(candidate).top
+            preview.model_selectors = monitor_chart(candidate).filters.models
+            preview.window_seconds = monitor_chart(candidate).window_seconds
             size = get_terminal_size()
             terminal = inspect_terminal(
-                candidate.command, no_color=candidate.no_color, ascii=candidate.ascii, size=size
+                candidate.chart.kind,
+                no_color=candidate.chart.presentation.theme == "no-color",
+                ascii=candidate.host.ascii,
+                size=size,
             )
             mode = translator.text(
                 {
@@ -1269,11 +1316,11 @@ def run_monitor(options: CommandOptions, translator: Translator) -> int:
                     "agent": "label.monitor_agent_mode",
                     "model": "label.monitor_model_mode",
                     "project": "label.monitor_project_mode",
-                }[candidate.by]
+                }[monitor_chart(candidate).by]
             )
             top = (
-                str(candidate.top)
-                if candidate.top is not None
+                str(monitor_chart(candidate).top)
+                if monitor_chart(candidate).top is not None
                 else translator.text("label.monitor_all")
             )
             adjustment_state = _controls_line(
@@ -1284,19 +1331,17 @@ def run_monitor(options: CommandOptions, translator: Translator) -> int:
                             f"status.monitor_adjust_{adjustment_page}",
                             **(
                                 {
-                                    "window": window_label(
-                                        candidate.window_seconds or preview.window_seconds
-                                    ),
-                                    "interval": f"{candidate.interval:g}",
+                                    "window": window_label(monitor_chart(candidate).window_seconds),
+                                    "interval": f"{candidate.host.interval:g}",
                                     "mode": mode,
                                     "top": top,
-                                    "theme": candidate.color_scheme,
-                                    "style": candidate.style,
+                                    "theme": candidate.chart.presentation.theme,
+                                    "style": candidate.chart.presentation.style,
                                 }
                                 if adjustment_page == "quick"
                                 else {
                                     "legend_position": translator.text(
-                                        f"label.legend_{candidate.legend.replace('-', '_')}"
+                                        f"label.legend_{candidate.chart.presentation.legend.replace('-', '_')}"
                                     )
                                 }
                             ),
@@ -1346,23 +1391,25 @@ def run_monitor(options: CommandOptions, translator: Translator) -> int:
                 current = candidate_options()
                 refresh_deltas.clear()
                 refresh_ranks.clear()
+                if not isinstance(previous.chart, MonitorConfig):
+                    raise TypeError("monitor runtime requires a monitor configuration")
                 observation_changed = (
-                    previous.by,
-                    previous.models,
-                    previous.window_seconds,
+                    previous.chart.by,
+                    previous.chart.filters.models,
+                    previous.chart.window_seconds,
                 ) != (
-                    current.by,
-                    current.models,
-                    current.window_seconds,
+                    monitor_chart(current).by,
+                    monitor_chart(current).filters.models,
+                    monitor_chart(current).window_seconds,
                 )
                 if observation_changed:
                     sample_generation += 1
                     rebaseline_pending = True
-                observer.by = current.by
-                observer.top = current.top
-                observer.model_selectors = current.models
-                observer.window_seconds = current.window_seconds or observer.window_seconds
-                interval = current.interval or interval
+                observer.by = monitor_chart(current).by
+                observer.top = monitor_chart(current).top
+                observer.model_selectors = monitor_chart(current).filters.models
+                observer.window_seconds = monitor_chart(current).window_seconds
+                interval = current.host.interval or interval
                 gap_limit = interval * 2
                 next_sample = time.monotonic() + interval
                 return
@@ -1370,9 +1417,9 @@ def run_monitor(options: CommandOptions, translator: Translator) -> int:
                 adjustment_page = "advanced" if adjustment_page == "quick" else "quick"
                 paint_picker()
             elif adjustment_page == "quick" and key in {"s", "S", "t", "T"}:
-                updated = adjust_option(candidate_options(), key)
-                theme_index = COLOR_SCHEMES.index(updated.color_scheme)
-                style = updated.style
+                updated = adjust_standalone(candidate_options(), key)
+                theme_index = COLOR_SCHEMES.index(updated.chart.presentation.theme)
+                style = updated.chart.presentation.style
                 paint_picker()
             elif adjustment_page == "advanced" and key in {"l", "L"}:
                 positions = ("below-title", "inside", "values", "hidden")
@@ -1424,12 +1471,12 @@ def run_monitor(options: CommandOptions, translator: Translator) -> int:
 
         def work(
             generation: int = generation,
-            submitted: CommandOptions = submitted,
+            submitted: StandaloneLaunch = submitted,
             ordinal: int = ordinal,
         ) -> None:
             started = time.monotonic()
             try:
-                if submitted.demo:
+                if submitted.host.demo_size:
                     records = _demo_snapshot(submitted, ordinal)
                 else:
                     results = runner.run(_monitor_plan(submitted))
@@ -1471,7 +1518,7 @@ def run_monitor(options: CommandOptions, translator: Translator) -> int:
                         prefix
                         + _dimmed(
                             translator.text("status.monitor_sampling_active"),
-                            color=not current.no_color,
+                            color=current.chart.presentation.theme != "no-color",
                         )
                     )
                 try:
@@ -1511,7 +1558,7 @@ def run_monitor(options: CommandOptions, translator: Translator) -> int:
                         status = translator.text(
                             "status.monitor_source",
                             source="DEMO DATA"
-                            if outcome.options.demo
+                            if outcome.options.host.demo_size
                             else f"ccusage {outcome.elapsed:.2f}s",
                             interval=f"{interval:g}",
                             state="",
@@ -1530,9 +1577,9 @@ def run_monitor(options: CommandOptions, translator: Translator) -> int:
                     paint(force=True)
                 elif key in {"y", "Y"} and body_view != "chart":
                     terminal = inspect_terminal(
-                        current.command,
-                        no_color=current.no_color,
-                        ascii=current.ascii,
+                        current.chart.kind,
+                        no_color=current.chart.presentation.theme == "no-color",
+                        ascii=current.host.ascii,
                         size=get_terminal_size(),
                     )
                     copied = (
@@ -1545,7 +1592,7 @@ def run_monitor(options: CommandOptions, translator: Translator) -> int:
                                 observer.display_now(time.monotonic()),
                                 max(8, min(32, terminal.width // 4)),
                             ),
-                            by=current.by,
+                            by=monitor_chart(current).by,
                             translator=translator,
                             terminal=terminal,
                             view=body_view,

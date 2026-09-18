@@ -2,16 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from datetime import date
+from typing import Literal, TypeAlias
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from ccusage_viz.core.time import (
-    DateRange,
-    natural_period_start,
-    today_for_timezone,
-)
-from ccusage_viz.core.time import (
-    parse_period as parse_core_period,
-)
+from ccusage_viz.core.time import DateRange, natural_period_start, today_for_timezone
+from ccusage_viz.core.time import parse_period as parse_core_period
 from ccusage_viz.errors import UsageError
 
 GRANULARITIES = ("day", "month", "quarter", "year")
@@ -46,49 +41,124 @@ MINIMUM_SIZES = {
     "monitor": (40, 10),
 }
 
-
-def parse_period(value: str) -> tuple[int, str]:
-    try:
-        return parse_core_period(value)
-    except ValueError as exc:
-        raise UsageError(
-            "error.arguments",
-            detail="--period must be a positive integer followed by d, mo, q, or y",
-        ) from exc
+Dimension: TypeAlias = Literal["agent", "model", "project"]
 
 
 @dataclass(frozen=True, slots=True)
-class CommandOptions:
-    command: str
-    date_range: DateRange
-    by: str | None
-    top: int | None
-    other: str
-    cache: str
-    agents: tuple[str, ...]
-    models: tuple[str, ...]
-    projects: tuple[str, ...]
-    demo: str | None
-    ccusage_bin: str
-    query_timeout: float
-    no_color: bool
-    ascii: bool
-    color_scheme: str = "classic"
+class ProcessConfig:
+    ccusage_bin: str = "ccusage"
+    query_timeout: float = 30.0
+    output_limit: int = 16 * 1024 * 1024
+    environment: tuple[tuple[str, str], ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class Filters:
+    agents: tuple[str, ...] = ()
+    models: tuple[str, ...] = ()
+    projects: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class ChartPresentation:
+    theme: str = "classic"
     style: str = "linear"
-    window_seconds: int | None = None
-    interval: float | None = None
     legend: str = "below-title"
-    panes: tuple[CommandOptions, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class TimelineConfig:
+    kind: Literal["timeline"]
+    date_range: DateRange
+    filters: Filters = Filters()
+    presentation: ChartPresentation = ChartPresentation()
+    by: Dimension | None = None
+    top: int | None = None
+    other: str = "show"
+    granularity: str = "day"
+    weekdays: str = "show"
+
+
+@dataclass(frozen=True, slots=True)
+class CalendarConfig:
+    kind: Literal["calendar"]
+    date_range: DateRange
+    filters: Filters = Filters()
+    presentation: ChartPresentation = ChartPresentation(style="relative")
+
+
+@dataclass(frozen=True, slots=True)
+class StackConfig:
+    kind: Literal["stack"]
+    date_range: DateRange
+    filters: Filters = Filters()
+    presentation: ChartPresentation = ChartPresentation(style="stacked")
+    cache: str = "combined"
+    granularity: str = "day"
+    weekdays: str = "show"
+
+
+@dataclass(frozen=True, slots=True)
+class RankingConfig:
+    kind: Literal["ranking"]
+    date_range: DateRange
+    filters: Filters = Filters()
+    presentation: ChartPresentation = ChartPresentation(style="bar")
+    by: Dimension = "project"
+    top: int = 10
+    other: str = "show"
+
+
+@dataclass(frozen=True, slots=True)
+class MonitorConfig:
+    kind: Literal["monitor"]
+    window_seconds: int
+    filters: Filters = Filters()
+    presentation: ChartPresentation = ChartPresentation(style="bars")
+    by: Dimension | None = None
+    top: int | None = None
+
+
+HistoricalChartConfig: TypeAlias = TimelineConfig | CalendarConfig | StackConfig | RankingConfig
+ChartConfig: TypeAlias = HistoricalChartConfig | MonitorConfig
+
+
+@dataclass(frozen=True, slots=True)
+class StandaloneHostConfig:
+    provider: str = "ccusage"
+    timezone: str | None = None
+    ascii: bool = False
+    demo_size: str | None = None
+    watch: bool = True
+    interval: float = 10.0
+
+
+@dataclass(frozen=True, slots=True)
+class PaneConfig:
+    chart: ChartConfig
+
+
+@dataclass(frozen=True, slots=True)
+class DashboardHostConfig:
+    provider: str = "ccusage"
+    timezone: str | None = None
+    ascii: bool = False
+    demo_size: str | None = None
     grid: str = "2x2"
     refresh_interval: float = 15.0
     sampling_interval: float = 15.0
     header_style: str = "panel"
     header_summary: str = "day"
     header_interval: float = 60.0
-    dashboard_style: str = DEFAULT_DASHBOARD_STYLE
-    granularity: str = "day"
-    weekdays: str = "show"
-    no_watch: bool = False
+    theme: str = "classic"
+    style: str = DEFAULT_DASHBOARD_STYLE
+
+
+@dataclass(frozen=True, slots=True)
+class StandaloneLaunch:
+    process: ProcessConfig
+    host: StandaloneHostConfig
+    chart: ChartConfig
     explicit: frozenset[str] = frozenset()
 
     def was_explicit(self, field: str) -> bool:
@@ -96,14 +166,37 @@ class CommandOptions:
 
 
 @dataclass(frozen=True, slots=True)
-class TuiPanel:
-    options: CommandOptions
-    interval: float
-    label: str
+class DashboardLaunch:
+    process: ProcessConfig
+    host: DashboardHostConfig
+    panes: tuple[PaneConfig, ...]
+    explicit: frozenset[str] = frozenset()
+
+    def was_explicit(self, field: str) -> bool:
+        return field in self.explicit
+
+
+LaunchConfig: TypeAlias = StandaloneLaunch | DashboardLaunch
+
+
+@dataclass(frozen=True, slots=True)
+class StandaloneRoute:
+    launch: StandaloneLaunch
+
+
+@dataclass(frozen=True, slots=True)
+class DashboardRoute:
+    launch: DashboardLaunch
+
+
+LaunchRoute: TypeAlias = StandaloneRoute | DashboardRoute
+
+
+def chart_kind(chart: ChartConfig) -> str:
+    return chart.kind
 
 
 def compatible_styles(command: str, by: str | None) -> tuple[str, ...]:
-    """Return styles that can represent the selected series shape."""
     styles = COMMAND_STYLES[command]
     if command == "timeline" and by is not None:
         return tuple(style for style in styles if style != "area")
@@ -116,100 +209,110 @@ def _cycle(values: tuple[str, ...], current: str, step: int) -> str:
     return values[(values.index(current) + step) % len(values)]
 
 
-def adjust_option(options: CommandOptions, key: str) -> CommandOptions:
-    """Apply one shared interactive option transition, if the key supports it."""
+def adjust_chart(chart: ChartConfig, key: str, *, demo: bool = False) -> ChartConfig:
     if key in {"s", "S"}:
-        styles = compatible_styles(options.command, options.by)
-        current = options.style if options.style in styles else styles[0]
-        return replace(options, style=_cycle(styles, current, 1 if key == "s" else -1))
+        styles = compatible_styles(chart.kind, getattr(chart, "by", None))
+        current = chart.presentation.style
+        style = _cycle(styles, current if current in styles else styles[0], 1 if key == "s" else -1)
+        return replace(chart, presentation=replace(chart.presentation, style=style))
     if key in {"t", "T"}:
         from ccusage_viz.render.palette import COLOR_SCHEMES
 
-        color_scheme = _cycle(COLOR_SCHEMES, options.color_scheme, 1 if key == "t" else -1)
-        return replace(options, color_scheme=color_scheme, no_color=color_scheme == "no-color")
-    if key in {"i", "I"} and options.command == "monitor":
-        interval_values: tuple[float, ...] = (
-            (1.0, 5.0, 15.0, 30.0, 60.0) if options.demo else (5.0, 15.0, 30.0, 60.0)
-        )
-        current = options.interval
-        index = interval_values.index(current) if current in interval_values else 2
-        return replace(options, interval=interval_values[(index + 1) % len(interval_values)])
-    if key in {"p", "P"} and options.command != "monitor":
-        if not options.date_range.relative_until or options.date_range.period is None:
-            return options
-        granularity = options.granularity
-        unit = PERIOD_UNITS[granularity]
-        value, period_unit = parse_period(options.date_range.period)
-        presets = PERIOD_PRESETS[period_unit]
+        theme = _cycle(COLOR_SCHEMES, chart.presentation.theme, 1 if key == "t" else -1)
+        return replace(chart, presentation=replace(chart.presentation, theme=theme))
+    if key in {"p", "P"} and not isinstance(chart, MonitorConfig):
+        if not chart.date_range.relative_until or chart.date_range.period is None:
+            return chart
+        value, unit = parse_period(chart.date_range.period)
+        presets = PERIOD_PRESETS[unit]
         nearest = min(presets, key=lambda preset: abs(preset - value))
         next_value = presets[(presets.index(nearest) + 1) % len(presets)]
-        unit = period_unit
         period = f"{next_value}{unit}"
-        end = options.date_range.until
+        end = chart.date_range.until
         return replace(
-            options,
-            date_range=DateRange(
-                natural_period_start(end, next_value, unit),
-                end,
-                options.date_range.timezone,
-                relative_until=True,
-                period=period,
+            chart,
+            date_range=replace(
+                chart.date_range, since=natural_period_start(end, next_value, unit), period=period
             ),
         )
-    if key in {"g", "G"} and options.command in {"timeline", "stack"}:
-        return replace(options, granularity=_cycle(GRANULARITIES, options.granularity, 1))
-    if key in {"k", "K"} and options.command in {"timeline", "stack"}:
-        return replace(options, weekdays=_cycle(WEEKDAY_MODES, options.weekdays, 1))
-    if key in {"l", "L"} and options.command in {"timeline", "stack", "monitor"}:
-        positions = (
+    if key in {"g", "G"} and isinstance(chart, (TimelineConfig, StackConfig)):
+        return replace(chart, granularity=_cycle(GRANULARITIES, chart.granularity, 1))
+    if key in {"k", "K"} and isinstance(chart, (TimelineConfig, StackConfig)):
+        return replace(chart, weekdays=_cycle(WEEKDAY_MODES, chart.weekdays, 1))
+    if key in {"l", "L"} and isinstance(chart, (TimelineConfig, StackConfig, MonitorConfig)):
+        values = (
             ("below-title", "hidden")
-            if options.command == "stack"
+            if isinstance(chart, StackConfig)
             else ("below-title", "inside", "values", "hidden")
-            if options.command == "monitor"
+            if isinstance(chart, MonitorConfig)
             else ("below-title", "inside", "hidden")
         )
-        return replace(options, legend=_cycle(positions, options.legend, 1))
-    if key in {"c", "C"} and options.command == "stack":
-        return replace(options, cache=_cycle(CACHE_MODES, options.cache, 1))
-    if key in {"b", "B"} and options.command in {"timeline", "ranking", "monitor"}:
-        values: tuple[str | None, ...] = (
-            (None, "agent", "model", "project")
-            if options.command == "timeline"
-            else ("agent", "model", "project")
-            if options.command == "ranking"
-            else (None, "agent", "model", "project")
-        )
-        current = options.by if options.by in values else values[0]
-        by = values[(values.index(current) + 1) % len(values)]
-        styles = compatible_styles(options.command, by)
-        top = options.top
-        if by is None:
-            top = None
-        elif top is None:
-            top = 3
         return replace(
-            options, by=by, top=top, style=options.style if options.style in styles else styles[0]
+            chart,
+            presentation=replace(
+                chart.presentation, legend=_cycle(values, chart.presentation.legend, 1)
+            ),
         )
+    if key in {"c", "C"} and isinstance(chart, StackConfig):
+        return replace(chart, cache=_cycle(CACHE_MODES, chart.cache, 1))
+    if key in {"b", "B"} and isinstance(chart, (TimelineConfig, RankingConfig, MonitorConfig)):
+        values: tuple[Dimension | None, ...] = (
+            (None, "agent", "model", "project")
+            if not isinstance(chart, RankingConfig)
+            else ("agent", "model", "project")
+        )
+        current = chart.by if chart.by in values else values[0]
+        by = values[(values.index(current) + 1) % len(values)]
+        styles = compatible_styles(chart.kind, by)
+        top = None if by is None else chart.top or 3
+        presentation = (
+            chart.presentation
+            if chart.presentation.style in styles
+            else replace(chart.presentation, style=styles[0])
+        )
+        return replace(chart, by=by, top=top, presentation=presentation)
     if (
         key in {"+", "="}
-        and options.command in {"timeline", "ranking", "monitor"}
-        and options.by is not None
+        and isinstance(chart, (TimelineConfig, RankingConfig, MonitorConfig))
+        and chart.by is not None
     ):
-        return replace(options, top=(options.top or 0) + 1)
+        return replace(chart, top=(chart.top or 0) + 1)
     if (
         key in {"-", "_"}
-        and options.command in {"timeline", "ranking", "monitor"}
-        and options.by is not None
+        and isinstance(chart, (TimelineConfig, RankingConfig, MonitorConfig))
+        and chart.by is not None
     ):
-        return replace(options, top=max(1, (options.top or 1) - 1))
-    if key in {"o", "O"} and options.command in {"timeline", "ranking"}:
-        return replace(options, other=_cycle(OTHER_MODES, options.other, 1))
-    if key in {"w", "W"} and options.command == "monitor":
+        return replace(chart, top=max(1, (chart.top or 1) - 1))
+    if key in {"o", "O"} and isinstance(chart, (TimelineConfig, RankingConfig)):
+        return replace(chart, other=_cycle(OTHER_MODES, chart.other, 1))
+    if key in {"w", "W"} and isinstance(chart, MonitorConfig):
         values = (300, 900, 1800, 3600, 21600, 43200, 86400)
-        current = options.window_seconds or 3600
-        nearest = min(values, key=lambda value: abs(value - current))
-        return replace(options, window_seconds=values[(values.index(nearest) + 1) % len(values)])
-    return options
+        nearest = min(values, key=lambda value: abs(value - chart.window_seconds))
+        return replace(chart, window_seconds=values[(values.index(nearest) + 1) % len(values)])
+    return chart
+
+
+def adjust_standalone(config: StandaloneLaunch, key: str) -> StandaloneLaunch:
+    if key in {"i", "I"} and isinstance(config.chart, MonitorConfig):
+        values = (1.0, 5.0, 15.0, 30.0, 60.0) if config.host.demo_size else (5.0, 15.0, 30.0, 60.0)
+        current = config.host.interval
+        index = values.index(current) if current in values else 2
+        return replace(
+            config, host=replace(config.host, interval=values[(index + 1) % len(values)])
+        )
+    return replace(
+        config, chart=adjust_chart(config.chart, key, demo=config.host.demo_size is not None)
+    )
+
+
+def parse_period(value: str) -> tuple[int, str]:
+    try:
+        return parse_core_period(value)
+    except ValueError as exc:
+        raise UsageError(
+            "error.arguments",
+            detail="--period must be a positive integer followed by d, mo, q, or y",
+        ) from exc
 
 
 def _parse_date(value: str) -> date:
@@ -249,13 +352,8 @@ def resolve_date_range(
         if start > end:
             raise UsageError("error.date_order")
         return DateRange(
-            start,
-            end,
-            timezone,
-            fixed_bounds=until is not None,
-            implicit_until=until is None,
+            start, end, timezone, fixed_bounds=until is not None, implicit_until=until is None
         )
-
     canonical_period = period or COMMAND_DEFAULT_PERIODS[command]
     value, unit = parse_period(canonical_period)
     try:

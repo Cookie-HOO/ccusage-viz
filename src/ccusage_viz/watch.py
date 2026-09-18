@@ -10,6 +10,7 @@ from collections.abc import Hashable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from shutil import get_terminal_size
+from typing import Literal, cast
 
 from ccusage_viz.command_copy import (
     copy_command,
@@ -28,7 +29,16 @@ from ccusage_viz.domain import Notice, UsageRecord
 from ccusage_viz.errors import UsageError
 from ccusage_viz.formatting import clip_width
 from ccusage_viz.i18n import Translator
-from ccusage_viz.options import CommandOptions, adjust_option, compatible_styles
+from ccusage_viz.options import (
+    HistoricalChartConfig,
+    MonitorConfig,
+    RankingConfig,
+    StackConfig,
+    StandaloneLaunch,
+    TimelineConfig,
+    adjust_standalone,
+    compatible_styles,
+)
 from ccusage_viz.query.client import QueryRunner
 from ccusage_viz.query.models import QueryKind
 from ccusage_viz.query.planner import plan_queries
@@ -77,12 +87,12 @@ class RefreshResult:
     notices: tuple[str, ...]
     elapsed: float
     snapshot: UsageSnapshot | None = None
-    options: CommandOptions | None = None
+    options: StandaloneLaunch | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class RuntimeAdjustmentResult:
-    options: CommandOptions
+    options: StandaloneLaunch
     seed: RefreshResult
 
 
@@ -106,7 +116,7 @@ def _adjustment_key_supported(command: str, page: str, key: str) -> bool:
 
 
 def _render(
-    options: CommandOptions,
+    options: StandaloneLaunch,
     translator: Translator,
     terminal: Terminal,
     records: tuple[UsageRecord, ...],
@@ -121,21 +131,23 @@ def _render(
     summary_notices: tuple[Notice, ...] = (),
     normalize_titles: bool = False,
 ) -> RenderedChart:
+    if isinstance(options.chart, MonitorConfig):
+        raise TypeError("historical rendering does not support monitor configurations")
     filtered, filter_notices = filter_records(
         records,
-        options.date_range,
-        agents=options.agents,
-        models=options.models,
-        projects=options.projects,
+        options.chart.date_range,
+        agents=options.chart.filters.agents,
+        models=options.chart.filters.models,
+        projects=options.chart.filters.projects,
     )
     all_notices = (*notices, *filter_notices)
 
     def context_for(notice_count: int) -> RenderContext:
         title_content = (
-            translator.text(f"label.{options.by or 'total'}")
-            if normalize_titles and options.command == "timeline"
-            else translator.text(f"label.{options.by or 'project'}")
-            if normalize_titles and options.command == "ranking"
+            translator.text(f"label.{options.chart.by or 'total'}")
+            if normalize_titles and options.chart.kind == "timeline"
+            else translator.text(f"label.{options.chart.by or 'project'}")
+            if normalize_titles and options.chart.kind == "ranking"
             else None
         )
         return RenderContext(
@@ -147,57 +159,60 @@ def _render(
             translator,
             color=terminal.color,
             ascii=terminal.ascii,
-            color_scheme=options.color_scheme,
-            style=options.style,
-            legend_position=options.legend,
+            color_scheme=options.chart.presentation.theme,
+            style=options.chart.presentation.style,
+            legend_position=options.chart.presentation.legend,
             hide_upper_right_axes=hide_upper_right_axes,
             deltas=ranking_deltas,
             rank_deltas=ranking_rank_deltas,
-            weekday_mode=options.weekdays,
-            period=options.date_range.period if options.date_range.relative_until else None,
+            weekday_mode=getattr(options.chart, "weekdays", "show"),
+            period=options.chart.date_range.period
+            if not isinstance(options.chart, MonitorConfig)
+            and options.chart.date_range.relative_until
+            else None,
             title_content=title_content,
         )
 
-    if options.command == "timeline":
+    if options.chart.kind == "timeline":
         model = build_timeline(
             filtered,
-            options.date_range,
-            by=None if options.by == "total" else options.by,
-            top=options.top,
-            show_other=options.other == "show",
+            options.chart.date_range,
+            by=None if options.chart.by == "total" else options.chart.by,
+            top=options.chart.top,
+            show_other=options.chart.other == "show",
             include_summary=True,
             notices=all_notices,
-            aggregation=options.granularity,
+            aggregation=options.chart.granularity,
             coverage=coverage,
         )
         chart = render_timeline(model, context_for(len(model.notices)))
-    elif options.command == "calendar":
+    elif options.chart.kind == "calendar":
         model = build_calendar(
             filtered,
-            options.date_range,
+            options.chart.date_range,
             include_summary=True,
             notices=all_notices,
             coverage=coverage,
         )
         chart = render_calendar(model, context_for(len(model.notices)))
-    elif options.command == "stack":
+    elif options.chart.kind == "stack":
         model = build_stack(
             filtered,
-            options.date_range,
-            split_cache=options.cache == "split",
+            options.chart.date_range,
+            split_cache=options.chart.cache == "split",
             include_summary=True,
             notices=all_notices,
-            aggregation=options.granularity,
+            aggregation=options.chart.granularity,
             coverage=coverage,
         )
         chart = render_stack(model, context_for(len(model.notices)))
     else:
         model = build_ranking(
             filtered,
-            options.date_range,
-            by=options.by or "project",
-            top=options.top,
-            show_other=options.other == "show",
+            options.chart.date_range,
+            by=options.chart.by or "project",
+            top=options.chart.top,
+            show_other=options.chart.other == "show",
             include_summary=True,
             notices=all_notices,
             summary_notices=summary_notices,
@@ -209,42 +224,48 @@ def _render(
 
 
 def ranking_entries(
-    options: CommandOptions, snapshot: UsageSnapshot
+    options: StandaloneLaunch, snapshot: UsageSnapshot
 ) -> tuple[tuple[Hashable, float, bool], ...]:
+    if not isinstance(options.chart, RankingConfig):
+        raise TypeError("ranking entries require a ranking configuration")
     filtered, _ = filter_records(
         snapshot.records,
-        options.date_range,
-        agents=options.agents,
-        models=options.models,
-        projects=options.projects,
+        options.chart.date_range,
+        agents=options.chart.filters.agents,
+        models=options.chart.filters.models,
+        projects=options.chart.filters.projects,
     )
     model = build_ranking(
         filtered,
-        options.date_range,
-        by=options.by or "project",
-        top=options.top,
-        show_other=options.other == "show",
+        options.chart.date_range,
+        by=options.chart.by or "project",
+        top=options.chart.top,
+        show_other=options.chart.other == "show",
         include_summary=False,
         notices=snapshot.notices,
     )
     return tuple((entry.key, float(entry.usage.total), entry.is_other) for entry in model.entries)
 
 
-def ranking_values(options: CommandOptions, snapshot: UsageSnapshot) -> dict[Hashable, float]:
+def ranking_values(options: StandaloneLaunch, snapshot: UsageSnapshot) -> dict[Hashable, float]:
     return {key: value for key, value, _ in ranking_entries(options, snapshot)}
 
 
-def ranking_keys(options: CommandOptions, snapshot: UsageSnapshot) -> tuple[Hashable, ...]:
+def ranking_keys(options: StandaloneLaunch, snapshot: UsageSnapshot) -> tuple[Hashable, ...]:
     return tuple(key for key, _, is_other in ranking_entries(options, snapshot) if not is_other)
 
 
-def load_snapshot(options: CommandOptions, runner: QueryRunner) -> UsageSnapshot:
+def load_snapshot(options: StandaloneLaunch, runner: QueryRunner) -> UsageSnapshot:
+    if isinstance(options.chart, MonitorConfig):
+        raise TypeError("historical snapshot loading does not support monitor configurations")
     started = time.monotonic()
-    if options.demo:
-        records = generate_demo(options.demo, options.date_range)
+    if options.host.demo_size:
+        records = generate_demo(options.host.demo_size, options.chart.date_range)
         notices: tuple[Notice, ...] = ()
         includes_project_attribution = True
-        coverage = DateCoverage.from_interval(options.date_range.since, options.date_range.until)
+        coverage = DateCoverage.from_interval(
+            options.chart.date_range.since, options.chart.date_range.until
+        )
     else:
         plan = plan_queries(options)
         results = runner.run(plan)
@@ -266,12 +287,12 @@ def load_snapshot(options: CommandOptions, runner: QueryRunner) -> UsageSnapshot
         time.monotonic() - started,
         includes_project_attribution,
         coverage,
-        () if options.demo else plan.summary_notices,
+        () if options.host.demo_size else plan.summary_notices,
     )
 
 
 def render_snapshot(
-    options: CommandOptions,
+    options: StandaloneLaunch,
     translator: Translator,
     terminal: Terminal,
     snapshot: UsageSnapshot,
@@ -302,7 +323,7 @@ def render_snapshot(
 
 
 def _refresh(
-    options: CommandOptions,
+    options: StandaloneLaunch,
     translator: Translator,
     terminal: Terminal,
     runner: QueryRunner,
@@ -322,20 +343,25 @@ def _refresh(
     )
 
 
-def run_once(options: CommandOptions, translator: Translator) -> int:
-    current = replace(options, date_range=refresh_date_range(options.date_range))
-    terminal = inspect_terminal(
-        current.command,
-        no_color=current.no_color,
-        ascii=current.ascii,
+def run_once(options: StandaloneLaunch, translator: Translator) -> int:
+    if isinstance(options.chart, MonitorConfig):
+        raise TypeError("one-shot historical rendering does not support monitor configurations")
+    current = replace(
+        options,
+        chart=replace(options.chart, date_range=refresh_date_range(options.chart.date_range)),
     )
-    runner = QueryRunner(current.ccusage_bin, timeout=current.query_timeout)
+    terminal = inspect_terminal(
+        current.chart.kind,
+        no_color=current.chart.presentation.theme == "no-color",
+        ascii=current.host.ascii,
+    )
+    runner = QueryRunner(current.process.ccusage_bin, timeout=current.process.query_timeout)
     result = _refresh(
         current, translator, terminal, runner, reserve_prompt=True, normalize_titles=True
     )
     status = (
-        translator.text("status.demo", size=current.demo)
-        if current.demo
+        translator.text("status.demo", size=current.host.demo_size)
+        if current.host.demo_size
         else translator.text("status.query_time", seconds=f"{result.elapsed:.2f}")
     )
     screen = InteractiveScreen(sys.stdout)
@@ -349,7 +375,7 @@ def run_once(options: CommandOptions, translator: Translator) -> int:
             color=terminal.color,
             ascii=terminal.ascii,
             translator=translator,
-            color_scheme=current.color_scheme,
+            color_scheme=current.chart.presentation.theme,
         ),
         height=terminal.height,
     )
@@ -467,40 +493,55 @@ def _watch_status(
 
 
 def run_runtime_adjustment(
-    options: CommandOptions,
+    options: StandaloneLaunch,
     translator: Translator,
     snapshot: UsageSnapshot,
     screen: InteractiveScreen,
 ) -> RuntimeAdjustmentResult | None:
-    theme_index = COLOR_SCHEMES.index(options.color_scheme)
+    theme_index = COLOR_SCHEMES.index(options.chart.presentation.theme)
     last_size: os.terminal_size | None = None
     current = options
     rendered: RefreshResult | None = None
-    rendered_options: CommandOptions | None = None
+    rendered_options: StandaloneLaunch | None = None
     render_warning: str | None = None
     copied_status: str | None = None
     adjustment_page = "quick"
 
     def grouping_choices() -> tuple[str, ...]:
-        if current.command == "timeline":
+        if current.chart.kind == "timeline":
             return ("total", "agent", "model", "project")
-        if current.command == "ranking":
+        if current.chart.kind == "ranking":
             return ("agent", "model", "project")
         return ()
 
     def paint() -> None:
         nonlocal current, last_size, rendered, rendered_options, render_warning
         theme = COLOR_SCHEMES[theme_index]
-        styles = compatible_styles(current.command, current.by)
-        style = current.style if current.style in styles else styles[0]
-        current = replace(current, color_scheme=theme, style=style)
+        styles = compatible_styles(current.chart.kind, getattr(current.chart, "by", None))
+        style = (
+            current.chart.presentation.style
+            if current.chart.presentation.style in styles
+            else styles[0]
+        )
+        current = replace(
+            current,
+            chart=replace(
+                current.chart,
+                presentation=replace(current.chart.presentation, theme=theme, style=style),
+            ),
+        )
         last_size = get_terminal_size()
-        terminal = Terminal(last_size.columns, last_size.lines, not current.no_color, current.ascii)
+        terminal = Terminal(
+            last_size.columns,
+            last_size.lines,
+            current.chart.presentation.theme != "no-color",
+            current.host.ascii,
+        )
         try:
             terminal = inspect_terminal(
-                current.command,
-                no_color=current.no_color,
-                ascii=current.ascii,
+                current.chart.kind,
+                no_color=current.chart.presentation.theme == "no-color",
+                ascii=current.host.ascii,
                 size=last_size,
             )
             candidate = render_snapshot(
@@ -512,7 +553,7 @@ def run_runtime_adjustment(
             )
         except UsageError as exc:
             render_warning = format_error(
-                exc, translator, color=terminal.color, color_scheme=current.color_scheme
+                exc, translator, color=terminal.color, color_scheme=current.chart.presentation.theme
             )
         else:
             rendered = candidate
@@ -535,28 +576,30 @@ def run_runtime_adjustment(
             "style_count": len(styles),
             "style": style,
         }
-        status_key = f"status.runtime_adjustment_{current.command}_{adjustment_page}"
-        key_key = f"status.tui_adjust_{current.command}_{adjustment_page}_controls"
+        status_key = f"status.runtime_adjustment_{current.chart.kind}_{adjustment_page}"
+        key_key = f"status.tui_adjust_{current.chart.kind}_{adjustment_page}_controls"
         state_values = dict(common)
-        if current.command in {"timeline", "ranking"}:
+        if isinstance(current.chart, (TimelineConfig, RankingConfig)):
             state_values.update(
-                grouping=current.by or translator.text("label.all"),
-                top=current.top if current.top is not None else translator.text("label.all"),
-                other=translator.text("label.on" if current.other == "show" else "label.off"),
+                grouping=current.chart.by or translator.text("label.all"),
+                top=current.chart.top
+                if current.chart.top is not None
+                else translator.text("label.all"),
+                other=translator.text("label.on" if current.chart.other == "show" else "label.off"),
             )
-        if current.command in {"timeline", "stack"}:
-            state_values["weekday"] = translator.text(f"label.weekday_{current.weekdays}")
+        if isinstance(current.chart, (TimelineConfig, StackConfig)):
+            state_values["weekday"] = translator.text(f"label.weekday_{current.chart.weekdays}")
             state_values["legend_position"] = translator.text(
-                f"label.legend_{current.legend.replace('-', '_')}"
+                f"label.legend_{current.chart.presentation.legend.replace('-', '_')}"
             )
-        if current.command == "stack":
+        if isinstance(current.chart, StackConfig):
             state_values["cache"] = translator.text(
-                "label.on" if current.cache == "split" else "label.off"
+                "label.on" if current.chart.cache == "split" else "label.off"
             )
         state = translator.messages[status_key].format(**state_values)
         project_preview_missing = (
-            current.command in {"timeline", "ranking"}
-            and current.by == "project"
+            isinstance(current.chart, (TimelineConfig, RankingConfig))
+            and current.chart.by == "project"
             and not snapshot.includes_project_attribution
         )
         preview_notice = (
@@ -617,27 +660,29 @@ def run_runtime_adjustment(
                     adjustment_page = "advanced" if adjustment_page == "quick" else "quick"
                     paint()
                 elif key is not None and _adjustment_key_supported(
-                    current.command, adjustment_page, key
+                    current.chart.kind, adjustment_page, key
                 ):
-                    updated = adjust_option(current, key)
+                    updated = adjust_standalone(current, key)
                     if updated != current:
                         current = updated
-                        theme_index = COLOR_SCHEMES.index(current.color_scheme)
+                        theme_index = COLOR_SCHEMES.index(current.chart.presentation.theme)
                         paint()
     except KeyboardInterrupt:
         return None
 
 
 def run_watch(
-    options: CommandOptions,
+    options: StandaloneLaunch,
     translator: Translator,
     *,
     seed: RefreshResult | None = None,
     screen: InteractiveScreen | None = None,
 ) -> int:
+    if isinstance(options.chart, MonitorConfig):
+        raise TypeError("historical watch mode does not support monitor configurations")
     active_screen = screen or InteractiveScreen(sys.stdout)
-    interval = options.interval or 10.0
-    runner = QueryRunner(options.ccusage_bin, timeout=options.query_timeout)
+    interval = options.host.interval or 10.0
+    runner = QueryRunner(options.process.ccusage_bin, timeout=options.process.query_timeout)
     results: queue.Queue[tuple[int, RefreshResult | BaseException]] = queue.Queue()
     running = False
     queued = False
@@ -652,22 +697,29 @@ def run_watch(
     render_warning: str | None = None
     last_size: tuple[int, int] | None = None
     base_status = (
-        translator.text("status.demo", size=options.demo)
-        if seed and options.demo
+        translator.text("status.demo", size=options.host.demo_size)
+        if seed and options.host.demo_size
         else translator.text("status.query_time", seconds=f"{seed.elapsed:.2f}")
         if seed
         else translator.text("status.loading")
     )
     current = seed.options if seed and seed.options is not None else options
+
+    def historical_chart(config: StandaloneLaunch) -> HistoricalChartConfig:
+        if isinstance(config.chart, MonitorConfig):
+            raise TypeError("historical watch mode does not support monitor configurations")
+        return config.chart
+
+    historical_chart(current)
     ranking_deltas = RefreshDeltas()
     ranking_ranks = RefreshRanks()
-    if current.command == "ranking" and last_snapshot is not None:
+    if current.chart.kind == "ranking" and last_snapshot is not None:
         ranking_deltas.accept(ranking_values(current, last_snapshot))
         ranking_ranks.accept(ranking_keys(current, last_snapshot))
     next_refresh = time.monotonic() + interval if seed else time.monotonic()
 
     def style_enabled() -> bool:
-        return color_enabled(sys.stdout, no_color=current.no_color)
+        return color_enabled(sys.stdout, no_color=current.chart.presentation.theme == "no-color")
 
     def terminal_size() -> os.terminal_size:
         return get_terminal_size()
@@ -694,7 +746,7 @@ def run_watch(
                 "data-json": "status.data_json_keys",
             }[body_view]
         )
-        if current.demo:
+        if current.host.demo_size:
             keys = f"{keys} · {translator.text('status.demo_keys')}"
         return keys
 
@@ -705,11 +757,16 @@ def run_watch(
         color = style_enabled()
         try:
             terminal = inspect_terminal(
-                current.command, no_color=current.no_color, ascii=current.ascii, size=size
+                current.chart.kind,
+                no_color=current.chart.presentation.theme == "no-color",
+                ascii=current.host.ascii,
+                size=size,
             )
         except UsageError as exc:
             terminal_error = exc
-            warning = format_error(exc, translator, color=False, color_scheme=current.color_scheme)
+            warning = format_error(
+                exc, translator, color=False, color_scheme=current.chart.presentation.theme
+            )
             active_screen.paint(
                 last_chart or warning,
                 status(),
@@ -720,9 +777,9 @@ def run_watch(
                     (*last_notices, warning) if last_chart else (),
                     width=size.columns,
                     color=False,
-                    ascii=current.ascii,
+                    ascii=current.host.ascii,
                     translator=translator,
-                    color_scheme=current.color_scheme,
+                    color_scheme=current.chart.presentation.theme,
                 ),
                 height=size.lines,
                 force=force,
@@ -737,15 +794,17 @@ def run_watch(
                     terminal,
                     last_snapshot,
                     control_rows=0 if controls_hidden else 1,
-                    ranking_deltas=ranking_deltas.current if current.command == "ranking" else None,
+                    ranking_deltas=ranking_deltas.current
+                    if current.chart.kind == "ranking"
+                    else None,
                     ranking_rank_deltas=(
-                        ranking_ranks.current if current.command == "ranking" else None
+                        ranking_ranks.current if current.chart.kind == "ranking" else None
                     ),
                     normalize_titles=True,
                 )
             except UsageError as exc:
                 render_warning = format_error(
-                    exc, translator, color=color, color_scheme=current.color_scheme
+                    exc, translator, color=color, color_scheme=current.chart.presentation.theme
                 )
             else:
                 last_chart = rendered.chart
@@ -775,9 +834,9 @@ def run_watch(
                 (*last_notices, render_warning) if render_warning is not None else last_notices,
                 width=size.columns,
                 color=color,
-                ascii=current.ascii,
+                ascii=current.host.ascii,
                 translator=translator,
-                color_scheme=current.color_scheme,
+                color_scheme=current.chart.presentation.theme,
             ),
             height=size.lines,
             force=force,
@@ -788,20 +847,24 @@ def run_watch(
         generation = refresh_generation
         try:
             terminal = inspect_terminal(
-                current.command,
-                no_color=current.no_color,
-                ascii=current.ascii,
+                current.chart.kind,
+                no_color=current.chart.presentation.theme == "no-color",
+                ascii=current.host.ascii,
             )
         except BaseException as exc:
             results.put((generation, exc))
             running = True
             return
 
-        snapshot = replace(current, date_range=refresh_date_range(current.date_range))
+        chart = historical_chart(current)
+        snapshot = replace(
+            current,
+            chart=replace(chart, date_range=refresh_date_range(chart.date_range)),
+        )
 
         def work(
             generation: int = generation,
-            snapshot: CommandOptions = snapshot,
+            snapshot: StandaloneLaunch = snapshot,
             size: Terminal = terminal,
         ) -> None:
             try:
@@ -859,31 +922,31 @@ def run_watch(
                         last_chart = outcome.chart
                         last_notices = outcome.notices
                         last_snapshot = outcome.snapshot
-                        if current.command == "ranking" and last_snapshot is not None:
-                            if (
-                                previous_options.by,
-                                previous_options.top,
-                                previous_options.other,
-                                previous_options.agents,
-                                previous_options.models,
-                                previous_options.projects,
-                                previous_options.date_range,
+                        if isinstance(current.chart, RankingConfig) and last_snapshot is not None:
+                            if not isinstance(previous_options.chart, RankingConfig) or (
+                                previous_options.chart.by,
+                                previous_options.chart.top,
+                                previous_options.chart.other,
+                                previous_options.chart.filters.agents,
+                                previous_options.chart.filters.models,
+                                previous_options.chart.filters.projects,
+                                previous_options.chart.date_range,
                             ) != (
-                                current.by,
-                                current.top,
-                                current.other,
-                                current.agents,
-                                current.models,
-                                current.projects,
-                                current.date_range,
+                                current.chart.by,
+                                current.chart.top,
+                                current.chart.other,
+                                current.chart.filters.agents,
+                                current.chart.filters.models,
+                                current.chart.filters.projects,
+                                current.chart.date_range,
                             ):
                                 ranking_deltas.clear()
                                 ranking_ranks.clear()
                             ranking_deltas.accept(ranking_values(current, last_snapshot))
                             ranking_ranks.accept(ranking_keys(current, last_snapshot))
                         base_status = (
-                            translator.text("status.demo", size=current.demo)
-                            if current.demo
+                            translator.text("status.demo", size=current.host.demo_size)
+                            if current.host.demo_size
                             else translator.text(
                                 "status.query_time", seconds=f"{outcome.elapsed:.2f}"
                             )
@@ -893,7 +956,7 @@ def run_watch(
                             outcome,
                             translator,
                             color=style_enabled(),
-                            color_scheme=current.color_scheme,
+                            color_scheme=current.chart.presentation.theme,
                         )
                         if isinstance(outcome, UsageError):
                             terminal_error = outcome
@@ -913,13 +976,13 @@ def run_watch(
                     controls_hidden = not controls_hidden
                     paint(force=True)
                 elif key in {"v", "V"}:
-                    body_view = next_body_view(body_view)
+                    body_view = next_body_view(cast(BodyView, body_view))
                     paint(force=True)
                 elif key in {"y", "Y"} and body_view != "chart":
                     terminal = inspect_terminal(
-                        current.command,
-                        no_color=current.no_color,
-                        ascii=current.ascii,
+                        current.chart.kind,
+                        no_color=current.chart.presentation.theme == "no-color",
+                        ascii=current.host.ascii,
                         size=terminal_size(),
                     )
                     copied = (
@@ -932,7 +995,7 @@ def run_watch(
                             last_snapshot,
                             translator,
                             terminal,
-                            view=body_view,
+                            view=cast(Literal["data-table", "data-json"], body_view),
                             complete=True,
                         )
                     )
@@ -962,9 +1025,9 @@ def run_watch(
                     if not paused:
                         next_refresh = time.monotonic() + interval
                     active_screen.paint_status(status())
-                elif current.demo and key in {"s", "d", "l"}:
+                elif current.host.demo_size and key in {"s", "d", "l"}:
                     size = {"s": "small", "d": "medium", "l": "large"}[key]
-                    current = replace(current, demo=size)
+                    current = replace(current, host=replace(current.host, demo_size=size))
                     refresh_generation += 1
                     if running:
                         queued = True

@@ -1,13 +1,13 @@
 import shlex
-from dataclasses import replace
 from datetime import date
 
 import pytest
 
 import ccusage_viz.tui as tui_module
 from ccusage_viz.cli import _to_options, build_parser
+from ccusage_viz.cli import parse_pane_fragment as parse_dashboard_pane
 from ccusage_viz.command_copy import format_dashboard_pane_command, format_full_dashboard_command
-from ccusage_viz.configuration import parse_dashboard_pane
+from ccusage_viz.configuration import standalone_from_pane
 from ccusage_viz.coverage import DateCoverage, DateInterval
 from ccusage_viz.deltas import RefreshRanks
 from ccusage_viz.domain import Notice, SourceKind, TokenUsage, UsageRecord
@@ -30,6 +30,7 @@ from ccusage_viz.tui import (
     _header_lines,
     _header_options,
     _header_refresh_interval,
+    _new_header,
     _new_pane_options,
     _next_header_summary,
     _pane_render,
@@ -37,6 +38,7 @@ from ccusage_viz.tui import (
     _refresh_deltas,
     _refresh_ranks,
     _replace_header_interval,
+    _set_header_theme,
     _unique_notices,
     compose_panels,
     pane_at,
@@ -51,21 +53,38 @@ from ccusage_viz.watch import UsageSnapshot
 def test_dashboard_defaults_to_a_filled_four_pane_dashboard() -> None:
     parser = build_parser(load_translator("en"))
     options = _to_options(parser.parse_args(["dashboard"]))
-    assert options.command == "dashboard"
-    assert tuple(pane.command for pane in options.panes) == (
+    assert "dashboard" == "dashboard"
+    assert tuple(pane.chart.kind for pane in options.panes) == (
         "timeline",
         "stack",
         "ranking",
         "monitor",
     )
-    assert options.panes[-1].by == "model"
-    assert options.refresh_interval == 15.0
-    assert options.sampling_interval == 15.0
-    assert options.grid == "2x2"
-    assert options.header_style == "panel"
-    assert options.header_summary == "day"
-    assert options.header_interval == 60.0
-    assert options.dashboard_style == "split"
+    assert options.panes[-1].chart.by == "model"
+    assert options.host.refresh_interval == 15.0
+    assert options.host.sampling_interval == 15.0
+    assert options.host.grid == "2x2"
+    assert options.host.header_style == "panel"
+    assert options.host.header_summary == "day"
+    assert options.host.header_interval == 60.0
+    assert options.host.style == "split"
+
+
+def test_dashboard_timezone_is_host_owned_and_round_trips() -> None:
+    parser = build_parser(load_translator("en"))
+    dashboard = _to_options(parser.parse_args(["dashboard", "--timezone", "UTC"]))
+
+    full = format_full_dashboard_command(dashboard)
+    reparsed = _to_options(parser.parse_args(shlex.split(full)[1:]))
+
+    assert dashboard.host.timezone == "UTC"
+    assert reparsed.host.timezone == "UTC"
+    assert all(
+        pane.chart.date_range.timezone is None
+        for pane in reparsed.panes
+        if hasattr(pane.chart, "date_range")
+    )
+    assert _header_options(reparsed).chart.date_range.timezone == "UTC"
 
 
 def test_full_dashboard_command_includes_private_and_runtime_configuration() -> None:
@@ -99,7 +118,7 @@ def test_full_dashboard_command_includes_private_and_runtime_configuration() -> 
     assert "--pane" in tokens
     assert "--interval" not in tokens
     reparsed = _to_options(parser.parse_args(tokens[1:]))
-    assert reparsed.panes[0].projects == ("/private/project",)
+    assert reparsed.panes[0].chart.filters.projects == ("/private/project",)
 
 
 def test_dashboard_pane_copy_materializes_canonical_standalone_interval() -> None:
@@ -109,15 +128,15 @@ def test_dashboard_pane_copy_materializes_canonical_standalone_interval() -> Non
     stack = parse_dashboard_pane("stack", host=base)
     monitor = parse_dashboard_pane("monitor --by model", host=base)
 
-    assert format_dashboard_pane_command(timeline, refresh_interval=30) == (
-        "ccuv timeline --period 7d --interval 30"
-    )
-    assert format_dashboard_pane_command(stack, refresh_interval=30) == (
-        "ccuv stack --period 14d --interval 30"
-    )
-    assert format_dashboard_pane_command(monitor, refresh_interval=monitor.interval) == (
-        "ccuv monitor --window 1h --interval 15 --by model --top 3 --style line"
-    )
+    assert format_dashboard_pane_command(
+        standalone_from_pane(base, timeline), refresh_interval=30
+    ) == ("ccuv timeline --period 7d --interval 30")
+    assert format_dashboard_pane_command(
+        standalone_from_pane(base, stack), refresh_interval=30
+    ) == ("ccuv stack --period 14d --interval 30")
+    assert format_dashboard_pane_command(
+        standalone_from_pane(base, monitor), refresh_interval=30, sampling_interval=15
+    ) == ("ccuv monitor --window 1h --by model --top 3 --style line")
 
 
 def test_dashboard_monitor_default_does_not_change_explicit_or_standalone_total() -> None:
@@ -126,9 +145,9 @@ def test_dashboard_monitor_default_does_not_change_explicit_or_standalone_total(
     panel = dashboard.panes[0]
     standalone = _to_options(parser.parse_args(["monitor"]))
 
-    assert _new_pane_options("monitor", dashboard).by == "model"
-    assert panel.by is None
-    assert standalone.by is None
+    assert _new_pane_options("monitor", dashboard).chart.by == "model"
+    assert panel.chart.by is None
+    assert standalone.chart.by is None
 
 
 def test_tui_adjustment_target_exists_only_during_adjustment() -> None:
@@ -185,7 +204,7 @@ def test_dashboard_pane_render_retains_chart_notices_and_deduplicates_them() -> 
     snapshot = UsageSnapshot(
         (
             UsageRecord(
-                ranking.date_range.until,
+                ranking.chart.date_range.until,
                 "claude",
                 TokenUsage(10, 10, 0, 0, 0),
                 SourceKind.CLAUDE_DAILY_PROJECTS,
@@ -193,7 +212,9 @@ def test_dashboard_pane_render_retains_chart_notices_and_deduplicates_them() -> 
         ),
         (),
         0.1,
-        coverage=DateCoverage((DateInterval(ranking.date_range.until, ranking.date_range.until),)),
+        coverage=DateCoverage(
+            (DateInterval(ranking.chart.date_range.until, ranking.chart.date_range.until),)
+        ),
         summary_notices=(Notice("notice.summary_excludes_session_agent", {"agent": "Codex"}),),
     )
     panes = [
@@ -310,6 +331,7 @@ def test_tui_adjustment_footer_has_quick_advanced_and_three_rows() -> None:
     assert _adjustment_key_supported("timeline", "advanced", "k")
     assert _adjustment_key_supported("timeline", "quick", "b")
     assert not _adjustment_key_supported("timeline", "advanced", "b")
+    assert not _adjustment_key_supported("monitor", "quick", "i")
 
     rows, target = _adjustment_footer("timeline", "quick", translator, 80)
     assert len(rows) == 3
@@ -348,15 +370,34 @@ def test_tui_is_not_a_dashboard_compatibility_alias() -> None:
         parser.parse_args(["tui"])
 
 
+def test_dashboard_header_uses_host_summary_and_tracks_global_theme() -> None:
+    parser = build_parser(load_translator("en"))
+    options = _to_options(
+        parser.parse_args(["dashboard", "--header-summary", "quarter", "--theme", "nord"])
+    )
+
+    header = _new_header(options)
+    assert header.summary_period == "quarter"
+    assert header.options.chart.presentation.theme == "nord"
+
+    _set_header_theme(header, "dracula")
+    assert header.options.chart.presentation.theme == "dracula"
+
+
 def test_tui_header_query_is_unfiltered_and_independent() -> None:
     parser = build_parser(load_translator("en"))
     options = _to_options(parser.parse_args(["dashboard", "--demo", "--header-style", "panel"]))
     header = _header_options(options)
-    assert header.command == "timeline"
-    assert header.agents == header.models == header.projects == ()
-    assert header.by is None
-    assert header.top is None
-    assert header.date_range.days == 8
+    assert header.chart.kind == "timeline"
+    assert (
+        header.chart.filters.agents
+        == header.chart.filters.models
+        == header.chart.filters.projects
+        == ()
+    )
+    assert header.chart.by is None
+    assert header.chart.top is None
+    assert header.chart.date_range.days == 8
 
 
 def test_header_summary_cycle_includes_none_and_wraps() -> None:
@@ -372,7 +413,9 @@ def test_header_summary_cycle_includes_none_and_wraps() -> None:
 def test_header_refresh_uses_missing_coverage_then_current_day() -> None:
     parser = build_parser(load_translator("en"))
     options = _to_options(parser.parse_args(["dashboard", "--header-summary", "month"]))
-    header = DashboardHeader(_header_options(options), QueryRunner())
+    header = DashboardHeader(
+        _header_options(options), QueryRunner(), summary_period=options.host.header_summary
+    )
     today = date(2026, 3, 15)
 
     cold = _header_refresh_interval(header, today=today)
@@ -386,14 +429,16 @@ def test_header_refresh_uses_missing_coverage_then_current_day() -> None:
     header.records = ()
     assert _header_refresh_interval(header, today=today) == DateInterval(today, today)
 
-    header.options = replace(header.options, header_summary="none")
+    header.summary_period = "none"
     assert _header_refresh_interval(header, today=today) is None
 
 
 def test_header_date_rollover_requests_new_current_day() -> None:
     parser = build_parser(load_translator("en"))
     options = _to_options(parser.parse_args(["dashboard", "--header-summary", "day"]))
-    header = DashboardHeader(_header_options(options), QueryRunner())
+    header = DashboardHeader(
+        _header_options(options), QueryRunner(), summary_period=options.host.header_summary
+    )
     previous = date(2026, 3, 15)
     header.coverage = DateCoverage((DateInterval(previous.replace(day=8), previous),))
     header.records = (UsageRecord(previous, "claude", TokenUsage.zero(), SourceKind.UNIFIED_DAILY),)
@@ -406,7 +451,9 @@ def test_header_date_rollover_requests_new_current_day() -> None:
 def test_header_none_keeps_title_without_unknown_detail() -> None:
     parser = build_parser(load_translator("en"))
     options = _to_options(parser.parse_args(["dashboard", "--header-summary", "none"]))
-    header = DashboardHeader(_header_options(options), QueryRunner())
+    header = DashboardHeader(
+        _header_options(options), QueryRunner(), summary_period=options.host.header_summary
+    )
 
     compact = _header_lines(header, "compact", load_translator("en"), Terminal(60, 4, False, True))
     banner = _header_lines(header, "banner", load_translator("en"), Terminal(60, 4, False, True))
@@ -420,7 +467,9 @@ def test_header_none_keeps_title_without_unknown_detail() -> None:
 def test_header_cold_period_keeps_structure_with_unknown_detail() -> None:
     parser = build_parser(load_translator("en"))
     options = _to_options(parser.parse_args(["dashboard", "--header-summary", "quarter"]))
-    header = DashboardHeader(_header_options(options), QueryRunner())
+    header = DashboardHeader(
+        _header_options(options), QueryRunner(), summary_period=options.host.header_summary
+    )
 
     lines = _header_lines(header, "banner", load_translator("en"), Terminal(60, 4, False, True))
 
@@ -477,9 +526,9 @@ def test_tui_accepts_repeatable_pane_fragments_and_grid() -> None:
             ["dashboard", "--pane", "timeline --period 7d", "--pane", "ranking", "--grid", "1x2"]
         )
     )
-    assert tuple(pane.command for pane in options.panes) == ("timeline", "ranking")
-    assert options.panes[0].date_range.period == "7d"
-    assert options.grid == "1x2"
+    assert tuple(pane.chart.kind for pane in options.panes) == ("timeline", "ranking")
+    assert options.panes[0].chart.date_range.period == "7d"
+    assert options.host.grid == "1x2"
 
 
 def test_tui_grid_auto_and_compositor() -> None:

@@ -18,7 +18,7 @@ from ccusage_viz.transform import (
 if TYPE_CHECKING:
     from ccusage_viz.i18n import Translator
     from ccusage_viz.monitor import ObservedBucket
-    from ccusage_viz.options import CommandOptions
+    from ccusage_viz.options import StandaloneLaunch
     from ccusage_viz.terminal import Terminal
     from ccusage_viz.watch import UsageSnapshot
 
@@ -68,13 +68,18 @@ def _usage_values(usage: TokenUsage) -> dict[str, int]:
     }
 
 
-def _historical_model(options: CommandOptions, snapshot: UsageSnapshot):
+def _historical_model(options: StandaloneLaunch, snapshot: UsageSnapshot):
+    from ccusage_viz.options import MonitorConfig
+
+    chart = options.chart
+    if isinstance(chart, MonitorConfig):
+        raise TypeError("historical data views do not support monitor configurations")
     filtered, filter_notices = filter_records(
         snapshot.records,
-        options.date_range,
-        agents=options.agents,
-        models=options.models,
-        projects=options.projects,
+        chart.date_range,
+        agents=chart.filters.agents,
+        models=chart.filters.models,
+        projects=chart.filters.projects,
     )
     notices = (*snapshot.notices, *filter_notices)
     common = {
@@ -82,32 +87,32 @@ def _historical_model(options: CommandOptions, snapshot: UsageSnapshot):
         "notices": notices,
         "coverage": snapshot.coverage,
     }
-    if options.command == "timeline":
+    if chart.kind == "timeline":
         return build_timeline(
             filtered,
-            options.date_range,
-            by=None if options.by == "total" else options.by,
-            top=options.top,
-            show_other=options.other == "show",
-            aggregation=options.granularity,
+            chart.date_range,
+            by=chart.by,
+            top=chart.top,
+            show_other=chart.other == "show",
+            aggregation=chart.granularity,
             **common,
         )
-    if options.command == "calendar":
-        return build_calendar(filtered, options.date_range, **common)
-    if options.command == "stack":
+    if chart.kind == "calendar":
+        return build_calendar(filtered, chart.date_range, **common)
+    if chart.kind == "stack":
         return build_stack(
             filtered,
-            options.date_range,
-            split_cache=options.cache == "split",
-            aggregation=options.granularity,
+            chart.date_range,
+            split_cache=chart.cache == "split",
+            aggregation=chart.granularity,
             **common,
         )
     return build_ranking(
         filtered,
-        options.date_range,
-        by=options.by or "project",
-        top=options.top,
-        show_other=options.other == "show",
+        chart.date_range,
+        by=chart.by,
+        top=chart.top,
+        show_other=chart.other == "show",
         summary_notices=snapshot.summary_notices,
         **common,
     )
@@ -175,13 +180,13 @@ def _markdown(rows: list[dict[str, object]]) -> str:
 
 
 def snapshot_data_payload(
-    options: CommandOptions, snapshot: UsageSnapshot | None
+    options: StandaloneLaunch, snapshot: UsageSnapshot | None
 ) -> tuple[str | None, list[dict[str, object]]]:
     """Return chart-model data rows, never raw source records."""
     if snapshot is None:
         return None, []
     model = _historical_model(options, snapshot)
-    return options.command, _historical_rows(model)
+    return options.chart.kind, _historical_rows(model)
 
 
 def _display_payload(payload: str, terminal: Terminal, *, complete: bool) -> str:
@@ -196,7 +201,7 @@ def _display_payload(payload: str, terminal: Terminal, *, complete: bool) -> str
 
 
 def render_snapshot_data(
-    options: CommandOptions,
+    options: StandaloneLaunch,
     snapshot: UsageSnapshot | None,
     translator: Translator,
     terminal: Terminal,

@@ -9,26 +9,31 @@ import ccusage_viz.application as application
 from ccusage_viz.core.time import DateRange
 from ccusage_viz.errors import UsageError
 from ccusage_viz.i18n import load_translator
-from ccusage_viz.options import CommandOptions
+from ccusage_viz.options import (
+    ChartPresentation,
+    ProcessConfig,
+    StandaloneHostConfig,
+    StandaloneLaunch,
+    TimelineConfig,
+)
 
 
-def options(**changes: object) -> CommandOptions:
-    base = CommandOptions(
-        command="timeline",
-        date_range=DateRange(date(2026, 1, 1), date(2026, 1, 14), None),
-        by=None,
-        top=None,
-        other="show",
-        cache="combined",
-        agents=(),
-        models=(),
-        projects=(),
-        demo="small",
-        ccusage_bin="ccusage",
-        query_timeout=30,
-        no_color=False,
-        ascii=False,
-        interval=10,
+def options(**changes: object) -> StandaloneLaunch:
+    host_changes = {}
+    if "ascii" in changes:
+        host_changes["ascii"] = changes.pop("ascii")
+    if "no_watch" in changes:
+        host_changes["watch"] = not changes.pop("no_watch")
+    host = StandaloneHostConfig(ascii=False, demo_size="small", interval=10)
+    host = replace(host, **host_changes)
+    base = StandaloneLaunch(
+        ProcessConfig(query_timeout=30),
+        host,
+        TimelineConfig(
+            "timeline",
+            DateRange(date(2026, 1, 1), date(2026, 1, 14), None),
+            presentation=ChartPresentation(),
+        ),
     )
     return replace(base, **changes)
 
@@ -53,7 +58,7 @@ def test_preflight_requires_explicit_ascii_for_dumb_terminal(
 ) -> None:
     monkeypatch.setattr(application, "interactive_streams", lambda: True)
     monkeypatch.setenv("TERM", "dumb")
-    dependency_calls: list[CommandOptions] = []
+    dependency_calls: list[StandaloneLaunch] = []
     monkeypatch.setattr(
         application,
         "ensure_ccusage",

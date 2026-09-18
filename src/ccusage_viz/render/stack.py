@@ -131,7 +131,9 @@ def render_stack(model: StackModel, context: RenderContext) -> str:
             context.width,
         )
         show_legend = context.legend_position == "below-title"
-        raw_values = [[usage.total for usage in component.values] for component in model.components]
+        raw_values: list[list[float]] = [
+            [float(usage.total) for usage in component.values] for component in model.components
+        ]
         normalized = context.style == "normalized"
         if normalized:
             values = [

@@ -10,28 +10,28 @@ from ccusage_viz.core.time import DateRange
 from ccusage_viz.dependency import ensure_ccusage
 from ccusage_viz.errors import QueryError
 from ccusage_viz.i18n import load_translator
-from ccusage_viz.options import CommandOptions
+from ccusage_viz.options import (
+    ProcessConfig,
+    StandaloneHostConfig,
+    StandaloneLaunch,
+    TimelineConfig,
+)
 
 
-def options(**changes: object) -> CommandOptions:
-    base = CommandOptions(
-        command="timeline",
-        date_range=DateRange(date(2026, 1, 1), date(2026, 1, 2), None),
-        by=None,
-        top=None,
-        other="hide",
-        cache="combined",
-        agents=(),
-        models=(),
-        projects=(),
-        interval=None,
-        demo=None,
-        ccusage_bin="ccusage",
-        query_timeout=2,
-        no_color=True,
-        ascii=True,
+def options(**changes: object) -> StandaloneLaunch:
+    process = ProcessConfig(query_timeout=2)
+    host = StandaloneHostConfig(ascii=True, watch=False)
+    explicit = changes.pop("explicit", frozenset())
+    if "demo" in changes:
+        host = replace(host, demo_size=changes.pop("demo"))
+    if "ccusage_bin" in changes:
+        process = replace(process, ccusage_bin=changes.pop("ccusage_bin"))
+    return StandaloneLaunch(
+        process,
+        host,
+        TimelineConfig("timeline", DateRange(date(2026, 1, 1), date(2026, 1, 2), None)),
+        explicit,
     )
-    return replace(base, **changes)
 
 
 def test_dependency_preflight_skips_demo_and_custom_binary(monkeypatch: pytest.MonkeyPatch) -> None:

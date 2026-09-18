@@ -12,29 +12,27 @@ from ccusage_viz.data_view import (
 from ccusage_viz.domain import Agent, SourceKind, TokenUsage, UsageRecord
 from ccusage_viz.i18n import load_translator
 from ccusage_viz.monitor import ObservedBucket
-from ccusage_viz.options import CommandOptions
+from ccusage_viz.options import (
+    ProcessConfig,
+    StandaloneHostConfig,
+    StandaloneLaunch,
+    TimelineConfig,
+)
 from ccusage_viz.terminal import Terminal
 from ccusage_viz.watch import UsageSnapshot
 
 
-def _options() -> CommandOptions:
-    return CommandOptions(
-        command="timeline",
-        date_range=DateRange(date(2026, 1, 1), date(2026, 1, 31), None),
-        by="agent",
-        top=1,
-        other="show",
-        cache="combined",
-        agents=(),
-        models=(),
-        projects=(),
-        interval=5,
-        demo=None,
-        ccusage_bin="ccusage",
-        query_timeout=30,
-        no_color=True,
-        ascii=False,
-        granularity="month",
+def _options() -> StandaloneLaunch:
+    return StandaloneLaunch(
+        ProcessConfig(),
+        StandaloneHostConfig(interval=5),
+        TimelineConfig(
+            "timeline",
+            DateRange(date(2026, 1, 1), date(2026, 1, 31), None),
+            by="agent",
+            top=1,
+            granularity="month",
+        ),
     )
 
 

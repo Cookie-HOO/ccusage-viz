@@ -125,6 +125,7 @@ MESSAGES = {
     "status.tui_adjust_ranking_quick_controls": "p 周期 · b 分组 · +/- Top · t/T 主题 · s/S 样式 · a 高级",
     "status.tui_adjust_ranking_advanced_controls": "o 其他 · a 快捷",
     "status.tui_adjust_monitor_quick_controls": "w 窗口 · i 间隔 · b 分组 · +/- Top · t/T 主题 · s/S 样式 · a 高级",
+    "status.tui_adjust_monitor_pane_quick_controls": "w 窗口 · b 分组 · +/- Top · t/T 主题 · s/S 样式 · a 高级",
     "status.tui_adjust_monitor_advanced_controls": "l 图例 · a 快捷",
     "status.tui_adjust_management": "[ 前移 · ] 后移 · x 删除 · Tab 下一面板 · y 复制",
     "status.tui_global_quick_controls": "t/T 主题 · s/S 样式 · w 页眉 · u 摘要 · z 布局 · a 高级",

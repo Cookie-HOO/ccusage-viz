@@ -185,13 +185,13 @@ def namespace(**overrides: object) -> Namespace:
 def test_historical_lifecycle_defaults_and_validation() -> None:
     parser = build_parser(load_translator("en"))
     default = _to_options(parser.parse_args(["timeline"]))
-    assert default.interval == 10
-    assert not default.no_watch
+    assert default.host.interval == 10
+    assert default.host.watch
 
     one_shot = _to_options(
         parser.parse_args(["timeline", "--no-watch"]), explicit=frozenset({"no_watch"})
     )
-    assert one_shot.no_watch
+    assert not one_shot.host.watch
 
     with pytest.raises(UsageError, match="error.arguments"):
         _to_options(
@@ -255,8 +255,8 @@ def test_top_requires_a_category_dimension(
 def test_grouped_timeline_defaults_to_top_three(dimension: str) -> None:
     options = _to_options(namespace(command="timeline", by=dimension, top=None))
 
-    assert options.top == 3
-    assert options.other == "show"
+    assert options.chart.top == 3
+    assert options.chart.other == "show"
 
 
 @pytest.mark.parametrize("dimension", ("agent", "model", "project"))
@@ -264,13 +264,13 @@ def test_grouped_monitor_defaults_to_top_three(dimension: str) -> None:
     parser = build_parser(load_translator("en"))
     options = _to_options(parser.parse_args(["monitor", "--by", dimension]))
 
-    assert options.top == 3
+    assert options.chart.top == 3
 
 
 def test_ranking_has_a_default_category_dimension_for_top() -> None:
     options = _to_options(namespace(command="ranking", by="project", top=5))
-    assert options.by == "project"
-    assert options.top == 5
+    assert options.chart.by == "project"
+    assert options.chart.top == 5
 
 
 @pytest.mark.parametrize(
@@ -288,10 +288,10 @@ def test_monitor_accepts_grouping_and_top(dimension: str) -> None:
     options = _to_options(
         namespace(command="monitor", demo=None, by=dimension, top=2, style="line")
     )
-    assert options.by == dimension
-    assert options.top == 2
-    assert options.window_seconds == 3600
-    assert options.interval == 15.0
+    assert options.chart.by == dimension
+    assert options.chart.top == 2
+    assert options.chart.window_seconds == 3600
+    assert options.host.interval == 15.0
 
 
 def test_monitor_parser_keeps_startup_selectors() -> None:
@@ -314,9 +314,9 @@ def test_monitor_parser_keeps_startup_selectors() -> None:
         )
     )
 
-    assert options.agents == ("claude",)
-    assert options.models == ("sonnet",)
-    assert options.projects == ("app",)
+    assert options.chart.filters.agents == ("claude",)
+    assert options.chart.filters.models == ("sonnet",)
+    assert options.chart.filters.projects == ("app",)
 
 
 def test_monitor_parser_rejects_unknown_grouping() -> None:
@@ -335,7 +335,7 @@ def test_monitor_grouping_rejects_bars(dimension: str) -> None:
 
 def test_demo_monitor_defaults_to_one_second_interval() -> None:
     options = _to_options(namespace(command="monitor", demo="small", by=None, style="bars"))
-    assert options.interval == 1.0
+    assert options.host.interval == 1.0
 
 
 def test_global_language_options_precede_a_subcommand() -> None:
@@ -348,7 +348,7 @@ def test_global_language_options_precede_a_subcommand() -> None:
 
 def test_large_top_values_are_accepted() -> None:
     parser = build_parser(load_translator("en"))
-    assert _to_options(parser.parse_args(["ranking", "--top", "999"])).top == 999
+    assert _to_options(parser.parse_args(["ranking", "--top", "999"])).chart.top == 999
 
 
 @pytest.mark.parametrize("timeout", ("0", "nan", "inf"))
@@ -376,10 +376,10 @@ def test_dashboard_owns_distinct_pane_cadences() -> None:
             ]
         )
     )
-    assert options.refresh_interval == 30
-    assert options.sampling_interval == 5
-    assert options.panes[0].interval == 30
-    assert options.panes[1].interval == 5
+    assert options.host.refresh_interval == 30
+    assert options.host.sampling_interval == 5
+    assert options.panes[0].chart.kind == "timeline"
+    assert options.panes[1].chart.kind == "monitor"
 
 
 @pytest.mark.parametrize(

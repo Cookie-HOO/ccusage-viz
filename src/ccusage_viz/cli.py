@@ -25,7 +25,23 @@ from ccusage_viz.options import (
     HEADER_SUMMARIES,
     OTHER_MODES,
     WEEKDAY_MODES,
-    CommandOptions,
+    CalendarConfig,
+    ChartPresentation,
+    DashboardHostConfig,
+    DashboardLaunch,
+    DashboardRoute,
+    Filters,
+    LaunchConfig,
+    LaunchRoute,
+    MonitorConfig,
+    PaneConfig,
+    ProcessConfig,
+    RankingConfig,
+    StackConfig,
+    StandaloneHostConfig,
+    StandaloneLaunch,
+    StandaloneRoute,
+    TimelineConfig,
     compatible_styles,
     resolve_date_range,
 )
@@ -233,6 +249,7 @@ def _add_tui(parser: argparse.ArgumentParser, tr: Translator) -> None:
     parser.add_argument("--ccusage-bin", default="ccusage", help=tr.text("help.ccusage_bin"))
     parser.add_argument("--query-timeout", type=float, default=30.0, help=argparse.SUPPRESS)
     parser.add_argument("--ascii", action="store_true", help=tr.text("help.ascii"))
+    parser.add_argument("--timezone", help=tr.text("help.timezone"))
     parser.add_argument(
         "--theme",
         dest="color_scheme",
@@ -346,59 +363,146 @@ def _inject_default_command(argv: list[str]) -> list[str]:
     return ["timeline", *argv]
 
 
-def parse_pane_fragment(
-    fragment: str,
-    *,
-    base: CommandOptions | None = None,
-    refresh_interval: float = 15.0,
-    sampling_interval: float = 15.0,
-) -> CommandOptions:
+def _chart_from_namespace(namespace: argparse.Namespace, *, timezone: str | None):
+    command = namespace.command or "timeline"
+    filters = Filters(
+        tuple(namespace.agent), tuple(namespace.model), tuple(getattr(namespace, "project", ()))
+    )
+    style = (
+        getattr(namespace, "style", None)
+        or compatible_styles(command, getattr(namespace, "by", None))[0]
+    )
+    presentation = ChartPresentation(
+        namespace.color_scheme, style, getattr(namespace, "legend", "below-title")
+    )
+    top = getattr(namespace, "top", None)
+    if command in {"timeline", "monitor"} and namespace.by is not None and top is None:
+        top = 3
+    if command == "monitor":
+        return MonitorConfig(
+            "monitor", _parse_window(namespace.window), filters, presentation, namespace.by, top
+        )
+    date_range = resolve_date_range(
+        command,
+        period=namespace.period,
+        since=namespace.since,
+        until=namespace.until,
+        timezone=timezone,
+    )
+    if command == "timeline":
+        return TimelineConfig(
+            "timeline",
+            date_range,
+            filters,
+            presentation,
+            namespace.by,
+            top,
+            namespace.other,
+            namespace.granularity,
+            namespace.weekdays,
+        )
+    if command == "calendar":
+        return CalendarConfig("calendar", date_range, filters, presentation)
+    if command == "stack":
+        return StackConfig(
+            "stack",
+            date_range,
+            filters,
+            presentation,
+            namespace.cache,
+            namespace.granularity,
+            namespace.weekdays,
+        )
+    return RankingConfig(
+        "ranking",
+        date_range,
+        filters,
+        presentation,
+        namespace.by,
+        top if top is not None else 10,
+        namespace.other,
+    )
+
+
+def _validate_chart(
+    namespace: argparse.Namespace, chart, *, explicit: frozenset[str], demo: str | None
+) -> float:
+    top = getattr(chart, "top", None)
+    by = getattr(chart, "by", None)
+    if top is not None and top < 1:
+        raise UsageError("error.top_positive")
+    if namespace.command in {"timeline", "monitor"} and top is not None and by is None:
+        raise UsageError("error.top_requires_by")
+    if chart.presentation.style not in compatible_styles(namespace.command, by):
+        raise UsageError(
+            "error.style_incompatible", style=chart.presentation.style, mode=by or "total"
+        )
+    no_watch = getattr(namespace, "no_watch", False)
+    requested = getattr(namespace, "interval", None)
+    if no_watch and "interval" in explicit:
+        raise UsageError("error.arguments", detail="--interval cannot be combined with --no-watch")
+    if namespace.command == "monitor" and no_watch:
+        raise UsageError("error.arguments", detail="monitor does not support --no-watch")
+    interval = requested
+    if namespace.command == "monitor" and interval is None:
+        interval = 1.0 if demo is not None else 15.0
+    minimum = (
+        1
+        if namespace.command == "monitor" and demo is not None
+        else 5
+        if namespace.command == "monitor"
+        else 2
+    )
+    if interval is not None and (not math.isfinite(interval) or interval < minimum):
+        raise UsageError("error.interval_min", minimum=minimum)
+    return interval if interval is not None else 10.0
+
+
+def parse_pane_fragment(fragment: str, *, host: DashboardLaunch | None = None) -> PaneConfig:
     try:
         tokens = shlex.split(fragment)
     except ValueError as exc:
         raise UsageError("error.tui_panel", value=fragment) from exc
     if not tokens or tokens[0] not in _TUI_COMMANDS:
         raise UsageError("error.tui_panel", value=fragment)
-    for token in tokens[1:]:
-        option = token.split("=", 1)[0]
-        if option in _PANE_FORBIDDEN_OPTIONS or option.startswith("--header-"):
-            raise UsageError("error.tui_panel", value=fragment)
+    if any(
+        token.split("=", 1)[0] in _PANE_FORBIDDEN_OPTIONS
+        or token.split("=", 1)[0].startswith("--header-")
+        for token in tokens[1:]
+    ):
+        raise UsageError("error.tui_panel", value=fragment)
     explicit = _explicit_fields(tokens)
     try:
-        parsed = _to_options(
-            build_parser(Translator("en", dict(CATALOGS["en"]))).parse_args(tokens),
-            explicit=explicit,
+        namespace = build_parser(Translator("en", dict(CATALOGS["en"]))).parse_args(tokens)
+        chart = _chart_from_namespace(namespace, timezone=None)
+        if host is not None and host.host.ascii and "color_scheme" in explicit:
+            raise UsageError(
+                "error.arguments",
+                detail="Dashboard --ascii conflicts with an explicit Pane --theme",
+            )
+        _validate_chart(
+            namespace, chart, explicit=explicit, demo=host.host.demo_size if host else None
         )
-        _validate_configuration(parsed)
     except UsageError as exc:
         raise UsageError("error.tui_panel", value=fragment) from exc
-    if base is not None and base.ascii and parsed.was_explicit("color_scheme"):
-        raise UsageError(
-            "error.arguments", detail="Dashboard --ascii conflicts with an explicit Pane --theme"
-        )
-    return replace(
-        parsed,
-        ascii=base.ascii if base is not None else False,
-        ccusage_bin=base.ccusage_bin if base is not None else parsed.ccusage_bin,
-        query_timeout=base.query_timeout if base is not None else parsed.query_timeout,
-        demo=base.demo if base is not None else None,
-        interval=sampling_interval if parsed.command == "monitor" else refresh_interval,
-        no_watch=False,
-    )
+    return PaneConfig(chart)
 
 
 def _to_options(
     namespace: argparse.Namespace, *, explicit: frozenset[str] = frozenset()
-) -> CommandOptions:
+) -> LaunchConfig:
     command = namespace.command or "timeline"
+    process = ProcessConfig(namespace.ccusage_bin, namespace.query_timeout)
+    if not math.isfinite(process.query_timeout) or process.query_timeout <= 0:
+        raise UsageError("error.arguments", detail="--query-timeout must be positive and finite")
     if command == "dashboard":
-        pane_fragments = namespace.panes or list(DEFAULT_DASHBOARD_PANELS)
+        fragments = namespace.panes or list(DEFAULT_DASHBOARD_PANELS)
         if namespace.grid != "auto":
             try:
                 rows, columns = (int(item) for item in namespace.grid.lower().split("x", 1))
             except (ValueError, AttributeError):
                 raise UsageError("error.tui_grid", value=namespace.grid) from None
-            if rows < 1 or columns < 1 or rows * columns < len(pane_fragments):
+            if rows < 1 or columns < 1 or rows * columns < len(fragments):
                 raise UsageError("error.tui_grid", value=namespace.grid)
         for cadence in (
             namespace.refresh_interval,
@@ -407,125 +511,34 @@ def _to_options(
         ):
             if not math.isfinite(cadence) or cadence < 1:
                 raise UsageError("error.interval_min", minimum=1)
-        if not math.isfinite(namespace.query_timeout) or namespace.query_timeout <= 0:
-            raise UsageError(
-                "error.arguments", detail="--query-timeout must be positive and finite"
-            )
-        dashboard = CommandOptions(
-            command="dashboard",
-            date_range=resolve_date_range(
-                "timeline", period="14d", since=None, until=None, timezone=None
-            ),
-            by=None,
-            top=None,
-            other="show",
-            cache="combined",
-            agents=(),
-            models=(),
-            projects=(),
-            demo=namespace.demo,
-            ccusage_bin=namespace.ccusage_bin,
-            query_timeout=namespace.query_timeout,
-            no_color=namespace.color_scheme == "no-color",
+        host = DashboardHostConfig(
+            timezone=namespace.timezone,
             ascii=namespace.ascii,
-            color_scheme=namespace.color_scheme,
+            demo_size=namespace.demo,
             grid=namespace.grid,
             refresh_interval=namespace.refresh_interval,
             sampling_interval=namespace.sampling_interval,
             header_style=namespace.header_style,
             header_summary=namespace.header_summary,
             header_interval=namespace.header_interval,
-            dashboard_style=namespace.dashboard_style,
-            explicit=explicit,
+            theme=namespace.color_scheme,
+            style=namespace.dashboard_style,
         )
-        panes = tuple(
-            parse_pane_fragment(
-                fragment,
-                base=dashboard,
-                refresh_interval=dashboard.refresh_interval,
-                sampling_interval=dashboard.sampling_interval,
-            )
-            for fragment in pane_fragments
+        launch = DashboardLaunch(process, host, (), explicit)
+        return replace(
+            launch,
+            panes=tuple(parse_pane_fragment(fragment, host=launch) for fragment in fragments),
         )
-        return replace(dashboard, panes=panes)
-    top = getattr(namespace, "top", None)
-    if command == "timeline" and namespace.by is not None and top is None:
-        top = 3
-    if command == "monitor" and namespace.by in {"agent", "model", "project"} and top is None:
-        top = 3
-    if top is not None and top < 1:
-        raise UsageError("error.top_positive")
-    if command == "timeline" and top is not None and namespace.by is None:
-        raise UsageError("error.top_requires_by")
-    if (
-        command == "monitor"
-        and top is not None
-        and namespace.by not in {"agent", "model", "project"}
-    ):
-        raise UsageError("error.top_requires_by")
-    requested_style = getattr(namespace, "style", None)
-    style = requested_style or compatible_styles(command, getattr(namespace, "by", None))[0]
-    if style not in compatible_styles(command, getattr(namespace, "by", None)):
-        raise UsageError("error.style_incompatible", style=style, mode=namespace.by or "total")
-    no_watch = getattr(namespace, "no_watch", False)
-    requested_interval = getattr(namespace, "interval", None)
-    if no_watch and "interval" in explicit:
-        raise UsageError("error.arguments", detail="--interval cannot be combined with --no-watch")
-    if command == "monitor" and no_watch:
-        raise UsageError("error.arguments", detail="monitor does not support --no-watch")
-    interval = requested_interval
-    if command == "monitor" and interval is None:
-        interval = 1.0 if namespace.demo is not None else 15.0
-    interval_minimum = (
-        1
-        if command == "monitor" and namespace.demo is not None
-        else 5
-        if command == "monitor"
-        else 2
-    )
-    if interval is not None and (not math.isfinite(interval) or interval < interval_minimum):
-        raise UsageError("error.interval_min", minimum=interval_minimum)
-    if not math.isfinite(namespace.query_timeout) or namespace.query_timeout <= 0:
-        raise UsageError("error.arguments", detail="--query-timeout must be positive and finite")
-    if command == "monitor":
-        window_seconds = _parse_window(namespace.window)
-        date_range = resolve_date_range(
-            "timeline", period="1d", since=None, until=None, timezone=None
-        )
-    else:
-        window_seconds = None
-        date_range = resolve_date_range(
-            command,
-            period=namespace.period,
-            since=namespace.since,
-            until=namespace.until,
-            timezone=namespace.timezone,
-        )
-    return CommandOptions(
-        command=command,
-        date_range=date_range,
-        by=getattr(namespace, "by", None),
-        top=top,
-        other=getattr(namespace, "other", "show"),
-        cache=getattr(namespace, "cache", "combined"),
-        agents=tuple(namespace.agent),
-        models=tuple(namespace.model),
-        projects=tuple(getattr(namespace, "project", ())),
-        demo=namespace.demo,
-        ccusage_bin=namespace.ccusage_bin,
-        query_timeout=namespace.query_timeout,
-        no_color=namespace.color_scheme == "no-color",
+    chart = _chart_from_namespace(namespace, timezone=getattr(namespace, "timezone", None))
+    interval = _validate_chart(namespace, chart, explicit=explicit, demo=namespace.demo)
+    host = StandaloneHostConfig(
+        timezone=getattr(namespace, "timezone", None),
         ascii=namespace.ascii,
-        color_scheme=namespace.color_scheme,
-        style=style,
-        window_seconds=window_seconds,
+        demo_size=namespace.demo,
+        watch=not getattr(namespace, "no_watch", False),
         interval=interval,
-        legend=getattr(namespace, "legend", "below-title"),
-        granularity=getattr(namespace, "granularity", "day"),
-        weekdays=getattr(namespace, "weekdays", "show"),
-        no_watch=no_watch,
-        explicit=explicit,
     )
+    return StandaloneLaunch(process, host, chart, explicit)
 
 
 def _explicit_fields(argv: list[str]) -> frozenset[str]:
@@ -538,8 +551,16 @@ def _explicit_fields(argv: list[str]) -> frozenset[str]:
     return frozenset(fields)
 
 
-def _validate_configuration(options: CommandOptions) -> None:
-    if options.ascii and options.was_explicit("color_scheme"):
+def _route(options: LaunchConfig) -> LaunchRoute:
+    return (
+        DashboardRoute(options)
+        if isinstance(options, DashboardLaunch)
+        else StandaloneRoute(options)
+    )
+
+
+def _validate_configuration(options: LaunchConfig) -> None:
+    if options.host.ascii and options.was_explicit("color_scheme"):
         raise UsageError(
             "error.arguments", detail="--ascii cannot be combined with an explicit --theme"
         )
@@ -559,7 +580,8 @@ def main(argv: list[str] | None = None) -> int:
         namespace = parser.parse_args(args)
         options = _to_options(namespace, explicit=explicit)
         _validate_configuration(options)
-        return run(options, tr)
+        route = _route(options)
+        return run(route.launch, tr)
     except VizError as exc:
         text = format_error(
             exc,
