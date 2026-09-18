@@ -1,9 +1,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from threading import Event
 from typing import Protocol
 
-from ccusage_viz.query.models import PhysicalPlan, PhysicalQuery, ProviderRef, QueryIntent
+from ccusage_viz.query.models import (
+    PhysicalPlan,
+    PhysicalQuery,
+    PhysicalResult,
+    ProviderRef,
+    ProviderResult,
+    ProviderResultFragment,
+    QueryIntent,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,9 +49,23 @@ class ProviderCompiler(Protocol):
     def fingerprint(self, query: PhysicalQuery) -> str: ...
 
 
+class ProviderExecutor(Protocol):
+    def execute(self, query: PhysicalQuery, cancelled: Event) -> PhysicalResult: ...
+
+    def normalize(self, result: PhysicalResult) -> ProviderResultFragment: ...
+
+    def assemble(
+        self, plan: PhysicalPlan, fragments: tuple[ProviderResultFragment, ...]
+    ) -> ProviderResult: ...
+
+
+class Provider(ProviderCompiler, ProviderExecutor, Protocol):
+    pass
+
+
 @dataclass(frozen=True, slots=True)
 class ProviderDefinition:
-    provider: ProviderCompiler
+    provider: Provider
 
     @property
     def provider_id(self) -> str:

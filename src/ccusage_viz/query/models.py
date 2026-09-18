@@ -192,6 +192,7 @@ Metadata: TypeAlias = tuple[tuple[str, Scalar], ...]
 class PhysicalResult:
     query: PhysicalQuery
     payload: bytes
+    diagnostics: bytes = b""
 
 
 @dataclass(frozen=True, slots=True)
@@ -211,6 +212,7 @@ class ProviderResult:
     resolution: DataResolution
     coverage: DateCoverage
     notices: tuple[Notice, ...] = ()
+    summary_notices: tuple[Notice, ...] = ()
     provider_metadata: Metadata = ()
 
 

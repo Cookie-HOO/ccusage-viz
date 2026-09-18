@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import timedelta
 
 from ccusage_viz.core.time import DateRange
@@ -15,7 +16,12 @@ _PROJECTS = (
 )
 
 
-def generate_demo(size: str, date_range: DateRange) -> tuple[UsageRecord, ...]:
+def generate_demo(
+    size: str,
+    date_range: DateRange,
+    *,
+    cancelled: Callable[[], bool] | None = None,
+) -> tuple[UsageRecord, ...]:
     """Create synthetic, deterministic data; size changes magnitude only."""
     try:
         magnitude = _MAGNITUDES[size]
@@ -23,6 +29,8 @@ def generate_demo(size: str, date_range: DateRange) -> tuple[UsageRecord, ...]:
         raise ValueError("demo size must be small, medium, or large") from exc
     records: list[UsageRecord] = []
     for offset in range(date_range.days):
+        if cancelled is not None and cancelled():
+            break
         day = date_range.since + timedelta(days=offset)
         if offset % 6 == 0:
             continue
