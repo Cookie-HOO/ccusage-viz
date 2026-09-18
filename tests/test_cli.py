@@ -135,37 +135,6 @@ def test_timeline_rejects_removed_point_style() -> None:
     assert caught.value.key == "error.arguments"
 
 
-@pytest.mark.parametrize(
-    ("command", "demo", "watch", "no_color"),
-    [
-        ("timeline", None, 5.0, False),
-        ("timeline", "small", None, True),
-        ("ranking", None, None, False),
-        ("ranking", "large", 5.0, False),
-    ],
-)
-def test_pick_accepts_supported_modes(
-    command: str, demo: str | None, watch: float | None, no_color: bool
-) -> None:
-    options = _to_options(
-        namespace(
-            command=command,
-            pick=True,
-            demo=demo,
-            watch=watch,
-            no_color=no_color,
-            color_scheme="nord",
-            by="project" if command == "ranking" else "total",
-            top=None,
-        )
-    )
-
-    assert options.pick
-    assert options.demo == demo
-    assert options.watch == watch
-    assert options.color_scheme == "nord"
-
-
 def test_root_help_lists_localized_subcommand_summaries(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -191,7 +160,6 @@ def namespace(**overrides: object) -> Namespace:
         "project": [],
         "watch": None,
         "demo": "small",
-        "pick": False,
         "lang": "en",
         "ccusage_bin": "ccusage",
         "timeout": 30.0,
@@ -358,18 +326,6 @@ def test_demo_monitor_defaults_to_one_second_interval() -> None:
     assert options.interval == 1.0
 
 
-def test_monitor_pick_explains_how_to_preview_appearance() -> None:
-    with pytest.raises(UsageError) as caught:
-        _to_options(namespace(command="monitor", demo=None, pick=True, by=None))
-    assert caught.value.key == "error.monitor_pick"
-
-
-def test_demo_monitor_pick_explains_that_demo_is_already_ready() -> None:
-    with pytest.raises(UsageError) as caught:
-        _to_options(namespace(command="monitor", demo="small", pick=True, by=None))
-    assert caught.value.key == "error.monitor_demo_pick"
-
-
 def test_global_language_options_precede_a_subcommand() -> None:
     assert _inject_default_command(["--lang", "zh", "timeline"]) == [
         "timeline",
@@ -392,7 +348,7 @@ def test_dashboard_rejects_non_positive_or_non_finite_timeout(timeout: str) -> N
 
 
 @pytest.mark.parametrize(
-    "flag", ["--pick-theme", "--color-scheme", "--preview-schemes", "--no-color"]
+    "flag", ["--pick", "--pick-theme", "--color-scheme", "--preview-schemes", "--no-color"]
 )
 def test_obsolete_appearance_flags_are_rejected(flag: str) -> None:
     parser = build_parser(load_translator("en"))

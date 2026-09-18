@@ -81,7 +81,7 @@ class RefreshResult:
 
 
 @dataclass(frozen=True, slots=True)
-class AppearancePickerResult:
+class RuntimeAdjustmentResult:
     options: CommandOptions
     seed: RefreshResult
 
@@ -451,14 +451,12 @@ def _watch_status(
     return " · ".join(parts)
 
 
-def run_appearance_picker(
+def run_runtime_adjustment(
     options: CommandOptions,
     translator: Translator,
     snapshot: UsageSnapshot,
     screen: InteractiveScreen,
-    *,
-    adjust_display: bool = False,
-) -> AppearancePickerResult | None:
+) -> RuntimeAdjustmentResult | None:
     theme_index = COLOR_SCHEMES.index(options.color_scheme)
     last_size: os.terminal_size | None = None
     current = options
@@ -495,7 +493,7 @@ def run_appearance_picker(
                 translator,
                 terminal,
                 snapshot,
-                control_rows=2 if adjust_display else 1,
+                control_rows=2,
             )
         except UsageError as exc:
             render_warning = format_error(
@@ -514,11 +512,6 @@ def run_appearance_picker(
             if visible is not None
             else ()
         )
-        source_status = (
-            translator.text("status.demo", size=current.demo)
-            if current.demo
-            else translator.text("status.query_time", seconds=f"{snapshot.elapsed:.2f}")
-        )
         common = {
             "theme_index": theme_index + 1,
             "theme_count": len(COLOR_SCHEMES),
@@ -528,69 +521,49 @@ def run_appearance_picker(
             "style": style,
             "summary": translator.text("label.off" if current.no_summary else "label.on"),
         }
-        if adjust_display:
-            status_key = f"status.appearance_picker_adjust_{current.command}_{adjustment_page}"
-            key_key = f"status.tui_adjust_{current.command}_{adjustment_page}_controls"
-            state_values = dict(common)
-            if current.command in {"timeline", "ranking"}:
-                state_values.update(
-                    grouping=current.by or translator.text("label.all"),
-                    top=current.top if current.top is not None else translator.text("label.all"),
-                    other=translator.text("label.on" if current.show_other else "label.off"),
-                )
-            if current.command in {"timeline", "stack"}:
-                state_values["weekday"] = translator.text(f"label.weekday_{current.weekday_mode}")
-                state_values["legend_position"] = translator.text(
-                    f"label.legend_{current.legend_position.replace('-', '_')}"
-                )
-            if current.command == "stack":
-                state_values["cache"] = translator.text(
-                    "label.on" if current.split_cache else "label.off"
-                )
-            state = translator.text(status_key, **state_values)
-            project_preview_missing = (
-                current.command in {"timeline", "ranking"}
-                and current.by == "project"
-                and not snapshot.includes_project_attribution
+        status_key = f"status.runtime_adjustment_{current.command}_{adjustment_page}"
+        key_key = f"status.tui_adjust_{current.command}_{adjustment_page}_controls"
+        state_values = dict(common)
+        if current.command in {"timeline", "ranking"}:
+            state_values.update(
+                grouping=current.by or translator.text("label.all"),
+                top=current.top if current.top is not None else translator.text("label.all"),
+                other=translator.text("label.on" if current.show_other else "label.off"),
             )
-            preview_notice = (
-                translator.text("status.project_preview_missing")
-                if project_preview_missing
-                else None
+        if current.command in {"timeline", "stack"}:
+            state_values["weekday"] = translator.text(f"label.weekday_{current.weekday_mode}")
+            state_values["legend_position"] = translator.text(
+                f"label.legend_{current.legend_position.replace('-', '_')}"
             )
-            controls: str | tuple[str, ...] = (
-                _controls_line(
-                    " · ".join(part for part in (state, copied_status) if part is not None),
-                    width=terminal.width,
-                    color=terminal.color,
-                ),
-                _controls_line(
-                    f"{translator.text(f'status.tui_adjust_{adjustment_page}')} · "
-                    f"{translator.text(key_key)}",
-                    width=terminal.width,
-                    color=terminal.color,
-                ),
+        if current.command == "stack":
+            state_values["cache"] = translator.text(
+                "label.on" if current.split_cache else "label.off"
             )
-            status = " · ".join(
-                part
-                for part in (translator.text("status.tui_adjust_history"), preview_notice)
-                if part
-            )
-        else:
-            status = " · ".join(
-                part
-                for part in (
-                    translator.text("status.appearance_picker", **common),
-                    source_status,
-                    copied_status,
-                )
-                if part is not None
-            )
-            controls = _controls_line(
-                translator.text("status.appearance_picker_style_keys"),
+        state = translator.text(status_key, **state_values)
+        project_preview_missing = (
+            current.command in {"timeline", "ranking"}
+            and current.by == "project"
+            and not snapshot.includes_project_attribution
+        )
+        preview_notice = (
+            translator.text("status.project_preview_missing") if project_preview_missing else None
+        )
+        controls: str | tuple[str, ...] = (
+            _controls_line(
+                " · ".join(part for part in (state, copied_status) if part is not None),
                 width=terminal.width,
                 color=terminal.color,
-            )
+            ),
+            _controls_line(
+                f"{translator.text(f'status.tui_adjust_{adjustment_page}')} · "
+                f"{translator.text(key_key)}",
+                width=terminal.width,
+                color=terminal.color,
+            ),
+        )
+        status = " · ".join(
+            part for part in (translator.text("status.tui_adjust_history"), preview_notice) if part
+        )
         screen.paint(
             chart,
             status,
@@ -618,7 +591,7 @@ def run_appearance_picker(
                 if key == "\x1b":
                     return None
                 if key in {"\r", "\n"} and rendered is not None and rendered_options == current:
-                    return AppearancePickerResult(current, rendered)
+                    return RuntimeAdjustmentResult(current, rendered)
                 if key in {"y", "Y"}:
                     copied_status = (
                         translator.text("status.command_copied")
@@ -626,17 +599,11 @@ def run_appearance_picker(
                         else translator.text("status.command_copy_failed")
                     )
                     paint()
-                elif not adjust_display and key in {"s", "S", "t", "T"}:
-                    current = adjust_option(current, key)
-                    theme_index = COLOR_SCHEMES.index(current.color_scheme)
-                    paint()
-                elif adjust_display and key in {"a", "A"}:
+                elif key in {"a", "A"}:
                     adjustment_page = "advanced" if adjustment_page == "quick" else "quick"
                     paint()
-                elif (
-                    adjust_display
-                    and key is not None
-                    and _adjustment_key_supported(current.command, adjustment_page, key)
+                elif key is not None and _adjustment_key_supported(
+                    current.command, adjustment_page, key
                 ):
                     updated = adjust_option(current, key)
                     if updated != current:
@@ -965,8 +932,8 @@ def run_watch(
                     )
                     paint()
                 elif key in {"m", "M"} and body_view == "chart" and last_snapshot is not None:
-                    picked = run_appearance_picker(
-                        current, translator, last_snapshot, active_screen, adjust_display=True
+                    picked = run_runtime_adjustment(
+                        current, translator, last_snapshot, active_screen
                     )
                     if picked is not None:
                         current = picked.options

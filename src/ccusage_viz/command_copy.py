@@ -128,8 +128,6 @@ def format_full_command(options: CommandOptions) -> str:
         args.extend(("--watch", f"{options.watch:g}"))
     if options.demo is not None:
         args.extend(("--demo", options.demo))
-    if options.pick:
-        args.append("--pick")
     args.extend(("--ccusage-bin", options.ccusage_bin))
     args.extend(("--timeout", f"{options.timeout:g}"))
     args.extend(("--theme", options.color_scheme))

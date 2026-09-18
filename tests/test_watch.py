@@ -19,8 +19,8 @@ from ccusage_viz.options import CommandOptions
 from ccusage_viz.query.client import QueryRunner
 from ccusage_viz.terminal import InteractiveScreen, Terminal
 from ccusage_viz.watch import (
-    AppearancePickerResult,
     RefreshResult,
+    RuntimeAdjustmentResult,
     UsageSnapshot,
     _controls_line,
     _notice_lines,
@@ -31,7 +31,7 @@ from ccusage_viz.watch import (
     _render,
     _watch_status,
     load_snapshot,
-    run_appearance_picker,
+    run_runtime_adjustment,
 )
 
 
@@ -248,40 +248,6 @@ def test_one_shot_reserves_one_more_row_than_watch(monkeypatch: pytest.MonkeyPat
     assert heights == [29, 28, 28]
 
 
-def test_appearance_picker_hides_timeline_area_when_grouped(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    keys = iter(("s", "s", "s", "s", "s", "\n"))
-    rendered_styles: list[str] = []
-
-    class Screen:
-        def paint(self, *args, **kwargs) -> None:
-            pass
-
-    monkeypatch.setattr("ccusage_viz.watch._input_mode", nullcontext)
-    monkeypatch.setattr("ccusage_viz.watch._read_key", lambda timeout: next(keys))
-    monkeypatch.setattr(
-        "ccusage_viz.watch.inspect_terminal",
-        lambda *args, **kwargs: Terminal(100, 30, True, True),
-    )
-    original_render = _render
-
-    def capture_render(current, *args, **kwargs):
-        rendered_styles.append(current.style)
-        return original_render(current, *args, **kwargs)
-
-    monkeypatch.setattr("ccusage_viz.watch._render", capture_render)
-    result = run_appearance_picker(
-        replace(options(command="timeline", demo="small"), by="model", style="linear"),
-        load_translator("en"),
-        UsageSnapshot((), (), 0.25),
-        cast(InteractiveScreen, Screen()),
-    )
-
-    assert isinstance(result, AppearancePickerResult)
-    assert rendered_styles == ["linear", "step", "no-line", "points", "line-points", "stem"]
-
-
 @pytest.mark.parametrize(
     ("command", "by", "keys", "expected"),
     [
@@ -306,7 +272,7 @@ def test_appearance_picker_hides_timeline_area_when_grouped(
         ("calendar", "total", ("a", "u", "\n"), {"no_summary": True}),
     ],
 )
-def test_appearance_picker_adjusts_display_options_from_retained_snapshot(
+def test_runtime_adjustment_updates_display_options_from_retained_snapshot(
     command: str,
     by: str,
     keys: tuple[str, ...],
@@ -337,15 +303,14 @@ def test_appearance_picker_adjusts_display_options_from_retained_snapshot(
     snapshot = UsageSnapshot((), (), 0.25)
     current = replace(options(command=command), by=by)
 
-    result = run_appearance_picker(
+    result = run_runtime_adjustment(
         current,
         load_translator("en"),
         snapshot,
         cast(InteractiveScreen, Screen()),
-        adjust_display=True,
     )
 
-    assert isinstance(result, AppearancePickerResult)
+    assert isinstance(result, RuntimeAdjustmentResult)
     assert all(getattr(result.options, field) == value for field, value in expected.items())
     assert rendered_snapshots and all(item is snapshot for item in rendered_snapshots)
     assert result.options.agents == current.agents
@@ -353,7 +318,7 @@ def test_appearance_picker_adjusts_display_options_from_retained_snapshot(
     assert result.options.projects == current.projects
 
 
-def test_appearance_picker_retains_last_chart_until_an_invalid_draft_recovers(
+def test_runtime_adjustment_retains_last_chart_until_an_invalid_draft_recovers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     paints: list[tuple[object, ...]] = []
@@ -382,20 +347,19 @@ def test_appearance_picker_retains_last_chart_until_an_invalid_draft_recovers(
     current = replace(
         options(command="stack"), date_range=DateRange(date(2026, 1, 1), date(2026, 1, 7), "7d")
     )
-    result = run_appearance_picker(
+    result = run_runtime_adjustment(
         current,
         load_translator("en"),
         UsageSnapshot((), (), 0.25),
         cast(InteractiveScreen, Screen()),
-        adjust_display=True,
     )
 
-    assert isinstance(result, AppearancePickerResult)
+    assert isinstance(result, RuntimeAdjustmentResult)
     assert calls == 3
     assert any(args[0] == "chart" and "too narrow" in str(args[3]) for args in paints)
 
 
-def test_appearance_picker_pages_match_dashboard_and_weekdays_work(
+def test_runtime_adjustment_pages_match_dashboard_and_weekdays_work(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     controls: list[object] = []
@@ -412,15 +376,14 @@ def test_appearance_picker_pages_match_dashboard_and_weekdays_work(
         lambda *args, **kwargs: Terminal(100, 30, True, True),
     )
 
-    result = run_appearance_picker(
+    result = run_runtime_adjustment(
         options(command="timeline"),
         load_translator("en"),
         UsageSnapshot((), (), 0.25),
         cast(InteractiveScreen, Screen()),
-        adjust_display=True,
     )
 
-    assert isinstance(result, AppearancePickerResult)
+    assert isinstance(result, RuntimeAdjustmentResult)
     assert result.options.weekday_mode == "show"
     assert result.options.by == "agent"
     assert "Quick settings" in str(controls[0])
@@ -446,19 +409,18 @@ def test_project_adjustment_explains_missing_retained_attribution(
         lambda *args, **kwargs: Terminal(100, 30, True, True),
     )
 
-    result = run_appearance_picker(
+    result = run_runtime_adjustment(
         options(command="timeline"),
         load_translator("en"),
         UsageSnapshot((), (), 0.25),
         cast(InteractiveScreen, Screen()),
-        adjust_display=True,
     )
 
     assert result is None
     assert any("project data is not in this preview" in str(args[1]) for args in paints)
 
 
-def test_appearance_picker_copy_uses_adjusted_display_options(
+def test_runtime_adjustment_copy_uses_adjusted_display_options(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class Screen:
@@ -477,7 +439,7 @@ def test_appearance_picker_copy_uses_adjusted_display_options(
         "ccusage_viz.watch.copy_command", lambda command: copied.append(command) or True
     )
 
-    result = run_appearance_picker(
+    result = run_runtime_adjustment(
         replace(
             options(command="timeline"),
             by="total",
@@ -487,7 +449,6 @@ def test_appearance_picker_copy_uses_adjusted_display_options(
         load_translator("en"),
         UsageSnapshot((), (), 0.25),
         cast(InteractiveScreen, Screen()),
-        adjust_display=True,
     )
 
     assert result is None
@@ -497,7 +458,7 @@ def test_appearance_picker_copy_uses_adjusted_display_options(
     ]
 
 
-def test_appearance_picker_normalizes_timeline_area_when_grouping_changes(
+def test_runtime_adjustment_normalizes_timeline_area_when_grouping_changes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class Screen:
@@ -512,91 +473,15 @@ def test_appearance_picker_normalizes_timeline_area_when_grouping_changes(
         lambda *args, **kwargs: Terminal(100, 30, True, True),
     )
 
-    result = run_appearance_picker(
+    result = run_runtime_adjustment(
         replace(options(command="timeline"), by="total", style="area"),
         load_translator("en"),
         UsageSnapshot((), (), 0.25),
         cast(InteractiveScreen, Screen()),
-        adjust_display=True,
     )
 
-    assert isinstance(result, AppearancePickerResult)
+    assert isinstance(result, RuntimeAdjustmentResult)
     assert result.options.by == "agent"
-    assert result.options.style == "linear"
-
-
-def test_appearance_picker_cycles_theme_and_style_with_retained_snapshot(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    rendered_appearances: list[tuple[str, str]] = []
-    keys = iter(("t", "s", "S", "T", "\n"))
-
-    class Screen:
-        def paint(self, *args, **kwargs) -> None:
-            pass
-
-    monkeypatch.setattr("ccusage_viz.watch._input_mode", nullcontext)
-    monkeypatch.setattr("ccusage_viz.watch._read_key", lambda timeout: next(keys))
-    monkeypatch.setattr(
-        "ccusage_viz.watch.inspect_terminal",
-        lambda *args, **kwargs: Terminal(100, 30, True, True),
-    )
-
-    original_render = _render
-
-    def capture_render(current, *args, **kwargs):
-        rendered_appearances.append((current.color_scheme, current.style))
-        return original_render(current, *args, **kwargs)
-
-    monkeypatch.setattr("ccusage_viz.watch._render", capture_render)
-    current = replace(options(command="timeline", demo="small"), pick=True)
-    snapshot = UsageSnapshot((), (), 0.25)
-
-    result = run_appearance_picker(
-        current,
-        load_translator("en"),
-        snapshot,
-        cast(InteractiveScreen, Screen()),
-    )
-
-    assert isinstance(result, AppearancePickerResult)
-    assert result.options.color_scheme == "classic"
-    assert result.options.style == "linear"
-    assert result.options.demo == "small"
-    assert rendered_appearances == [
-        ("classic", "linear"),
-        ("vivid", "linear"),
-        ("vivid", "step"),
-        ("vivid", "linear"),
-        ("classic", "linear"),
-    ]
-
-
-def test_appearance_picker_ignores_retired_navigation_aliases(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    keys = iter(("n", "p", "j", "k", "q", "Q", "\n"))
-
-    class Screen:
-        def paint(self, *args, **kwargs) -> None:
-            pass
-
-    monkeypatch.setattr("ccusage_viz.watch._input_mode", nullcontext)
-    monkeypatch.setattr("ccusage_viz.watch._read_key", lambda timeout: next(keys))
-    monkeypatch.setattr(
-        "ccusage_viz.watch.inspect_terminal",
-        lambda *args, **kwargs: Terminal(100, 30, True, True),
-    )
-
-    result = run_appearance_picker(
-        replace(options(command="timeline", demo="small"), pick=True),
-        load_translator("en"),
-        UsageSnapshot((), (), 0.25),
-        cast(InteractiveScreen, Screen()),
-    )
-
-    assert isinstance(result, AppearancePickerResult)
-    assert result.options.color_scheme == "classic"
     assert result.options.style == "linear"
 
 
@@ -679,175 +564,6 @@ def test_demo_refresh_never_invokes_query_runner() -> None:
     assert "Ranking" in result.chart
     assert result.notices == ()
     assert result.elapsed >= 0
-
-
-@pytest.mark.skipif(os.name != "posix", reason="PTY smoke test is POSIX-only")
-def test_appearance_picker_navigates_wraps_and_restores_terminal() -> None:
-    import pty
-    import select
-    import subprocess
-    import termios
-    import time
-
-    master, slave = pty.openpty()
-    env = {
-        **os.environ,
-        "COLUMNS": "100",
-        "LINES": "30",
-        "TERM": "xterm-256color",
-        "LANG": "en_US.UTF-8",
-        "LC_ALL": "en_US.UTF-8",
-    }
-    env.pop("NO_COLOR", None)
-    process = subprocess.Popen(  # ty: ignore[no-matching-overload]
-        [
-            sys.executable,
-            "-m",
-            "ccusage_viz",
-            "timeline",
-            "--pick",
-            "--demo",
-            "small",
-            "--ascii",
-        ],
-        stdin=slave,
-        stdout=slave,
-        stderr=slave,
-        text=False,
-        env=env,
-        close_fds=True,
-    )
-    output = bytearray()
-
-    def read_until(text: bytes, *, after: int = 0, timeout: float = 5) -> None:
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline and text not in output[after:]:
-            readable, _, _ = select.select([master], [], [], 0.1)
-            if readable:
-                output.extend(os.read(master, 8192))
-        assert text in output[after:]
-
-    try:
-        read_until(
-            b"THEME \xc2\xb7 1/11 \xc2\xb7 classic \xc2\xb7 STYLE \xc2\xb7 1/7 \xc2\xb7 linear"
-        )
-        previous_length = len(output)
-        os.write(master, b"T")
-        read_until(
-            b"THEME \xc2\xb7 11/11 \xc2\xb7 no-color \xc2\xb7 STYLE \xc2\xb7 1/7 \xc2\xb7 linear",
-            after=previous_length,
-        )
-        previous_length = len(output)
-        os.write(master, b"t")
-        read_until(
-            b"THEME \xc2\xb7 1/11 \xc2\xb7 classic \xc2\xb7 STYLE \xc2\xb7 1/7 \xc2\xb7 linear",
-            after=previous_length,
-        )
-
-        os.write(master, b"\x03")
-        exit_deadline = time.monotonic() + 3
-        while process.poll() is None and time.monotonic() < exit_deadline:
-            readable, _, _ = select.select([master], [], [], 0.05)
-            if readable:
-                output.extend(os.read(master, 8192))
-        assert process.poll() == 0
-        while True:
-            readable, _, _ = select.select([master], [], [], 0.1)
-            if not readable:
-                break
-            try:
-                output.extend(os.read(master, 8192))
-            except OSError:
-                break
-        assert output.endswith((b"\n", b"\r\n"))
-        assert b"\x1b[38;5;" in output
-        assert b"\x1b[38;2;" not in output
-        assert b"\x1b[48;" not in output
-        after = termios.tcgetattr(slave)
-        assert after[3] & termios.ICANON
-        assert after[3] & termios.ECHO
-    finally:
-        if process.poll() is None:
-            process.kill()
-            process.wait()
-        os.close(master)
-        os.close(slave)
-
-
-@pytest.mark.skipif(os.name != "posix", reason="PTY smoke test is POSIX-only")
-def test_appearance_picker_confirmation_hands_demo_snapshot_to_watch() -> None:
-    import pty
-    import select
-    import subprocess
-    import termios
-    import time
-
-    master, slave = pty.openpty()
-    env = {
-        **os.environ,
-        "COLUMNS": "100",
-        "LINES": "30",
-        "TERM": "xterm-256color",
-        "LANG": "en_US.UTF-8",
-        "LC_ALL": "en_US.UTF-8",
-    }
-    env.pop("NO_COLOR", None)
-    process = subprocess.Popen(  # ty: ignore[no-matching-overload]
-        [
-            sys.executable,
-            "-m",
-            "ccusage_viz",
-            "timeline",
-            "--pick",
-            "--theme",
-            "nord",
-            "--demo",
-            "small",
-            "--watch",
-            "10",
-            "--ascii",
-        ],
-        stdin=slave,
-        stdout=slave,
-        stderr=slave,
-        text=False,
-        env=env,
-        close_fds=True,
-    )
-    output = bytearray()
-
-    def read_until(text: bytes, *, after: int = 0, timeout: float = 5) -> None:
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline and text not in output[after:]:
-            readable, _, _ = select.select([master], [], [], 0.1)
-            if readable:
-                output.extend(os.read(master, 8192))
-        assert text in output[after:]
-
-    try:
-        read_until(b"THEME \xc2\xb7 8/11 \xc2\xb7 nord \xc2\xb7 STYLE \xc2\xb7 1/7 \xc2\xb7 linear")
-        previous_length = len(output)
-        os.write(master, b"\r")
-        read_until(b"refresh every 10s", after=previous_length)
-        assert b"DEMO DATA \xc2\xb7 small" in output[previous_length:]
-
-        os.write(master, b"\x03")
-        exit_deadline = time.monotonic() + 3
-        while process.poll() is None and time.monotonic() < exit_deadline:
-            readable, _, _ = select.select([master], [], [], 0.05)
-            if readable:
-                output.extend(os.read(master, 8192))
-        assert process.poll() == 0
-        assert output.endswith((b"\n", b"\r\n"))
-        after = termios.tcgetattr(slave)
-        assert after[3] & termios.ICANON
-        assert after[3] & termios.ECHO
-    finally:
-        if process.poll() is None:
-            process.kill()
-            process.wait()
-        os.close(master)
-        os.close(slave)
 
 
 @pytest.mark.skipif(os.name != "posix", reason="PTY smoke test is POSIX-only")

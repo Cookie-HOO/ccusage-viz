@@ -1,14 +1,10 @@
 from __future__ import annotations
 
 import sys
-from dataclasses import replace
 
-from ccusage_viz.core.time import refresh_date_range
 from ccusage_viz.dependency import ensure_ccusage
 from ccusage_viz.i18n import Translator
 from ccusage_viz.options import CommandOptions
-from ccusage_viz.query.client import QueryRunner
-from ccusage_viz.terminal import InteractiveScreen, inspect_terminal
 
 
 def run(options: CommandOptions, translator: Translator) -> int:
@@ -23,32 +19,8 @@ def run(options: CommandOptions, translator: Translator) -> int:
 
         return run_monitor(options, translator)
 
-    from ccusage_viz.watch import load_snapshot, run_appearance_picker, run_once, run_watch
+    from ccusage_viz.watch import run_once, run_watch
 
-    if options.pick:
-        current = replace(options, date_range=refresh_date_range(options.date_range))
-        inspect_terminal(
-            current.command,
-            no_color=current.no_color,
-            ascii=current.ascii,
-        )
-        runner = QueryRunner(current.ccusage_bin, timeout=current.timeout)
-        snapshot = load_snapshot(current, runner)
-        screen = InteractiveScreen(sys.stdout)
-        try:
-            picked = run_appearance_picker(current, translator, snapshot, screen)
-            if picked is None:
-                return 0
-            if picked.options.watch is not None:
-                return run_watch(
-                    picked.options,
-                    translator,
-                    seed=picked.seed,
-                    screen=screen,
-                )
-            return 0
-        finally:
-            screen.finish()
     if options.watch is not None:
         return run_watch(options, translator)
     output = run_once(options, translator)

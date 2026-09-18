@@ -165,7 +165,7 @@ ccuv monitor --demo small
 
 `monitor` 是常驻、进程内的观测视图。第一次成功的累计 `ccusage` 快照只建立基线；随后快照使用单调时钟的实际间隔进行差分。因此它在启动前没有任何读数，不能重建过去 24 小时图表。进程内原生历史以分钟汇总，最多保留 24 小时；显示窗口默认为 1 小时，可在 5 分钟到 24 小时之间调整。`--window` 只保留当前进程观测到的历史（5m–24h，默认 `1h`）；真实监控的 `--interval` 默认 15 秒。Demo Monitor 未显式指定 `--interval` 时以 1 秒的合成节奏推进；隐藏的 `--timeout` 限制单个 `ccusage` 子进程的最大时长。
 
-省略 `--by` 时显示权威的**总 TPM**；`--by model` 显示各模型 TPM；`--by agent` 和 `--by project` 显示从可见窗口左边界开始的累计 Token 增长。分组视图可用 `--legend-position values` 显示无标记的紧凑列表，列出各可见项及其最新显示值。紧凑 Monitor 排名只用排名旁的箭头表示真实名次变化，并用数值旁的 `↑`、`↓` 和 `—` 表示增长、下降和持平（`--ascii` 下为 `^`、`v` 和 `=`）；由于 Monitor 中每个序列都持续活跃，因此不显示活动点。初始基线不显示标记，之后首次出现的序列只显示数值上升，不伪造排名箭头。分组 Monitor 默认保留 Top 3，其余合并到 `Other`。`--agent`、`--model` 与 `--project` 都是仅启动时生效的数据源筛选。按 `Ctrl-C` 退出；`r` 立即采样，Space 暂停/恢复，`v` 按图表 → 精简命令 → 完整命令 → Markdown 数据表 → JSON 数据 → 图表循环。精简命令省略默认参数，完整命令显式列出所有生效设置。图表视图可用 `m` 调整但不可复制；其余视图可用 `y` 复制但不可调整。数据表和 JSON 都只序列化当前显示的桶（包括分组、Top N 与 `Other`），不暴露原始计数器。`h` 隐藏或恢复仅当前会话的控制栏以归还图表行数，`m` 仅可从图表打开固定两行的运行时调整面板。快捷页可调整窗口、间隔、分组、Top、主题和样式，不会重新查询或丢失已保留历史；按 `a` 切换到高级页调整图例，`y` 会复制候选命令。启动时的 `--model` 筛选会保持不变，不作为运行时控制。调整引导始终可见，关闭面板后会恢复此前的控制栏偏好。Monitor 横轴使用 `HH:MM` 标签。可用 `--theme` 和 `--style` 指定初始外观；Monitor 有意不支持启动时 `--pick`，因为真实观测历史尚不存在——要立即比较样式请使用 `monitor --demo`。Demo Monitor 数据是确定性的，启动即有波动的内存历史，绝不调用 `ccusage`。
+省略 `--by` 时显示权威的**总 TPM**；`--by model` 显示各模型 TPM；`--by agent` 和 `--by project` 显示从可见窗口左边界开始的累计 Token 增长。分组视图可用 `--legend-position values` 显示无标记的紧凑列表，列出各可见项及其最新显示值。紧凑 Monitor 排名只用排名旁的箭头表示真实名次变化，并用数值旁的 `↑`、`↓` 和 `—` 表示增长、下降和持平（`--ascii` 下为 `^`、`v` 和 `=`）；由于 Monitor 中每个序列都持续活跃，因此不显示活动点。初始基线不显示标记，之后首次出现的序列只显示数值上升，不伪造排名箭头。分组 Monitor 默认保留 Top 3，其余合并到 `Other`。`--agent`、`--model` 与 `--project` 都是仅启动时生效的数据源筛选。按 `Ctrl-C` 退出；`r` 立即采样，Space 暂停/恢复，`v` 按图表 → 精简命令 → 完整命令 → Markdown 数据表 → JSON 数据 → 图表循环。精简命令省略默认参数，完整命令显式列出所有生效设置。图表视图可用 `m` 调整但不可复制；其余视图可用 `y` 复制但不可调整。数据表和 JSON 都只序列化当前显示的桶（包括分组、Top N 与 `Other`），不暴露原始计数器。`h` 隐藏或恢复仅当前会话的控制栏以归还图表行数，`m` 仅可从图表打开固定两行的运行时调整面板。快捷页可调整窗口、间隔、分组、Top、主题和样式，不会重新查询或丢失已保留历史；按 `a` 切换到高级页调整图例，`y` 会复制候选命令。启动时的 `--model` 筛选会保持不变，不作为运行时控制。调整引导始终可见，关闭面板后会恢复此前的控制栏偏好。Monitor 横轴使用 `HH:MM` 标签。可用 `--theme` 和 `--style` 指定初始外观；真实观测历史在启动时尚不存在；要立即比较样式请使用 `monitor --demo`。Demo Monitor 数据是确定性的，启动即有波动的内存历史，绝不调用 `ccusage`。
 
 观测 TPM 不等同于 QPM，也不等同于 API 速率限制 TPM；当前没有 QPM 指标。未来若加入外部 QPM，将统计逻辑请求，绝不会从 Token 或重试次数推断请求数。Monitor 的 `style=ranking` 是进程内观测窗口的当前值紧凑视图，不是累计历史数据的 `ranking` 子命令：总量与模型模式显示当前观测 TPM，Agent 与项目模式显示当前可见窗口内的 Token 增长。Monitor 不宣称提供历史逐分钟数据、任意日期范围的小时分布或启动前的滚动窗口。采样间隙、查询错误和计数器回退不会被伪装成零流量。
 
@@ -230,23 +230,11 @@ ccuv timeline --demo large
 
 生成的记录是确定性的。三个档位只改变数值量级，不改变日期、形状或标识；数据涵盖零值日期、峰值、单位边界、跨 Agent 同名项目、Token 残差和 Top 溢出。Demo 模式从不调用 `ccusage`，也不写入用量记录。
 
-### 外观选择器与图表样式
+### 图表样式
 
-Theme 负责语义前景色，Style 负责图表形态。两者都只在当前进程中生效：
-
-```bash
-ccuv timeline --pick
-ccuv calendar --pick --theme github
-ccuv stack --pick --split-cache
-ccuv timeline --pick --demo small
-ccuv timeline --pick --watch 5
-```
-
-没有 `--demo` 时，选择器会按当前日期范围和筛选条件执行一次普通 `ccusage` 快照查询。指定 `--demo [small|medium|large]` 时，选择阶段和后续运行始终使用该档确定性合成数据，且绝不调用 `ccusage`。导航只会重新渲染保留在内存中的快照，不会重新查询或生成数据。
+Theme 负责语义前景色，Style 负责图表形态。使用 `--theme` 和 `--style` 指定初始外观；TUI 运行期间可按 `m` 基于已保留快照调整受支持的设置，不会因此发起新查询。
 
 Dashboard 浏览模式有意只保留一行控制栏：`r` 刷新全部、`s`/点击调整子图、`g` 全局调整、`h` 隐藏/显示控制栏、`y` 复制仪表盘、Space 暂停/继续调度。Dashboard 不再提供详情或子图命令显示。来自子图的数据和能力警告会去重后显示在控制栏正上方的全局警告区，不会挤占紧凑子图单元格的内容。子图和全局调整均先进入**快捷设置**，`a` 切换到**高级设置**。全局快捷设置包含主题、样式、页眉、摘要和布局；全局高级设置使用 `+` 添加子图，并提供 `x` 删除、`[`/`]` 排序和 `Tab` 选择子图。复制 Dashboard 会保留外壳 Theme/Style 与每个子图各自独立的 Theme/Style。
-
-选择器始终只在屏幕上保留一张图。按 `s`/`S` 切换下一个/上一个样式，按 `t`/`T` 切换下一个/上一个主题，按 `y` 复制规范化后的候选命令，按 Enter 确认，按 `Esc` 取消，首尾循环；`Ctrl-C` 会退出应用。`s`/`S` 与 `t`/`T` 是唯一的外观选择器导航快捷键；`--theme` 和 `--style` 指定初始外观。Ranking 也支持选择器，包括显式的 `no-color` 主题，此时仍可完整选择 Style。不使用 Watch 时，确认后保留当前图表并退出；使用 Watch 时，当前快照成为第一张 Watch 图表，首次自动刷新等待一个完整间隔。
 
 样式按子命令定义：Timeline 支持 `linear`、`step`、`no-line`、`points`、`line-points`、`stem`、`area`。`no-line` 不连线但保留各系列不同的标记；`points` 使用统一实心点且不连线；`line-points` 使用统一实心点和线性连线。Monitor 支持 `bars`、`line`、`step`、`points`、`line-points`、`ranking`；两个统一点样式与 Timeline 的无线和线性连线语义相同。Calendar 支持 `relative`、`absolute`；Stack 支持 `stacked`、`stacked-pattern`、`grouped`、`grouped-thin`、`normalized`；Ranking 支持 `bar`、`dot`、`dots`。`--ascii` 独立于 Theme 和 Style，只改变字符。
 

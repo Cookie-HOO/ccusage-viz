@@ -81,9 +81,7 @@ def _preparse_language(argv: list[str]) -> str:
     return namespace.lang or detect_language()
 
 
-def _add_presentation(
-    parser: argparse.ArgumentParser, tr: Translator, command: str, *, include_pick: bool = True
-) -> None:
+def _add_presentation(parser: argparse.ArgumentParser, tr: Translator, command: str) -> None:
     parser.add_argument(
         "--demo",
         nargs="?",
@@ -91,8 +89,6 @@ def _add_presentation(
         const="medium",
         help=tr.text("help.demo"),
     )
-    if include_pick:
-        parser.add_argument("--pick", action="store_true", help=tr.text("help.pick"))
     parser.add_argument("--lang", choices=("en", "zh"), help=tr.text("help.lang"))
     parser.add_argument("--ccusage-bin", default="ccusage", help=tr.text("help.ccusage_bin"))
     parser.add_argument("--timeout", type=float, default=30.0, help=argparse.SUPPRESS)
@@ -223,11 +219,10 @@ def _add_monitor(parser: argparse.ArgumentParser, tr: Translator) -> None:
     parser.add_argument("--agent", action="append", default=[], help=tr.text("help.agent"))
     parser.add_argument("--model", action="append", default=[], help=tr.text("help.model"))
     parser.add_argument("--project", action="append", default=[], help=tr.text("help.project"))
-    _add_presentation(parser, tr, "monitor", include_pick=False)
+    _add_presentation(parser, tr, "monitor")
     # Grouped monitor views need a line-compatible default rather than the
     # ungrouped Total mode's bar default.
     parser.set_defaults(style=None)
-    parser.add_argument("--pick", action="store_true", help=argparse.SUPPRESS)
 
 
 def build_parser(tr: Translator) -> argparse.ArgumentParser:
@@ -366,10 +361,6 @@ def _to_options(namespace: argparse.Namespace) -> CommandOptions:
             header_interval=namespace.header_interval,
             dashboard_style=namespace.dashboard_style,
         )
-    if command == "monitor" and getattr(namespace, "pick", False):
-        raise UsageError(
-            "error.monitor_demo_pick" if namespace.demo is not None else "error.monitor_pick"
-        )
     top = getattr(namespace, "top", None)
     if command == "timeline" and namespace.by != "total" and top is None:
         top = 3
@@ -440,7 +431,6 @@ def _to_options(namespace: argparse.Namespace) -> CommandOptions:
         ascii=namespace.ascii,
         color_scheme=namespace.color_scheme,
         style=style,
-        pick=getattr(namespace, "pick", False),
         window_seconds=window_seconds,
         interval=interval,
         no_summary=getattr(namespace, "no_summary", False),

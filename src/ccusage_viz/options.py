@@ -75,7 +75,6 @@ class CommandOptions:
     ascii: bool
     color_scheme: str = "classic"
     style: str = "linear"
-    pick: bool = False
     window_seconds: int | None = None
     interval: float | None = None
     no_summary: bool = False
