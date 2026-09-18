@@ -1,6 +1,7 @@
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
+from ccusage_viz.core.time import DateRange
 from ccusage_viz.domain import ProjectRef, SourceKind, TokenUsage, UsageRecord
 from ccusage_viz.formatting import display_width
 from ccusage_viz.i18n import load_translator
@@ -19,7 +20,7 @@ from ccusage_viz.monitor import (
     _series_descriptors,
     _stable_y_max,
 )
-from ccusage_viz.options import CommandOptions, DateRange
+from ccusage_viz.options import CommandOptions
 from ccusage_viz.render.base import RenderContext
 from ccusage_viz.render.palette import get_color_scheme
 from ccusage_viz.terminal import Terminal

@@ -6,10 +6,11 @@ from subprocess import CompletedProcess
 
 import pytest
 
+from ccusage_viz.core.time import DateRange
 from ccusage_viz.dependency import ensure_ccusage
 from ccusage_viz.errors import QueryError
 from ccusage_viz.i18n import load_translator
-from ccusage_viz.options import CommandOptions, DateRange
+from ccusage_viz.options import CommandOptions
 
 
 def options(**changes: object) -> CommandOptions:

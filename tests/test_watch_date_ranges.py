@@ -2,7 +2,8 @@ from datetime import date
 
 import pytest
 
-from ccusage_viz.options import refresh_date_range, resolve_date_range
+from ccusage_viz.core.time import refresh_date_range
+from ccusage_viz.options import resolve_date_range
 
 
 @pytest.mark.parametrize("period", [None, "7d"])

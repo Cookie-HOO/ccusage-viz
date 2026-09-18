@@ -20,11 +20,11 @@ from ccusage_viz.chart_models import (
     StackModel,
     TimelineModel,
 )
+from ccusage_viz.core.time import DateRange
 from ccusage_viz.domain import TokenUsage
 from ccusage_viz.errors import UsageError
 from ccusage_viz.formatting import display_width, strip_ansi
 from ccusage_viz.i18n import load_translator
-from ccusage_viz.options import DateRange
 from ccusage_viz.render.base import RenderContext, isolated_plot
 from ccusage_viz.render.calendar import render_calendar
 from ccusage_viz.render.palette import (

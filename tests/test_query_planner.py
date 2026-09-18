@@ -1,9 +1,10 @@
 from dataclasses import replace
 from datetime import date
 
+from ccusage_viz.core.time import DateRange
 from ccusage_viz.coverage import DateInterval
 from ccusage_viz.domain import Notice
-from ccusage_viz.options import CommandOptions, DateRange
+from ccusage_viz.options import CommandOptions
 from ccusage_viz.query.models import QueryKind
 from ccusage_viz.query.planner import plan_queries
 

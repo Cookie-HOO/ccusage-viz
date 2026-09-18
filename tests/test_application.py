@@ -4,8 +4,9 @@ from datetime import date
 import pytest
 
 from ccusage_viz.application import run
+from ccusage_viz.core.time import DateRange
 from ccusage_viz.i18n import load_translator
-from ccusage_viz.options import CommandOptions, DateRange
+from ccusage_viz.options import CommandOptions
 from ccusage_viz.watch import AppearancePickerResult, RefreshResult, UsageSnapshot
 
 

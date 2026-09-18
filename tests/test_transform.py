@@ -3,9 +3,9 @@ from datetime import date, timedelta
 import pytest
 
 from ccusage_viz.chart_models import ChangeDirection
+from ccusage_viz.core.time import DateRange
 from ccusage_viz.coverage import DateCoverage
 from ccusage_viz.domain import ModelBreakdown, Notice, SourceKind, TokenUsage, UsageRecord
-from ccusage_viz.options import DateRange
 from ccusage_viz.project_identity import make_project_ref
 from ccusage_viz.transform import (
     build_calendar,

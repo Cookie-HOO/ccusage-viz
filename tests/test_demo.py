@@ -1,8 +1,8 @@
 from datetime import date
 
+from ccusage_viz.core.time import DateRange
 from ccusage_viz.demo import generate_demo
 from ccusage_viz.domain import UsageRecord
-from ccusage_viz.options import DateRange
 
 
 def record_identity(record: UsageRecord) -> tuple[date, str, tuple[str, str], str]:

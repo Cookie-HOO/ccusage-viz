@@ -14,10 +14,10 @@ from ccusage_viz.chart_models import (
     StackModel,
     TimelineModel,
 )
+from ccusage_viz.core.time import DateRange
 from ccusage_viz.coverage import DateCoverage
 from ccusage_viz.domain import Notice, TokenUsage, UsageRecord
 from ccusage_viz.errors import UsageError
-from ccusage_viz.options import DateRange
 from ccusage_viz.project_identity import project_label, resolve_projects, unique_projects
 from ccusage_viz.selectors import SelectorCandidate, resolve_selectors
 from ccusage_viz.summaries import build_period_summary, period_start

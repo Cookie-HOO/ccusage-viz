@@ -1,6 +1,7 @@
 from datetime import date, datetime
 from json import loads
 
+from ccusage_viz.core.time import DateRange
 from ccusage_viz.data_view import (
     body_view_copy_kind,
     next_body_view,
@@ -11,7 +12,7 @@ from ccusage_viz.data_view import (
 from ccusage_viz.domain import Agent, SourceKind, TokenUsage, UsageRecord
 from ccusage_viz.i18n import load_translator
 from ccusage_viz.monitor import ObservedBucket
-from ccusage_viz.options import CommandOptions, DateRange
+from ccusage_viz.options import CommandOptions
 from ccusage_viz.terminal import Terminal
 from ccusage_viz.watch import UsageSnapshot
 

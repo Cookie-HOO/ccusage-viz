@@ -18,6 +18,7 @@ from ccusage_viz.command_copy import (
     format_full_command_display,
     wrap_command,
 )
+from ccusage_viz.core.time import refresh_date_range
 from ccusage_viz.coverage import DateCoverage
 from ccusage_viz.data_view import BodyView, next_body_view, render_snapshot_data
 from ccusage_viz.deltas import RefreshDeltas, RefreshRanks
@@ -27,7 +28,7 @@ from ccusage_viz.domain import Notice, UsageRecord
 from ccusage_viz.errors import UsageError
 from ccusage_viz.formatting import clip_width
 from ccusage_viz.i18n import Translator
-from ccusage_viz.options import CommandOptions, adjust_option, compatible_styles, refresh_date_range
+from ccusage_viz.options import CommandOptions, adjust_option, compatible_styles
 from ccusage_viz.query.client import QueryRunner
 from ccusage_viz.query.models import QueryKind
 from ccusage_viz.query.planner import plan_queries

@@ -1,10 +1,17 @@
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, replace
-from datetime import date, datetime, timedelta
+from datetime import date
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from ccusage_viz.core.time import (
+    DateRange,
+    natural_period_start,
+    today_for_timezone,
+)
+from ccusage_viz.core.time import (
+    parse_period as parse_core_period,
+)
 from ccusage_viz.errors import UsageError
 
 AGGREGATIONS = ("day", "month", "quarter", "year")
@@ -19,7 +26,6 @@ PERIOD_PRESETS = {
 }
 DEFAULT_PERIODS = {"d": 14, "mo": 13, "q": 8, "y": 5}
 COMMAND_DEFAULT_PERIODS = {"timeline": "14d", "calendar": "365d", "stack": "14d", "ranking": "14d"}
-_PERIOD_PATTERN = re.compile(r"(?P<value>[1-9][0-9]*)(?P<unit>d|mo|q|y)$")
 WEEKDAY_MODES = ("auto", "show", "hidden")
 COMMAND_STYLES = {
     "timeline": ("linear", "step", "no-line", "points", "line-points", "stem", "area"),
@@ -40,50 +46,14 @@ MINIMUM_SIZES = {
 }
 
 
-@dataclass(frozen=True, slots=True)
-class DateRange:
-    since: date
-    until: date
-    timezone: str | None
-    relative_until: bool = False
-    period: str | None = None
-    fixed_bounds: bool = False
-    implicit_until: bool = False
-
-    @property
-    def days(self) -> int:
-        return (self.until - self.since).days + 1
-
-
-def _natural_start(end: date, value: int, unit: str) -> date:
-    if unit == "d":
-        return end - timedelta(days=value - 1)
-    if unit == "mo":
-        month_index = end.year * 12 + end.month - 1 - (value - 1)
-        return date(month_index // 12, month_index % 12 + 1, 1)
-    if unit == "q":
-        quarter_index = end.year * 4 + (end.month - 1) // 3 - (value - 1)
-        return date(quarter_index // 4, quarter_index % 4 * 3 + 1, 1)
-    return date(end.year - value + 1, 1, 1)
-
-
 def parse_period(value: str) -> tuple[int, str]:
-    match = _PERIOD_PATTERN.fullmatch(value)
-    if match is None:
+    try:
+        return parse_core_period(value)
+    except ValueError as exc:
         raise UsageError(
             "error.arguments",
             detail="--period must be a positive integer followed by d, mo, q, or y",
-        )
-    return int(match["value"]), match["unit"]
-
-
-def refresh_date_range(date_range: DateRange, *, today: date | None = None) -> DateRange:
-    """Advance a rolling period while leaving startup-anchored ranges frozen."""
-    if not date_range.relative_until or date_range.period is None:
-        return date_range
-    end = today_for_timezone(date_range.timezone, today)
-    value, unit = parse_period(date_range.period)
-    return replace(date_range, since=_natural_start(end, value, unit), until=end)
+        ) from exc
 
 
 @dataclass(frozen=True, slots=True)
@@ -175,7 +145,7 @@ def adjust_option(options: CommandOptions, key: str) -> CommandOptions:
         return replace(
             options,
             date_range=DateRange(
-                _natural_start(end, next_value, unit),
+                natural_period_start(end, next_value, unit),
                 end,
                 options.date_range.timezone,
                 relative_until=True,
@@ -194,7 +164,7 @@ def adjust_option(options: CommandOptions, key: str) -> CommandOptions:
             aggregation=aggregation,
             date_range=replace(
                 options.date_range,
-                since=_natural_start(end, value, unit),
+                since=natural_period_start(end, value, unit),
                 period=f"{value}{unit}",
             ),
         )
@@ -261,17 +231,6 @@ def _parse_date(value: str) -> date:
         raise UsageError("error.date_invalid", value=value) from exc
 
 
-def today_for_timezone(timezone: str | None, today: date | None = None) -> date:
-    if today is not None:
-        return today
-    if timezone is None:
-        return date.today()
-    try:
-        return datetime.now(ZoneInfo(timezone)).date()
-    except (ZoneInfoNotFoundError, ValueError) as exc:
-        raise UsageError("error.timezone", value=timezone) from exc
-
-
 def resolve_date_range(
     command: str,
     *,
@@ -287,7 +246,10 @@ def resolve_date_range(
             ZoneInfo(timezone)
         except (ZoneInfoNotFoundError, ValueError) as exc:
             raise UsageError("error.timezone", value=timezone) from exc
-    current = today_for_timezone(timezone, today)
+    try:
+        current = today_for_timezone(timezone, today)
+    except (ZoneInfoNotFoundError, ValueError) as exc:
+        raise UsageError("error.timezone", value=timezone) from exc
     if period is not None and (since is not None or until is not None):
         raise UsageError("error.date_conflict")
     if until is not None and since is None:
@@ -313,7 +275,7 @@ def resolve_date_range(
     if unit != allowed_unit:
         raise UsageError("error.arguments", detail=f"--period unit must be {allowed_unit}")
     try:
-        start = _natural_start(end, value, unit)
+        start = natural_period_start(end, value, unit)
     except (OverflowError, ValueError) as exc:
         raise UsageError("error.arguments", detail="--period is out of range") from exc
     return DateRange(start, end, timezone, relative_until=True, period=canonical_period)

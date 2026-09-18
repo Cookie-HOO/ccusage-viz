@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from datetime import timedelta
 
+from ccusage_viz.core.time import DateRange
 from ccusage_viz.domain import ModelBreakdown, SourceKind, TokenUsage, UsageRecord
-from ccusage_viz.options import DateRange
 from ccusage_viz.project_identity import make_project_ref
 
 _MAGNITUDES = {"small": 1, "medium": 1_000, "large": 1_000_000}

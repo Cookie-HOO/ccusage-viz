@@ -5,8 +5,8 @@ from dataclasses import dataclass, field
 from datetime import date
 from enum import StrEnum
 
+from ccusage_viz.core.time import DateRange
 from ccusage_viz.domain import Notice, TokenUsage
-from ccusage_viz.options import DateRange
 
 GroupKey = Hashable
 

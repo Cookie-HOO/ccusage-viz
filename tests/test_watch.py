@@ -9,12 +9,13 @@ from typing import cast
 
 import pytest
 
+from ccusage_viz.core.time import DateRange
 from ccusage_viz.coverage import DateCoverage, DateInterval
 from ccusage_viz.domain import Notice
 from ccusage_viz.errors import UsageError
 from ccusage_viz.formatting import display_width, strip_ansi
 from ccusage_viz.i18n import load_translator
-from ccusage_viz.options import CommandOptions, DateRange
+from ccusage_viz.options import CommandOptions
 from ccusage_viz.query.client import QueryRunner
 from ccusage_viz.terminal import InteractiveScreen, Terminal
 from ccusage_viz.watch import (
