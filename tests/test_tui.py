@@ -4,6 +4,7 @@ from datetime import date
 import pytest
 
 import ccusage_viz.tui as tui_module
+from ccusage_viz.bootstrap import build_query_runtime
 from ccusage_viz.cli import _to_options, build_parser
 from ccusage_viz.cli import parse_pane_fragment as parse_dashboard_pane
 from ccusage_viz.command_copy import format_dashboard_pane_command, format_full_dashboard_command
@@ -30,7 +31,9 @@ from ccusage_viz.tui import (
     _header_lines,
     _header_options,
     _header_refresh_interval,
+    _load_pane,
     _new_header,
+    _new_pane,
     _new_pane_options,
     _next_header_summary,
     _pane_render,
@@ -192,9 +195,58 @@ def test_dashboard_adjustment_status_only_advertises_navigation_when_available()
 def test_dashboard_panes_have_no_details_state() -> None:
     parser = build_parser(load_translator("en"))
     options = _to_options(parser.parse_args(["dashboard", "--demo"]))
-    pane = TuiPane(parse_dashboard_pane("timeline", host=options), QueryRunner())
+    pane = TuiPane(parse_dashboard_pane("timeline", host=options))
 
     assert not hasattr(pane, "show_details")
+
+
+def test_dashboard_panes_only_own_monitor_query_runners() -> None:
+    parser = build_parser(load_translator("en"))
+    options = _to_options(parser.parse_args(["dashboard", "--demo"]))
+
+    historical = _new_pane(
+        standalone_from_pane(options, parse_dashboard_pane("timeline", host=options))
+    )
+    monitor = _new_pane(
+        standalone_from_pane(options, parse_dashboard_pane("monitor", host=options))
+    )
+
+    assert historical.monitor_runner is None
+    assert isinstance(monitor.monitor_runner, QueryRunner)
+
+
+def test_dashboard_load_dispatches_to_shared_runtime_or_monitor_runner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parser = build_parser(load_translator("en"))
+    options = _to_options(parser.parse_args(["dashboard", "--demo"]))
+    historical = standalone_from_pane(
+        options, parse_dashboard_pane("timeline", host=options)
+    )
+    monitor = standalone_from_pane(options, parse_dashboard_pane("monitor", host=options))
+    runtime = build_query_runtime()
+    monitor_runner = QueryRunner()
+    calls: list[tuple[str, object]] = []
+
+    monkeypatch.setattr(
+        tui_module,
+        "load_snapshot",
+        lambda selected, selected_runtime: calls.append(("historical", selected_runtime))
+        or UsageSnapshot((), (), 0),
+    )
+    monkeypatch.setattr(
+        tui_module,
+        "load_monitor_sample",
+        lambda selected, selected_runner, *, demo_ordinal: calls.append(
+            ("monitor", selected_runner)
+        )
+        or (),
+    )
+
+    _load_pane(historical, runtime, None, 0)
+    _load_pane(monitor, runtime, monitor_runner, 1)
+
+    assert calls == [("historical", runtime), ("monitor", monitor_runner)]
 
 
 def test_dashboard_pane_render_retains_chart_notices_and_deduplicates_them() -> None:
@@ -218,8 +270,8 @@ def test_dashboard_pane_render_retains_chart_notices_and_deduplicates_them() -> 
         summary_notices=(Notice("notice.summary_excludes_session_agent", {"agent": "Codex"}),),
     )
     panes = [
-        TuiPane(ranking, QueryRunner(), snapshot=snapshot),
-        TuiPane(ranking, QueryRunner(), snapshot=snapshot),
+        TuiPane(ranking, snapshot=snapshot),
+        TuiPane(ranking, snapshot=snapshot),
     ]
 
     rendered = [
@@ -277,7 +329,6 @@ def test_dashboard_pane_retains_last_render_for_localized_renderer_warnings(
     options = _to_options(parser.parse_args(["dashboard", "--demo"]))
     pane = TuiPane(
         parse_dashboard_pane("stack", host=options),
-        QueryRunner(),
         snapshot=UsageSnapshot((), (), 0.25),
     )
     monkeypatch.setattr(
@@ -376,7 +427,9 @@ def test_dashboard_header_uses_host_summary_and_tracks_global_theme() -> None:
         parser.parse_args(["dashboard", "--header-summary", "quarter", "--theme", "nord"])
     )
 
-    header = _new_header(options)
+    runtime = build_query_runtime()
+    header = _new_header(options, runtime)
+    assert header.runtime is runtime
     assert header.summary_period == "quarter"
     assert header.options.chart.presentation.theme == "nord"
 
@@ -414,7 +467,7 @@ def test_header_refresh_uses_missing_coverage_then_current_day() -> None:
     parser = build_parser(load_translator("en"))
     options = _to_options(parser.parse_args(["dashboard", "--header-summary", "month"]))
     header = DashboardHeader(
-        _header_options(options), QueryRunner(), summary_period=options.host.header_summary
+        _header_options(options), build_query_runtime(), summary_period=options.host.header_summary
     )
     today = date(2026, 3, 15)
 
@@ -437,7 +490,7 @@ def test_header_date_rollover_requests_new_current_day() -> None:
     parser = build_parser(load_translator("en"))
     options = _to_options(parser.parse_args(["dashboard", "--header-summary", "day"]))
     header = DashboardHeader(
-        _header_options(options), QueryRunner(), summary_period=options.host.header_summary
+        _header_options(options), build_query_runtime(), summary_period=options.host.header_summary
     )
     previous = date(2026, 3, 15)
     header.coverage = DateCoverage((DateInterval(previous.replace(day=8), previous),))
@@ -452,7 +505,7 @@ def test_header_none_keeps_title_without_unknown_detail() -> None:
     parser = build_parser(load_translator("en"))
     options = _to_options(parser.parse_args(["dashboard", "--header-summary", "none"]))
     header = DashboardHeader(
-        _header_options(options), QueryRunner(), summary_period=options.host.header_summary
+        _header_options(options), build_query_runtime(), summary_period=options.host.header_summary
     )
 
     compact = _header_lines(header, "compact", load_translator("en"), Terminal(60, 4, False, True))
@@ -468,7 +521,7 @@ def test_header_cold_period_keeps_structure_with_unknown_detail() -> None:
     parser = build_parser(load_translator("en"))
     options = _to_options(parser.parse_args(["dashboard", "--header-summary", "quarter"]))
     header = DashboardHeader(
-        _header_options(options), QueryRunner(), summary_period=options.host.header_summary
+        _header_options(options), build_query_runtime(), summary_period=options.host.header_summary
     )
 
     lines = _header_lines(header, "banner", load_translator("en"), Terminal(60, 4, False, True))

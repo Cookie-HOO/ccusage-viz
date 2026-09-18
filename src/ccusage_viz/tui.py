@@ -8,6 +8,7 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from shutil import get_terminal_size
 
+from ccusage_viz.bootstrap import build_query_runtime
 from ccusage_viz.command_copy import (
     copy_command,
     format_dashboard_pane_command,
@@ -49,6 +50,7 @@ from ccusage_viz.options import (
     adjust_standalone,
 )
 from ccusage_viz.query.client import QueryRunner
+from ccusage_viz.query.runtime import QueryRuntime
 from ccusage_viz.render.base import RenderContext, styled_text
 from ccusage_viz.render.palette import COLOR_SCHEMES, get_color_scheme
 from ccusage_viz.render.summary import render_summary, render_summary_placeholder
@@ -71,7 +73,7 @@ _PANE_COMMANDS = ("timeline", "calendar", "stack", "ranking", "monitor")
 @dataclass(slots=True)
 class TuiPane:
     options: StandaloneLaunch
-    runner: QueryRunner
+    monitor_runner: QueryRunner | None = None
     snapshot: UsageSnapshot | None = None
     observer: ObservedTPM | None = None
     future: Future[UsageSnapshot | tuple[UsageRecord, ...]] | None = None
@@ -101,7 +103,7 @@ class TuiPane:
 @dataclass(slots=True)
 class DashboardHeader:
     options: StandaloneLaunch
-    runner: QueryRunner
+    runtime: QueryRuntime
     snapshot: UsageSnapshot | None = None
     future: Future[UsageSnapshot] | None = None
     refreshed_at: float = 0.0
@@ -141,13 +143,10 @@ def _header_options(
     )
 
 
-def _new_header(options: DashboardLaunch) -> DashboardHeader:
-    header_options = _header_options(options)
+def _new_header(options: DashboardLaunch, runtime: QueryRuntime) -> DashboardHeader:
     return DashboardHeader(
-        header_options,
-        QueryRunner(
-            header_options.process.ccusage_bin, timeout=header_options.process.query_timeout
-        ),
+        _header_options(options),
+        runtime,
         summary_period=options.host.header_summary,
     )
 
@@ -525,26 +524,31 @@ def compose_panels(
 
 def _new_pane(options: StandaloneLaunch) -> TuiPane:
     observer = None
-    if options.chart.kind == "monitor":
+    monitor_runner = None
+    if isinstance(options.chart, MonitorConfig):
         observer = ObservedTPM(
             window_seconds=options.chart.window_seconds or 3600,
             by=options.chart.by,
             top=options.chart.top,
             model_selectors=options.chart.filters.models,
         )
-    return TuiPane(
-        options,
-        QueryRunner(options.process.ccusage_bin, timeout=options.process.query_timeout),
-        observer=observer,
-    )
+        monitor_runner = QueryRunner(
+            options.process.ccusage_bin, timeout=options.process.query_timeout
+        )
+    return TuiPane(options, monitor_runner, observer=observer)
 
 
 def _load_pane(
-    options: StandaloneLaunch, runner: QueryRunner, demo_ordinal: int
+    options: StandaloneLaunch,
+    runtime: QueryRuntime,
+    monitor_runner: QueryRunner | None,
+    demo_ordinal: int,
 ) -> UsageSnapshot | tuple[UsageRecord, ...]:
-    if options.chart.kind == "monitor":
-        return load_monitor_sample(options, runner, demo_ordinal=demo_ordinal)
-    return load_snapshot(options, runner)
+    if isinstance(options.chart, MonitorConfig):
+        if monitor_runner is None:
+            raise ValueError("monitor panes require a query runner")
+        return load_monitor_sample(options, monitor_runner, demo_ordinal=demo_ordinal)
+    return load_snapshot(options, runtime)
 
 
 def _ranking_values(options: StandaloneLaunch, snapshot: UsageSnapshot) -> dict[Hashable, float]:
@@ -787,8 +791,9 @@ def _choose_pane_type(
 def run_tui(options: DashboardLaunch, translator: Translator) -> int:
     from ccusage_viz.configuration import standalone_from_pane
 
+    runtime = build_query_runtime()
     panes = [_new_pane(standalone_from_pane(options, pane)) for pane in options.panes]
-    header = _new_header(options)
+    header = _new_header(options, runtime)
     executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix="ccusage-viz-tui")
     focused: int | None = None
     active_grid = options.host.grid
@@ -829,7 +834,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             )
         )
         pane.submitted_options = submitted
-        pane.future = executor.submit(_load_pane, submitted, pane.runner, pane.demo_ordinal)
+        pane.future = executor.submit(
+            _load_pane, submitted, runtime, pane.monitor_runner, pane.demo_ordinal
+        )
 
     def refresh_header(*, queue_if_running: bool = False, aggressive: bool = False) -> None:
         requested = _header_refresh_interval(header, aggressive=aggressive)
@@ -849,7 +856,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         )
         header.submitted_options = submitted
         header.refreshed_at = time.monotonic()
-        header.future = executor.submit(load_snapshot, submitted, header.runner)
+        header.future = executor.submit(load_snapshot, submitted, header.runtime)
 
     def collect() -> bool:
         nonlocal last_successful_update
@@ -1251,7 +1258,8 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                             focused += 1
                         elif key in {"x", "X"} and len(panes) > 1:
                             removed = panes.pop(focused)
-                            removed.runner.cancel()
+                            if removed.monitor_runner is not None:
+                                removed.monitor_runner.cancel()
                             focused = min(focused, len(panes) - 1)
                         elif key in {"y", "Y"}:
                             pane.copied = copy_command(
@@ -1362,7 +1370,8 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         and len(panes) > 1
                     ):
                         removed = panes.pop(focused)
-                        removed.runner.cancel()
+                        if removed.monitor_runner is not None:
+                            removed.monitor_runner.cancel()
                         focused = min(focused, len(panes) - 1)
                     elif adjustment_page == "advanced" and key == "+":
                         grid_error = None
@@ -1427,8 +1436,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
     except KeyboardInterrupt:
         return 0
     finally:
-        header.runner.cancel()
+        runtime.cancel()
         for pane in panes:
-            pane.runner.cancel()
+            if pane.monitor_runner is not None:
+                pane.monitor_runner.cancel()
         executor.shutdown(wait=False, cancel_futures=True)
         screen.finish()
