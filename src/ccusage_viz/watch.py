@@ -12,6 +12,7 @@ from dataclasses import dataclass, replace
 from shutil import get_terminal_size
 from typing import Literal, cast
 
+from ccusage_viz.acquisition import historical_provider_id, historical_query_intent
 from ccusage_viz.bootstrap import build_query_runtime
 from ccusage_viz.command_copy import (
     copy_command,
@@ -39,7 +40,8 @@ from ccusage_viz.options import (
     adjust_standalone,
     compatible_styles,
 )
-from ccusage_viz.query.models import ProviderResult
+from ccusage_viz.query.coordinator import QueryHandle
+from ccusage_viz.query.models import ProviderResult, QueryTrigger
 from ccusage_viz.query.runtime import QueryRuntime
 from ccusage_viz.render import (
     RenderContext,
@@ -264,11 +266,27 @@ def snapshot_from_result(result: ProviderResult, elapsed: float) -> UsageSnapsho
     )
 
 
-def load_snapshot(options: StandaloneLaunch, runtime: QueryRuntime) -> UsageSnapshot:
+def load_snapshot(
+    options: StandaloneLaunch,
+    runtime: QueryRuntime,
+    *,
+    owner_id: str = "standalone",
+    generation: int = 0,
+    trigger: QueryTrigger = QueryTrigger.STARTUP,
+    coverage: DateCoverage | None = None,
+) -> UsageSnapshot:
     if isinstance(options.chart, MonitorConfig):
         raise TypeError("historical snapshot loading does not support monitor configurations")
+    intent = historical_query_intent(
+        options,
+        runtime.definition(historical_provider_id(options)),
+        owner_id=owner_id,
+        generation=generation,
+        trigger=trigger,
+        coverage=coverage,
+    )
     started = time.monotonic()
-    result = runtime.acquire(options)
+    result = runtime.acquire(intent)
     return snapshot_from_result(result, time.monotonic() - started)
 
 
@@ -309,6 +327,10 @@ def _refresh(
     terminal: Terminal,
     runtime: QueryRuntime,
     *,
+    owner_id: str = "standalone",
+    generation: int = 0,
+    trigger: QueryTrigger = QueryTrigger.STARTUP,
+    coverage: DateCoverage | None = None,
     reserve_prompt: bool = False,
     control_rows: int = 0,
     normalize_titles: bool = False,
@@ -317,7 +339,14 @@ def _refresh(
         options,
         translator,
         terminal,
-        load_snapshot(options, runtime),
+        load_snapshot(
+            options,
+            runtime,
+            owner_id=owner_id,
+            generation=generation,
+            trigger=trigger,
+            coverage=coverage,
+        ),
         reserve_prompt=reserve_prompt,
         control_rows=control_rows,
         normalize_titles=normalize_titles,
@@ -669,7 +698,8 @@ def run_watch(
     runtime = build_query_runtime()
     results: queue.Queue[tuple[int, RefreshResult | BaseException]] = queue.Queue()
     running = False
-    queued = False
+    pending_trigger: QueryTrigger | None = None
+    active_handle: QueryHandle[ProviderResult] | None = None
     refresh_generation = 0
     paused = False
     controls_hidden = False
@@ -826,8 +856,8 @@ def run_watch(
             force=force,
         )
 
-    def start_refresh() -> None:
-        nonlocal running
+    def start_refresh(trigger: QueryTrigger) -> None:
+        nonlocal active_handle, running
         generation = refresh_generation
         try:
             terminal = inspect_terminal(
@@ -846,20 +876,32 @@ def run_watch(
             chart=replace(chart, date_range=refresh_date_range(chart.date_range)),
         )
 
+        intent = historical_query_intent(
+            snapshot,
+            runtime.definition(historical_provider_id(snapshot)),
+            owner_id="standalone",
+            generation=generation,
+            trigger=trigger,
+        )
+        started = time.monotonic()
+        active_handle = runtime.submit(intent)
+
         def work(
             generation: int = generation,
             snapshot: StandaloneLaunch = snapshot,
             size: Terminal = terminal,
+            handle: QueryHandle[ProviderResult] = active_handle,
         ) -> None:
             try:
+                result = snapshot_from_result(handle.result(), time.monotonic() - started)
                 results.put(
                     (
                         generation,
-                        _refresh(
+                        render_snapshot(
                             snapshot,
                             translator,
                             size,
-                            runtime,
+                            result,
                             control_rows=1,
                             normalize_titles=True,
                         ),
@@ -879,14 +921,14 @@ def run_watch(
                 if (size.columns, size.lines) != last_size:
                     paint(force=True)
                 now = time.monotonic()
-                if (
-                    terminal_error is None
-                    and not running
-                    and (queued or (not paused and now >= next_refresh))
-                ):
-                    queued = False
-                    start_refresh()
-                    active_screen.paint_status(status())
+                if terminal_error is None and not running:
+                    trigger = pending_trigger
+                    if trigger is None and not paused and now >= next_refresh:
+                        trigger = QueryTrigger.STARTUP if last_snapshot is None else QueryTrigger.TICK
+                    if trigger is not None:
+                        pending_trigger = None
+                        start_refresh(trigger)
+                        active_screen.paint_status(status())
 
                 try:
                     outcome = results.get_nowait()
@@ -895,6 +937,7 @@ def run_watch(
                 if outcome is not None:
                     outcome_generation, outcome = outcome
                     running = False
+                    active_handle = None
                     next_refresh = time.monotonic() + interval
                     if outcome_generation != refresh_generation:
                         next_refresh = time.monotonic()
@@ -945,15 +988,16 @@ def run_watch(
                         if isinstance(outcome, UsageError):
                             terminal_error = outcome
                     paint()
-                    if queued:
+                    if pending_trigger is not None:
                         next_refresh = time.monotonic()
 
                 key = _read_key(0.05)
                 if key == "\x03":
                     raise KeyboardInterrupt
                 if key == "r":
-                    if running:
-                        queued = True
+                    pending_trigger = QueryTrigger.REFRESH
+                    if running and active_handle is not None:
+                        active_handle.cancel()
                     else:
                         next_refresh = time.monotonic()
                 elif key in {"h", "H"}:
@@ -1002,7 +1046,11 @@ def run_watch(
                         last_notices = picked.seed.notices
                         last_snapshot = picked.seed.snapshot
                         refresh_generation += 1
-                        next_refresh = time.monotonic()
+                        pending_trigger = QueryTrigger.REFRESH
+                        if running and active_handle is not None:
+                            active_handle.cancel()
+                        else:
+                            next_refresh = time.monotonic()
                     paint()
                 elif key == " ":
                     paused = not paused
@@ -1013,13 +1061,16 @@ def run_watch(
                     size = {"s": "small", "d": "medium", "l": "large"}[key]
                     current = replace(current, host=replace(current.host, demo_size=size))
                     refresh_generation += 1
-                    if running:
-                        queued = True
+                    pending_trigger = QueryTrigger.REFRESH
+                    if running and active_handle is not None:
+                        active_handle.cancel()
                     else:
                         next_refresh = time.monotonic()
     except KeyboardInterrupt:
         return 0
     finally:
+        if active_handle is not None:
+            active_handle.cancel()
         runtime.cancel()
         if screen is None:
             active_screen.finish()

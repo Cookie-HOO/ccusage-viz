@@ -1,24 +1,38 @@
 from __future__ import annotations
 
-from ccusage_viz.coverage import DateInterval
+from ccusage_viz.coverage import DateCoverage, DateInterval
 from ccusage_viz.options import MonitorConfig, StandaloneLaunch
 from ccusage_viz.query.models import (
     DataResolution,
     DataScope,
     ExecutionContext,
-    PhysicalPlan,
     QueryIntent,
     QueryTrigger,
 )
-from ccusage_viz.query.provider import ProviderCompiler
+from ccusage_viz.query.provider import ProviderDefinition
 
 
-def plan_queries(options: StandaloneLaunch, compiler: ProviderCompiler) -> PhysicalPlan:
-    """Compile provider-neutral intent through an injected provider compiler."""
+def historical_provider_id(options: StandaloneLaunch) -> str:
+    """Resolve the configured historical data mode to its Provider ID."""
+    return "demo" if options.host.demo_size else options.host.provider
+
+
+def historical_query_intent(
+    options: StandaloneLaunch,
+    definition: ProviderDefinition,
+    *,
+    owner_id: str,
+    generation: int,
+    trigger: QueryTrigger,
+    coverage: DateCoverage | None = None,
+) -> QueryIntent:
+    """Compose one historical Host request into provider-neutral query intent."""
     chart = options.chart
     if isinstance(chart, MonitorConfig):
         raise TypeError("historical query planning does not support monitor configurations")
-    coverage = DateInterval(chart.date_range.since, chart.date_range.until)
+    provider = definition.provider
+    scope_interval = DateInterval(chart.date_range.since, chart.date_range.until)
+    coverage = coverage or DateCoverage()
     project_required = bool(chart.filters.projects) or getattr(chart, "by", None) == "project"
     available_options = {
         "chart_kind": chart.kind,
@@ -26,12 +40,12 @@ def plan_queries(options: StandaloneLaunch, compiler: ProviderCompiler) -> Physi
     }
     execution_options = tuple(
         (key, available_options[key])
-        for key in sorted(compiler.capabilities.execution_options)
+        for key in sorted(provider.capabilities.execution_options)
         if available_options.get(key) is not None
     )
     execution_context = (
         None
-        if compiler.capabilities.in_process
+        if provider.capabilities.in_process
         else ExecutionContext(
             options.process.ccusage_bin,
             options.process.query_timeout,
@@ -39,16 +53,15 @@ def plan_queries(options: StandaloneLaunch, compiler: ProviderCompiler) -> Physi
             options.process.environment,
         )
     )
-    intent = QueryIntent(
-        owner_id="legacy-standalone",
-        generation=0,
-        trigger=QueryTrigger.STARTUP,
-        provider=compiler.provider,
-        scope=DataScope((coverage,), chart.date_range.timezone),
-        missing_intervals=(coverage,),
+    return QueryIntent(
+        owner_id=owner_id,
+        generation=generation,
+        trigger=trigger,
+        provider=provider.provider,
+        scope=DataScope((scope_interval,), chart.date_range.timezone),
+        missing_intervals=coverage.missing(scope_interval),
         resolution=DataResolution.DATE,
         dimensions=("project",) if project_required else ("agent",),
         execution_options=execution_options,
         execution_context=execution_context,
     )
-    return compiler.compile(intent)

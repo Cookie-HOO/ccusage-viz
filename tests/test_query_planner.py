@@ -1,8 +1,9 @@
 from dataclasses import replace
 from datetime import date
 
+from ccusage_viz.acquisition import historical_query_intent
 from ccusage_viz.core.time import DateRange
-from ccusage_viz.coverage import DateInterval
+from ccusage_viz.coverage import DateCoverage, DateInterval
 from ccusage_viz.domain import Notice
 from ccusage_viz.options import (
     CalendarConfig,
@@ -16,7 +17,7 @@ from ccusage_viz.options import (
 )
 from ccusage_viz.providers.ccusage import CCUSAGE_DEFINITION
 from ccusage_viz.providers.demo import DEMO_DEFINITION
-from ccusage_viz.query.planner import plan_queries
+from ccusage_viz.query.models import QueryTrigger
 
 
 def options(
@@ -36,16 +37,52 @@ def options(
     return StandaloneLaunch(ProcessConfig(), StandaloneHostConfig(), chart)
 
 
+def intent(
+    options: StandaloneLaunch,
+    definition=CCUSAGE_DEFINITION,
+    *,
+    owner_id: str = "test",
+    generation: int = 0,
+    trigger: QueryTrigger = QueryTrigger.STARTUP,
+    coverage: DateCoverage | None = None,
+):
+    return historical_query_intent(
+        options,
+        definition,
+        owner_id=owner_id,
+        generation=generation,
+        trigger=trigger,
+        coverage=coverage,
+    )
+
+
 def test_default_plan_uses_unified_by_agent_query() -> None:
-    (query,) = plan_queries(options("timeline"), CCUSAGE_DEFINITION.provider).queries
+    (query,) = CCUSAGE_DEFINITION.provider.compile(intent(options("timeline"))).queries
     assert query.operation == "unified_daily"
     assert query.arguments[:3] == ("daily", "--by-agent", "--json")
     assert query.arguments[-4:] == ("--timezone", "UTC", "--offline", "--no-cost")
     assert query.coverage.intervals == (DateInterval(date(2026, 1, 2), date(2026, 1, 3)),)
 
 
+def test_composition_preserves_owner_lifecycle_and_missing_coverage() -> None:
+    selected = intent(
+        options("timeline"),
+        owner_id="dashboard:pane:2",
+        generation=7,
+        trigger=QueryTrigger.REFRESH,
+        coverage=DateCoverage.from_interval(date(2026, 1, 2), date(2026, 1, 2)),
+    )
+
+    assert selected.owner_id == "dashboard:pane:2"
+    assert selected.generation == 7
+    assert selected.trigger is QueryTrigger.REFRESH
+    assert selected.missing_intervals == (DateInterval(date(2026, 1, 3), date(2026, 1, 3)),)
+    (query,) = CCUSAGE_DEFINITION.provider.compile(selected).queries
+    assert query.arguments[4:7] == ("2026-01-03", "--until", "2026-01-03")
+
+
 def test_project_ranking_uses_fixed_parallel_pair() -> None:
-    plan = plan_queries(options("ranking", by="project"), CCUSAGE_DEFINITION.provider)
+    plan = CCUSAGE_DEFINITION.provider.compile(intent(options("ranking", by="project")))
     assert [query.operation for query in plan.queries] == [
         "claude_daily_projects",
         "codex_sessions",
@@ -62,8 +99,8 @@ def test_project_ranking_uses_fixed_parallel_pair() -> None:
 
 
 def test_daily_project_view_omits_codex_with_notice() -> None:
-    plan = plan_queries(
-        options("stack", projects=("demo",)), CCUSAGE_DEFINITION.provider
+    plan = CCUSAGE_DEFINITION.provider.compile(
+        intent(options("stack", projects=("demo",)))
     )
     assert len(plan.queries) == 1
     assert plan.queries[0].operation == "claude_daily_projects"
@@ -73,7 +110,7 @@ def test_daily_project_view_omits_codex_with_notice() -> None:
 def test_provider_neutral_planner_compiles_demo_acquisition() -> None:
     demo = replace(options("timeline"), host=replace(options("timeline").host, demo_size="small"))
 
-    (query,) = plan_queries(demo, DEMO_DEFINITION.provider).queries
+    (query,) = DEMO_DEFINITION.provider.compile(intent(demo, DEMO_DEFINITION)).queries
 
     assert query.provider == DEMO_DEFINITION.provider.provider
     assert query.operation == "generate"
@@ -82,15 +119,20 @@ def test_provider_neutral_planner_compiles_demo_acquisition() -> None:
 
 def test_empty_provider_results_preserve_query_attribution_semantics() -> None:
     unified = CCUSAGE_DEFINITION.provider.assemble(
-        plan_queries(options("timeline"), CCUSAGE_DEFINITION.provider), ()
+        CCUSAGE_DEFINITION.provider.compile(intent(options("timeline"))), ()
     )
     project = CCUSAGE_DEFINITION.provider.assemble(
-        plan_queries(options("ranking", by="project"), CCUSAGE_DEFINITION.provider), ()
+        CCUSAGE_DEFINITION.provider.compile(intent(options("ranking", by="project"))), ()
     )
     demo = DEMO_DEFINITION.provider.assemble(
-        plan_queries(
-            replace(options("timeline"), host=replace(options("timeline").host, demo_size="small")),
-            DEMO_DEFINITION.provider,
+        DEMO_DEFINITION.provider.compile(
+            intent(
+                replace(
+                    options("timeline"),
+                    host=replace(options("timeline").host, demo_size="small"),
+                ),
+                DEMO_DEFINITION,
+            )
         ),
         (),
     )

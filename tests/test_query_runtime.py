@@ -1,22 +1,21 @@
 from __future__ import annotations
 
 from concurrent.futures import Future
-from dataclasses import replace
 from datetime import date
 from typing import cast
 
 import pytest
 
+from ccusage_viz.acquisition import historical_query_intent
 from ccusage_viz.core.time import DateRange
 from ccusage_viz.options import (
-    MonitorConfig,
     ProcessConfig,
     StandaloneHostConfig,
     StandaloneLaunch,
     TimelineConfig,
 )
 from ccusage_viz.query.coordinator import QueryCoordinator, QueryHandle
-from ccusage_viz.query.models import PhysicalPlan, ProviderResult
+from ccusage_viz.query.models import PhysicalPlan, ProviderResult, QueryTrigger
 from ccusage_viz.query.provider import Provider
 from ccusage_viz.query.registry import ProviderRegistry
 from ccusage_viz.query.runtime import QueryRuntime
@@ -35,22 +34,22 @@ def test_runtime_requires_a_frozen_provider_registry() -> None:
         QueryRuntime(ProviderRegistry(), QueryCoordinator())
 
 
-def test_runtime_selects_demo_provider_for_demo_acquisition() -> None:
+def test_runtime_selects_provider_from_query_intent() -> None:
     from ccusage_viz.bootstrap import build_query_runtime
 
-    result = build_query_runtime().acquire(historical())
+    runtime = build_query_runtime()
+    selected = historical_query_intent(
+        historical(),
+        runtime.definition("demo"),
+        owner_id="standalone",
+        generation=0,
+        trigger=QueryTrigger.STARTUP,
+    )
+    result = runtime.acquire(selected)
 
     assert result.records
     assert result.provenance[0].provider.provider_id == "demo"
     assert result.includes_project_attribution
-
-
-def test_runtime_rejects_monitor_configuration() -> None:
-    runtime = QueryRuntime.__new__(QueryRuntime)
-    monitor = replace(historical(), chart=MonitorConfig("monitor", 3600))
-
-    with pytest.raises(TypeError, match="does not support monitor"):
-        runtime.acquire(monitor)
 
 
 def test_runtime_delegates_execution_and_cancellation() -> None:
@@ -76,8 +75,15 @@ def test_runtime_delegates_execution_and_cancellation() -> None:
 
     coordinator = Coordinator()
     runtime = QueryRuntime(build_provider_registry(), cast(QueryCoordinator, coordinator))
-    handle = runtime.submit(historical())
-    assert handle.result() == runtime.acquire(historical())
+    selected = historical_query_intent(
+        historical(),
+        runtime.definition("demo"),
+        owner_id="standalone",
+        generation=0,
+        trigger=QueryTrigger.STARTUP,
+    )
+    handle = runtime.submit(selected)
+    assert handle.result() == runtime.acquire(selected)
     runtime.cancel()
 
     assert coordinator.plan is not None

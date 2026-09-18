@@ -195,7 +195,7 @@ def test_dashboard_adjustment_status_only_advertises_navigation_when_available()
 def test_dashboard_panes_have_no_details_state() -> None:
     parser = build_parser(load_translator("en"))
     options = _to_options(parser.parse_args(["dashboard", "--demo"]))
-    pane = TuiPane(parse_dashboard_pane("timeline", host=options))
+    pane = TuiPane(parse_dashboard_pane("timeline", host=options), owner_id="pane:test")
 
     assert not hasattr(pane, "show_details")
 
@@ -205,10 +205,12 @@ def test_dashboard_panes_only_own_monitor_query_runners() -> None:
     options = _to_options(parser.parse_args(["dashboard", "--demo"]))
 
     historical = _new_pane(
-        standalone_from_pane(options, parse_dashboard_pane("timeline", host=options))
+        standalone_from_pane(options, parse_dashboard_pane("timeline", host=options)),
+        "pane:historical",
     )
     monitor = _new_pane(
-        standalone_from_pane(options, parse_dashboard_pane("monitor", host=options))
+        standalone_from_pane(options, parse_dashboard_pane("monitor", host=options)),
+        "pane:monitor",
     )
 
     assert historical.monitor_runner is None

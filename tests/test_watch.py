@@ -26,7 +26,7 @@ from ccusage_viz.options import (
     StandaloneLaunch,
     TimelineConfig,
 )
-from ccusage_viz.query.models import DataResolution, ProviderResult
+from ccusage_viz.query.models import DataResolution, ProviderResult, QueryIntent
 from ccusage_viz.query.runtime import QueryRuntime
 from ccusage_viz.terminal import InteractiveScreen, Terminal
 from ccusage_viz.watch import (
@@ -78,10 +78,15 @@ def options(*, command: str = "ranking", demo: str | None = "small") -> Standalo
 class Runtime:
     def __init__(self, result: ProviderResult) -> None:
         self.result = result
-        self.options: list[StandaloneLaunch] = []
+        self.options: list[QueryIntent] = []
         self.cancelled = False
 
-    def acquire(self, selected: StandaloneLaunch) -> ProviderResult:
+    def definition(self, provider_id: str):
+        from ccusage_viz.bootstrap import build_provider_registry
+
+        return build_provider_registry().get(provider_id)
+
+    def acquire(self, selected: QueryIntent) -> ProviderResult:
         self.options.append(selected)
         return self.result
 
@@ -602,7 +607,9 @@ def test_demo_snapshot_uses_requested_size_through_query_runtime(size: str) -> N
     assert snapshot.records == ()
     assert snapshot.coverage == coverage
     assert snapshot.includes_project_attribution
-    assert runtime.options == [selected]
+    assert len(runtime.options) == 1
+    assert runtime.options[0].provider.provider_id == "demo"
+    assert dict(runtime.options[0].execution_options)["demo_size"] == size
 
 
 def test_successful_empty_daily_query_still_records_requested_coverage() -> None:

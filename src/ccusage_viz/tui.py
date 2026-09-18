@@ -8,6 +8,7 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from shutil import get_terminal_size
 
+from ccusage_viz.acquisition import historical_provider_id, historical_query_intent
 from ccusage_viz.bootstrap import build_query_runtime
 from ccusage_viz.command_copy import (
     copy_command,
@@ -51,7 +52,7 @@ from ccusage_viz.options import (
 )
 from ccusage_viz.query.client import QueryRunner
 from ccusage_viz.query.coordinator import QueryHandle
-from ccusage_viz.query.models import ProviderResult
+from ccusage_viz.query.models import ProviderResult, QueryTrigger
 from ccusage_viz.query.runtime import QueryRuntime
 from ccusage_viz.render.base import RenderContext, styled_text
 from ccusage_viz.render.palette import COLOR_SCHEMES, get_color_scheme
@@ -90,7 +91,7 @@ class TuiPane:
     generation: int = 0
     submitted_generation: int | None = None
     submitted_options: StandaloneLaunch | None = None
-    refresh_pending: bool = False
+    pending_trigger: QueryTrigger | None = None
     requested_options: StandaloneLaunch | None = None
     rebaseline_pending: bool = False
     previous_values: dict[Hashable, float] = field(default_factory=dict)
@@ -98,6 +99,7 @@ class TuiPane:
     values_initialized: bool = False
     previous_ranks: dict[Hashable, int] = field(default_factory=dict)
     rank_deltas: dict[Hashable, int] = field(default_factory=dict)
+    owner_id: str = "dashboard:pane"
 
     @property
     def interval(self) -> float:
@@ -116,7 +118,7 @@ class DashboardHeader:
     generation: int = 0
     submitted_generation: int | None = None
     submitted_options: StandaloneLaunch | None = None
-    refresh_pending: bool = False
+    pending_trigger: QueryTrigger | None = None
     records: tuple[UsageRecord, ...] = ()
     coverage: DateCoverage = field(default_factory=DateCoverage)
     accepted_at: datetime | None = None
@@ -527,7 +529,7 @@ def compose_panels(
     return "\n".join(output)
 
 
-def _new_pane(options: StandaloneLaunch) -> TuiPane:
+def _new_pane(options: StandaloneLaunch, owner_id: str) -> TuiPane:
     observer = None
     monitor_runner = None
     if isinstance(options.chart, MonitorConfig):
@@ -540,7 +542,7 @@ def _new_pane(options: StandaloneLaunch) -> TuiPane:
         monitor_runner = QueryRunner(
             options.process.ccusage_bin, timeout=options.process.query_timeout
         )
-    return TuiPane(options, monitor_runner, observer=observer)
+    return TuiPane(options, monitor_runner, observer=observer, owner_id=owner_id)
 
 
 def _load_pane(
@@ -803,7 +805,11 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
     from ccusage_viz.configuration import standalone_from_pane
 
     runtime = build_query_runtime()
-    panes = [_new_pane(standalone_from_pane(options, pane)) for pane in options.panes]
+    panes = [
+        _new_pane(standalone_from_pane(options, pane), f"dashboard:pane:{index}")
+        for index, pane in enumerate(options.panes)
+    ]
+    next_pane_id = len(panes)
     header = _new_header(options, runtime)
     executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix="ccusage-viz-tui")
     focused: int | None = None
@@ -825,12 +831,24 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
     footer_notice_rows = 0
     screen = InteractiveScreen(sys.stdout)
 
-    def refresh(index: int, *, queue_if_running: bool = False) -> None:
+    def allocate_pane_owner_id() -> str:
+        nonlocal next_pane_id
+        owner_id = f"dashboard:pane:{next_pane_id}"
+        next_pane_id += 1
+        return owner_id
+
+    def refresh(
+        index: int,
+        *,
+        trigger: QueryTrigger,
+        queue_if_running: bool = False,
+    ) -> None:
         pane = panes[index]
         if pane.future is not None and not pane.future.done():
-            pane.refresh_pending = pane.refresh_pending or queue_if_running
-            if queue_if_running and pane.query_handle is not None:
-                pane.query_handle.cancel()
+            if queue_if_running:
+                pane.pending_trigger = trigger
+                if pane.query_handle is not None:
+                    pane.query_handle.cancel()
             return
         pane.error = None
         pane.submitted_generation = pane.generation
@@ -853,18 +871,31 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 _load_pane, submitted, runtime, pane.monitor_runner, pane.demo_ordinal
             )
         else:
+            intent = historical_query_intent(
+                submitted,
+                runtime.definition(historical_provider_id(submitted)),
+                owner_id=pane.owner_id,
+                generation=pane.generation,
+                trigger=trigger,
+            )
             started = time.monotonic()
-            pane.query_handle = runtime.submit(submitted)
+            pane.query_handle = runtime.submit(intent)
             pane.future = executor.submit(_await_historical, pane.query_handle, started)
 
-    def refresh_header(*, queue_if_running: bool = False, aggressive: bool = False) -> None:
+    def refresh_header(
+        *,
+        trigger: QueryTrigger,
+        queue_if_running: bool = False,
+        aggressive: bool = False,
+    ) -> None:
         requested = _header_refresh_interval(header, aggressive=aggressive)
         if requested is None:
             return
         if header.future is not None and not header.future.done():
-            header.refresh_pending = header.refresh_pending or queue_if_running
-            if queue_if_running and header.query_handle is not None:
-                header.query_handle.cancel()
+            if queue_if_running:
+                header.pending_trigger = trigger
+                if header.query_handle is not None:
+                    header.query_handle.cancel()
             return
         header.error = None
         header.submitted_generation = header.generation
@@ -877,8 +908,15 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         )
         header.submitted_options = submitted
         header.refreshed_at = time.monotonic()
+        intent = historical_query_intent(
+            submitted,
+            header.runtime.definition(historical_provider_id(submitted)),
+            owner_id="dashboard:header",
+            generation=header.generation,
+            trigger=trigger,
+        )
         started = time.monotonic()
-        header.query_handle = header.runtime.submit(submitted)
+        header.query_handle = header.runtime.submit(intent)
         header.future = executor.submit(_await_historical, header.query_handle, started)
 
     def collect() -> bool:
@@ -905,9 +943,10 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 if submitted_generation == header.generation:
                     header.error = str(exc)
                     changed = True
-            if header.refresh_pending:
-                header.refresh_pending = False
-                refresh_header()
+            if header.pending_trigger is not None:
+                trigger = header.pending_trigger
+                header.pending_trigger = None
+                refresh_header(trigger=trigger)
         for index, pane in enumerate(panes):
             future = pane.future
             if future is None or not future.done():
@@ -920,9 +959,10 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             pane.submitted_options = None
             observed_at = time.monotonic()
             if submitted_generation != pane.generation:
-                if pane.refresh_pending:
-                    pane.refresh_pending = False
-                    refresh(index)
+                if pane.pending_trigger is not None:
+                    trigger = pane.pending_trigger
+                    pane.pending_trigger = None
+                    refresh(index, trigger=trigger)
                 continue
             pane.refreshed_at = observed_at
             try:
@@ -968,9 +1008,10 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     pane.requested_options = None
                     pane.error = str(exc)
                     changed = True
-            if pane.refresh_pending:
-                pane.refresh_pending = False
-                refresh(index)
+            if pane.pending_trigger is not None:
+                trigger = pane.pending_trigger
+                pane.pending_trigger = None
+                refresh(index, trigger=trigger)
         return changed
 
     def full_dashboard_command() -> str:
@@ -1145,9 +1186,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
     try:
         with tui_input_mode() as decoder:
             for index in range(len(panes)):
-                refresh(index)
+                refresh(index, trigger=QueryTrigger.STARTUP)
             if header_style != "hidden":
-                refresh_header()
+                refresh_header(trigger=QueryTrigger.STARTUP)
             paint()
             while True:
                 size = get_terminal_size()
@@ -1161,14 +1202,14 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     and header.future is None
                     and now - header.refreshed_at >= options.host.header_interval
                 ):
-                    refresh_header()
+                    refresh_header(trigger=QueryTrigger.TICK)
                 for index, pane in enumerate(panes):
                     if (
                         not scheduling_paused
                         and pane.future is None
                         and now - pane.refreshed_at >= pane.interval
                     ):
-                        refresh(index)
+                        refresh(index, trigger=QueryTrigger.TICK)
                 if changed:
                     paint()
                 event = read_event(decoder, 0.1)
@@ -1308,7 +1349,11 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                     pane.generation += 1
                                     if pane.observer is not None:
                                         pane.rebaseline_pending = True
-                                    refresh(focused, queue_if_running=True)
+                                    refresh(
+                                        focused,
+                                        trigger=QueryTrigger.REFRESH,
+                                        queue_if_running=True,
+                                    )
                                 else:
                                     pane.options = updated
                                     if pane.observer is not None and key in {"w", "W", "i", "I"}:
@@ -1358,7 +1403,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                 header.summary_period,
                             )
                             if any(not header.coverage.covers(item) for item in required.intervals):
-                                refresh_header(queue_if_running=True)
+                                refresh_header(
+                                    trigger=QueryTrigger.REFRESH, queue_if_running=True
+                                )
                     elif adjustment_page == "quick" and key == "u":
                         next_summary = _next_header_summary(header.summary_period)
                         header.summary_period = next_summary
@@ -1368,7 +1415,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                 today_for_timezone(header.options.host.timezone), next_summary
                             )
                             if any(not header.coverage.covers(item) for item in required.intervals):
-                                refresh_header(queue_if_running=True)
+                                refresh_header(
+                                    trigger=QueryTrigger.REFRESH, queue_if_running=True
+                                )
                     elif adjustment_page == "quick" and key == "z":
                         grid_draft = ""
                         grid_error = None
@@ -1397,6 +1446,8 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         and len(panes) > 1
                     ):
                         removed = panes.pop(focused)
+                        if removed.query_handle is not None:
+                            removed.query_handle.cancel()
                         if removed.monitor_runner is not None:
                             removed.monitor_runner.cancel()
                         focused = min(focused, len(panes) - 1)
@@ -1410,9 +1461,14 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                 screen, translator, height=get_terminal_size().lines
                             )
                             if choice:
-                                panes.append(_new_pane(_new_pane_options(choice, options)))
+                                panes.append(
+                                    _new_pane(
+                                        _new_pane_options(choice, options),
+                                        allocate_pane_owner_id(),
+                                    )
+                                )
                                 focused = len(panes) - 1
-                                refresh(focused)
+                                refresh(focused, trigger=QueryTrigger.STARTUP)
                     else:
                         continue
                     paint()
@@ -1423,8 +1479,16 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     continue
                 if key == "r":
                     for index in range(len(panes)):
-                        refresh(index, queue_if_running=True)
-                    refresh_header(queue_if_running=True, aggressive=True)
+                        refresh(
+                            index,
+                            trigger=QueryTrigger.REFRESH,
+                            queue_if_running=True,
+                        )
+                    refresh_header(
+                        trigger=QueryTrigger.REFRESH,
+                        queue_if_running=True,
+                        aggressive=True,
+                    )
                 elif key in {"v", "V"}:
                     body_view = next_dashboard_body_view(body_view)
                     copied_status = None
