@@ -16,9 +16,16 @@ from ccusage_viz.data_view import BodyView, next_body_view, render_monitor_data
 from ccusage_viz.diagnostics import format_error
 from ccusage_viz.errors import UsageError
 from ccusage_viz.i18n import Translator
+from ccusage_viz.lifecycle import (
+    FixedIntervalScheduler,
+    LifecycleCoordinator,
+    LifecycleTrigger,
+    OperationToken,
+    QueryTrigger,
+    query_trigger,
+)
 from ccusage_viz.monitor_component import MonitorComponent, MonitorSubmission
 from ccusage_viz.options import MonitorConfig, StandaloneLaunch, adjust_standalone
-from ccusage_viz.query.models import QueryTrigger
 from ccusage_viz.render.base import RenderContext
 from ccusage_viz.terminal import FramePainter, Terminal, compose_frame, inspect_terminal
 from ccusage_viz.terminal_ui import controls_line, input_mode, read_key
@@ -40,17 +47,15 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
         runtime=runtime,
     )
     screen = FramePainter()
-    active: MonitorSubmission | None = None
-    active_trigger: QueryTrigger | None = None
-    active_discarded = False
-    pending_trigger: QueryTrigger | None = None
-    paused = False
+    started_at = time.monotonic()
+    scheduler = FixedIntervalScheduler(options.host.interval, now=started_at)
+    lifecycle = LifecycleCoordinator("standalone:monitor")
+    active: tuple[OperationToken, MonitorSubmission] | None = None
     controls_hidden = False
     body_view: BodyView = "chart"
     demo_ordinal = 0
     status = translator.text("status.loading")
     last_size: tuple[int, int] | None = None
-    next_sample = time.monotonic()
 
     def monitor_chart(config: StandaloneLaunch) -> MonitorConfig:
         if not isinstance(config.chart, MonitorConfig):
@@ -153,9 +158,7 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                     terminal=terminal,
                     view=body_view,
                 )
-            screen.paint(
-                compose_frame(body, status, controls, height=terminal.height), force=force
-            )
+            screen.paint(compose_frame(body, status, controls, height=terminal.height), force=force)
         except UsageError as exc:
             screen.paint(
                 compose_frame(
@@ -269,51 +272,70 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                 return data_affecting
             elif key in {"a", "A"}:
                 adjustment_page = "advanced" if adjustment_page == "quick" else "quick"
-            elif adjustment_page == "quick" and key in {
-                "s",
-                "S",
-                "t",
-                "T",
-                "b",
-                "B",
-                "w",
-                "W",
-                "i",
-                "I",
-                "+",
-                "=",
-                "-",
-                "_",
-            } or adjustment_page == "advanced" and key in {"l", "L"}:
+            elif (
+                adjustment_page == "quick"
+                and key
+                in {
+                    "s",
+                    "S",
+                    "t",
+                    "T",
+                    "b",
+                    "B",
+                    "w",
+                    "W",
+                    "i",
+                    "I",
+                    "+",
+                    "=",
+                    "-",
+                    "_",
+                }
+                or adjustment_page == "advanced"
+                and key in {"l", "L"}
+            ):
                 candidate = adjust_standalone(candidate, key)
             else:
                 continue
             paint_picker()
 
-    def submit(trigger: QueryTrigger) -> bool:
-        nonlocal active, active_discarded, active_trigger, status
-        if active is not None:
+    def start_ready(now: float) -> bool:
+        nonlocal active, status
+        operation = lifecycle.take_ready(now=now)
+        if operation is None:
             return False
         try:
-            active = component.submit(trigger, sample_ordinal=demo_ordinal + 1)
+            submission = component.submit(
+                query_trigger(operation.trigger),
+                sample_ordinal=demo_ordinal + 1,
+            )
         except BaseException as exc:
+            lifecycle.abandon(operation)
             component.fail(exc, generation=component.generation)
             status = translator.text(
                 "status.monitor_source",
                 source=str(exc),
                 interval=f"{component.candidate.host.interval:g}",
-                state=f" · {translator.text('status.paused')}" if paused else "",
+                state=(f" · {translator.text('status.paused')}" if lifecycle.paused else ""),
             ).rstrip(" ·")
             return False
-        active_trigger = trigger
-        active_discarded = False
+        active = (operation, submission)
+        lifecycle.attach(operation, submission.cancel)
         return True
 
-    def advance_deadline(now: float) -> None:
-        nonlocal next_sample
-        interval = component.candidate.host.interval
-        while next_sample <= now:
-            next_sample += interval
+    def request(
+        trigger: LifecycleTrigger,
+        *,
+        now: float,
+        replace_active: bool = False,
+    ) -> bool:
+        requested = lifecycle.request(
+            trigger,
+            generation=component.generation,
+            now=now,
+            replace_active=replace_active,
+        )
+        return requested and start_ready(now)
 
     try:
         if options.host.demo_size:
@@ -331,7 +353,9 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                     detect_gap=False,
                 )
                 demo_ordinal = ordinal
-            next_sample = demo_now + component.candidate.host.interval
+            scheduler.rebuild(component.candidate.host.interval, now=demo_now)
+        else:
+            request(LifecycleTrigger.STARTUP, now=started_at)
 
         with input_mode():
             paint()
@@ -340,10 +364,9 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                 if (size.columns, size.lines) != last_size:
                     paint(force=True)
                 now = time.monotonic()
-                if not paused and active is None and now >= next_sample:
-                    submitted = submit(QueryTrigger.TICK)
-                    advance_deadline(now)
-                    if submitted:
+                if scheduler.due(now=now):
+                    started = request(LifecycleTrigger.PERIODIC, now=now)
+                    if started:
                         status = translator.text(
                             "status.monitor_sampling",
                             seconds=(
@@ -353,24 +376,27 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                             ),
                             interval=f"{component.candidate.host.interval:g}",
                         )
+                    if started or component.error is not None:
                         paint()
-                    else:
-                        paint()
-                if active is not None and active.handle.done():
-                    submission = active
-                    trigger = active_trigger
-                    discarded = active_discarded
+                if active is not None and active[1].handle.done():
+                    operation, submission = active
                     active = None
-                    active_trigger = None
-                    active_discarded = False
+                    current = lifecycle.accepts(
+                        operation,
+                        generation=submission.generation,
+                    )
                     try:
                         completion = submission.result()
-                        accepted = not discarded and component.accept(
+                        accepted = current and component.accept(
                             completion,
                             now=time.monotonic(),
                             wall=datetime.now().astimezone(),
                         )
                         if accepted:
+                            lifecycle.complete(
+                                operation,
+                                generation=submission.generation,
+                            )
                             demo_ordinal += 1
                             source = (
                                 "DEMO DATA"
@@ -382,38 +408,39 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                                 source=source,
                                 interval=f"{component.candidate.host.interval:g}",
                                 state=(
-                                    f" · {translator.text('status.paused')}" if paused else ""
+                                    f" · {translator.text('status.paused')}"
+                                    if lifecycle.paused
+                                    else ""
                                 ),
                             ).rstrip(" ·")
+                        elif current:
+                            lifecycle.abandon(operation)
                     except BaseException as exc:
-                        if not discarded:
+                        if current:
+                            lifecycle.abandon(operation)
                             component.fail(exc, generation=submission.generation)
                             status = translator.text(
                                 "status.monitor_source",
                                 source=str(exc),
                                 interval=f"{component.candidate.host.interval:g}",
                                 state=(
-                                    f" · {translator.text('status.paused')}" if paused else ""
+                                    f" · {translator.text('status.paused')}"
+                                    if lifecycle.paused
+                                    else ""
                                 ),
                             ).rstrip(" ·")
                     paint()
-                    if pending_trigger is not None:
-                        trigger = pending_trigger
-                        pending_trigger = None
-                        submit(trigger)
-                    elif trigger is QueryTrigger.REFRESH and next_sample <= time.monotonic():
-                        advance_deadline(time.monotonic())
+                    start_ready(time.monotonic())
                 key = read_key(0.05)
                 if key == "\x03":
                     raise KeyboardInterrupt
                 if key == "r":
-                    if active is None:
-                        if not submit(QueryTrigger.REFRESH):
-                            paint()
-                    else:
-                        pending_trigger = QueryTrigger.REFRESH
-                        active_discarded = True
-                        active.cancel()
+                    if not request(
+                        LifecycleTrigger.MANUAL,
+                        now=time.monotonic(),
+                        replace_active=True,
+                    ):
+                        paint()
                 elif key in {"h", "H"}:
                     controls_hidden = not controls_hidden
                     paint(force=True)
@@ -447,43 +474,44 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                     )
                     paint()
                 elif key in {"m", "M"} and body_view == "chart":
+                    previous_interval = component.candidate.host.interval
                     data_affecting = pick_appearance()
                     if data_affecting:
-                        if active is not None:
-                            active_discarded = True
-                            active.cancel()
-                            pending_trigger = QueryTrigger.REFRESH
-                        elif not submit(QueryTrigger.REFRESH):
-                            paint()
-                        next_sample = time.monotonic() + component.candidate.host.interval
+                        now = time.monotonic()
+                        if component.candidate.host.interval != previous_interval:
+                            scheduler.rebuild(component.candidate.host.interval, now=now)
+                        request(LifecycleTrigger.CONFIGURATION, now=now)
                     paint()
                 elif key == " ":
-                    paused = not paused
-                    if paused:
+                    resumed = False
+                    if not lifecycle.paused:
+                        scheduler.pause()
+                        lifecycle.pause()
                         component.pause()
-                        pending_trigger = None
-                        if active is not None:
-                            active_discarded = True
-                            active.cancel()
                     else:
                         now = time.monotonic()
+                        lifecycle.resume()
+                        scheduler.resume(now=now)
                         component.resume(now=now, wall=datetime.now().astimezone())
-                        next_sample = now + component.candidate.host.interval
-                    status = translator.text(
-                        "status.monitor_paused",
-                        source=(
-                            f"ccusage {component.last_elapsed:.2f}s"
-                            if component.last_elapsed is not None
-                            else "ccusage …"
-                        ),
-                        interval=f"{component.candidate.host.interval:g}",
-                        state=f" · {translator.text('status.paused')}" if paused else "",
-                    )
+                        resumed = request(LifecycleTrigger.RESUME, now=now)
+                    if lifecycle.paused or resumed:
+                        status = translator.text(
+                            "status.monitor_paused",
+                            source=(
+                                f"ccusage {component.last_elapsed:.2f}s"
+                                if component.last_elapsed is not None
+                                else "ccusage …"
+                            ),
+                            interval=f"{component.candidate.host.interval:g}",
+                            state=(
+                                f" · {translator.text('status.paused')}" if lifecycle.paused else ""
+                            ),
+                        )
                     paint()
     except KeyboardInterrupt:
         return 0
     finally:
-        if active is not None:
-            active.cancel()
+        scheduler.shutdown()
+        lifecycle.shutdown()
         runtime.cancel()
         screen.finish()

@@ -7,6 +7,7 @@ import pytest
 import ccusage_viz.monitor as monitor_host
 from ccusage_viz.domain import ProjectRef, SourceKind, TokenUsage, UsageRecord
 from ccusage_viz.i18n import load_translator
+from ccusage_viz.lifecycle import QueryTrigger
 from ccusage_viz.options import (
     ChartPresentation,
     MonitorConfig,
@@ -465,10 +466,9 @@ def test_standalone_pause_discards_active_sample_and_preserves_paused_status(
     )
 
     assert monitor_host.run_monitor(launch, load_translator("en")) == 0
+    assert ("submit", QueryTrigger.STARTUP, 1) in events
     assert ("pause",) in events
     assert ("submission-cancel",) in events
     assert not any(event[0] == "fail" for event in events)
-    assert any(
-        event[0] == "paint" and "paused" in str(event[1]) for event in events
-    )
+    assert any(event[0] == "paint" and "paused" in str(event[1]) for event in events)
     assert events[-2:] == [("runtime-cancel",), ("finish",)]
