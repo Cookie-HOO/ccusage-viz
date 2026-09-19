@@ -17,8 +17,7 @@ def _forbidden_imports(root: Path, forbidden_imports: set[str]) -> list[str]:
                 tuple(alias.name for alias in node.names)
                 if isinstance(node, ast.Import)
                 else tuple(
-                    ".".join(filter(None, (node.module, alias.name)))
-                    for alias in node.names
+                    ".".join(filter(None, (node.module, alias.name))) for alias in node.names
                 )
                 if isinstance(node, ast.ImportFrom)
                 else ()
@@ -49,77 +48,90 @@ def test_chart_registry_contains_only_the_four_presentation_charts() -> None:
 
 
 def test_query_package_does_not_import_host_or_presentation_layers() -> None:
-    assert _forbidden_imports(
-        PACKAGE_ROOT / "query",
-        {
-            "ccusage_viz.cli",
-            "ccusage_viz.options",
-            "ccusage_viz.render",
-            "ccusage_viz.tui",
-            "ccusage_viz.watch",
-        },
-    ) == []
+    assert (
+        _forbidden_imports(
+            PACKAGE_ROOT / "query",
+            {
+                "ccusage_viz.cli",
+                "ccusage_viz.options",
+                "ccusage_viz.render",
+                "ccusage_viz.tui",
+                "ccusage_viz.watch",
+            },
+        )
+        == []
+    )
 
 
 def test_chart_catalog_does_not_import_hosts_or_data_adapters() -> None:
-    assert _forbidden_imports(
-        PACKAGE_ROOT / "charts",
-        {
-            "ccusage_viz.acquisition",
-            "ccusage_viz.application",
-            "ccusage_viz.cli",
-            "ccusage_viz.dependency",
-            "ccusage_viz.monitor",
-            "ccusage_viz.providers",
-            "ccusage_viz.query",
-            "ccusage_viz.terminal",
-            "ccusage_viz.tui",
-            "ccusage_viz.watch",
-        },
-    ) == []
+    assert (
+        _forbidden_imports(
+            PACKAGE_ROOT / "charts",
+            {
+                "ccusage_viz.acquisition",
+                "ccusage_viz.application",
+                "ccusage_viz.cli",
+                "ccusage_viz.dependency",
+                "ccusage_viz.monitor",
+                "ccusage_viz.providers",
+                "ccusage_viz.query",
+                "ccusage_viz.terminal",
+                "ccusage_viz.tui",
+                "ccusage_viz.watch",
+            },
+        )
+        == []
+    )
 
 
 def test_providers_do_not_import_monitor_or_presentation_layers() -> None:
-    assert _forbidden_imports(
-        PACKAGE_ROOT / "providers",
-        {
-            "ccusage_viz.chart_models",
-            "ccusage_viz.monitor",
-            "ccusage_viz.monitor_component",
-            "ccusage_viz.processing.monitor",
-            "ccusage_viz.render",
-        },
-    ) == []
+    assert (
+        _forbidden_imports(
+            PACKAGE_ROOT / "providers",
+            {
+                "ccusage_viz.chart_models",
+                "ccusage_viz.monitor",
+                "ccusage_viz.monitor_component",
+                "ccusage_viz.processing.monitor",
+                "ccusage_viz.render",
+            },
+        )
+        == []
+    )
 
 
 def test_renderers_do_not_import_monitor_runtime_or_data_adapters() -> None:
-    assert _forbidden_imports(
-        PACKAGE_ROOT / "render",
-        {
-            "ccusage_viz.monitor",
-            "ccusage_viz.monitor_component",
-            "ccusage_viz.processing.monitor",
-            "ccusage_viz.providers",
-            "ccusage_viz.query",
-        },
-    ) == []
+    assert (
+        _forbidden_imports(
+            PACKAGE_ROOT / "render",
+            {
+                "ccusage_viz.monitor",
+                "ccusage_viz.monitor_component",
+                "ccusage_viz.processing.monitor",
+                "ccusage_viz.providers",
+                "ccusage_viz.query",
+            },
+        )
+        == []
+    )
 
 
 def test_monitor_hosts_do_not_import_the_removed_query_client() -> None:
     for name in ("monitor.py", "tui.py"):
-        assert _forbidden_imports(
-            PACKAGE_ROOT / name,
-            {"ccusage_viz.query.client"},
-        ) == []
+        assert (
+            _forbidden_imports(
+                PACKAGE_ROOT / name,
+                {"ccusage_viz.query.client"},
+            )
+            == []
+        )
     assert not (PACKAGE_ROOT / "query" / "client.py").exists()
 
 
 def test_dashboard_panes_do_not_mirror_component_business_state() -> None:
     tree = ast.parse((PACKAGE_ROOT / "tui.py").read_text())
     pane = next(
-        node
-        for node in tree.body
-        if isinstance(node, ast.ClassDef) and node.name == "TuiPane"
+        node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "TuiPane"
     )
     fields = {
         target.id
@@ -147,6 +159,80 @@ def test_dashboard_panes_do_not_mirror_component_business_state() -> None:
     )
 
 
+def test_async_hosts_own_operations_through_the_shared_lifecycle() -> None:
+    for name, owners in {
+        "watch.py": ("standalone",),
+        "monitor.py": ("standalone:monitor",),
+        "tui.py": ("dashboard:header",),
+    }.items():
+        source = (PACKAGE_ROOT / name).read_text()
+        assert "LifecycleCoordinator(" not in source
+        assert "LifecycleOperation(" in source
+        assert "take_completed(" in source
+        assert all(owner in source for owner in owners)
+
+    tui = ast.parse((PACKAGE_ROOT / "tui.py").read_text())
+    host_fields = {
+        class_name: {
+            target.id
+            for node in tui.body
+            if isinstance(node, ast.ClassDef) and node.name == class_name
+            for statement in node.body
+            if isinstance(statement, ast.AnnAssign)
+            and isinstance((target := statement.target), ast.Name)
+        }
+        for class_name in ("TuiPane", "DashboardHeader")
+    }
+    forbidden = {
+        "future",
+        "operation",
+        "submission",
+        "token",
+        "submitted_generation",
+        "submitted_options",
+        "requested_options",
+    }
+    assert host_fields["TuiPane"].isdisjoint(forbidden)
+    assert host_fields["DashboardHeader"].isdisjoint(forbidden)
+
+
+def test_monitor_demo_bootstrap_is_the_only_submit_outside_operation_starters() -> None:
+    allowed_starters = {"start", "start_pane_submission"}
+    direct_submissions: list[tuple[str, str, int]] = []
+
+    class SubmitVisitor(ast.NodeVisitor):
+        def __init__(self, name: str) -> None:
+            self.name = name
+            self.functions: list[str] = []
+
+        def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+            self.functions.append(node.name)
+            self.generic_visit(node)
+            self.functions.pop()
+
+        def visit_Call(self, node: ast.Call) -> None:
+            if (
+                isinstance(node.func, ast.Attribute)
+                and node.func.attr == "submit"
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "component"
+                and self.functions[-1] not in allowed_starters
+            ):
+                direct_submissions.append((self.name, self.functions[-1], node.lineno))
+            self.generic_visit(node)
+
+    for name in ("monitor.py", "tui.py", "watch.py"):
+        SubmitVisitor(name).visit(ast.parse((PACKAGE_ROOT / name).read_text()))
+
+    assert [(name, function) for name, function, _line in direct_submissions] == [
+        ("monitor.py", "run_monitor")
+    ]
+    monitor_source = (PACKAGE_ROOT / "monitor.py").read_text()
+    assert "if options.host.demo_size:" in monitor_source
+    assert "component.submit(QueryTrigger.STARTUP, sample_ordinal=ordinal)" in monitor_source
+    assert "detect_gap=False" in monitor_source
+
+
 def test_hosts_compose_complete_frames_and_only_painter_writes_rows() -> None:
     terminal = (PACKAGE_ROOT / "terminal.py").read_text()
     assert "class Frame:" in terminal
@@ -165,21 +251,23 @@ def test_reusable_historical_views_do_not_import_watch_host() -> None:
     assert [
         violation
         for violation in violations
-        if violation.split(":", 1)[0]
-        in {"data_view.py", "historical_render.py", "tui.py"}
+        if violation.split(":", 1)[0] in {"data_view.py", "historical_render.py", "tui.py"}
     ] == []
 
 
 def test_processing_package_does_not_import_runtime_or_adapter_layers() -> None:
-    assert _forbidden_imports(
-        PACKAGE_ROOT / "processing",
-        {
-            "ccusage_viz.monitor",
-            "ccusage_viz.providers",
-            "ccusage_viz.query",
-            "ccusage_viz.render",
-            "ccusage_viz.terminal",
-            "ccusage_viz.tui",
-            "ccusage_viz.watch",
-        },
-    ) == []
+    assert (
+        _forbidden_imports(
+            PACKAGE_ROOT / "processing",
+            {
+                "ccusage_viz.monitor",
+                "ccusage_viz.providers",
+                "ccusage_viz.query",
+                "ccusage_viz.render",
+                "ccusage_viz.terminal",
+                "ccusage_viz.tui",
+                "ccusage_viz.watch",
+            },
+        )
+        == []
+    )
