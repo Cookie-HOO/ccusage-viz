@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import sys
 import time
-from collections.abc import Hashable, Mapping
+from collections.abc import Callable, Hashable, Mapping
 from dataclasses import dataclass, replace
 from shutil import get_terminal_size
 
@@ -29,7 +29,7 @@ from ccusage_viz.historical_render import render_historical_component
 from ccusage_viz.i18n import Translator
 from ccusage_viz.lifecycle import (
     FixedIntervalScheduler,
-    LifecycleCoordinator,
+    LifecycleOperation,
     LifecycleTrigger,
     OperationToken,
     query_trigger,
@@ -358,8 +358,7 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
     )
     started_at = time.monotonic()
     scheduler = FixedIntervalScheduler(interval, now=started_at)
-    lifecycle = LifecycleCoordinator("standalone")
-    active: tuple[OperationToken, HistoricalSubmission] | None = None
+    lifecycle: LifecycleOperation[HistoricalSubmission] = LifecycleOperation("standalone")
     controls_hidden = False
     body_view: BodyView = "chart"
     last_chart = ""
@@ -394,7 +393,7 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
             translator,
             interval=interval,
             paused=lifecycle.paused,
-            running=active is not None,
+            running=lifecycle.submission is not None,
             color=style_enabled(),
         )
 
@@ -509,15 +508,15 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
             force=force,
         )
 
+    def start(operation: OperationToken) -> tuple[HistoricalSubmission, Callable[[], None]]:
+        submission = component.submit(query_trigger(operation.trigger))
+        return submission, submission.cancel
+
     def start_ready(now: float) -> bool:
-        nonlocal active, base_status, terminal_error
-        operation = lifecycle.take_ready(now=now)
-        if operation is None:
-            return False
+        nonlocal base_status, terminal_error
         try:
-            submission = component.submit(query_trigger(operation.trigger))
+            return lifecycle.start_ready(now=now, start=start)
         except BaseException as exc:
-            lifecycle.abandon(operation)
             component.fail(exc, generation=component.generation)
             base_status = format_error(
                 exc,
@@ -528,9 +527,6 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
             if isinstance(exc, UsageError):
                 terminal_error = exc
             return False
-        active = (operation, submission)
-        lifecycle.attach(operation, submission.cancel)
-        return True
 
     def request(
         trigger: LifecycleTrigger,
@@ -538,6 +534,7 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
         now: float,
         replace_active: bool = False,
     ) -> bool:
+        nonlocal base_status, terminal_error
         candidate = component.candidate
         chart = historical_chart(candidate)
         refreshed = replace(
@@ -545,21 +542,34 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
             chart=replace(chart, date_range=refresh_date_range(chart.date_range)),
         )
         component.configure(refreshed, data_affecting=True)
-        requested = lifecycle.request(
-            trigger,
-            generation=component.generation,
-            now=now,
-            replace_active=replace_active,
-        )
-        return requested and start_ready(now)
+        try:
+            return lifecycle.request(
+                trigger,
+                generation=component.generation,
+                now=now,
+                replace_active=replace_active,
+                start=start,
+            )
+        except BaseException as exc:
+            component.fail(exc, generation=component.generation)
+            base_status = format_error(
+                exc,
+                translator,
+                color=style_enabled(),
+                color_scheme=current.chart.presentation.theme,
+            )
+            if isinstance(exc, UsageError):
+                terminal_error = exc
+            return False
 
     try:
         request(LifecycleTrigger.STARTUP, now=started_at)
         if not options.host.watch:
-            if active is None:
+            operation = lifecycle.operation
+            submission = lifecycle.submission
+            if operation is None or submission is None:
                 paint()
                 return 1
-            operation, submission = active
             try:
                 completion = submission.result()
                 if not lifecycle.accepts(operation, generation=submission.generation):
@@ -603,7 +613,7 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
                 )
                 return 0
             finally:
-                active = None
+                lifecycle.abandon(operation)
 
         with input_mode():
             paint()
@@ -619,9 +629,9 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
                 ):
                     paint()
 
-                if active is not None and active[1].handle.done():
-                    operation, submission = active
-                    active = None
+                completed = lifecycle.take_completed(lambda submission: submission.handle.done())
+                if completed is not None:
+                    operation, submission = completed
                     current_operation = lifecycle.accepts(
                         operation,
                         generation=submission.generation,
@@ -752,8 +762,6 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
                     if not lifecycle.paused:
                         scheduler.pause()
                         lifecycle.pause()
-                        if active is not None and lifecycle.active is None:
-                            active = None
                     else:
                         now = time.monotonic()
                         lifecycle.resume()

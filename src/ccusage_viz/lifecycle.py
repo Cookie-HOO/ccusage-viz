@@ -4,6 +4,7 @@ import math
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import Generic, TypeVar
 
 
 class QueryTrigger(StrEnum):
@@ -95,6 +96,126 @@ class FixedIntervalScheduler:
     def _validate_interval(interval: float) -> None:
         if not math.isfinite(interval) or interval <= 0:
             raise ValueError("scheduler interval must be positive and finite")
+
+
+_Submission = TypeVar("_Submission")
+
+
+class LifecycleOperation(Generic[_Submission]):
+    """Bind lifecycle admission to one host-owned asynchronous submission."""
+
+    __slots__ = ("coordinator", "operation", "submission")
+
+    def __init__(self, owner_id: str) -> None:
+        self.coordinator = LifecycleCoordinator(owner_id)
+        self.operation: OperationToken | None = None
+        self.submission: _Submission | None = None
+
+    @property
+    def active(self) -> OperationToken | None:
+        return self.coordinator.active
+
+    @property
+    def paused(self) -> bool:
+        return self.coordinator.paused
+
+    def request(
+        self,
+        trigger: LifecycleTrigger,
+        *,
+        generation: int,
+        now: float,
+        start: Callable[[OperationToken], tuple[_Submission, Callable[[], None]]],
+        debounce: float = 0.0,
+        replace_active: bool = False,
+    ) -> bool:
+        previous = self.coordinator.active
+        try:
+            requested = self.coordinator.request(
+                trigger,
+                generation=generation,
+                now=now,
+                debounce=debounce,
+                replace_active=replace_active,
+            )
+        finally:
+            if previous is not None and self.coordinator.active is None:
+                self.operation = None
+                self.submission = None
+        return requested and self.start_ready(now=now, start=start)
+
+    def start_ready(
+        self,
+        *,
+        now: float,
+        start: Callable[[OperationToken], tuple[_Submission, Callable[[], None]]],
+    ) -> bool:
+        operation = self.coordinator.take_ready(now=now)
+        if operation is None:
+            return False
+        try:
+            submission, cancel = start(operation)
+        except BaseException:
+            self.coordinator.abandon(operation)
+            raise
+        self.operation = operation
+        self.submission = submission
+        self.coordinator.attach(operation, cancel)
+        return True
+
+    def take_completed(
+        self,
+        done: Callable[[_Submission], bool],
+    ) -> tuple[OperationToken, _Submission] | None:
+        operation = self.operation
+        submission = self.submission
+        if operation is None or submission is None or not done(submission):
+            return None
+        return operation, submission
+
+    def accepts(self, operation: OperationToken, *, generation: int) -> bool:
+        return self.coordinator.accepts(operation, generation=generation)
+
+    def complete(self, operation: OperationToken, *, generation: int) -> bool:
+        completed = self.coordinator.complete(operation, generation=generation)
+        if completed and operation == self.operation:
+            self.operation = None
+            self.submission = None
+        return completed
+
+    def abandon(self, operation: OperationToken) -> None:
+        self.coordinator.abandon(operation)
+        if operation == self.operation and operation != self.coordinator.active:
+            self.operation = None
+            self.submission = None
+
+    def pause(self) -> None:
+        previous = self.coordinator.active
+        try:
+            self.coordinator.pause()
+        finally:
+            if previous is not None and self.coordinator.active is None:
+                self.operation = None
+                self.submission = None
+
+    def resume(self) -> None:
+        self.coordinator.resume()
+
+    def detach_active(self) -> OperationToken | None:
+        operation = self.coordinator.active
+        try:
+            return self.coordinator.detach_active()
+        finally:
+            if operation is not None and self.coordinator.active is None:
+                self.operation = None
+                self.submission = None
+
+    def shutdown(self) -> None:
+        try:
+            self.coordinator.shutdown()
+        finally:
+            self.operation = None
+            self.submission = None
 
 
 class LifecycleCoordinator:
@@ -237,11 +358,7 @@ def query_trigger(trigger: LifecycleTrigger) -> QueryTrigger:
             return QueryTrigger.STARTUP
         case LifecycleTrigger.PERIODIC:
             return QueryTrigger.TICK
-        case (
-            LifecycleTrigger.MANUAL
-            | LifecycleTrigger.CONFIGURATION
-            | LifecycleTrigger.RESUME
-        ):
+        case LifecycleTrigger.MANUAL | LifecycleTrigger.CONFIGURATION | LifecycleTrigger.RESUME:
             return QueryTrigger.REFRESH
         case _:
             raise ValueError(f"unknown lifecycle trigger: {trigger!r}")

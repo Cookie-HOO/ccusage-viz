@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import pytest
 
 from ccusage_viz.lifecycle import (
     FixedIntervalScheduler,
     LifecycleCoordinator,
+    LifecycleOperation,
     LifecycleTrigger,
     OperationToken,
     query_trigger,
@@ -50,6 +53,167 @@ def test_scheduler_rebuild_starts_a_new_sequence_at_modification_time() -> None:
 def test_scheduler_rejects_invalid_intervals(interval: float) -> None:
     with pytest.raises(ValueError):
         FixedIntervalScheduler(interval, now=0)
+
+
+def test_operation_starts_current_intent_and_collects_completed_submission() -> None:
+    lifecycle: LifecycleOperation[str] = LifecycleOperation("pane-1")
+    cancelled: list[str] = []
+
+    assert lifecycle.request(
+        LifecycleTrigger.STARTUP,
+        generation=0,
+        now=0,
+        start=lambda operation: (
+            f"submission-{operation.operation_id}",
+            lambda: cancelled.append("cancelled"),
+        ),
+    )
+    assert lifecycle.active == OperationToken("pane-1", 0, 1, LifecycleTrigger.STARTUP)
+    completed = lifecycle.take_completed(lambda submission: submission.endswith("-1"))
+    assert completed == (
+        OperationToken("pane-1", 0, 1, LifecycleTrigger.STARTUP),
+        "submission-1",
+    )
+    assert lifecycle.submission == "submission-1"
+    operation, _submission = completed
+    assert lifecycle.complete(operation, generation=0)
+    assert lifecycle.operation is lifecycle.submission is None
+
+
+def test_operation_starts_debounced_intent_when_polled_at_its_deadline() -> None:
+    lifecycle: LifecycleOperation[str] = LifecycleOperation("pane-1")
+
+    assert not lifecycle.request(
+        LifecycleTrigger.CONFIGURATION,
+        generation=1,
+        now=1,
+        debounce=0.5,
+        start=lambda _operation: ("configured", lambda: None),
+    )
+    assert not lifecycle.start_ready(
+        now=1.49,
+        start=lambda _operation: ("configured", lambda: None),
+    )
+    assert lifecycle.start_ready(
+        now=1.5,
+        start=lambda _operation: ("configured", lambda: None),
+    )
+    assert lifecycle.submission == "configured"
+
+
+def test_operation_start_failure_consumes_intent_and_clears_active_state() -> None:
+    lifecycle: LifecycleOperation[str] = LifecycleOperation("pane-1")
+
+    def fail(_operation: OperationToken) -> tuple[str, Callable[[], None]]:
+        raise RuntimeError("could not start")
+
+    with pytest.raises(RuntimeError, match="could not start"):
+        lifecycle.request(
+            LifecycleTrigger.STARTUP,
+            generation=0,
+            now=0,
+            start=fail,
+        )
+
+    assert lifecycle.active is None
+    assert lifecycle.coordinator.pending is None
+    assert lifecycle.operation is lifecycle.submission is None
+
+
+def test_operation_replacement_detaches_and_clears_previous_submission() -> None:
+    lifecycle: LifecycleOperation[str] = LifecycleOperation("pane-1")
+    cancelled: list[str] = []
+    lifecycle.request(
+        LifecycleTrigger.PERIODIC,
+        generation=0,
+        now=0,
+        start=lambda _operation: ("periodic", lambda: cancelled.append("periodic")),
+    )
+
+    assert lifecycle.request(
+        LifecycleTrigger.MANUAL,
+        generation=0,
+        now=1,
+        replace_active=True,
+        start=lambda _operation: ("manual", lambda: cancelled.append("manual")),
+    )
+
+    assert cancelled == ["periodic"]
+    assert lifecycle.submission == "manual"
+    assert lifecycle.active is not None
+    assert lifecycle.active.trigger is LifecycleTrigger.MANUAL
+
+
+def test_operation_pause_clears_automatic_but_keeps_manual_submission() -> None:
+    lifecycle: LifecycleOperation[str] = LifecycleOperation("pane-1")
+    cancelled: list[str] = []
+    lifecycle.request(
+        LifecycleTrigger.PERIODIC,
+        generation=0,
+        now=0,
+        start=lambda _operation: ("periodic", lambda: cancelled.append("periodic")),
+    )
+
+    lifecycle.pause()
+
+    assert cancelled == ["periodic"]
+    assert lifecycle.operation is lifecycle.submission is None
+    lifecycle.resume()
+    lifecycle.request(
+        LifecycleTrigger.MANUAL,
+        generation=0,
+        now=1,
+        start=lambda _operation: ("manual", lambda: cancelled.append("manual")),
+    )
+    lifecycle.pause()
+    assert lifecycle.submission == "manual"
+    assert cancelled == ["periodic"]
+
+
+def test_operation_finalization_releases_pending_work_for_restart() -> None:
+    lifecycle: LifecycleOperation[str] = LifecycleOperation("pane-1")
+    lifecycle.request(
+        LifecycleTrigger.STARTUP,
+        generation=0,
+        now=0,
+        start=lambda _operation: ("startup", lambda: None),
+    )
+    lifecycle.request(
+        LifecycleTrigger.MANUAL,
+        generation=0,
+        now=1,
+        start=lambda _operation: ("manual", lambda: None),
+    )
+    completed = lifecycle.take_completed(lambda _submission: True)
+    assert completed is not None
+    operation, _submission = completed
+
+    assert lifecycle.complete(operation, generation=0)
+    assert lifecycle.start_ready(
+        now=1,
+        start=lambda _operation: ("manual", lambda: None),
+    )
+    assert lifecycle.submission == "manual"
+
+
+def test_operation_shutdown_cleans_up_even_when_cancellation_raises() -> None:
+    lifecycle: LifecycleOperation[str] = LifecycleOperation("pane-1")
+
+    def fail_cancel() -> None:
+        raise RuntimeError("could not cancel")
+
+    lifecycle.request(
+        LifecycleTrigger.STARTUP,
+        generation=0,
+        now=0,
+        start=lambda _operation: ("startup", fail_cancel),
+    )
+
+    with pytest.raises(RuntimeError, match="could not cancel"):
+        lifecycle.shutdown()
+
+    assert lifecycle.active is None
+    assert lifecycle.operation is lifecycle.submission is None
 
 
 def test_coordinator_allows_one_active_and_one_pending_operation() -> None:
