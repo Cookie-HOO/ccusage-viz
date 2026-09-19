@@ -10,6 +10,7 @@ from ccusage_viz.i18n import load_translator
 from ccusage_viz.lifecycle import QueryTrigger
 from ccusage_viz.options import (
     ChartPresentation,
+    Filters,
     MonitorConfig,
     ProcessConfig,
     StandaloneHostConfig,
@@ -472,4 +473,111 @@ def test_standalone_pause_discards_active_sample_and_preserves_paused_status(
     assert ("submission-cancel",) in events
     assert not any(event[0] == "fail" for event in events)
     assert any(event[0] == "paint" and "paused" in str(event[1]) for event in events)
+    assert events[-2:] == [("runtime-cancel",), ("finish",)]
+
+
+@pytest.mark.parametrize(
+    ("edited", "expected_configures", "expected_submits"),
+    (
+        (
+            Filters(agents=("Claude Code",)),
+            [("configure", True, 1)],
+            [
+                ("submit", QueryTrigger.STARTUP, 1, 0),
+                ("submit", QueryTrigger.REFRESH, 2, 1),
+            ],
+        ),
+        (None, [], [("submit", QueryTrigger.STARTUP, 1, 0)]),
+    ),
+)
+def test_monitor_filter_editor_commits_once_or_discards_without_refresh(
+    monkeypatch: pytest.MonkeyPatch,
+    edited: Filters | None,
+    expected_configures: list[tuple[object, ...]],
+    expected_submits: list[tuple[object, ...]],
+) -> None:
+    launch = monitor_options()
+    events: list[tuple[object, ...]] = []
+
+    class Runtime:
+        def cancel(self) -> None:
+            events.append(("runtime-cancel",))
+
+    class Handle:
+        def done(self) -> bool:
+            return True
+
+    class Submission:
+        def __init__(self, generation: int, ordinal: int) -> None:
+            self.generation = generation
+            self.options = launch
+            self.ordinal = ordinal
+            self.handle = Handle()
+
+        def cancel(self) -> None:
+            events.append(("submission-cancel", self.generation))
+
+        def result(self) -> object:
+            return object()
+
+    class Component:
+        def __init__(self, selected: StandaloneLaunch, **_kwargs: object) -> None:
+            self.candidate = selected
+            self.accepted_options = None
+            self.accepted_records = ()
+            self.error = None
+            self.accepted_at = None
+            self.last_elapsed = None
+            self.deltas = {}
+            self.rank_deltas = {}
+            self.generation = 0
+
+        def configure(self, selected: StandaloneLaunch, *, data_affecting: bool) -> None:
+            if selected == self.candidate:
+                return
+            self.candidate = selected
+            if data_affecting:
+                self.generation += 1
+            events.append(("configure", data_affecting, self.generation))
+
+        def submit(self, trigger: QueryTrigger, *, sample_ordinal: int) -> Submission:
+            events.append(("submit", trigger, sample_ordinal, self.generation))
+            return Submission(self.generation, sample_ordinal)
+
+        def accept(self, _completion: object, **_kwargs: object) -> bool:
+            self.accepted_options = self.candidate
+            self.accepted_records = ()
+            return True
+
+        def render(self, *_args: object, **_kwargs: object) -> str:
+            return "monitor chart"
+
+        def fail(self, *_args: object, **_kwargs: object) -> bool:
+            return True
+
+    class Screen:
+        def paint(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def finish(self) -> None:
+            events.append(("finish",))
+
+    keys = iter(("f", "\x03"))
+    monkeypatch.setattr(monitor_host, "build_query_runtime", Runtime)
+    monkeypatch.setattr(monitor_host, "build_chart_registry", lambda: object())
+    monkeypatch.setattr(monitor_host, "MonitorComponent", Component)
+    monkeypatch.setattr(monitor_host, "FramePainter", Screen)
+    monkeypatch.setattr(monitor_host, "input_mode", nullcontext)
+    monkeypatch.setattr(monitor_host, "read_key", lambda _timeout: next(keys))
+    monkeypatch.setattr(monitor_host, "run_filter_editor", lambda *_args, **_kwargs: edited)
+    monkeypatch.setattr(monitor_host, "get_terminal_size", lambda: terminal_size((100, 30)))
+    monkeypatch.setattr(
+        monitor_host,
+        "inspect_terminal",
+        lambda *_args, **_kwargs: Terminal(100, 30, False, True),
+    )
+
+    assert monitor_host.run_monitor(launch, load_translator("en")) == 0
+    assert [event for event in events if event[0] == "configure"] == expected_configures
+    assert [event for event in events if event[0] == "submit"] == expected_submits
     assert events[-2:] == [("runtime-cancel",), ("finish",)]

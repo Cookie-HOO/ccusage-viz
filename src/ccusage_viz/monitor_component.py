@@ -66,6 +66,7 @@ class MonitorComponent:
     __slots__ = (
         "accepted_at",
         "accepted_options",
+        "accepted_records",
         "candidate",
         "error",
         "generation",
@@ -95,6 +96,7 @@ class MonitorComponent:
         self.runtime = runtime
         self.candidate = options
         self.accepted_options: StandaloneLaunch | None = None
+        self.accepted_records: tuple[UsageRecord, ...] = ()
         self.observer = ObservedTPM(
             window_seconds=chart.window_seconds,
             by=chart.by,
@@ -191,6 +193,7 @@ class MonitorComponent:
             self.rank_changes.accept(monitor_rank_keys(values))
             self.observer.update_y_axis(max(values.values(), default=0.0))
         self.accepted_options = self.candidate
+        self.accepted_records = completion.records
         self.accepted_at = wall
         self.refreshed_at = now
         self.last_elapsed = completion.elapsed
@@ -207,6 +210,7 @@ class MonitorComponent:
     def preview(self, options: StandaloneLaunch) -> MonitorComponent:
         preview = MonitorComponent(options, registry=self.registry)
         preview.accepted_options = options
+        preview.accepted_records = self.accepted_records
         preview.observer = _copy_observer(self.observer)
         preview._configure_observer(self._monitor_config(options))
         return preview

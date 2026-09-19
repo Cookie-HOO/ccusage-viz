@@ -23,6 +23,7 @@ from ccusage_viz.deltas import RefreshDeltas, RefreshRanks
 from ccusage_viz.diagnostics import format_error
 from ccusage_viz.domain import UsageRecord
 from ccusage_viz.errors import UsageError
+from ccusage_viz.filter_draft import discover_filter_choices, run_filter_editor
 from ccusage_viz.formatting import (
     center_text,
     clip_width,
@@ -63,6 +64,7 @@ from ccusage_viz.options import (
     StandaloneLaunch,
     TimelineConfig,
     adjust_standalone,
+    replace_chart_filters,
 )
 from ccusage_viz.processing import build_period_summary, required_summary_coverage
 from ccusage_viz.query.coordinator import QueryHandle
@@ -740,10 +742,10 @@ _QUICK_KEYS = {
     "monitor": frozenset("dwWbB+-=tTsS"),
 }
 _ADVANCED_KEYS = {
-    "timeline": frozenset("olkuOLKU"),
-    "calendar": frozenset("uU"),
-    "stack": frozenset("clkuCLKU"),
-    "ranking": frozenset("ouOU"),
+    "timeline": frozenset("olkOLK"),
+    "calendar": frozenset(),
+    "stack": frozenset("clkCLK"),
+    "ranking": frozenset("oO"),
     "monitor": frozenset("lL"),
 }
 
@@ -953,6 +955,20 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             )
         except BaseException:
             return False
+
+    def pane_records(pane: TuiPane) -> tuple[UsageRecord, ...]:
+        component = pane.component
+        if isinstance(component, MonitorComponent):
+            return component.accepted_records
+        return component.snapshot.records if component.snapshot is not None else ()
+
+    def pane_includes_projects(pane: TuiPane) -> bool:
+        component = pane.component
+        return (
+            not isinstance(component, HistoricalChartComponent)
+            or component.snapshot is None
+            or component.snapshot.includes_project_attribution
+        )
 
     def refresh(
         index: int,
@@ -1441,6 +1457,59 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         pane = panes[focused]
                         if key in {"a", "A"}:
                             adjustment_page = "advanced" if adjustment_page == "quick" else "quick"
+                        elif key in {"f", "F"}:
+                            component = pane.component
+                            base = component.candidate
+                            size = get_terminal_size()
+                            editor_width = size.columns
+                            editor_height = size.lines
+
+                            def paint_filter_editor(
+                                body: str,
+                                editor_controls: str,
+                                *,
+                                height: int = editor_height,
+                            ) -> None:
+                                screen.paint(
+                                    compose_frame(
+                                        body,
+                                        translator.text("status.tui_adjust_history"),
+                                        editor_controls,
+                                        height=height,
+                                    )
+                                )
+
+                            def read_filter_key() -> str | None:
+                                editor_event = read_event(decoder, 0.1)
+                                return (
+                                    editor_event.value
+                                    if isinstance(editor_event, KeyEvent)
+                                    else None
+                                )
+
+                            edited = run_filter_editor(
+                                base.chart.filters,
+                                discover_filter_choices(
+                                    pane_records(pane),
+                                    base.chart.filters,
+                                    include_projects=pane_includes_projects(pane),
+                                ),
+                                translator,
+                                width=editor_width,
+                                paint=paint_filter_editor,
+                                read_key=read_filter_key,
+                            )
+                            if edited is not None and edited != base.chart.filters:
+                                _clear_changes(pane)
+                                component.configure(
+                                    replace_chart_filters(base, edited),
+                                    data_affecting=True,
+                                )
+                                refresh(
+                                    focused,
+                                    trigger=LifecycleTrigger.CONFIGURATION,
+                                    data_affecting=False,
+                                )
                         elif key == "[" and focused > 0:
                             panes[focused - 1], panes[focused] = panes[focused], panes[focused - 1]
                             focused -= 1

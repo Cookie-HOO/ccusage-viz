@@ -1,4 +1,5 @@
 import shlex
+from dataclasses import replace
 from datetime import date
 
 import pytest
@@ -19,6 +20,7 @@ from ccusage_viz.options import (
     StandaloneLaunch,
     TimelineConfig,
     adjust_standalone,
+    replace_chart_filters,
     resolve_date_range,
 )
 
@@ -121,6 +123,18 @@ def test_runtime_adjustments_replace_owned_nested_configs() -> None:
     assert adjust_standalone(source, "+").chart.top == 11
     assert adjust_standalone(source, "k").chart.weekdays == "hide"
     assert adjust_standalone(timeline(rolling=False), "p") == timeline(rolling=False)
+
+
+def test_replace_chart_filters_preserves_every_other_setting() -> None:
+    source = timeline(by="model", top=10)
+    filters = Filters(agents=("Claude Code",), models=("sonnet",))
+
+    updated = replace_chart_filters(source, filters)
+
+    assert updated.chart.filters == filters
+    assert replace(updated.chart, filters=source.chart.filters) == source.chart
+    assert updated.host == source.host
+    assert updated.process == source.process
 
 
 def test_monitor_copy_keeps_startup_selection() -> None:

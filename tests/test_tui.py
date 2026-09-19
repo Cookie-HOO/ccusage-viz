@@ -19,6 +19,7 @@ from ccusage_viz.historical_component import HistoricalChartComponent, UsageSnap
 from ccusage_viz.i18n import load_translator
 from ccusage_viz.lifecycle import FixedIntervalScheduler, LifecycleOperation
 from ccusage_viz.monitor_component import MonitorComponent
+from ccusage_viz.options import Filters
 from ccusage_viz.query.models import QueryTrigger
 from ccusage_viz.terminal import Terminal
 from ccusage_viz.tui import (
@@ -498,6 +499,132 @@ def test_dashboard_primary_completion_queues_pane_supplement(
         ),
     ]
     assert not any(event[0] == "fail" for event in events)
+
+
+@pytest.mark.parametrize(
+    ("edited", "expected_configures", "expected_submits"),
+    (
+        (
+            Filters(agents=("Claude Code",)),
+            [("configure", True, 1)],
+            [
+                ("submit", QueryTrigger.STARTUP, 0),
+                ("submit", QueryTrigger.REFRESH, 1),
+            ],
+        ),
+        (None, [], [("submit", QueryTrigger.STARTUP, 0)]),
+    ),
+)
+def test_dashboard_pane_filter_editor_commits_once_or_discards_without_refresh(
+    monkeypatch: pytest.MonkeyPatch,
+    edited: Filters | None,
+    expected_configures: list[tuple[object, ...]],
+    expected_submits: list[tuple[object, ...]],
+) -> None:
+    parser = build_parser(load_translator("en"))
+    options = _to_options(
+        parser.parse_args(
+            [
+                "dashboard",
+                "--demo",
+                "--header-style",
+                "hidden",
+                "--header-summary",
+                "none",
+                "--pane",
+                "timeline",
+            ]
+        )
+    )
+    events: list[tuple[object, ...]] = []
+
+    class Runtime:
+        def cancel(self) -> None:
+            events.append(("runtime-cancel",))
+
+    class Submission:
+        def __init__(self, generation: int) -> None:
+            self.generation = generation
+            self.purpose = tui_module.HistoricalPurpose.PRIMARY
+
+        def cancel(self) -> None:
+            events.append(("submission-cancel", self.generation))
+
+        def result(self) -> object:
+            return object()
+
+    class Component:
+        def __init__(self, selected: object, **_kwargs: object) -> None:
+            self.candidate = selected
+            self.accepted_generation = None
+            self.accepted_options = None
+            self.accepted_at = None
+            self.snapshot = None
+            self.error = None
+            self.generation = 0
+
+        def configure(self, selected: object, *, data_affecting: bool) -> None:
+            if selected == self.candidate:
+                return
+            self.candidate = selected
+            if data_affecting:
+                self.generation += 1
+            events.append(("configure", data_affecting, self.generation))
+
+        def missing_comparison_coverage(self) -> DateCoverage:
+            return DateCoverage()
+
+        def submit(self, trigger: QueryTrigger, **_kwargs: object) -> Submission:
+            events.append(("submit", trigger, self.generation))
+            return Submission(self.generation)
+
+        def accept(self, _completion: object) -> bool:
+            chart = self.candidate.chart
+            self.snapshot = UsageSnapshot(
+                (),
+                (),
+                0.1,
+                coverage=DateCoverage.from_interval(
+                    chart.date_range.since,
+                    chart.date_range.until,
+                ),
+            )
+            self.accepted_options = self.candidate
+            self.accepted_generation = self.generation
+            self.accepted_at = tui_module.datetime.now().astimezone()
+            return True
+
+        def fail(self, *_args: object, **_kwargs: object) -> bool:
+            return True
+
+    class Screen:
+        def __init__(self, _stream: object) -> None:
+            pass
+
+        def paint(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def finish(self) -> None:
+            events.append(("finish",))
+
+    keys = iter((KeyEvent("s"), KeyEvent("f"), KeyEvent("\x03")))
+    runtime = Runtime()
+    monkeypatch.setattr(tui_module, "build_query_runtime", lambda: runtime)
+    monkeypatch.setattr(tui_module, "build_chart_registry", lambda: object())
+    monkeypatch.setattr(tui_module, "HistoricalChartComponent", Component)
+    monkeypatch.setattr(tui_module, "FramePainter", Screen)
+    monkeypatch.setattr(tui_module, "tui_input_mode", nullcontext)
+    monkeypatch.setattr(tui_module, "read_event", lambda _decoder, _timeout: next(keys))
+    monkeypatch.setattr(tui_module, "run_filter_editor", lambda *_args, **_kwargs: edited)
+    monkeypatch.setattr(
+        tui_module, "get_terminal_size", lambda: __import__("os").terminal_size((100, 30))
+    )
+    monkeypatch.setattr(tui_module, "_pane_render", lambda *_args: tui_module.PaneRender("chart"))
+
+    assert tui_module.run_tui(options, load_translator("en")) == 0
+    assert [event for event in events if event[0] == "configure"] == expected_configures
+    assert [event for event in events if event[0] == "submit"] == expected_submits
+    assert events[-2:] == [("runtime-cancel",), ("finish",)]
 
 
 def test_dashboard_pane_render_retains_notices_for_each_source_pane() -> None:

@@ -16,6 +16,7 @@ from ccusage_viz.command_copy import (
 from ccusage_viz.data_view import BodyView, next_body_view, render_monitor_data
 from ccusage_viz.diagnostics import format_error
 from ccusage_viz.errors import UsageError
+from ccusage_viz.filter_draft import discover_filter_choices, run_filter_editor
 from ccusage_viz.i18n import Translator
 from ccusage_viz.lifecycle import (
     FixedIntervalScheduler,
@@ -26,10 +27,16 @@ from ccusage_viz.lifecycle import (
     query_trigger,
 )
 from ccusage_viz.monitor_component import MonitorComponent, MonitorSubmission
-from ccusage_viz.options import MonitorConfig, StandaloneLaunch, adjust_standalone
+from ccusage_viz.options import (
+    MonitorConfig,
+    StandaloneLaunch,
+    adjust_standalone,
+    replace_chart_filters,
+)
 from ccusage_viz.render.base import RenderAudit, RenderContext
 from ccusage_viz.terminal import FramePainter, Terminal, compose_frame, inspect_terminal
 from ccusage_viz.terminal_ui import controls_line, input_mode, read_key
+from ccusage_viz.tui_input import InputDecoder, KeyEvent, read_event
 
 
 def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
@@ -489,6 +496,65 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                         else "status.command_copy_failed"
                     )
                     paint()
+                elif (
+                    key in {"f", "F"}
+                    and body_view == "chart"
+                    and component.accepted_options is not None
+                ):
+                    config = component.candidate
+                    chart = monitor_chart(config)
+                    terminal = terminal_for(config)
+                    editor_width = terminal.width
+                    editor_height = terminal.height
+                    editor_color = terminal.color
+
+                    def paint_filter_editor(
+                        body: str,
+                        editor_controls: str,
+                        *,
+                        width: int = editor_width,
+                        height: int = editor_height,
+                        color: bool = editor_color,
+                    ) -> None:
+                        screen.paint(
+                            compose_frame(
+                                body,
+                                translator.text("status.tui_adjust_monitor"),
+                                controls_line(
+                                    editor_controls,
+                                    width=width,
+                                    color=color,
+                                ),
+                                height=height,
+                            )
+                        )
+
+                    decoder = InputDecoder()
+
+                    def read_filter_key(
+                        input_decoder: InputDecoder = decoder,
+                    ) -> str | None:
+                        event = read_event(input_decoder, 0.1)
+                        return event.value if isinstance(event, KeyEvent) else None
+
+                    edited = run_filter_editor(
+                        chart.filters,
+                        discover_filter_choices(component.accepted_records, chart.filters),
+                        translator,
+                        width=terminal.width,
+                        paint=paint_filter_editor,
+                        read_key=read_filter_key,
+                    )
+                    if edited is not None and edited != chart.filters:
+                        component.configure(
+                            replace_chart_filters(config, edited),
+                            data_affecting=True,
+                        )
+                        request(
+                            LifecycleTrigger.CONFIGURATION,
+                            now=time.monotonic(),
+                        )
+                    paint(force=True)
                 elif key in {"m", "M"} and body_view == "chart":
                     previous_interval = component.candidate.host.interval
                     data_affecting = pick_appearance()

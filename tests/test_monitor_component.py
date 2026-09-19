@@ -104,6 +104,7 @@ def test_monitor_component_accepts_cumulative_samples_and_projects_timeline() ->
     assert model.observed_series[0].values[-1] == 360
     assert model.y_axis_max == 500
     assert component.last_elapsed == 0.1
+    assert component.accepted_records == (record(160),)
     assert component.error is None
 
 
@@ -151,6 +152,7 @@ def test_monitor_component_rejects_stale_completion_and_failure() -> None:
     component.configure(options(window_seconds=600), data_affecting=True)
 
     assert not component.accept(stale, now=0, wall=wall)
+    assert component.accepted_records == ()
     assert component.observer.previous is None
     assert not component.fail(RuntimeError("stale"), generation=0)
     assert component.error is None

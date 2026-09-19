@@ -20,6 +20,7 @@ from ccusage_viz.data_view import BodyView, next_body_view, render_snapshot_data
 from ccusage_viz.deltas import RefreshDeltas, RefreshRanks
 from ccusage_viz.diagnostics import color_enabled, format_error
 from ccusage_viz.errors import QueryError, UsageError
+from ccusage_viz.filter_draft import discover_filter_choices, run_filter_editor
 from ccusage_viz.historical_component import (
     HistoricalChartComponent,
     HistoricalPurpose,
@@ -44,10 +45,12 @@ from ccusage_viz.options import (
     TimelineConfig,
     adjust_standalone,
     compatible_styles,
+    replace_chart_filters,
 )
 from ccusage_viz.render.palette import COLOR_SCHEMES
 from ccusage_viz.terminal import FramePainter, Terminal, compose_frame, inspect_terminal
 from ccusage_viz.terminal_ui import controls_line, dimmed, input_mode, notice_lines, read_key
+from ccusage_viz.tui_input import InputDecoder, KeyEvent, read_event
 
 
 @dataclass(frozen=True, slots=True)
@@ -800,6 +803,61 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
                         else "status.command_copy_failed"
                     )
                     paint()
+                elif key in {"f", "F"} and body_view == "chart" and last_snapshot is not None:
+                    editor_size = terminal_size()
+
+                    editor_width = editor_size.columns
+                    editor_height = editor_size.lines
+
+                    def paint_filter_editor(
+                        body: str,
+                        editor_controls: str,
+                        *,
+                        width: int = editor_width,
+                        height: int = editor_height,
+                    ) -> None:
+                        active_screen.paint(
+                            compose_frame(
+                                body,
+                                translator.text("status.tui_adjust_history"),
+                                controls_line(
+                                    editor_controls,
+                                    width=width,
+                                    color=style_enabled(),
+                                ),
+                                height=height,
+                            )
+                        )
+
+                    decoder = InputDecoder()
+
+                    def read_filter_key(
+                        input_decoder: InputDecoder = decoder,
+                    ) -> str | None:
+                        event = read_event(input_decoder, 0.1)
+                        return event.value if isinstance(event, KeyEvent) else None
+
+                    edited = run_filter_editor(
+                        historical_chart(current).filters,
+                        discover_filter_choices(
+                            last_snapshot.records,
+                            historical_chart(current).filters,
+                            include_projects=last_snapshot.includes_project_attribution,
+                        ),
+                        translator,
+                        width=editor_size.columns,
+                        paint=paint_filter_editor,
+                        read_key=read_filter_key,
+                    )
+                    if edited is not None and edited != historical_chart(current).filters:
+                        current = replace_chart_filters(current, edited)
+                        component.configure(current, data_affecting=True)
+                        request(
+                            LifecycleTrigger.CONFIGURATION,
+                            now=time.monotonic(),
+                            data_affecting=False,
+                        )
+                    paint(force=True)
                 elif key in {"m", "M"} and body_view == "chart" and last_snapshot is not None:
                     picked = run_runtime_adjustment(
                         current, translator, last_snapshot, active_screen

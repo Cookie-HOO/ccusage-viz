@@ -303,6 +303,10 @@ def adjust_chart(chart: ChartConfig, key: str, *, demo: bool = False) -> ChartCo
     return chart
 
 
+def replace_chart_filters(config: StandaloneLaunch, filters: Filters) -> StandaloneLaunch:
+    return replace(config, chart=replace(config.chart, filters=filters))
+
+
 def adjust_standalone(config: StandaloneLaunch, key: str) -> StandaloneLaunch:
     if key in {"i", "I"} and isinstance(config.chart, MonitorConfig):
         values = (1.0, 5.0, 15.0, 30.0, 60.0) if config.host.demo_size else (5.0, 15.0, 30.0, 60.0)
