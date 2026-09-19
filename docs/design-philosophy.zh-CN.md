@@ -29,8 +29,7 @@
    | Layout、Weights、焦点、Pane 顺序 | Dashboard 几何与导航 | 不构成 Pane 配置 |
    | 全局暂停、Controls | Dashboard 会话外壳 | Pane 不拥有局部暂停或 Controls 状态 |
    | Dashboard Theme、Style | 外壳、Header 与 Summary | 不改变 Pane Theme 或图表 Style |
-   | Dashboard Density | Header、Summary 与外壳信息量 | 不改变 Pane Density；Pane 默认 Compact |
-   | Summary Granularity | Dashboard Summary | 不改变 Pane Granularity |
+   | Header Style、Summary 周期 | Dashboard Header | 不改变 Pane Density、Scope 或 Granularity |
 
    | Dashboard 全局唯一设置 | 对 Pane 的影响 |
    | --- | --- |
@@ -62,11 +61,11 @@
 
 2. **By、Top 和 Other 不改变 Data Scope。**
 
-   By 将范围内的数据组织为可见系列；Top 裁剪这些系列；Other 决定是否合并被裁剪的系列。Summary 始终聚合完整 Scope。Other 不占 Top 名额且始终位于最后；隐藏 Other 时应说明可见数据占比。
+   By 将范围内的数据组织为可见系列；Top 裁剪这些系列；Other 决定是否合并被裁剪的系列。Summary 始终聚合完整 Scope。Other 不占 Top 名额且始终位于最后。Ranking 隐藏 Other 时在标题中显示 `Top N · 占总量 X%`；显示 Other 后恢复完整 Scope 覆盖并省略占比。
 
 3. **展示范围与比较 Coverage 相互独立。**
 
-   展示范围决定图表中的日期，比较 Coverage 只为 Summary 提供基线。只查询缺失区间；相邻缺口可以合并，远距离区间不应为了减少调用而扩张成一个连续范围。
+   展示范围决定图表中的日期，比较 Coverage 只为 Summary 提供基线。Component 拥有已接受的比较事实、Coverage 与补充状态。持续 Host 会把适用但未覆盖的比较渲染为 `??`，并且只查询缺失区间：相邻缺口可以合并，彼此分离的基线保持独立，不扩张成一个连续范围。成功但为空的已覆盖区间是数值零；补充请求失败时保留 `??` 并添加局部 Notice。
 
 4. **滚动与固定日期模式保持不同承诺。**
 
@@ -100,7 +99,7 @@
 
 1. **Density 控制狭义图表之外的信息量。**
 
-   Minimal 保留身份、图表和紧凑状态；Compact 增加当前 Scope 的 Token 值但不比较；Standard 提供完整分析 Summary；Full 再增加运行与审计详情。Standalone 与 Dashboard 默认 Standard，Pane 默认 Compact。
+   Density 只有三种取值。Minimal 保留身份、图表和紧凑运行状态；Compact 增加当前筛选 Scope 的 Token 值与有效 Filter 维度数，不显示比较或审计；Full 增加适用的周期比较和 Host 提供的运行审计。Standalone 默认 Full，新建或默认 Pane 使用 Compact。Dashboard 不存在全局图表 Density。
 
 2. **Theme、Style 与 Density 各自承担单一职责。**
 
@@ -108,11 +107,11 @@
 
 3. **Summary 跨产品形态共享指标与比较语法。**
 
-   Standalone、Pane 和 Dashboard Summary 在各自 Scope 内以一致方式计算和呈现 Token 数值及比较。Dashboard Summary 使用未筛选数据，不继承 Pane Scope；Dashboard Header 始终存在，身份、Summary 和运行状态是独立信息。固定日期范围不推断范围外的比较基线。
+   Standalone 与 Pane Summary 在 By、Top、Other 投影之前，根据图表自身筛选 Scope 一致计算和呈现 Token 数值及比较。独立的 Dashboard Header Summary 拥有未筛选数据与 Coverage，不继承 Pane Scope。身份、Summary 和运行状态保持为彼此独立的信息。固定日期范围不推断范围外的比较基线。
 
 4. **Controls 和 Notices 独立于 Density。**
 
-   Controls 是会话级交互外壳，可以隐藏以归还空间。影响正确理解的重要 Notice 不得仅因 Density 较低而消失。
+   Controls 是会话级交互外壳，可以隐藏以归还空间。影响正确理解的重要 Notice 不得仅因 Density 较低而消失。在 Dashboard 中，每条 Notice 都保留在其来源 Pane 内的有界区域；Notice 不做全局聚合或去重，一个 Pane 也不能占用另一个 Pane 的空间。
 
 5. **动态 TUI 是首要体验，同时为其他环境提供明确退路。**
 
@@ -254,6 +253,6 @@
 
    完整 CLI 拼写、参数矩阵、快捷键表、Preset 内容和操作示例属于用户指南；组件接口、状态机和测试标准属于正式设计规格。新增功能应能归入本文原则；必须破例时，应明确写出例外及边界。
 
-5. **文档按认知深度分层，但统一整理延后执行。**
+5. **文档按认知深度分层，并在同一次维护中保持一致。**
 
-   README 用自然语言和小型结构图建立第一印象；用户指南通过用户故事讲解使用方式，设计哲学解释原则与理由；配置、TUI、数据语义、语言与 Locale 行为和 Roadmap 提供权威细节，其中 Roadmap 只描述计划工作。术语在首次出现处直观解释，并在配置参考中集中定义。设计讨论与实现完成前保持现有文件结构，之后再统一迁移、去重和建立链接，避免在契约尚未稳定时反复拆分。
+   README 通过自然语言和小型产品地图建立第一印象；架构文档定义已经实现的所有权与运行边界，设计哲学解释稳定原则与理由。正式设计规格保留决策和测试标准，Roadmap 只描述计划工作。英文与简体中文文档必须表达相同契约；术语、默认值或所有权发生变化时，应同步协调这些层级，而不是延后处理。

@@ -1,8 +1,8 @@
 # ccuv 如何实现
 
-本文描述 `ccusage-viz` 已批准的目标架构。迁移仍在进行中，因此当前模块尚未完全符合下述边界。本文面向维护者与贡献者；普通使用方式请参考 README 和用户文档。
+本文描述 `ccusage-viz` 当前已经实现的架构，面向维护者与贡献者；普通使用方式请参考 README 和用户文档。
 
-> **状态：**正在实施的目标架构。迁移阶段见[运行时架构设计](superpowers/specs/2026-09-18-runtime-architecture-design.md)。
+> **状态：**当前架构。[运行时架构设计](superpowers/specs/2026-09-18-runtime-architecture-design.md) 记录设计决策与已经完成的迁移阶段。
 
 [English](architecture.md)
 
@@ -147,6 +147,16 @@ Semantic Chart Model
 Renderer 不查询数据，也不直接写 stdout。Status、Controls、Notices、设置、检查内容和图表正文会被组合为完整逻辑 Frame。Painter 比较完整 Frame，只写入变化的终端行；完整逻辑重绘不代表无条件清屏。
 
 Plotext 使用进程级全局状态，因此其渲染位于串行 adapter 之后。Query 是当前管线中唯一必须异步执行的阶段：Provider 工作通常耗时数秒，而当前 Processing 与 Rendering 都是毫秒级操作。因此，Processing 保持为同步且隔离的语义转换，Rendering 通过串行 adapter 同步执行。只有后续 profiling 证明渲染明显影响输入响应时，才在不改变 Component 与 Host 语义的前提下把现有渲染边界移入单个串行 worker。
+
+### 呈现与 Scope 契约
+
+图表呈现只包含三种 Density：`minimal`、`compact`、`full`。Standalone 默认 `full`，每个新建或默认 Dashboard Pane 显式使用 `compact`。Density 属于 Standalone 或 Pane 携带的图表配置；Dashboard 不存在全局图表 Density，修改 Dashboard Theme、Style、Header、Summary 或 Layout 也不会改写 Pane 拥有的 Density、Theme、Style、Filters 或分析设置。Density 变化只递增 render revision，不改变 data Generation 或 scheduler 基线。
+
+`minimal` 保留身份、图表和紧凑运行状态；`compact` 增加当前筛选 Scope 总量和有效 Filter 维度数；`full` 增加适用的周期比较和 Host 提供的运行审计。Controls 与影响正确理解的 Notice 不依赖 Density。Dashboard 在解析每个 Pane 自身几何后，为其格式化有界局部 Notice 区；Notice 不做全局聚合或去重，也不能占用其他 Pane 的行。
+
+时间、时区以及 Agent/Model/Project Filters 共同定义一个图表 Summary Scope。筛选先于 Summary 计算；By、Top、Other 是后续投影，不改变 Summary 总量或比较值。Ranking 在隐藏 Other 时把 `Top N · 占总量 X%` 元数据放入标题；显示 Other 时图表覆盖完整筛选 Scope，因此省略占比。Dashboard Header Summary 是拥有未筛选数据与 Coverage 的独立 owner，不是 Pane 状态投影。
+
+固定范围——包括启动时解析结束日期的单独 Since——会保留两个解析后的边界，且不推断范围外的比较 Coverage。对于滚动范围，Historical Component 拥有已接受事实、比较 Coverage、缺失区间、补充请求 pending/error 状态和同 generation 合并。持续 Host 先把适用但未覆盖的比较渲染为 `??`，再只调度缺失区间；相邻缺口可以合并，彼此分离的基线保持独立物理请求。成功但为空的已覆盖区间是数值零。补充请求失败时保留 `??` 并添加局部 Notice。Historical no-Watch 把所需比较 Coverage 纳入初始原子请求。
 
 ## 运行时状态
 

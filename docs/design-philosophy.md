@@ -29,8 +29,7 @@ This document records the stable product concepts and design constraints of `ccu
    | Layout, Weights, focus, Pane order | Dashboard geometry and navigation | Not part of Pane configuration |
    | Global pause, Controls | Dashboard session shell | A Pane owns no local pause or Controls state |
    | Dashboard Theme and Style | Shell, Header, and Summary | Does not change Pane Theme or chart Style |
-   | Dashboard Density | Header, Summary, and shell information volume | Does not change Pane Density; a Pane defaults to Compact |
-   | Summary Granularity | Dashboard Summary | Does not change Pane Granularity |
+   | Header Style and Summary period | Dashboard Header | Does not change Pane Density, Scope, or Granularity |
 
    | Uniform Dashboard setting | Effect on Panes |
    | --- | --- |
@@ -62,11 +61,11 @@ This document records the stable product concepts and design constraints of `ccu
 
 2. **By, Top, and Other do not change Data Scope.**
 
-   By reorganizes scoped data into visible series, Top truncates those series, and Other controls whether excluded series are combined. Summary always aggregates the complete Scope. Other never consumes a Top slot and is always last; hiding it should expose the visible share.
+   By reorganizes scoped data into visible series, Top truncates those series, and Other controls whether excluded series are combined. Summary always aggregates the complete Scope. Other never consumes a Top slot and is always last. When Ranking hides Other, its title exposes `Top N · X% of total`; showing Other restores full Scope coverage and omits the share.
 
 3. **Display range and comparison Coverage are independent.**
 
-   Display range determines chart dates. Comparison Coverage supplies Summary baselines only. Query missing intervals only: adjacent gaps may merge, while distant ranges should not be expanded into one continuous query merely to reduce calls.
+   Display range determines chart dates. Comparison Coverage supplies Summary baselines only. The Component owns accepted comparison facts, Coverage, and supplemental state. Continuous Hosts render applicable uncovered comparisons as `??` and query only missing intervals: adjacent gaps may merge, while disjoint baselines remain separate rather than expanding into one continuous query. A successful empty covered interval is numeric zero; supplemental failure retains `??` and adds a local Notice.
 
 4. **Rolling and fixed date modes make different promises.**
 
@@ -100,7 +99,7 @@ This document records the stable product concepts and design constraints of `ccu
 
 1. **Density controls information outside the narrow chart.**
 
-   Minimal retains identity, chart, and compact status. Compact adds the current Scope's token value without comparison. Standard provides the complete analytical Summary. Full adds runtime and audit details. Standalone and Dashboard default to Standard; a Pane defaults to Compact.
+   Density has exactly three values. Minimal retains identity, chart, and compact runtime state. Compact adds the current filtered-Scope token value and active Filter-dimension count without comparisons or audit. Full adds applicable period comparisons and Host-supplied runtime audit. Standalone defaults to Full; a new or default Pane uses Compact. Dashboard has no global chart Density.
 
 2. **Theme, Style, and Density each have one responsibility.**
 
@@ -108,11 +107,11 @@ This document records the stable product concepts and design constraints of `ccu
 
 3. **Summary uses one metric and comparison grammar across product forms.**
 
-   Standalone, Pane, and Dashboard Summary calculate and present Token values and comparisons consistently within their respective scopes. Dashboard Summary uses unfiltered data and does not inherit Pane Scope. Dashboard Header always exists; identity, Summary, and runtime status remain distinct information. A fixed date range has no inferred range-outside comparison baseline.
+   Standalone and Pane Summary calculate and present Token values and comparisons consistently from their chart's filtered Scope, before By, Top, and Other projection. The independent Dashboard Header Summary owns unfiltered data and Coverage and never inherits Pane Scope. Identity, Summary, and runtime status remain distinct information. A fixed date range has no inferred range-outside comparison baseline.
 
 4. **Controls and Notices are independent of Density.**
 
-   Controls are a session-level interaction shell and may be hidden to reclaim space. Notices required to interpret the output correctly must not disappear merely because Density is low.
+   Controls are a session-level interaction shell and may be hidden to reclaim space. Notices required to interpret the output correctly must not disappear merely because Density is low. In Dashboard, each Notice remains in a bounded band inside its source Pane; Notices are neither globally aggregated nor deduplicated, and one Pane cannot consume another Pane's space.
 
 5. **Dynamic TUI is the primary experience, with deliberate fallbacks for other environments.**
 
@@ -254,6 +253,6 @@ This document records the stable product concepts and design constraints of `ccu
 
    Complete CLI spelling, option matrices, key maps, Preset contents, and operating examples belong in user guides. Component interfaces, state machines, and test criteria belong in formal design specifications. A new feature should fit one of these principles; any necessary exception must state its boundary explicitly.
 
-5. **Documentation is layered by depth, while unified reorganization is deferred.**
+5. **Documentation is layered by depth and kept consistent in one maintenance pass.**
 
-   The README builds first-contact understanding through natural explanations and a small product map. User guides teach through user stories, while design philosophy explains principles and reasons. Configuration, TUI, data semantics, language and locale behavior, and the roadmap provide authoritative detail; the roadmap describes planned work only. Terms are explained intuitively at first use and defined authoritatively in the configuration reference. Existing files remain in place until design discussion and implementation are complete, after which one coordinated pass will migrate, deduplicate, and link the material.
+   The README builds first-contact understanding through natural explanations and a small product map. Architecture documents define implemented ownership and runtime boundaries, while design philosophy explains stable principles and reasons. Formal design specifications preserve decisions and test criteria; the roadmap describes planned work only. English and Simplified Chinese documents must describe the same contracts, and changes to terminology, defaults, or ownership are reconciled across these layers rather than deferred.

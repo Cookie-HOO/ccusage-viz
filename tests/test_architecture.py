@@ -1,9 +1,18 @@
 from __future__ import annotations
 
 import ast
+from dataclasses import fields, replace
 from pathlib import Path
 
 from ccusage_viz.bootstrap import build_chart_registry
+from ccusage_viz.configuration import default_pane, standalone_from_pane
+from ccusage_viz.options import (
+    DENSITIES,
+    ChartPresentation,
+    DashboardHostConfig,
+    DashboardLaunch,
+    ProcessConfig,
+)
 
 PACKAGE_ROOT = Path(__file__).parents[1] / "src" / "ccusage_viz"
 
@@ -45,6 +54,37 @@ def test_chart_registry_contains_only_the_four_presentation_charts() -> None:
         for path in (PACKAGE_ROOT / "charts").rglob("*.py")
         for node in ast.walk(ast.parse(path.read_text()))
     )
+
+
+def test_density_contract_is_three_state_and_pane_owned() -> None:
+    assert DENSITIES == ("minimal", "compact", "full")
+    assert "standard" not in DENSITIES
+    assert ChartPresentation().density == "full"
+    assert "density" not in {field.name for field in fields(DashboardHostConfig)}
+
+    dashboard = DashboardLaunch(ProcessConfig(), DashboardHostConfig(), ())
+    pane = default_pane("timeline", dashboard=dashboard)
+
+    assert pane.chart.presentation.density == "compact"
+    assert standalone_from_pane(dashboard, pane).chart.presentation == pane.chart.presentation
+
+
+def test_dashboard_globals_do_not_rewrite_pane_presentation() -> None:
+    dashboard = DashboardLaunch(
+        ProcessConfig(),
+        DashboardHostConfig(theme="nord", style="accent", header_style="compact"),
+        (),
+    )
+    pane = default_pane("ranking", dashboard=dashboard)
+    presentation = ChartPresentation(
+        theme="dracula",
+        style="dot",
+        legend="inside",
+        density="minimal",
+    )
+    pane = replace(pane, chart=replace(pane.chart, presentation=presentation))
+
+    assert standalone_from_pane(dashboard, pane).chart.presentation == presentation
 
 
 def test_query_package_does_not_import_host_or_presentation_layers() -> None:
@@ -126,6 +166,41 @@ def test_monitor_hosts_do_not_import_the_removed_query_client() -> None:
             == []
         )
     assert not (PACKAGE_ROOT / "query" / "client.py").exists()
+
+
+def test_dashboard_composes_notices_inside_their_source_panes() -> None:
+    source = (PACKAGE_ROOT / "tui.py").read_text()
+
+    assert "def _local_pane_content(" in source
+    assert "_local_pane_content(" in source[source.index("def run_tui(") :]
+    assert "def _unique_notices(" not in source
+
+
+def test_historical_component_owns_incremental_comparison_state() -> None:
+    tree = ast.parse((PACKAGE_ROOT / "historical_component.py").read_text())
+    component = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.ClassDef) and node.name == "HistoricalChartComponent"
+    )
+    slots = next(
+        node.value
+        for node in component.body
+        if isinstance(node, ast.Assign)
+        and any(
+            isinstance(target, ast.Name) and target.id == "__slots__" for target in node.targets
+        )
+    )
+    assert isinstance(slots, ast.Tuple)
+    slot_names = {element.value for element in slots.elts if isinstance(element, ast.Constant)}
+    methods = {
+        node.name
+        for node in component.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+
+    assert {"snapshot", "supplemental_error"} <= slot_names
+    assert {"required_coverage", "missing_comparison_coverage"} <= methods
 
 
 def test_dashboard_panes_do_not_mirror_component_business_state() -> None:

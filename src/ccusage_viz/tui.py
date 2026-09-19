@@ -691,6 +691,7 @@ def _pane_render(pane: TuiPane, translator: Translator, terminal: Terminal) -> P
                 hide_upper_right_axes=True,
                 ranking_deltas=pane.deltas if active.chart.kind == "ranking" else None,
                 ranking_rank_deltas=pane.rank_deltas if active.chart.kind == "ranking" else None,
+                normalize_titles=True,
                 interval=pane.scheduler.interval,
             )
             candidate = PaneRender(rendered.chart, rendered.notices)

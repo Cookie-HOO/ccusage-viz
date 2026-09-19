@@ -42,7 +42,6 @@ After the package is published to PyPI, install it with pipx:
 ```bash
 pipx install ccusage-viz
 ccuv --version
-ccuv --version
 ```
 
 `ccuv` is a packaged command alias for `ccusage-viz`; both commands have identical behavior.
@@ -81,7 +80,7 @@ Each rendering command produces one chart; `dashboard` composes independently re
 | `monitor` | process-local 1 hour | authoritative Total TPM | — | Persistent observed Token throughput from repeated snapshots |
 | `dashboard` | per pane | Timeline, Stack, Ranking, Monitor | per pane | One dashboard with adjustment-only pane selection and independent refresh |
 
-All date ranges are **inclusive natural days**. `--period 14d` means today plus the preceding 13 days. Rolling ranges are headed by their canonical period (for example, `Timeline · 14d`); a range explicitly bounded by both `--since` and `--until` instead shows its resolved dates. `--until` defaults to today; use `--timezone` with an IANA name to define the natural-day boundary. `--period` cannot be combined with `--since`.
+All date ranges are **inclusive natural days**. `--period 14d` means today plus the preceding 13 days. Rolling ranges are headed by their canonical period (for example, `Timeline · 14d`). Supplying `--since` selects a fixed range: a lone `--since` resolves its end to today's date in the selected timezone at startup, while an explicit `--until` sets that end. Fixed ranges show both resolved dates and never advance their bounds during the session. `--until` cannot be used alone; use `--timezone` with an IANA name to define the natural-day boundary. `--period` cannot be combined with `--since`.
 
 ```bash
 # One total line for the last 14 days
@@ -145,14 +144,25 @@ The two-query ranking path is a fixed data-source plan, not a loop over dates, A
 
 ### Period comparison summaries
 
-`timeline` and `stack` use `--granularity day|month|quarter|year`; runtime `g` changes Granularity without changing the selected Period or date range. `calendar` and `ranking` remain daily. Period accepts `d`, `mo`, `q`, and `y` independently, so an explicit `--period 12mo` remains valid at any Granularity. A range with both `--since` and `--until` is fixed. Summaries always aggregate the complete current filter scope, independent of Top N presentation clipping. When Top N hides groups and `Other` is off, the summary is qualified as the current-filter total and notes that the chart shows only Top N; complete charts omit that qualification.
+`timeline` and `stack` use `--granularity day|month|quarter|year`; runtime `g` changes Granularity without changing the selected Period or date range. `calendar` and `ranking` remain daily. Period accepts `d`, `mo`, `q`, and `y` independently, so an explicit `--period 12mo` remains valid at any Granularity. Any range selected with `--since` is fixed and has no inferred comparison interval outside its resolved bounds.
 
-Day compares today with yesterday and the same weekday seven days earlier. Month and quarter compare period-to-date with the same elapsed-day count in the prior period and last year; year compares year-to-date with prior-year-to-date. Calendar boundaries are used rather than fixed 30/90/365-day subtraction, and shorter periods are clamped. A summary derives only from records already loaded for its chart—standalone commands and Dashboard panes never run summary-only queries.
+A chart Summary always uses the same complete filtered Scope as its chart: time, timezone, and Agent/Model/Project Filters. It is computed before `--by`, Top N, and `Other`, so those presentation and analysis projections do not change the current total or comparisons. When Ranking hides groups beyond Top N and `Other` is off, its title reports `Top N · X% of total`; enabling `Other` covers the full filtered Scope, so the share is omitted. Summary text does not carry Top qualifiers.
 
-Coverage comes from each successful requested interval, including successful empty responses; it is never inferred from the first or last returned row. A missing row inside covered time is a real zero, while time outside coverage is unknown. Current-period coverage is required before a numeric summary appears, and each uncovered comparison is omitted independently. Equal values use a neutral marker (`—`, or `=` with `--ascii`), a positive value against zero is shown as “from 0” with an upward marker, and a positive baseline falling to zero is a 100% decrease. The complete sentence, fragments, punctuation, and placeholders are localized in the built-in English and Simplified Chinese catalogs.
+Day compares today with yesterday and the same weekday seven days earlier. Month and quarter compare period-to-date with the same elapsed-day count in the prior period and last year; year compares year-to-date with prior-year-to-date. Calendar boundaries are used rather than fixed 30/90/365-day subtraction, and shorter periods are clamped.
+
+Coverage comes from each successfully requested interval, including successful empty responses; it is never inferred from the first or last returned row. A missing row inside covered time is a numeric zero, while time outside Coverage is unknown. Continuous historical Hosts render applicable uncovered comparisons as `??`, then query only the missing comparison intervals and fill them when the current generation is accepted; adjacent gaps may merge, but disjoint baselines remain separate requests. A failed supplement keeps `??` and adds a local Notice. Fixed ranges request no inferred comparison Coverage. Equal values use a neutral marker (`—`, or `=` with `--ascii`), a positive value against zero is shown as “from 0” with an upward marker, and a positive baseline falling to zero is a 100% decrease. The complete sentence, fragments, punctuation, and placeholders are localized in the built-in English and Simplified Chinese catalogs.
 
 Calendar’s metrics footer is always three logical rows: active days/current streak/longest streak; daily average plus an optional peak; and the heat legend. The average remains visible when no peak exists, and narrow terminals clip each row independently.
 
+### Information Density
+
+Every Standalone chart and Dashboard Pane owns one of exactly three Density values: `minimal`, `compact`, or `full`. Standalone defaults to `full`; new and default Dashboard Panes use `compact`. There is no Dashboard-global chart Density, and global settings never rewrite a Pane's value. Use `--density` at startup or `d` on a chart's Quick adjustment page.
+
+- `minimal` keeps identity, chart, and compact runtime state, with no Summary or audit rows.
+- `compact` adds the current filtered-Scope total and the count of non-empty Filter dimensions, without comparisons or audit.
+- `full` adds applicable period comparisons plus Host-supplied accepted/query time and refresh or sample cadence. Monitor adds only applicable realtime audit and never invents historical comparisons.
+
+Changing Density is presentation-only. It does not increment data generation, reset scheduling, or discard accepted facts. Controls and correctness-critical Notices remain available at every Density.
 
 ## Monitor
 
@@ -195,7 +205,7 @@ ccuv dashboard wide --header-style panel --header-summary quarter --header-inter
 
 The Dashboard Header is independent from pane summaries. `--header-style` accepts `hidden`, `compact`, `banner`, or `panel` (the default). `--header-summary` independently selects `day`, `month`, `quarter`, `year`, or `none` (default `day`); `none` keeps the title and freshness but omits detail, while `hidden` removes the entire Header. During a cold period switch, the full localized structure appears immediately with `??` values and is replaced only by accepted data. Header data is an unfiltered all-agent total refreshed separately every 60 seconds by default (`--header-interval`). The title row right-aligns the last successfully accepted update time; failed or stale refreshes do not advance it. Dashboard `--theme` colors only the shell, title, Header summary, placeholders, and separators; every pane keeps its own `--theme`. Dashboard `--style` consolidates shell structure into `minimal`, `split` (default), `framed`, or `accent`; it never changes pane chart styles or Header Style. Press `s` to adjust pane 1 or click a pane directly; `Tab` is inert while browsing and wraps between panes during pane adjustment.
 
-Browse mode intentionally has one concise footer row: `r` refresh all, `s`/click adjust a pane, `g` open global adjustment, `h` hide/show controls, `y` copy the Dashboard, and Space pause/resume scheduling. Details and pane-command display are not part of Dashboard. Data and capability warnings from panes appear once in a global warning block directly above this footer, rather than inside compact pane cells. Pane and global adjustment both start on **Quick** settings; `a` toggles **Advanced**. Global Quick contains Theme, Style, Header, summary, and layout. Global Advanced contains `+` add pane, `x` delete, `[`/`]` reorder, and `Tab` select pane. Pane adjustment retains each chart’s standalone-like controls and `y` copies only that pane. A copied Dashboard preserves shell Theme/Style and each pane’s independent Theme/Style. `Ctrl-C` restores the terminal and cancels active child queries.
+Browse mode intentionally has one concise footer row: `r` refresh all, `s`/click adjust a pane, `g` open global adjustment, `h` hide/show controls, `v` show the full command, and Space pause/resume scheduling. Controls are a session shell and remain independent of chart Density. Data, capability, renderer, and supplemental-comparison Notices stay in a bounded band inside their source Pane; they are neither moved into nor deduplicated through a global warning block, and one Pane's Notices do not change another Pane's geometry. Pane and global adjustment both start on **Quick** settings; `a` toggles **Advanced**. Global Quick contains Theme, Style, Header, summary, and layout. Global Advanced contains `+` add pane, `x` delete, `[`/`]` reorder, and `Tab` select pane. Pane adjustment retains each chart’s standalone-like controls and `y` copies only that pane. Dashboard-global Theme, Style, Header, Summary, and layout settings do not rewrite Pane-owned Density, Theme, Style, Filters, or analysis settings. A copied Dashboard preserves shell Theme/Style and each Pane’s independent presentation. `Ctrl-C` restores the terminal and cancels active child queries.
 
 Monitor owns an anchored, padded y-axis shared by standalone and Dashboard rendering. The bound expands immediately when data crosses it and shrinks only after sustained lower utilization, so small fluctuations move the line instead of continuously moving the axis. This changes presentation only: Total and Model remain observed TPM, while Agent and Project remain visible-window Token growth.
 

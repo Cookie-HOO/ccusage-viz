@@ -16,6 +16,7 @@ from ccusage_viz.deltas import RefreshRanks
 from ccusage_viz.domain import Notice, SourceKind, TokenUsage, UsageRecord
 from ccusage_viz.errors import UsageError
 from ccusage_viz.historical_component import HistoricalChartComponent, UsageSnapshot
+from ccusage_viz.historical_render import RenderedChart
 from ccusage_viz.i18n import load_translator
 from ccusage_viz.lifecycle import FixedIntervalScheduler, LifecycleOperation
 from ccusage_viz.monitor_component import MonitorComponent
@@ -700,6 +701,31 @@ def test_dashboard_monitor_forwards_component_changes_to_chart_renderer(
     assert captured["density"] == "compact"
     assert captured["audit"].interval == monitor.scheduler.interval
     assert captured["audit"].cadence == "sample"
+
+
+def test_dashboard_historical_pane_normalizes_titles_like_standalone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parser = build_parser(load_translator("en"))
+    options = _to_options(parser.parse_args(["dashboard", "--demo"]))
+    pane = _new_pane(
+        standalone_from_pane(options, parse_dashboard_pane("timeline", host=options)),
+        "pane:timeline",
+    )
+    assert isinstance(pane.component, HistoricalChartComponent)
+    pane.component.seed(pane.component.candidate, UsageSnapshot((), (), 0.1))
+    captured: dict[str, object] = {}
+
+    def fake_render(*_args: object, **kwargs: object) -> RenderedChart:
+        captured.update(kwargs)
+        return RenderedChart("timeline", ())
+
+    monkeypatch.setattr(tui_module, "render_historical_component", fake_render)
+
+    rendered = _pane_render(pane, load_translator("en"), Terminal(58, 16, False, True))
+
+    assert rendered.chart == "timeline"
+    assert captured["normalize_titles"] is True
 
 
 def test_dashboard_monitor_and_error_panes_do_not_contribute_chart_notices() -> None:

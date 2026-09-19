@@ -1,8 +1,8 @@
 # How ccuv Works
 
-This document describes the approved target architecture of `ccusage-viz`. The migration is in progress, so current modules do not yet match every boundary below. It is intended for maintainers and contributors; ordinary usage belongs in the README and user guides.
+This document describes the implemented architecture of `ccusage-viz`. It is intended for maintainers and contributors; ordinary usage belongs in the README and user guides.
 
-> **Status:** Target architecture under implementation. See the [runtime architecture design](superpowers/specs/2026-09-18-runtime-architecture-design.md) for migration phases.
+> **Status:** Current architecture. The [runtime architecture design](superpowers/specs/2026-09-18-runtime-architecture-design.md) records the design decisions and completed migration phases.
 
 [简体中文](architecture.zh-CN.md)
 
@@ -147,6 +147,16 @@ Semantic Chart Model
 Renderers never query data or write directly to stdout. Status, Controls, Notices, settings, inspection content, and chart bodies are composed into a complete logical Frame. The Painter compares complete Frames and writes only changed terminal rows; a complete logical repaint does not imply an unconditional terminal clear.
 
 Plotext rendering remains behind a serialized adapter because Plotext uses process-global state. Query is the only pipeline stage required to run asynchronously: Provider work commonly takes seconds, while current processing and rendering are millisecond-scale operations. Processing therefore remains a synchronous, isolated semantic transformation, and rendering remains synchronous through the serialized adapter. If profiling later demonstrates material input latency, the existing render boundary may move behind one serial worker without changing Component or Host semantics.
+
+### Presentation and Scope contract
+
+Chart presentation has exactly three Density values: `minimal`, `compact`, and `full`. Standalone defaults to `full`; each new or default Dashboard Pane explicitly uses `compact`. Density belongs to the chart configuration carried by Standalone or Pane. Dashboard has no global chart Density, and changes to Dashboard Theme, Style, Header, Summary, or Layout do not rewrite Pane-owned Density, Theme, Style, Filters, or analysis settings. A Density change advances render revision only; it does not change data Generation or scheduler baselines.
+
+`minimal` retains identity, chart, and compact runtime state. `compact` adds the current filtered-Scope total and active Filter-dimension count. `full` adds applicable period comparisons and Host-supplied runtime audit. Controls and correctness-critical Notices are independent of Density. In Dashboard, each Pane formats a bounded local Notice band after resolving its own geometry; Notices are not globally aggregated or deduplicated and cannot consume another Pane's rows.
+
+Time, timezone, and Agent/Model/Project Filters define one chart Summary Scope. Filtering occurs before Summary calculation; By, Top, and Other are later projections and do not alter the Summary total or comparisons. Ranking with hidden Other carries `Top N · X% of total` metadata in its title; when Other is shown, the share is omitted because the chart covers the full filtered Scope. The Dashboard Header Summary is a separate owner with unfiltered data and Coverage, never a projection of Pane state.
+
+A fixed range—including a lone Since whose end is resolved at startup—keeps both resolved bounds and infers no outside-range comparison Coverage. For rolling ranges, the historical Component owns accepted facts, comparison Coverage, missing intervals, supplemental pending/error state, and same-generation merges. Continuous Hosts first render uncovered applicable comparisons as `??`, then schedule only missing intervals; adjacent gaps may merge while disjoint baselines remain separate physical requests. A successful empty covered interval is numeric zero. A supplemental failure retains `??` and adds a local Notice. Historical no-Watch includes required comparison Coverage in its initial atomic request.
 
 ## Runtime state
 

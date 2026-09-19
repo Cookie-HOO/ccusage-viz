@@ -42,7 +42,6 @@ uv run ccuv ranking --by model --period 30d
 ```bash
 pipx install ccusage-viz
 ccuv --version
-ccuv --version
 ```
 
 `ccuv` 是随包安装的 `ccusage-viz` 命令别名，两者行为完全相同。
@@ -81,7 +80,7 @@ ccuv --version
 | `monitor` | 进程内 1 小时 | 权威总 TPM | — | 通过重复快照展示持续运行的观测 Token 吞吐率 |
 | `dashboard` | 各子图独立 | 时间趋势、Token 构成、排名、监测 | 各子图独立 | 仅调整时选择目标、各子图独立刷新的仪表盘 |
 
-所有日期范围都表示**包含首尾的自然日**。`--period 14d` 表示今天和此前 13 天。滚动范围标题显示规范化周期（例如 `时间趋势 · 14d`）；同时显式给出 `--since` 和 `--until` 的固定范围则显示实际生效日期。`--until` 默认为今天；可用 IANA 时区名通过 `--timezone` 定义自然日边界。`--period` 不能与 `--since` 同时使用。
+所有日期范围都表示**包含首尾的自然日**。`--period 14d` 表示今天和此前 13 天。滚动范围标题显示规范化周期（例如 `时间趋势 · 14d`）。提供 `--since` 会进入固定范围：单独使用时，结束日期在启动时按所选时区解析为当天；显式 `--until` 则指定结束日期。固定范围显示解析后的两个日期，且会话期间边界不再推进。`--until` 不能单独使用；可通过 `--timezone` 的 IANA 时区名定义自然日边界。`--period` 不能与 `--since` 同时使用。
 
 ```bash
 # 最近 14 天的一条总量折线
@@ -145,14 +144,25 @@ Ranking 的双查询路径是固定的数据源计划，不会按日期、Agent�
 
 ### 周期对比摘要
 
-`timeline` 和 `stack` 使用 `--granularity day|month|quarter|year`；运行时按 `g` 只切换粒度，不改变所选 Period 或日期范围。`calendar` 和 `ranking` 保持每日粒度。Period 可独立使用 `d`、`mo`、`q` 和 `y`，因此任意粒度下显式 `--period 12mo` 都有效。同时指定 `--since` 和 `--until` 会得到固定范围。摘要始终聚合当前完整筛选范围，不受 Top N 展示裁剪影响；当 Top N 隐藏尾部分组且未启用 `Other` 时，会标注为“当前筛选总量”并说明图表只显示 Top N。
+`timeline` 和 `stack` 使用 `--granularity day|month|quarter|year`；运行时按 `g` 只切换粒度，不改变所选 Period 或日期范围。`calendar` 和 `ranking` 保持每日粒度。Period 可独立使用 `d`、`mo`、`q` 和 `y`，因此任意粒度下显式 `--period 12mo` 都有效。任何由 `--since` 选择的范围都是固定范围，不会推断解析边界之外的比较区间。
 
-日摘要对比今天、昨天以及七天前同一星期几。月和季度按截至当前的已过天数，分别与上一周期同期、去年同期对比；年摘要对比今年至今与去年同期。计算使用自然月、自然季度和自然年边界，而不是固定减去 30/90/365 天；较短周期会自动截断。独立命令和 Dashboard 子图只使用图表已经加载的记录，绝不会为了摘要单独查询。
+图表 Summary 始终使用与图表一致的完整筛选 Scope：时间、时区以及 Agent/Model/Project Filters。它在 `--by`、Top N 和 `Other` 之前计算，因此这些分析与呈现投影不会改变当前总量或比较值。Ranking 在关闭 `Other` 且 Top N 隐藏尾部分组时，会在标题中显示 `Top N · 占总量 X%`；启用 `Other` 后图表覆盖完整筛选 Scope，因此省略占比。Summary 文本不再携带 Top 限定语。
 
-覆盖范围来自成功请求的区间，即使响应为空也算覆盖；不会从返回记录的首尾日期推断。覆盖区间内缺失的行是真实零值，区间外则是未知。显示普通数值摘要前必须覆盖当前周期，而每个缺失覆盖的对比片段会独立隐藏。持平使用中性标记 `—`（`--ascii` 下为 `=`）；零基准增长显示“从 0”并使用上升标记；正基准降为零显示下降 100%。完整句子、各片段、标点和占位符均在内置英文与简体中文目录中本地化。
+日摘要对比今天、昨天以及七天前同一星期几。月和季度按截至当前的已过天数，分别与上一周期同期、去年同期对比；年摘要对比今年至今与去年同期。计算使用自然月、自然季度和自然年边界，而不是固定减去 30/90/365 天；较短周期会自动截断。
+
+Coverage 来自每个成功请求的区间，即使响应为空也算覆盖；不会从返回记录的首尾日期推断。已覆盖时间中缺失的行是数值零，Coverage 之外则是未知。持续运行的 Historical Host 会先把适用但尚未覆盖的比较显示为 `??`，再只查询缺失的比较区间，并在当前 generation 被接受后补齐；相邻缺口可以合并，彼此分离的比较基线仍保持独立请求。补充查询失败时保留 `??` 并添加局部 Notice。固定范围不请求推断出的比较 Coverage。持平使用中性标记 `—`（`--ascii` 下为 `=`）；零基准增长显示“从 0”并使用上升标记；正基准降为零显示下降 100%。完整句子、各片段、标点和占位符均在内置英文与简体中文目录中本地化。
 
 Calendar 的指标页脚固定为三条逻辑行：活跃天数/当前连续/最长连续；日均及可选峰值；热力图例。没有峰值时日均仍会保留，窄终端会逐行独立裁剪。
 
+### 信息密度
+
+每个 Standalone 图表和 Dashboard Pane 都独立拥有且只使用三种 Density：`minimal`、`compact`、`full`。Standalone 默认 `full`，新建与默认 Dashboard Pane 使用 `compact`。Dashboard 不存在全局图表 Density，全局设置也不会改写 Pane 的值。可在启动时使用 `--density`，或在图表快捷调整页按 `d`。
+
+- `minimal` 保留身份、图表和紧凑运行状态，不显示 Summary 或审计行。
+- `compact` 增加当前筛选 Scope 总量和非空 Filter 维度数，不显示比较或审计。
+- `full` 增加适用的周期比较，以及 Host 提供的接受/查询时间和刷新或采样节奏。Monitor 只增加适用的实时审计，不虚构历史比较。
+
+Density 变化只影响呈现，不递增数据 generation、不重置调度，也不丢弃已接受事实。Controls 和影响正确理解的 Notice 在任何 Density 下都保持可用。
 
 ## Monitor
 
@@ -245,7 +255,7 @@ ccuv timeline --demo large
 
 Theme 负责语义前景色，Style 负责图表形态。使用 `--theme` 和 `--style` 指定初始外观；TUI 运行期间可按 `m` 基于已保留快照调整受支持的设置，不会因此发起新查询。
 
-Dashboard 浏览模式有意只保留一行控制栏：`r` 刷新全部、`s`/点击调整子图、`g` 全局调整、`h` 隐藏/显示控制栏、`y` 复制仪表盘、Space 暂停/继续调度。Dashboard 不再提供详情或子图命令显示。来自子图的数据和能力警告会去重后显示在控制栏正上方的全局警告区，不会挤占紧凑子图单元格的内容。子图和全局调整均先进入**快捷设置**，`a` 切换到**高级设置**。全局快捷设置包含主题、样式、页眉、摘要和布局；全局高级设置使用 `+` 添加子图，并提供 `x` 删除、`[`/`]` 排序和 `Tab` 选择子图。复制 Dashboard 会保留外壳 Theme/Style 与每个子图各自独立的 Theme/Style。
+Dashboard 浏览模式有意只保留一行控制栏：`r` 刷新全部、`s`/点击调整 Pane、`g` 全局调整、`h` 隐藏/显示控制栏、`v` 查看完整命令、Space 暂停/继续调度。Controls 属于会话外壳，不受图表 Density 影响。数据、能力、渲染器和补充比较 Notice 都保留在来源 Pane 内的有界区域；它们不会移入或经由全局警告区去重，一个 Pane 的 Notice 也不会改变另一个 Pane 的几何。Pane 和全局调整均先进入**快捷设置**，`a` 切换到**高级设置**。全局快捷设置包含 Theme、Style、Header、Summary 和 Layout；全局高级设置使用 `+` 添加 Pane，并提供 `x` 删除、`[`/`]` 排序和 `Tab` 选择 Pane。Pane 调整保留与 Standalone 对应的图表控件，`y` 只复制当前 Pane。Dashboard 全局 Theme、Style、Header、Summary 和 Layout 不会改写 Pane 拥有的 Density、Theme、Style、Filters 或分析设置。复制 Dashboard 会保留外壳 Theme/Style 与每个 Pane 各自独立的呈现。`Ctrl-C` 会还原终端并取消活动查询。
 
 样式按子命令定义：Timeline 支持 `linear`、`step`、`no-line`、`points`、`line-points`、`stem`、`area`。`no-line` 不连线但保留各系列不同的标记；`points` 使用统一实心点且不连线；`line-points` 使用统一实心点和线性连线。Monitor 支持 `bars`、`line`、`step`、`points`、`line-points`、`ranking`；两个统一点样式与 Timeline 的无线和线性连线语义相同。Calendar 支持 `relative`、`absolute`；Stack 支持 `stacked`、`stacked-pattern`、`grouped`、`grouped-thin`、`normalized`；Ranking 支持 `bar`、`dot`、`dots`。`--ascii` 独立于 Theme 和 Style，只改变字符。
 
