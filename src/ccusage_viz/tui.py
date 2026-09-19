@@ -39,6 +39,13 @@ from ccusage_viz.historical_component import (
 )
 from ccusage_viz.historical_render import render_historical_component
 from ccusage_viz.i18n import Translator
+from ccusage_viz.lifecycle import (
+    FixedIntervalScheduler,
+    LifecycleCoordinator,
+    LifecycleTrigger,
+    OperationToken,
+    query_trigger,
+)
 from ccusage_viz.monitor_component import (
     MonitorCompletion,
     MonitorComponent,
@@ -87,21 +94,19 @@ class MonitorOutcome:
 @dataclass(slots=True)
 class TuiPane:
     component: HistoricalChartComponent | MonitorComponent
+    scheduler: FixedIntervalScheduler
+    lifecycle: LifecycleCoordinator
     future: Future[HistoricalOutcome | MonitorOutcome] | None = None
-    query_handle: QueryHandle[ProviderResult] | None = None
-    refreshed_at: float = 0.0
+    operation: OperationToken | None = None
     demo_ordinal: int = 0
     render_warning: UsageError | None = None
     last_render: PaneRender | None = None
     copied: bool = False
-    pending_trigger: QueryTrigger | None = None
-    discard_completion: bool = False
     previous_values: dict[Hashable, float] = field(default_factory=dict)
     deltas: dict[Hashable, float] = field(default_factory=dict)
     values_initialized: bool = False
     previous_ranks: dict[Hashable, int] = field(default_factory=dict)
     rank_deltas: dict[Hashable, int] = field(default_factory=dict)
-    owner_id: str = "dashboard:pane"
 
     @property
     def interval(self) -> float:
@@ -556,12 +561,15 @@ def _new_pane(
             runtime=runtime,
             registry=registry,
         )
-    return TuiPane(component=component, owner_id=owner_id)
+    now = time.monotonic()
+    return TuiPane(
+        component,
+        FixedIntervalScheduler(options.host.interval, now=now),
+        LifecycleCoordinator(owner_id),
+    )
 
 
-def _await_historical(
-    handle: QueryHandle[ProviderResult], started: float
-) -> UsageSnapshot:
+def _await_historical(handle: QueryHandle[ProviderResult], started: float) -> UsageSnapshot:
     return snapshot_from_result(handle.result(), time.monotonic() - started)
 
 
@@ -726,9 +734,11 @@ def _adjustment_key_supported(command: str, page: str, key: str) -> bool:
 
 def _query_affecting_adjustment(command: str, key: str) -> bool:
     """Return whether an adjustment needs a matching replacement snapshot."""
-    return key in {"p", "P"} or (
-        key in {"b", "B"} and command in {"timeline", "ranking", "monitor"}
-    ) or (command == "monitor" and key in {"w", "W", "i", "I"})
+    return (
+        key in {"p", "P"}
+        or (key in {"b", "B"} and command in {"timeline", "ranking", "monitor"})
+        or (command == "monitor" and key in {"w", "W", "i", "I"})
+    )
 
 
 def _adjustment_footer(
@@ -850,7 +860,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
     browse_controls_hidden = False
     body_view: DashboardBodyView = "chart"
     copied_status: str | None = None
-    scheduling_paused = False
+    header_scheduling_paused = False
     last_successful_update: datetime | None = None
     last_size: tuple[int, int] | None = None
     footer_notice_rows = 0
@@ -862,43 +872,58 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         next_pane_id += 1
         return owner_id
 
+    def start_pane(index: int, *, now: float) -> bool:
+        pane = panes[index]
+        operation = pane.lifecycle.take_ready(now=now)
+        if operation is None:
+            return False
+        component = pane.component
+        try:
+            if isinstance(component, MonitorComponent):
+                submission = component.submit(
+                    query_trigger(operation.trigger),
+                    sample_ordinal=pane.demo_ordinal + 1,
+                )
+                pane.future = executor.submit(_await_monitor_submission, submission)
+            else:
+                submission = component.submit(query_trigger(operation.trigger))
+                pane.future = executor.submit(_await_historical_submission, submission)
+        except BaseException as exc:
+            pane.lifecycle.abandon(operation)
+            component.fail(exc, generation=component.generation)
+            return False
+        pane.operation = operation
+        pane.lifecycle.attach(operation, submission.cancel)
+        return True
+
     def refresh(
         index: int,
         *,
-        trigger: QueryTrigger,
-        queue_if_running: bool = False,
-    ) -> None:
+        trigger: LifecycleTrigger,
+        replace_active: bool = False,
+    ) -> bool:
         pane = panes[index]
-        if pane.future is not None and not pane.future.done():
-            if queue_if_running:
-                pane.pending_trigger = trigger
-                if pane.query_handle is not None:
-                    pane.query_handle.cancel()
-            return
         component = pane.component
-        if isinstance(component, MonitorComponent):
-            submission = component.submit(
-                trigger,
-                sample_ordinal=pane.demo_ordinal + 1,
+        if not isinstance(component, MonitorComponent):
+            current = component.candidate
+            if isinstance(current.chart, MonitorConfig):
+                raise TypeError("historical pane component has monitor configuration")
+            submitted = replace(
+                current,
+                chart=replace(
+                    current.chart,
+                    date_range=refresh_date_range(current.chart.date_range),
+                ),
             )
-            pane.query_handle = submission.handle
-            pane.future = executor.submit(_await_monitor_submission, submission)
-            pane.discard_completion = False
-            return
-        current = component.candidate
-        if isinstance(current.chart, MonitorConfig):
-            raise TypeError("historical pane component has monitor configuration")
-        submitted = replace(
-            current,
-            chart=replace(
-                current.chart,
-                date_range=refresh_date_range(current.chart.date_range),
-            ),
+            component.configure(submitted, data_affecting=True)
+        now = time.monotonic()
+        requested = pane.lifecycle.request(
+            trigger,
+            generation=component.generation,
+            now=now,
+            replace_active=replace_active,
         )
-        component.configure(submitted, data_affecting=True)
-        submission = component.submit(trigger)
-        pane.query_handle = submission.handle
-        pane.future = executor.submit(_await_historical_submission, submission)
+        return requested and start_pane(index, now=now)
 
     def refresh_header(
         *,
@@ -970,21 +995,23 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             if future is None or not future.done():
                 continue
             component = pane.component
-            discard_completion = pane.discard_completion
+            operation = pane.operation
             pane.future = None
-            pane.query_handle = None
-            pane.discard_completion = False
+            pane.operation = None
             observed_at = time.monotonic()
-            outcome_generation: int | None = None
+            if operation is None:
+                continue
             try:
                 loaded = future.result()
-                outcome_generation = loaded.generation
-                if discard_completion:
+                active = pane.lifecycle.accepts(operation, generation=loaded.generation)
+                if not active:
                     continue
                 if loaded.error is not None:
                     if component.fail(loaded.error, generation=loaded.generation):
-                        pane.refreshed_at = observed_at
+                        pane.lifecycle.complete(operation, generation=loaded.generation)
                         changed = True
+                    else:
+                        pane.lifecycle.abandon(operation)
                 else:
                     assert loaded.completion is not None
                     if isinstance(component, MonitorComponent):
@@ -1003,19 +1030,17 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                             _refresh_deltas(pane, component.ranking_values())
                             _refresh_ranks(pane, component.ranking_keys())
                     if accepted:
-                        pane.refreshed_at = observed_at
+                        pane.lifecycle.complete(operation, generation=loaded.generation)
                         last_successful_update = component.accepted_at
                         changed = True
+                    else:
+                        pane.lifecycle.abandon(operation)
             except Exception as exc:
-                if outcome_generation is not None and component.fail(
-                    exc, generation=outcome_generation
-                ):
-                    pane.refreshed_at = observed_at
-                    changed = True
-            if pane.pending_trigger is not None:
-                trigger = pane.pending_trigger
-                pane.pending_trigger = None
-                refresh(index, trigger=trigger)
+                if pane.lifecycle.accepts(operation, generation=operation.generation):
+                    pane.lifecycle.abandon(operation)
+                    if component.fail(exc, generation=operation.generation):
+                        changed = True
+            start_pane(index, now=observed_at)
         return changed
 
     def full_dashboard_command() -> str:
@@ -1032,10 +1057,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         width = get_terminal_size().columns
         if adjustment_mode == "pane" and focused is not None:
             return _adjustment_footer(
-                _pane_options(panes[focused]).chart.kind,
-                adjustment_page,
-                translator,
-                width
+                _pane_options(panes[focused]).chart.kind, adjustment_page, translator, width
             )[0]
         if adjustment_mode == "global":
             keys = translator.text(f"status.tui_global_{adjustment_page}_controls")
@@ -1099,12 +1121,11 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         if body_view != "chart":
             footer_notice_rows = 0
             body = format_full_command_display(full_dashboard_command(), size.columns)
-            screen.paint(
-                compose_frame(body, status, controls(), height=size.lines), force=force
-            )
+            screen.paint(compose_frame(body, status, controls(), height=size.lines), force=force)
             return
         initial_pending = all(
-            pane.refreshed_at == 0.0 and pane.component.error is None for pane in panes
+            pane.component.accepted_options is None and pane.component.error is None
+            for pane in panes
         )
         if initial_pending:
             completed = sum(pane.future is None for pane in panes)
@@ -1113,9 +1134,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 size.columns,
             )
             body = "\n".join((*header_lines, loading))
-            screen.paint(
-                compose_frame(body, status, controls(), height=size.lines), force=force
-            )
+            screen.paint(compose_frame(body, status, controls(), height=size.lines), force=force)
             return
 
         def render_panes(layout: PanelLayout, columns: int) -> list[PaneRender]:
@@ -1196,7 +1215,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
     try:
         with tui_input_mode() as decoder:
             for index in range(len(panes)):
-                refresh(index, trigger=QueryTrigger.STARTUP)
+                refresh(index, trigger=LifecycleTrigger.STARTUP)
             if header_style != "hidden":
                 refresh_header(trigger=QueryTrigger.STARTUP)
             paint()
@@ -1207,19 +1226,15 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 changed = collect()
                 now = time.monotonic()
                 if (
-                    not scheduling_paused
+                    not header_scheduling_paused
                     and header_style != "hidden"
                     and header.future is None
                     and now - header.refreshed_at >= options.host.header_interval
                 ):
                     refresh_header(trigger=QueryTrigger.TICK)
                 for index, pane in enumerate(panes):
-                    if (
-                        not scheduling_paused
-                        and pane.future is None
-                        and now - pane.refreshed_at >= pane.interval
-                    ):
-                        refresh(index, trigger=QueryTrigger.TICK)
+                    if pane.scheduler.due(now=now):
+                        refresh(index, trigger=LifecycleTrigger.PERIODIC)
                 if changed:
                     paint()
                 event = read_event(decoder, 0.1)
@@ -1334,8 +1349,8 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                             focused += 1
                         elif key in {"x", "X"} and len(panes) > 1:
                             removed = panes.pop(focused)
-                            if removed.query_handle is not None:
-                                removed.query_handle.cancel()
+                            removed.scheduler.shutdown()
+                            removed.lifecycle.shutdown()
                             focused = min(focused, len(panes) - 1)
                         elif key in {"y", "Y"}:
                             pane.copied = copy_command(
@@ -1355,11 +1370,15 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                 _clear_changes(pane)
                                 data_affecting = _query_affecting_adjustment(base.chart.kind, key)
                                 component.configure(updated, data_affecting=data_affecting)
+                                if updated.host.interval != base.host.interval:
+                                    pane.scheduler.rebuild(
+                                        updated.host.interval,
+                                        now=time.monotonic(),
+                                    )
                                 if data_affecting:
                                     refresh(
                                         focused,
-                                        trigger=QueryTrigger.REFRESH,
-                                        queue_if_running=True,
+                                        trigger=LifecycleTrigger.CONFIGURATION,
                                     )
                     paint()
                     continue
@@ -1391,9 +1410,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                 header.summary_period,
                             )
                             if any(not header.coverage.covers(item) for item in required.intervals):
-                                refresh_header(
-                                    trigger=QueryTrigger.REFRESH, queue_if_running=True
-                                )
+                                refresh_header(trigger=QueryTrigger.REFRESH, queue_if_running=True)
                     elif adjustment_page == "quick" and key == "u":
                         next_summary = _next_header_summary(header.summary_period)
                         header.summary_period = next_summary
@@ -1403,9 +1420,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                 today_for_timezone(header.options.host.timezone), next_summary
                             )
                             if any(not header.coverage.covers(item) for item in required.intervals):
-                                refresh_header(
-                                    trigger=QueryTrigger.REFRESH, queue_if_running=True
-                                )
+                                refresh_header(trigger=QueryTrigger.REFRESH, queue_if_running=True)
                     elif adjustment_page == "quick" and key == "z":
                         grid_draft = ""
                         grid_error = None
@@ -1434,8 +1449,8 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         and len(panes) > 1
                     ):
                         removed = panes.pop(focused)
-                        if removed.query_handle is not None:
-                            removed.query_handle.cancel()
+                        removed.scheduler.shutdown()
+                        removed.lifecycle.shutdown()
                         focused = min(focused, len(panes) - 1)
                     elif adjustment_page == "advanced" and key == "+":
                         grid_error = None
@@ -1458,7 +1473,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                     )
                                 )
                                 focused = len(panes) - 1
-                                refresh(focused, trigger=QueryTrigger.STARTUP)
+                                refresh(focused, trigger=LifecycleTrigger.STARTUP)
                     else:
                         continue
                     paint()
@@ -1471,8 +1486,8 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     for index in range(len(panes)):
                         refresh(
                             index,
-                            trigger=QueryTrigger.REFRESH,
-                            queue_if_running=True,
+                            trigger=LifecycleTrigger.MANUAL,
+                            replace_active=True,
                         )
                     refresh_header(
                         trigger=QueryTrigger.REFRESH,
@@ -1491,24 +1506,28 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 elif key == "\t":
                     continue
                 elif key == " ":
-                    scheduling_paused = not scheduling_paused
+                    paused = all(item.lifecycle.paused for item in panes)
                     now = time.monotonic()
-                    if scheduling_paused:
+                    header_scheduling_paused = not paused
+                    if not paused:
                         for item in panes:
-                            item.pending_trigger = None
+                            item.scheduler.pause()
+                            item.lifecycle.pause()
+                            if item.operation is not None and item.lifecycle.active is None:
+                                item.future = None
+                                item.operation = None
                             if isinstance(item.component, MonitorComponent):
                                 item.component.pause()
-                                if item.query_handle is not None:
-                                    item.discard_completion = True
-                                    item.query_handle.cancel()
                     else:
                         wall = datetime.now().astimezone()
                         header.refreshed_at = now
-                        for item in panes:
-                            item.refreshed_at = now
+                        for index, item in enumerate(panes):
+                            item.lifecycle.resume()
+                            item.scheduler.resume(now=now)
                             if isinstance(item.component, MonitorComponent):
                                 item.component.resume(now=now, wall=wall)
                             _clear_changes(item)
+                            refresh(index, trigger=LifecycleTrigger.RESUME)
                 elif key == "g" and body_view == "chart":
                     focused = None
                     adjustment_mode = "global"
@@ -1525,6 +1544,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
     except KeyboardInterrupt:
         return 0
     finally:
+        for pane in panes:
+            pane.scheduler.shutdown()
+            pane.lifecycle.shutdown()
         runtime.cancel()
         executor.shutdown(wait=False, cancel_futures=True)
         screen.finish()

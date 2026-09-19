@@ -1,4 +1,6 @@
 import shlex
+import threading
+from contextlib import nullcontext
 from datetime import date
 
 import pytest
@@ -15,7 +17,9 @@ from ccusage_viz.domain import Notice, SourceKind, TokenUsage, UsageRecord
 from ccusage_viz.errors import UsageError
 from ccusage_viz.historical_component import HistoricalChartComponent, UsageSnapshot
 from ccusage_viz.i18n import load_translator
+from ccusage_viz.lifecycle import FixedIntervalScheduler, LifecycleCoordinator
 from ccusage_viz.monitor_component import MonitorComponent
+from ccusage_viz.query.models import QueryTrigger
 from ccusage_viz.terminal import Terminal
 from ccusage_viz.tui import (
     DashboardHeader,
@@ -214,8 +218,115 @@ def test_dashboard_panes_host_chart_components_without_legacy_runners() -> None:
 
     assert isinstance(historical.component, HistoricalChartComponent)
     assert isinstance(monitor.component, MonitorComponent)
+    assert isinstance(historical.scheduler, FixedIntervalScheduler)
+    assert isinstance(monitor.scheduler, FixedIntervalScheduler)
+    assert isinstance(historical.lifecycle, LifecycleCoordinator)
+    assert isinstance(monitor.lifecycle, LifecycleCoordinator)
+    assert historical.lifecycle.owner_id == "pane:historical"
+    assert monitor.lifecycle.owner_id == "pane:monitor"
     assert not hasattr(historical, "monitor_runner")
     assert not hasattr(monitor, "monitor_runner")
+
+
+def test_dashboard_pause_cancels_automatic_panes_and_manual_refresh_remains_allowed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parser = build_parser(load_translator("en"))
+    options = _to_options(
+        parser.parse_args(
+            [
+                "dashboard",
+                "--demo",
+                "--header-style",
+                "hidden",
+                "--header-summary",
+                "none",
+                "--pane",
+                "timeline",
+            ]
+        )
+    )
+    events: list[tuple[object, ...]] = []
+    submissions: list[object] = []
+
+    class Runtime:
+        def cancel(self) -> None:
+            events.append(("runtime-cancel",))
+
+    class Submission:
+        def __init__(self, generation: int) -> None:
+            self.generation = generation
+            self.handle = self
+            self.cancelled = threading.Event()
+
+        def cancel(self) -> None:
+            self.cancelled.set()
+            events.append(("submission-cancel", self.generation))
+
+        def result(self) -> object:
+            self.cancelled.wait(1)
+            raise RuntimeError("cancelled query must stay hidden")
+
+    class Component:
+        def __init__(self, selected: object, **_kwargs: object) -> None:
+            self.candidate = selected
+            self.accepted_options = None
+            self.error = None
+            self.generation = 0
+
+        def configure(self, selected: object, *, data_affecting: bool) -> None:
+            if selected != self.candidate:
+                self.candidate = selected
+                if data_affecting:
+                    self.generation += 1
+
+        def submit(self, trigger: QueryTrigger) -> Submission:
+            events.append(("submit", trigger, self.generation))
+            submission = Submission(self.generation)
+            submissions.append(submission)
+            return submission
+
+        def fail(self, error: BaseException, *, generation: int) -> bool:
+            events.append(("fail", str(error), generation))
+            return True
+
+    class Screen:
+        def __init__(self, _stream: object) -> None:
+            pass
+
+        def paint(self, frame: object, **_kwargs: object) -> None:
+            events.append(("paint", frame))
+
+        def finish(self) -> None:
+            events.append(("finish",))
+
+    keys = iter((KeyEvent(" "), KeyEvent("r"), KeyEvent("\x03")))
+    runtime = Runtime()
+    monkeypatch.setattr(tui_module, "build_query_runtime", lambda: runtime)
+    monkeypatch.setattr(tui_module, "build_chart_registry", lambda: object())
+    monkeypatch.setattr(tui_module, "HistoricalChartComponent", Component)
+    monkeypatch.setattr(tui_module, "FramePainter", Screen)
+    monkeypatch.setattr(tui_module, "tui_input_mode", nullcontext)
+    monkeypatch.setattr(tui_module, "read_event", lambda _decoder, _timeout: next(keys))
+    monkeypatch.setattr(
+        tui_module, "get_terminal_size", lambda: __import__("os").terminal_size((100, 30))
+    )
+    monkeypatch.setattr(tui_module, "_pane_render", lambda *_args: tui_module.PaneRender("chart"))
+
+    assert tui_module.run_tui(options, load_translator("en")) == 0
+    assert [(event[1], event[2]) for event in events if event[0] == "submit"] == [
+        (QueryTrigger.STARTUP, 0),
+        (QueryTrigger.REFRESH, 0),
+    ]
+    assert len(submissions) == 2
+    assert submissions[0].cancelled.is_set()
+    assert submissions[1].cancelled.is_set()
+    assert not any(event[0] == "fail" for event in events)
+    assert events[-3:] == [
+        ("submission-cancel", 0),
+        ("runtime-cancel",),
+        ("finish",),
+    ]
 
 
 def test_dashboard_pane_render_retains_chart_notices_and_deduplicates_them() -> None:
@@ -239,8 +350,7 @@ def test_dashboard_pane_render_retains_chart_notices_and_deduplicates_them() -> 
         summary_notices=(Notice("notice.summary_excludes_session_agent", {"agent": "Codex"}),),
     )
     panes = [
-        _new_pane(standalone_from_pane(options, ranking), f"pane:{index}")
-        for index in range(2)
+        _new_pane(standalone_from_pane(options, ranking), f"pane:{index}") for index in range(2)
     ]
     for pane in panes:
         assert pane.component is not None
@@ -650,10 +760,7 @@ def test_pane_chooser_wraps_backward_and_escape_cancels(
         "read_event",
         lambda active, timeout: active.next(now=1.0),
     )
-    assert (
-        _choose_pane_type(Screen(), load_translator("en"), decoder, height=20)
-        == "monitor"
-    )
+    assert _choose_pane_type(Screen(), load_translator("en"), decoder, height=20) == "monitor"
 
     cancelled = InputDecoder()
     cancelled.feed("\x1b")
