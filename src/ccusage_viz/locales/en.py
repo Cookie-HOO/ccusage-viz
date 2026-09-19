@@ -81,6 +81,7 @@ MESSAGES = {
     "notice.model_overattributed": "Some model breakdowns exceed their record total, so no residual Other was added.",
     "notice.other_not_needed": "Other was not added: {count} groups remain after filtering, which does not exceed --top {top}.",
     "notice.summary_excludes_session_agent": "Ranking includes {agent} project-session usage; daily Summary excludes it because ccusage has no per-day values",
+    "notice.comparison_refresh_failed": "Comparison data could not be refreshed; retry to replace ?? values.",
     "prompt.ccusage_install": "ccusage is not installed. Press Enter to run the command below; type anything else, Ctrl-C, or EOF to cancel.\n{command}",
     "prompt.ccusage_install_confirm": "Install ccusage? ",
     "status.loading": "Loading…",

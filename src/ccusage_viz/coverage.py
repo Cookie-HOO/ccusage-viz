@@ -43,6 +43,12 @@ class DateCoverage:
     def merge(self, other: DateCoverage) -> DateCoverage:
         return DateCoverage((*self.intervals, *other.intervals))
 
+    def missing_coverage(self, required: DateCoverage) -> DateCoverage:
+        """Return the normalized portions of required coverage not yet covered."""
+        return DateCoverage(
+            tuple(missing for interval in required.intervals for missing in self.missing(interval))
+        )
+
     def missing(self, interval: DateInterval) -> tuple[DateInterval, ...]:
         """Return uncovered portions of an inclusive interval."""
         missing: list[DateInterval] = []
@@ -53,7 +59,9 @@ class DateCoverage:
             if covered.since > interval.until:
                 break
             if covered.since > cursor:
-                missing.append(DateInterval(cursor, min(interval.until, covered.since - timedelta(days=1))))
+                missing.append(
+                    DateInterval(cursor, min(interval.until, covered.since - timedelta(days=1)))
+                )
             cursor = max(cursor, covered.until + timedelta(days=1))
             if cursor > interval.until:
                 break

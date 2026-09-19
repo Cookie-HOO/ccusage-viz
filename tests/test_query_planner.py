@@ -46,6 +46,7 @@ def intent(
     generation: int = 0,
     trigger: QueryTrigger = QueryTrigger.STARTUP,
     coverage: DateCoverage | None = None,
+    required_coverage: DateCoverage | None = None,
 ):
     return historical_query_intent(
         options,
@@ -54,6 +55,7 @@ def intent(
         generation=generation,
         trigger=trigger,
         coverage=coverage,
+        required_coverage=required_coverage,
     )
 
 
@@ -142,6 +144,29 @@ def test_composition_preserves_owner_lifecycle_and_missing_coverage() -> None:
     assert query.arguments[4:7] == ("2026-01-03", "--until", "2026-01-03")
 
 
+def test_historical_intent_preserves_disjoint_required_coverage() -> None:
+    required = DateCoverage(
+        (
+            DateInterval(date(2025, 12, 26), date(2025, 12, 26)),
+            DateInterval(date(2026, 1, 2), date(2026, 1, 3)),
+        )
+    )
+    accepted = DateCoverage.from_interval(date(2026, 1, 2), date(2026, 1, 2))
+
+    selected = intent(
+        options("timeline"),
+        coverage=accepted,
+        required_coverage=required,
+    )
+
+    assert selected.scope.intervals == required.intervals
+    assert selected.missing_intervals == (
+        DateInterval(date(2025, 12, 26), date(2025, 12, 26)),
+        DateInterval(date(2026, 1, 3), date(2026, 1, 3)),
+    )
+    assert len(CCUSAGE_DEFINITION.provider.compile(selected).queries) == 2
+
+
 def test_project_ranking_uses_fixed_parallel_pair() -> None:
     plan = CCUSAGE_DEFINITION.provider.compile(intent(options("ranking", by="project")))
     assert [query.operation for query in plan.queries] == [
@@ -160,9 +185,7 @@ def test_project_ranking_uses_fixed_parallel_pair() -> None:
 
 
 def test_daily_project_view_omits_codex_with_notice() -> None:
-    plan = CCUSAGE_DEFINITION.provider.compile(
-        intent(options("stack", projects=("demo",)))
-    )
+    plan = CCUSAGE_DEFINITION.provider.compile(intent(options("stack", projects=("demo",))))
     assert len(plan.queries) == 1
     assert plan.queries[0].operation == "claude_daily_projects"
     assert plan.notices[0].key == "notice.daily_project_omitted"

@@ -72,7 +72,6 @@ def monitor_query_intent(
     )
 
 
-
 def historical_query_intent(
     options: StandaloneLaunch,
     definition: ProviderDefinition,
@@ -81,6 +80,7 @@ def historical_query_intent(
     generation: int,
     trigger: QueryTrigger,
     coverage: DateCoverage | None = None,
+    required_coverage: DateCoverage | None = None,
 ) -> QueryIntent:
     """Compose one historical Host request into provider-neutral query intent."""
     chart = options.chart
@@ -88,6 +88,7 @@ def historical_query_intent(
         raise TypeError("historical query planning does not support monitor configurations")
     provider = definition.provider
     scope_interval = DateInterval(chart.date_range.since, chart.date_range.until)
+    required_coverage = required_coverage or DateCoverage((scope_interval,))
     coverage = coverage or DateCoverage()
     project_required = bool(chart.filters.projects) or getattr(chart, "by", None) == "project"
     available_options = {
@@ -114,8 +115,8 @@ def historical_query_intent(
         generation=generation,
         trigger=trigger,
         provider=provider.provider,
-        scope=DataScope((scope_interval,), chart.date_range.timezone),
-        missing_intervals=coverage.missing(scope_interval),
+        scope=DataScope(required_coverage.intervals, chart.date_range.timezone),
+        missing_intervals=coverage.missing_coverage(required_coverage).intervals,
         resolution=DataResolution.DATE,
         dimensions=("project",) if project_required else ("agent",),
         execution_options=execution_options,

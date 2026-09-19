@@ -50,6 +50,26 @@ def test_coverage_reports_only_missing_subintervals() -> None:
     assert coverage.missing(DateInterval(date(2026, 1, 2), date(2026, 1, 3))) == ()
 
 
+def test_missing_coverage_preserves_disjoint_required_gaps() -> None:
+    accepted = DateCoverage(
+        (
+            DateInterval(date(2026, 1, 1), date(2026, 1, 2)),
+            DateInterval(date(2026, 1, 5), date(2026, 1, 5)),
+        )
+    )
+    required = DateCoverage(
+        (
+            DateInterval(date(2026, 1, 1), date(2026, 1, 3)),
+            DateInterval(date(2026, 1, 5), date(2026, 1, 7)),
+        )
+    )
+
+    assert accepted.missing_coverage(required).intervals == (
+        DateInterval(date(2026, 1, 3), date(2026, 1, 3)),
+        DateInterval(date(2026, 1, 6), date(2026, 1, 7)),
+    )
+
+
 def test_coverage_merge_preserves_and_coalesces_both_sides() -> None:
     first = DateCoverage.from_interval(date(2026, 1, 1), date(2026, 1, 2))
     second = DateCoverage.from_interval(date(2026, 1, 3), date(2026, 1, 4))

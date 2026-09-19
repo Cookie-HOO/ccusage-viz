@@ -10,6 +10,7 @@ from ccusage_viz.domain import ProjectRef, SourceKind, TokenUsage, UsageRecord
 from ccusage_viz.historical_component import (
     HistoricalChartComponent,
     HistoricalCompletion,
+    HistoricalPurpose,
     UsageSnapshot,
 )
 from ccusage_viz.options import (
@@ -175,6 +176,240 @@ def test_component_separates_data_generation_from_render_revision() -> None:
     assert chart.generation == generation
     assert chart.render_revision == revision + 1
     assert chart.model is not None
+
+
+def test_component_exposes_missing_full_comparison_coverage() -> None:
+    chart = component()
+    display = chart.display_coverage()
+    chart.seed(chart.candidate, UsageSnapshot((), (), 0.1, coverage=display))
+
+    assert chart.required_coverage() == DateCoverage.from_interval(
+        date(2025, 12, 31), date(2026, 1, 7)
+    )
+    assert chart.missing_comparison_coverage().intervals == (
+        DateInterval(date(2025, 12, 31), date(2025, 12, 31)),
+    )
+
+
+@pytest.mark.parametrize(
+    ("granularity", "expected"),
+    (
+        (
+            "month",
+            (
+                DateInterval(date(2025, 1, 1), date(2025, 1, 7)),
+                DateInterval(date(2025, 12, 1), date(2025, 12, 7)),
+            ),
+        ),
+        (
+            "quarter",
+            (
+                DateInterval(date(2025, 1, 1), date(2025, 1, 7)),
+                DateInterval(date(2025, 10, 1), date(2025, 10, 7)),
+            ),
+        ),
+        (
+            "year",
+            (DateInterval(date(2025, 1, 1), date(2025, 1, 7)),),
+        ),
+    ),
+)
+def test_component_exposes_period_comparison_coverage(
+    granularity: str,
+    expected: tuple[DateInterval, ...],
+) -> None:
+    selected = replace(
+        options(),
+        chart=replace(options().chart, granularity=granularity),
+    )
+    chart = HistoricalChartComponent(
+        selected,
+        owner_id="test:period",
+        runtime=None,
+        registry=build_chart_registry(),
+    )
+    chart.seed(
+        selected,
+        UsageSnapshot((), (), 0.1, coverage=chart.display_coverage()),
+    )
+
+    assert chart.missing_comparison_coverage().intervals == expected
+
+
+def test_component_fixed_range_requires_no_comparison_coverage() -> None:
+    selected = replace(
+        options(),
+        chart=replace(
+            options().chart,
+            date_range=replace(options().chart.date_range, fixed_bounds=True),
+        ),
+    )
+    chart = HistoricalChartComponent(
+        selected,
+        owner_id="test:fixed",
+        runtime=None,
+        registry=build_chart_registry(),
+    )
+    display = chart.display_coverage()
+    chart.seed(selected, UsageSnapshot((), (), 0.1, coverage=display))
+
+    assert chart.required_coverage() == display
+    assert not chart.missing_comparison_coverage().intervals
+
+
+def test_component_merges_supplement_without_replacing_display_facts() -> None:
+    chart = component()
+    display_record = UsageRecord(
+        date(2026, 1, 7),
+        "claude",
+        TokenUsage(20, 20, 0, 0, 0),
+        SourceKind.UNIFIED_DAILY,
+    )
+    display = chart.display_coverage()
+    chart.seed(
+        chart.candidate,
+        UsageSnapshot((display_record,), (), 0.1, coverage=display),
+    )
+    comparison = DateCoverage.from_interval(date(2025, 12, 31), date(2025, 12, 31))
+    comparison_record = replace(
+        display_record, day=date(2025, 12, 31), usage=TokenUsage(10, 10, 0, 0, 0)
+    )
+
+    assert chart.accept(
+        HistoricalCompletion(
+            chart.generation,
+            chart.candidate,
+            UsageSnapshot((comparison_record,), (), 0.2, coverage=comparison),
+            HistoricalPurpose.SUPPLEMENTAL,
+            comparison,
+        )
+    )
+
+    assert chart.snapshot is not None
+    assert chart.snapshot.records == (display_record, comparison_record)
+    assert chart.snapshot.coverage == display.merge(comparison)
+    assert chart.model is not None
+    assert chart.model.summary is not None
+    assert chart.model.summary.week_over_week is not None
+
+
+def test_component_supplement_failure_preserves_facts_and_adds_local_notice() -> None:
+    chart = component()
+    display = chart.display_coverage()
+    chart.seed(chart.candidate, UsageSnapshot((), (), 0.1, coverage=display))
+    snapshot = chart.snapshot
+
+    assert chart.fail(
+        RuntimeError("comparison failed"),
+        generation=chart.generation,
+        purpose=HistoricalPurpose.SUPPLEMENTAL,
+    )
+
+    assert chart.snapshot is snapshot
+    assert chart.error is None
+    assert chart.supplemental_error is not None
+    assert chart.model is not None
+    assert chart.model.notices[-1].key == "notice.comparison_refresh_failed"
+    assert chart.missing_comparison_coverage().intervals == (
+        DateInterval(date(2025, 12, 31), date(2025, 12, 31)),
+    )
+
+
+def test_component_successful_supplement_clears_failure_notice() -> None:
+    chart = component()
+    display = chart.display_coverage()
+    chart.seed(chart.candidate, UsageSnapshot((), (), 0.1, coverage=display))
+    comparison = chart.missing_comparison_coverage()
+    assert chart.fail(
+        RuntimeError("comparison failed"),
+        generation=chart.generation,
+        purpose=HistoricalPurpose.SUPPLEMENTAL,
+    )
+
+    assert chart.accept(
+        HistoricalCompletion(
+            chart.generation,
+            chart.candidate,
+            UsageSnapshot((), (), 0.2, coverage=comparison),
+            HistoricalPurpose.SUPPLEMENTAL,
+            comparison,
+        )
+    )
+
+    assert chart.supplemental_error is None
+    assert chart.model is not None
+    assert all(notice.key != "notice.comparison_refresh_failed" for notice in chart.model.notices)
+    assert not chart.missing_comparison_coverage().intervals
+
+
+def test_component_primary_replaces_empty_returned_interval() -> None:
+    chart = component()
+    stale = UsageRecord(
+        date(2026, 1, 7),
+        "claude",
+        TokenUsage(20, 20, 0, 0, 0),
+        SourceKind.UNIFIED_DAILY,
+    )
+    display = chart.display_coverage()
+    comparison = DateCoverage.from_interval(date(2025, 12, 31), date(2025, 12, 31))
+    comparison_record = replace(stale, day=date(2025, 12, 31))
+    chart.seed(
+        chart.candidate,
+        UsageSnapshot(
+            (stale, comparison_record),
+            (),
+            0.1,
+            coverage=display.merge(comparison),
+        ),
+    )
+
+    assert chart.accept(
+        HistoricalCompletion(
+            chart.generation,
+            chart.candidate,
+            UsageSnapshot((), (), 0.2, coverage=display),
+        )
+    )
+
+    assert chart.snapshot is not None
+    assert chart.snapshot.records == (comparison_record,)
+    assert chart.snapshot.coverage == display.merge(comparison)
+
+
+def test_component_new_generation_primary_resets_old_facts() -> None:
+    chart = component()
+    old = UsageRecord(
+        date(2026, 1, 7),
+        "claude",
+        TokenUsage(20, 20, 0, 0, 0),
+        SourceKind.UNIFIED_DAILY,
+    )
+    chart.seed(
+        chart.candidate,
+        UsageSnapshot((old,), (), 0.1, coverage=chart.display_coverage()),
+    )
+    changed = replace(
+        chart.candidate,
+        chart=replace(
+            chart.candidate.chart,
+            date_range=DateRange(date(2026, 2, 1), date(2026, 2, 7), None),
+        ),
+    )
+    chart.configure(changed, data_affecting=True)
+    new = replace(old, day=date(2026, 2, 7))
+    new_coverage = chart.display_coverage()
+
+    assert chart.accept(
+        HistoricalCompletion(
+            chart.generation,
+            changed,
+            UsageSnapshot((new,), (), 0.2, coverage=new_coverage),
+        )
+    )
+
+    assert chart.snapshot is not None
+    assert chart.snapshot.records == (new,)
+    assert chart.snapshot.coverage == new_coverage
 
 
 def test_component_exposes_ranking_refresh_state_from_accepted_model() -> None:
