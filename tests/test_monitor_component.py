@@ -108,6 +108,76 @@ def test_monitor_component_accepts_cumulative_samples_and_projects_timeline() ->
     assert component.error is None
 
 
+def test_monitor_component_total_and_model_presentation_stays_at_accepted_sample() -> None:
+    wall = datetime(2026, 9, 19, 12, 0, tzinfo=UTC)
+    later_wall = datetime(2026, 9, 19, 12, 30, tzinfo=UTC)
+    total = MonitorComponent(options(), registry=build_chart_registry())
+    model = MonitorComponent(options(by="model", style="ranking"), registry=build_chart_registry())
+    for component in (total, model):
+        component.accept(
+            completion(component, (record(100, models={"a": 60, "b": 40}),)),
+            now=0,
+            wall=wall,
+        )
+        component.accept(
+            completion(component, (record(160, models={"a": 100, "b": 60}),)),
+            now=10,
+            wall=wall,
+        )
+
+    total_accepted = total.timeline_model(now=10, count=4, wall=wall)
+    model_accepted = model.ranking_model(now=10, count=4, wall=wall)
+
+    assert total.timeline_model(now=1800, count=4, wall=later_wall) == total_accepted
+    assert model.ranking_model(now=1800, count=4, wall=later_wall) == model_accepted
+    assert total.preview(total.candidate).timeline_model(
+        now=1800, count=4, wall=later_wall
+    ) == total_accepted
+    assert model.preview(model.candidate).ranking_model(
+        now=1800, count=4, wall=later_wall
+    ) == model_accepted
+
+
+def test_monitor_component_agent_and_project_values_stay_at_accepted_sample() -> None:
+    wall = datetime(2026, 9, 19, 12, 0, tzinfo=UTC)
+    later_wall = datetime(2026, 9, 19, 12, 30, tzinfo=UTC)
+    agent = MonitorComponent(options(by="agent", style="ranking"), registry=build_chart_registry())
+    project = MonitorComponent(
+        options(by="project", style="ranking"), registry=build_chart_registry()
+    )
+    for component in (agent, project):
+        component.accept(completion(component, (record(100),)), now=0, wall=wall)
+        component.accept(completion(component, (record(130),)), now=10, wall=wall)
+
+    agent_accepted = agent.ranking_model(now=10, count=4, wall=wall)
+    project_accepted = project.ranking_model(now=10, count=4, wall=wall)
+
+    assert agent.ranking_model(now=1800, count=4, wall=later_wall) == agent_accepted
+    assert project.ranking_model(now=1800, count=4, wall=later_wall) == project_accepted
+
+
+def test_monitor_component_next_accept_advances_projection_but_stale_does_not() -> None:
+    component = MonitorComponent(options(), registry=build_chart_registry())
+    wall = datetime(2026, 9, 19, 12, 0, tzinfo=UTC)
+    component.accept(completion(component, (record(100),)), now=0, wall=wall)
+    component.accept(completion(component, (record(160),)), now=10, wall=wall)
+    accepted = component.timeline_model(now=10, count=4, wall=wall)
+
+    stale = completion(component, (record(220),))
+    component.configure(options(window_seconds=600), data_affecting=True)
+    assert not component.accept(stale, now=20, wall=wall)
+    assert component.timeline_model(now=1800, count=4, wall=wall) == accepted
+
+    component.accept(completion(component, (record(220),)), now=20, wall=wall)
+    advanced = component.timeline_model(now=20, count=4, wall=wall)
+    assert advanced != accepted
+    assert component.timeline_model(
+        now=1800,
+        count=4,
+        wall=datetime(2026, 9, 19, 12, 30, tzinfo=UTC),
+    ) == advanced
+
+
 def test_monitor_component_uses_bucket_token_growth_for_agent_ranking() -> None:
     component = MonitorComponent(
         options(by="agent", style="ranking"), registry=build_chart_registry()

@@ -184,11 +184,11 @@ class MonitorComponent:
             self.observer.rebaseline(counters, now, wall)
             self.clear_changes()
             self.rebaseline_pending = False
-            values = self.current_values(now, wall=wall)
+            values = self._latest_bucket_values_at(now, 32, wall)
             self.observer.update_y_axis(max(values.values(), default=0.0))
         else:
             self.observer.add(counters, now, wall)
-            values = self.current_values(now, wall=wall)
+            values = self._latest_bucket_values_at(now, 32, wall)
             self.value_changes.accept(values)
             self.rank_changes.accept(monitor_rank_keys(values))
             self.observer.update_y_axis(max(values.values(), default=0.0))
@@ -213,6 +213,19 @@ class MonitorComponent:
         preview.accepted_records = self.accepted_records
         preview.observer = _copy_observer(self.observer)
         preview._configure_observer(self._monitor_config(options))
+        preview.accepted_at = self.accepted_at
+        preview.refreshed_at = self.refreshed_at
+        preview.last_elapsed = self.last_elapsed
+        preview.render_revision = self.render_revision
+        preview.value_changes = RefreshDeltas(
+            dict(self.value_changes.previous),
+            dict(self.value_changes.current),
+            self.value_changes.initialized,
+        )
+        preview.rank_changes = RefreshRanks(
+            dict(self.rank_changes.previous),
+            dict(self.rank_changes.current),
+        )
         return preview
 
     def clear_changes(self) -> None:
@@ -320,13 +333,34 @@ class MonitorComponent:
         audit = render_audit(context)
         return "\n".join(line for line in (observation, chart, audit) if line)
 
+    def buckets(
+        self, count: int, *, now: float | None = None, wall: datetime | None = None
+    ):
+        """Project buckets at the last accepted sample, ignoring repaint-time clocks."""
+        projection_now = self.refreshed_at if self.refreshed_at is not None else now
+        if projection_now is None:
+            projection_now = 0.0
+        projection_wall = self.accepted_at if self.accepted_at is not None else wall
+        return self.observer.buckets(
+            self.observer.display_now(projection_now), count, projection_wall
+        )
+
     def _buckets(self, now: float, count: int, wall: datetime | None):
-        return self.observer.buckets(self.observer.display_now(now), count, wall)
+        return self.buckets(count, now=now, wall=wall)
 
     def _latest_bucket_values(
         self, now: float, count: int, wall: datetime | None
     ) -> dict[str, float]:
-        buckets = self._buckets(now, count, wall)
+        return self._latest_values(self._buckets(now, count, wall))
+
+    def _latest_bucket_values_at(
+        self, now: float, count: int, wall: datetime | None
+    ) -> dict[str, float]:
+        buckets = self.observer.buckets(self.observer.display_now(now), count, wall)
+        return self._latest_values(buckets)
+
+    @staticmethod
+    def _latest_values(buckets) -> dict[str, float]:
         names = dict.fromkeys(key for bucket in buckets for key in bucket.values)
         return {
             name: value
