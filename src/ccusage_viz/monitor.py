@@ -20,8 +20,8 @@ from ccusage_viz.monitor_component import MonitorComponent, MonitorSubmission
 from ccusage_viz.options import MonitorConfig, StandaloneLaunch, adjust_standalone
 from ccusage_viz.query.models import QueryTrigger
 from ccusage_viz.render.base import RenderContext
-from ccusage_viz.terminal import InteractiveScreen, Terminal, inspect_terminal
-from ccusage_viz.terminal_ui import controls_line, dimmed, input_mode, read_key
+from ccusage_viz.terminal import FramePainter, Terminal, compose_frame, inspect_terminal
+from ccusage_viz.terminal_ui import controls_line, input_mode, read_key
 
 
 def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
@@ -39,7 +39,7 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
         owner_id="standalone:monitor",
         runtime=runtime,
     )
-    screen = InteractiveScreen()
+    screen = FramePainter()
     active: MonitorSubmission | None = None
     active_trigger: QueryTrigger | None = None
     active_discarded = False
@@ -153,18 +153,22 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                     terminal=terminal,
                     view=body_view,
                 )
-            screen.paint(body, status, controls, height=terminal.height, force=force)
+            screen.paint(
+                compose_frame(body, status, controls, height=terminal.height), force=force
+            )
         except UsageError as exc:
             screen.paint(
-                format_error(
-                    exc,
-                    translator,
-                    color=False,
-                    color_scheme=config.chart.presentation.theme,
+                compose_frame(
+                    format_error(
+                        exc,
+                        translator,
+                        color=False,
+                        color_scheme=config.chart.presentation.theme,
+                    ),
+                    status,
+                    controls,
+                    height=terminal.height,
                 ),
-                status,
-                controls,
-                height=terminal.height,
                 force=force,
             )
 
@@ -226,10 +230,12 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                 color=terminal.color,
             )
             screen.paint(
-                render_component(preview, candidate, terminal, control_rows=2),
-                translator.text("status.tui_adjust_monitor"),
-                (adjustment_state, key_help),
-                height=terminal.height,
+                compose_frame(
+                    render_component(preview, candidate, terminal, control_rows=2),
+                    translator.text("status.tui_adjust_monitor"),
+                    (adjustment_state, key_help),
+                    height=terminal.height,
+                )
             )
 
         paint_picker()
@@ -347,21 +353,7 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                             ),
                             interval=f"{component.candidate.host.interval:g}",
                         )
-                        screen.paint_status(
-                            translator.text(
-                                "status.monitor_sampling_prefix",
-                                seconds=(
-                                    f"{component.last_elapsed:.2f}"
-                                    if component.last_elapsed is not None
-                                    else "…"
-                                ),
-                                interval=f"{component.candidate.host.interval:g}",
-                            )
-                            + dimmed(
-                                translator.text("status.monitor_sampling_active"),
-                                color=component.candidate.chart.presentation.theme != "no-color",
-                            )
-                        )
+                        paint()
                     else:
                         paint()
                 if active is not None and active.handle.done():
@@ -487,7 +479,7 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                         interval=f"{component.candidate.host.interval:g}",
                         state=f" · {translator.text('status.paused')}" if paused else "",
                     )
-                    screen.paint_status(status)
+                    paint()
     except KeyboardInterrupt:
         return 0
     finally:

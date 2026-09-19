@@ -63,7 +63,7 @@ from ccusage_viz.query.runtime import QueryRuntime
 from ccusage_viz.render.base import RenderContext, styled_text
 from ccusage_viz.render.palette import COLOR_SCHEMES, get_color_scheme
 from ccusage_viz.render.summary import render_summary, render_summary_placeholder
-from ccusage_viz.terminal import InteractiveScreen, Terminal
+from ccusage_viz.terminal import FramePainter, Terminal, compose_frame
 from ccusage_viz.terminal_ui import notice_lines as format_notice_lines
 from ccusage_viz.tui_input import InputDecoder, KeyEvent, MouseEvent, read_event, tui_input_mode
 
@@ -788,7 +788,7 @@ def _dashboard_adjustment_status(
 
 
 def _choose_pane_type(
-    screen: InteractiveScreen,
+    screen: FramePainter,
     translator: Translator,
     decoder: InputDecoder,
     *,
@@ -801,10 +801,12 @@ def _choose_pane_type(
             for item in _PANE_COMMANDS
         )
         screen.paint(
-            choices,
-            translator.text("status.tui_add_title"),
-            translator.text("status.tui_add_controls"),
-            height=height,
+            compose_frame(
+                choices,
+                translator.text("status.tui_add_title"),
+                translator.text("status.tui_add_controls"),
+                height=height,
+            )
         )
         event = read_event(decoder, 0.1)
         if not isinstance(event, KeyEvent):
@@ -852,7 +854,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
     last_successful_update: datetime | None = None
     last_size: tuple[int, int] | None = None
     footer_notice_rows = 0
-    screen = InteractiveScreen(sys.stdout)
+    screen = FramePainter(sys.stdout)
 
     def allocate_pane_owner_id() -> str:
         nonlocal next_pane_id
@@ -1097,7 +1099,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         if body_view != "chart":
             footer_notice_rows = 0
             body = format_full_command_display(full_dashboard_command(), size.columns)
-            screen.paint(body, status, controls(), height=size.lines, force=force)
+            screen.paint(
+                compose_frame(body, status, controls(), height=size.lines), force=force
+            )
             return
         initial_pending = all(
             pane.refreshed_at == 0.0 and pane.component.error is None for pane in panes
@@ -1109,7 +1113,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 size.columns,
             )
             body = "\n".join((*header_lines, loading))
-            screen.paint(body, status, controls(), height=size.lines, force=force)
+            screen.paint(
+                compose_frame(body, status, controls(), height=size.lines), force=force
+            )
             return
 
         def render_panes(layout: PanelLayout, columns: int) -> list[PaneRender]:
@@ -1183,11 +1189,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         )
         body = "\n".join((*header_lines, grid))
         screen.paint(
-            body,
-            status,
-            controls(),
-            notice_lines,
-            height=size.lines,
+            compose_frame(body, status, controls(), notice_lines, height=size.lines),
             force=force,
         )
 

@@ -18,59 +18,57 @@ class Terminal:
     ascii: bool
 
 
-class InteractiveScreen:
+@dataclass(frozen=True, slots=True)
+class Frame:
+    rows: tuple[str, ...]
+
+
+def compose_frame(
+    body: str,
+    status: str | None,
+    controls: str | tuple[str, ...],
+    notices: tuple[str, ...] = (),
+    *,
+    height: int | None = None,
+) -> Frame:
+    control_rows = (controls,) if isinstance(controls, str) else controls
+    body_rows = body.rstrip("\r\n").splitlines() if body else []
+    status_rows = () if status is None else (status,)
+    if height is not None:
+        body_rows = body_rows[
+            : max(0, height - len(notices) - len(status_rows) - len(control_rows))
+        ]
+    rows = [*status_rows, *body_rows]
+    if height is not None:
+        rows.extend(
+            "" for _ in range(max(0, height - len(rows) - len(notices) - len(control_rows)))
+        )
+    rows.extend(notices)
+    rows.extend(control_rows)
+    return Frame(tuple(rows))
+
+
+class FramePainter:
     def __init__(self, stream: TextIO = sys.stdout) -> None:
         self.stream = stream
         self.painted = False
         self.finished = False
-        self._lines: tuple[str, ...] = ()
-        self._height: int | None = None
+        self._frame: Frame | None = None
 
-    def paint(
-        self,
-        body: str,
-        status: str | None,
-        controls: str | tuple[str, ...],
-        notices: tuple[str, ...] = (),
-        *,
-        height: int | None = None,
-        force: bool = False,
-    ) -> None:
-        control_lines = (controls,) if isinstance(controls, str) else controls
-        body_lines = body.rstrip("\r\n").splitlines() if body else []
-        status_lines = () if status is None else (status,)
-        if height is not None:
-            body_lines = body_lines[
-                : max(0, height - len(notices) - len(status_lines) - len(control_lines))
-            ]
-        lines = [*status_lines, *body_lines]
-        if height is not None:
-            lines.extend(
-                "" for _ in range(max(0, height - len(lines) - len(notices) - len(control_lines)))
-            )
-        lines.extend(notices)
-        lines.extend(control_lines)
-        next_lines = tuple(lines)
-        if force or not self.painted or self._height != height:
-            content = "\n".join(next_lines)
-            self.stream.write(f"\x1b[H\x1b[2J{content}")
+    def paint(self, frame: Frame, *, force: bool = False) -> None:
+        if force or not self.painted or self._frame is None:
+            self.stream.write("\x1b[H\x1b[2J" + "\n".join(frame.rows))
         else:
             updates = []
-            for index, line in enumerate(next_lines):
-                if index >= len(self._lines) or self._lines[index] != line:
-                    updates.append(f"\x1b[{index + 1};1H\x1b[2K{line}")
-            for index in range(len(next_lines), len(self._lines)):
+            for index, row in enumerate(frame.rows):
+                if index >= len(self._frame.rows) or self._frame.rows[index] != row:
+                    updates.append(f"\x1b[{index + 1};1H\x1b[2K{row}")
+            for index in range(len(frame.rows), len(self._frame.rows)):
                 updates.append(f"\x1b[{index + 1};1H\x1b[2K")
             if updates:
                 self.stream.write("".join(updates))
         self.stream.flush()
-        self._lines = next_lines
-        self._height = height
-        self.painted = True
-
-    def paint_status(self, status: str) -> None:
-        self.stream.write(f"\x1b[H\x1b[2K{status}")
-        self.stream.flush()
+        self._frame = frame
         self.painted = True
 
     def finish(self) -> None:
@@ -103,5 +101,4 @@ def inspect_terminal(
             minimum_width=minimum_width,
             minimum_height=minimum_height,
         )
-    color = not no_color
-    return Terminal(actual.columns, actual.lines, color, ascii)
+    return Terminal(actual.columns, actual.lines, not no_color, ascii)

@@ -366,9 +366,9 @@ The migration is incremental but does not preserve legacy internal APIs.
 ### Phase 3: Result Processing and Charts
 
 - Split generic filtering and Summary logic from chart-specific projection.
-- Create one Definition per historical chart and Monitor.
+- Create one Definition per historical chart; Monitor remains a runtime/data mode that projects into Timeline or Ranking.
 - Move Monitor difference/window/Gap state into its Component processing state.
-- Create shared Chart Components and remove cross-imports between command loops.
+- Create shared historical and Monitor Components and remove cross-imports between command loops.
 
 ### Phase 4: Rendering and declarative presentation
 

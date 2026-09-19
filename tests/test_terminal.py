@@ -4,7 +4,7 @@ from io import StringIO
 import pytest
 
 from ccusage_viz.errors import UsageError
-from ccusage_viz.terminal import InteractiveScreen, inspect_terminal
+from ccusage_viz.terminal import FramePainter, compose_frame, inspect_terminal
 
 
 class Stream(StringIO):
@@ -16,71 +16,67 @@ class Stream(StringIO):
         return self.tty
 
 
-def test_interactive_screen_finishes_once_after_paint() -> None:
+def test_frame_painter_finishes_once_after_paint() -> None:
     stream = Stream(True)
-    screen = InteractiveScreen(stream)
+    painter = FramePainter(stream)
 
-    screen.finish()
+    painter.finish()
     assert stream.getvalue() == ""
 
-    screen.paint("chart", "status", "controls", height=4)
-    screen.finish()
-    screen.finish()
+    painter.paint(compose_frame("chart", "status", "controls", height=4))
+    painter.finish()
+    painter.finish()
 
     assert stream.getvalue() == "\x1b[H\x1b[2Jstatus\nchart\n\ncontrols\n"
 
 
-def test_interactive_screen_places_notices_directly_above_controls() -> None:
+def test_compose_frame_places_notices_directly_above_controls() -> None:
+    frame = compose_frame("chart", "status", "controls", ("warning",), height=6)
+
+    assert frame.rows == ("status", "chart", "", "", "warning", "controls")
+
+
+def test_frame_painter_force_repaints_and_preserves_incremental_updates() -> None:
     stream = Stream(True)
-    screen = InteractiveScreen(stream)
+    painter = FramePainter(stream)
+    frame = compose_frame("chart", "status", "controls", height=4)
 
-    screen.paint("chart", "status", "controls", ("warning",), height=6)
-
-    assert stream.getvalue() == "\x1b[H\x1b[2Jstatus\nchart\n\n\nwarning\ncontrols"
-
-
-def test_interactive_screen_force_repaints_and_preserves_incremental_updates() -> None:
-    stream = Stream(True)
-    screen = InteractiveScreen(stream)
-
-    screen.paint("chart", "status", "controls", height=4)
+    painter.paint(frame)
     stream.seek(0)
     stream.truncate(0)
 
-    screen.paint("chart", "status", "controls", height=4)
+    painter.paint(frame)
     assert stream.getvalue() == ""
 
-    screen.paint("chart", "status", "controls", height=4, force=True)
+    painter.paint(frame, force=True)
     assert stream.getvalue() == "\x1b[H\x1b[2Jstatus\nchart\n\ncontrols"
 
     stream.seek(0)
     stream.truncate(0)
-    screen.paint("updated", "status", "controls", height=4)
+    painter.paint(compose_frame("updated", "status", "controls", height=4))
     assert stream.getvalue() == "\x1b[2;1H\x1b[2Kupdated"
 
 
-def test_interactive_screen_can_omit_status_row() -> None:
-    stream = Stream(True)
-    screen = InteractiveScreen(stream)
+def test_compose_frame_can_omit_status_row() -> None:
+    frame = compose_frame("chart\nextra", None, ("one", "two", "three"), height=5)
 
-    screen.paint("chart\nextra", None, ("one", "two", "three"), height=5)
-
-    assert stream.getvalue() == "\x1b[H\x1b[2Jchart\nextra\none\ntwo\nthree"
+    assert frame.rows == ("chart", "extra", "one", "two", "three")
 
 
-def test_interactive_screen_reserves_each_control_row() -> None:
-    stream = Stream(True)
-    screen = InteractiveScreen(stream)
-
-    screen.paint(
+def test_compose_frame_reserves_each_control_row() -> None:
+    frame = compose_frame(
         "chart\nextra",
         "status",
         ("pane controls", "layout controls", "appearance controls"),
         height=5,
     )
 
-    assert stream.getvalue() == (
-        "\x1b[H\x1b[2Jstatus\nchart\npane controls\nlayout controls\nappearance controls"
+    assert frame.rows == (
+        "status",
+        "chart",
+        "pane controls",
+        "layout controls",
+        "appearance controls",
     )
 
 

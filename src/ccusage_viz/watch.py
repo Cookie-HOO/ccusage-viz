@@ -42,7 +42,7 @@ from ccusage_viz.options import (
 from ccusage_viz.query.coordinator import QueryHandle
 from ccusage_viz.query.models import ProviderResult, QueryTrigger
 from ccusage_viz.render.palette import COLOR_SCHEMES
-from ccusage_viz.terminal import InteractiveScreen, Terminal, inspect_terminal
+from ccusage_viz.terminal import FramePainter, Terminal, compose_frame, inspect_terminal
 from ccusage_viz.terminal_ui import controls_line, dimmed, input_mode, notice_lines, read_key
 
 
@@ -151,20 +151,22 @@ def run_once(options: StandaloneLaunch, translator: Translator) -> int:
             if current.host.demo_size
             else translator.text("status.query_time", seconds=f"{result.elapsed:.2f}")
         )
-        screen = InteractiveScreen(sys.stdout)
+        screen = FramePainter(sys.stdout)
         screen.paint(
-            result.chart,
-            status,
-            "",
-            notice_lines(
-                result.notices,
-                width=terminal.width,
-                color=terminal.color,
-                ascii=terminal.ascii,
-                translator=translator,
-                color_scheme=current.chart.presentation.theme,
-            ),
-            height=terminal.height,
+            compose_frame(
+                result.chart,
+                status,
+                "",
+                notice_lines(
+                    result.notices,
+                    width=terminal.width,
+                    color=terminal.color,
+                    ascii=terminal.ascii,
+                    translator=translator,
+                    color_scheme=current.chart.presentation.theme,
+                ),
+                height=terminal.height,
+            )
         )
         screen.finish()
         return 0
@@ -180,11 +182,9 @@ def _paint(
     *,
     height: int | None = None,
 ) -> None:
-    InteractiveScreen(sys.stdout).paint(body, status, controls, notices, height=height)
-
-
-def _paint_status(status: str) -> None:
-    InteractiveScreen(sys.stdout).paint_status(status)
+    FramePainter(sys.stdout).paint(
+        compose_frame(body, status, controls, notices, height=height)
+    )
 
 
 def _refreshing_status(status: str, translator: Translator, *, color: bool) -> str:
@@ -216,7 +216,7 @@ def run_runtime_adjustment(
     options: StandaloneLaunch,
     translator: Translator,
     snapshot: UsageSnapshot,
-    screen: InteractiveScreen,
+    screen: FramePainter,
 ) -> RuntimeAdjustmentResult | None:
     theme_index = COLOR_SCHEMES.index(options.chart.presentation.theme)
     last_size: os.terminal_size | None = None
@@ -349,18 +349,20 @@ def run_runtime_adjustment(
             part for part in (translator.text("status.tui_adjust_history"), preview_notice) if part
         )
         screen.paint(
-            chart,
-            status,
-            controls,
-            notice_lines(
-                notices,
-                width=terminal.width,
-                color=terminal.color,
-                ascii=terminal.ascii,
-                translator=translator,
-                color_scheme=theme,
-            ),
-            height=terminal.height,
+            compose_frame(
+                chart,
+                status,
+                controls,
+                notice_lines(
+                    notices,
+                    width=terminal.width,
+                    color=terminal.color,
+                    ascii=terminal.ascii,
+                    translator=translator,
+                    color_scheme=theme,
+                ),
+                height=terminal.height,
+            )
         )
 
     try:
@@ -403,11 +405,11 @@ def run_watch(
     translator: Translator,
     *,
     seed: RefreshResult | None = None,
-    screen: InteractiveScreen | None = None,
+    screen: FramePainter | None = None,
 ) -> int:
     if isinstance(options.chart, MonitorConfig):
         raise TypeError("historical watch mode does not support monitor configurations")
-    active_screen = screen or InteractiveScreen(sys.stdout)
+    active_screen = screen or FramePainter(sys.stdout)
     interval = options.host.interval or 10.0
     runtime = build_query_runtime()
     current = seed.options if seed and seed.options is not None else options
@@ -503,20 +505,22 @@ def run_watch(
                 exc, translator, color=False, color_scheme=current.chart.presentation.theme
             )
             active_screen.paint(
-                last_chart or warning,
-                status(),
-                ()
-                if controls_hidden
-                else controls_line(controls(), width=size.columns, color=False),
-                notice_lines(
-                    (*last_notices, warning) if last_chart else (),
-                    width=size.columns,
-                    color=False,
-                    ascii=current.host.ascii,
-                    translator=translator,
-                    color_scheme=current.chart.presentation.theme,
+                compose_frame(
+                    last_chart or warning,
+                    status(),
+                    ()
+                    if controls_hidden
+                    else controls_line(controls(), width=size.columns, color=False),
+                    notice_lines(
+                        (*last_notices, warning) if last_chart else (),
+                        width=size.columns,
+                        color=False,
+                        ascii=current.host.ascii,
+                        translator=translator,
+                        color_scheme=current.chart.presentation.theme,
+                    ),
+                    height=size.lines,
                 ),
-                height=size.lines,
                 force=force,
             )
             return
@@ -561,18 +565,20 @@ def run_watch(
             )
         )
         active_screen.paint(
-            body,
-            status(),
-            () if not footer else controls_line(footer, width=size.columns, color=color),
-            notice_lines(
-                (*last_notices, render_warning) if render_warning is not None else last_notices,
-                width=size.columns,
-                color=color,
-                ascii=current.host.ascii,
-                translator=translator,
-                color_scheme=current.chart.presentation.theme,
+            compose_frame(
+                body,
+                status(),
+                () if not footer else controls_line(footer, width=size.columns, color=color),
+                notice_lines(
+                    (*last_notices, render_warning) if render_warning is not None else last_notices,
+                    width=size.columns,
+                    color=color,
+                    ascii=current.host.ascii,
+                    translator=translator,
+                    color_scheme=current.chart.presentation.theme,
+                ),
+                height=size.lines,
             ),
-            height=size.lines,
             force=force,
         )
 
@@ -617,7 +623,7 @@ def run_watch(
                     if trigger is not None:
                         pending_trigger = None
                         start_refresh(trigger)
-                        active_screen.paint_status(status())
+                        paint()
 
                 try:
                     outcome = results.get_nowait()
@@ -762,7 +768,7 @@ def run_watch(
                     paused = not paused
                     if not paused:
                         next_refresh = time.monotonic() + interval
-                    active_screen.paint_status(status())
+                    paint()
                 elif current.host.demo_size and key in {"s", "d", "l"}:
                     size = {"s": "small", "d": "medium", "l": "large"}[key]
                     current = replace(current, host=replace(current.host, demo_size=size))

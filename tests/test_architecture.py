@@ -3,6 +3,8 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+from ccusage_viz.bootstrap import build_chart_registry
+
 PACKAGE_ROOT = Path(__file__).parents[1] / "src" / "ccusage_viz"
 
 
@@ -28,6 +30,22 @@ def _forbidden_imports(root: Path, forbidden_imports: set[str]) -> list[str]:
                 ):
                     violations.append(f"{path.name}: {module}")
     return violations
+
+
+def test_chart_registry_contains_only_the_four_presentation_charts() -> None:
+    registry = build_chart_registry()
+
+    assert [definition.chart_id for definition in registry] == [
+        "timeline",
+        "calendar",
+        "stack",
+        "ranking",
+    ]
+    assert not any(
+        isinstance(node, ast.ClassDef) and node.name == "MonitorDefinition"
+        for path in (PACKAGE_ROOT / "charts").rglob("*.py")
+        for node in ast.walk(ast.parse(path.read_text()))
+    )
 
 
 def test_query_package_does_not_import_host_or_presentation_layers() -> None:
@@ -61,7 +79,42 @@ def test_chart_catalog_does_not_import_hosts_or_data_adapters() -> None:
     ) == []
 
 
-def test_dashboard_panes_do_not_mirror_historical_component_state() -> None:
+def test_providers_do_not_import_monitor_or_presentation_layers() -> None:
+    assert _forbidden_imports(
+        PACKAGE_ROOT / "providers",
+        {
+            "ccusage_viz.chart_models",
+            "ccusage_viz.monitor",
+            "ccusage_viz.monitor_component",
+            "ccusage_viz.processing.monitor",
+            "ccusage_viz.render",
+        },
+    ) == []
+
+
+def test_renderers_do_not_import_monitor_runtime_or_data_adapters() -> None:
+    assert _forbidden_imports(
+        PACKAGE_ROOT / "render",
+        {
+            "ccusage_viz.monitor",
+            "ccusage_viz.monitor_component",
+            "ccusage_viz.processing.monitor",
+            "ccusage_viz.providers",
+            "ccusage_viz.query",
+        },
+    ) == []
+
+
+def test_monitor_hosts_do_not_import_the_removed_query_client() -> None:
+    for name in ("monitor.py", "tui.py"):
+        assert _forbidden_imports(
+            PACKAGE_ROOT / name,
+            {"ccusage_viz.query.client"},
+        ) == []
+    assert not (PACKAGE_ROOT / "query" / "client.py").exists()
+
+
+def test_dashboard_panes_do_not_mirror_component_business_state() -> None:
     tree = ast.parse((PACKAGE_ROOT / "tui.py").read_text())
     pane = next(
         node
@@ -79,13 +132,31 @@ def test_dashboard_panes_do_not_mirror_historical_component_state() -> None:
         {
             "options",
             "snapshot",
+            "observer",
             "error",
             "generation",
+            "render_revision",
+            "accepted_options",
             "submitted_generation",
             "submitted_options",
             "requested_options",
+            "rebaseline_pending",
+            "value_changes",
+            "rank_changes",
         }
     )
+
+
+def test_hosts_compose_complete_frames_and_only_painter_writes_rows() -> None:
+    terminal = (PACKAGE_ROOT / "terminal.py").read_text()
+    assert "class Frame:" in terminal
+    assert "class FramePainter:" in terminal
+    assert "def paint_status" not in terminal
+
+    for name in ("monitor.py", "tui.py", "watch.py"):
+        source = (PACKAGE_ROOT / name).read_text()
+        assert "compose_frame(" in source
+        assert "paint_status(" not in source
 
 
 def test_reusable_historical_views_do_not_import_watch_host() -> None:

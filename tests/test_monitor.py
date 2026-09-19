@@ -444,11 +444,8 @@ def test_standalone_pause_discards_active_sample_and_preserves_paused_status(
             return True
 
     class Screen:
-        def paint(self, body: str, status: str, *_args: object, **_kwargs: object) -> None:
-            events.append(("paint", body, status))
-
-        def paint_status(self, status: str) -> None:
-            events.append(("status", status))
+        def paint(self, frame: object, **_kwargs: object) -> None:
+            events.append(("paint", frame))
 
         def finish(self) -> None:
             events.append(("finish",))
@@ -457,7 +454,7 @@ def test_standalone_pause_discards_active_sample_and_preserves_paused_status(
     monkeypatch.setattr(monitor_host, "build_query_runtime", lambda: runtime)
     monkeypatch.setattr(monitor_host, "build_chart_registry", lambda: object())
     monkeypatch.setattr(monitor_host, "MonitorComponent", Component)
-    monkeypatch.setattr(monitor_host, "InteractiveScreen", Screen)
+    monkeypatch.setattr(monitor_host, "FramePainter", Screen)
     monkeypatch.setattr(monitor_host, "input_mode", nullcontext)
     monkeypatch.setattr(monitor_host, "read_key", lambda _timeout: next(keys))
     monkeypatch.setattr(monitor_host, "get_terminal_size", lambda: terminal_size((100, 30)))
@@ -471,5 +468,7 @@ def test_standalone_pause_discards_active_sample_and_preserves_paused_status(
     assert ("pause",) in events
     assert ("submission-cancel",) in events
     assert not any(event[0] == "fail" for event in events)
-    assert any(event[0] == "status" and "paused" in str(event[1]) for event in events)
+    assert any(
+        event[0] == "paint" and "paused" in str(event[1]) for event in events
+    )
     assert events[-2:] == [("runtime-cancel",), ("finish",)]

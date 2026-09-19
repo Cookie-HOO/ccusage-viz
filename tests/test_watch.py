@@ -31,13 +31,12 @@ from ccusage_viz.options import (
     StandaloneLaunch,
     TimelineConfig,
 )
-from ccusage_viz.terminal import InteractiveScreen, Terminal
+from ccusage_viz.terminal import FramePainter, Terminal
 from ccusage_viz.terminal_ui import controls_line, notice_lines
 from ccusage_viz.watch import (
     RefreshResult,
     RuntimeAdjustmentResult,
     _paint,
-    _paint_status,
     _refreshing_status,
     _watch_status,
     render_component,
@@ -114,12 +113,13 @@ def test_one_shot_paints_one_complete_interactive_frame(
         "ccusage_viz.watch.render_component",
         lambda *args, **kwargs: RefreshResult("complete chart", ("notice",), 0.25),
     )
-    monkeypatch.setattr("ccusage_viz.watch.InteractiveScreen", Screen)
+    monkeypatch.setattr("ccusage_viz.watch.FramePainter", Screen)
 
     assert run_once(options(), load_translator("en")) == 0
     assert [event[0] for event in events] == ["init", "paint", "finish"]
-    assert events[1][1] == "complete chart"
-    assert events[1][-1]["height"] == 30
+    assert events[1][1].rows[0] == "DEMO DATA · small · ccusage not invoked"
+    assert "complete chart" in events[1][1].rows
+    assert len(events[1][1].rows) == 30
 
 
 def test_watch_paint_places_footer_last_without_refresh_newline(
@@ -149,13 +149,6 @@ def test_watch_paint_keeps_footer_visible_if_body_is_too_tall(
 ) -> None:
     _paint("one\ntwo\nthree\nfour", "status", "controls", ("warning",), height=5)
     assert capsys.readouterr().out == "\x1b[H\x1b[2Jstatus\none\ntwo\nwarning\ncontrols"
-
-
-def test_watch_refresh_only_repaints_the_status_line(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    _paint_status("ccusage 1.96s · refresh every 5s · refreshing")
-    assert capsys.readouterr().out == "\x1b[H\x1b[2Kccusage 1.96s · refresh every 5s · refreshing"
 
 
 def test_refreshing_hint_is_dimmed_only_when_color_is_enabled() -> None:
@@ -385,7 +378,7 @@ def test_runtime_adjustment_updates_display_options_from_retained_snapshot(
         current,
         load_translator("en"),
         snapshot,
-        cast(InteractiveScreen, Screen()),
+        cast(FramePainter, Screen()),
     )
 
     assert isinstance(result, RuntimeAdjustmentResult)
@@ -435,12 +428,12 @@ def test_runtime_adjustment_retains_last_chart_until_an_invalid_draft_recovers(
         current,
         load_translator("en"),
         UsageSnapshot((), (), 0.25),
-        cast(InteractiveScreen, Screen()),
+        cast(FramePainter, Screen()),
     )
 
     assert isinstance(result, RuntimeAdjustmentResult)
     assert calls == 3
-    assert any(args[0] == "chart" and "too narrow" in str(args[3]) for args in paints)
+    assert any("chart" in args[0].rows and "too narrow" in str(args[0].rows) for args in paints)
 
 
 def test_runtime_adjustment_pages_match_dashboard_and_weekdays_work(
@@ -450,7 +443,7 @@ def test_runtime_adjustment_pages_match_dashboard_and_weekdays_work(
 
     class Screen:
         def paint(self, *args, **kwargs) -> None:
-            controls.append(args[2])
+            controls.append(args[0].rows[-2:])
 
     keys = iter(("k", "a", "k", "b", "a", "b", "\n"))
     monkeypatch.setattr("ccusage_viz.watch.input_mode", nullcontext)
@@ -464,7 +457,7 @@ def test_runtime_adjustment_pages_match_dashboard_and_weekdays_work(
         options(command="timeline"),
         load_translator("en"),
         UsageSnapshot((), (), 0.25),
-        cast(InteractiveScreen, Screen()),
+        cast(FramePainter, Screen()),
     )
 
     assert isinstance(result, RuntimeAdjustmentResult)
@@ -497,11 +490,11 @@ def test_project_adjustment_explains_missing_retained_attribution(
         options(command="timeline"),
         load_translator("en"),
         UsageSnapshot((), (), 0.25),
-        cast(InteractiveScreen, Screen()),
+        cast(FramePainter, Screen()),
     )
 
     assert result is None
-    assert any("project data is not in this preview" in str(args[1]) for args in paints)
+    assert any("project data is not in this preview" in str(args[0].rows) for args in paints)
 
 
 def test_runtime_adjustment_copy_uses_adjusted_display_options(
@@ -537,7 +530,7 @@ def test_runtime_adjustment_copy_uses_adjusted_display_options(
         ),
         load_translator("en"),
         UsageSnapshot((), (), 0.25),
-        cast(InteractiveScreen, Screen()),
+        cast(FramePainter, Screen()),
     )
 
     assert result is None
@@ -573,7 +566,7 @@ def test_runtime_adjustment_normalizes_timeline_area_when_grouping_changes(
         ),
         load_translator("en"),
         UsageSnapshot((), (), 0.25),
-        cast(InteractiveScreen, Screen()),
+        cast(FramePainter, Screen()),
     )
 
     assert isinstance(result, RuntimeAdjustmentResult)
