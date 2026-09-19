@@ -8,18 +8,13 @@ from typing import TypeAlias
 
 from ccusage_viz.coverage import DateCoverage, DateInterval
 from ccusage_viz.domain import Notice, UsageRecord
+from ccusage_viz.lifecycle import QueryTrigger
 
 
 class DataResolution(StrEnum):
     DATE = "date"
     RANGE = "range"
     TIMESTAMP = "timestamp"
-
-
-class QueryTrigger(StrEnum):
-    STARTUP = "startup"
-    REFRESH = "refresh"
-    TICK = "tick"
 
 
 @dataclass(frozen=True, order=True, slots=True)
