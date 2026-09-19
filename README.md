@@ -172,10 +172,15 @@ Observed TPM is neither QPM nor API rate-limit TPM. There is no QPM metric. Exte
 ## Dashboard
 
 ```bash
-# Filled 2×2 overview; Monitor defaults to Model TPM
+# Wide is the default preset; narrow and all provide alternative starting points
 ccuv dashboard
+ccuv dashboard narrow
+ccuv dashboard all
 
-# Choose any supported pane types and a startup grid
+# A preset can be overridden and extended with additional panes
+ccuv dashboard wide --refresh-interval 30 --pane "calendar"
+
+# Or define the complete pane list without a preset
 ccuv dashboard --pane "timeline --period 7d" --pane "stack" \
   --pane "ranking --by agent" --pane "monitor --by model --top 5" --grid 2x2
 
@@ -186,7 +191,7 @@ ccuv dashboard --refresh-interval 30 --sampling-interval 5
 ccuv dashboard --header-style panel --header-summary quarter --header-interval 90
 ```
 
-`dashboard` owns one terminal input loop and compositor while each Pane keeps its latest result, failure state, and—when it is a Monitor Pane—its own in-memory observation history. It starts with a compact loading state rather than an empty framed grid. The default Dashboard is a filled 2×2 overview: Timeline, Stack, Ranking, and Monitor grouped by Model. This generated Monitor default is equivalent to `monitor --by model`; standalone `monitor` and an explicit `--pane "monitor"` still show authoritative Total TPM. `--pane` is repeatable and takes a quoted chart fragment beginning with `timeline`, `calendar`, `stack`, `ranking`, or `monitor`; Host, process, and lifecycle options are rejected inside fragments. Dashboard owns cadence: `--refresh-interval` refreshes Historical Panes and `--sampling-interval` samples Monitor Panes. `--grid ROWSxCOLUMNS` selects the startup grid (`auto` uses up to two columns).
+`dashboard` owns one terminal input loop and compositor while each Pane keeps its latest result, failure state, and—when it is a Monitor Pane—its own in-memory observation history. It starts with a compact loading state rather than an empty framed grid. The default `wide` preset is a filled 2×2 overview: Timeline, Stack, Ranking, and Monitor grouped by Model. Bare `ccuv dashboard` is equivalent to `ccuv dashboard wide`; `narrow` provides a three-pane vertical view and `all` expands all ten representative views into a framed 5×2 grid. A preset supplies the base panes and settings, explicit Dashboard options override it, and repeated `--pane` values append. Without a preset, `--pane` defines the complete list. The generated Wide Monitor is equivalent to `monitor --by model`; standalone `monitor` and an explicit `--pane "monitor"` still show authoritative Total TPM. `--pane` takes a quoted chart fragment beginning with `timeline`, `calendar`, `stack`, `ranking`, or `monitor`; Host, process, and lifecycle options are rejected inside fragments. Dashboard owns cadence: `--refresh-interval` refreshes Historical Panes and `--sampling-interval` samples Monitor Panes. `--grid ROWSxCOLUMNS` selects the startup grid (`auto` uses up to two columns).
 
 The Dashboard Header is independent from pane summaries. `--header-style` accepts `hidden`, `compact`, `banner`, or `panel` (the default). `--header-summary` independently selects `day`, `month`, `quarter`, `year`, or `none` (default `day`); `none` keeps the title and freshness but omits detail, while `hidden` removes the entire Header. During a cold period switch, the full localized structure appears immediately with `??` values and is replaced only by accepted data. Header data is an unfiltered all-agent total refreshed separately every 60 seconds by default (`--header-interval`). The title row right-aligns the last successfully accepted update time; failed or stale refreshes do not advance it. Dashboard `--theme` colors only the shell, title, Header summary, placeholders, and separators; every pane keeps its own `--theme`. Dashboard `--style` consolidates shell structure into `minimal`, `split` (default), `framed`, or `accent`; it never changes pane chart styles or Header Style. Press `s` to adjust pane 1 or click a pane directly; `Tab` is inert while browsing and wraps between panes during pane adjustment.
 
@@ -194,7 +199,7 @@ Browse mode intentionally has one concise footer row: `r` refresh all, `s`/click
 
 Monitor owns an anchored, padded y-axis shared by standalone and Dashboard rendering. The bound expands immediately when data crosses it and shrinks only after sustained lower utilization, so small fluctuations move the line instead of continuously moving the axis. This changes presentation only: Total and Model remain observed TPM, while Agent and Project remain visible-window Token growth.
 
-Dashboard child panes share no completed data. Overlapping calls with the **exact** executable string, argument tuple, and timeout use one running subprocess, then each pane receives its own decoded copy. Different commands, options, timeouts, or calls that start after a prior one finished are never merged. The independent Header alone retains a process-local unfiltered daily coverage cache: a warm period switch renders immediately, a cold wider switch queries only Header data and shows `?` for unknown detail until accepted, and accepted intervals authoritatively replace cached rows. Failed, cancelled, or stale results preserve the last accepted Header data and freshness.
+Dashboard child panes share no completed data. Overlapping calls with the **exact** executable string, argument tuple, and timeout use one running subprocess, then each pane receives its own decoded copy. Different commands, options, timeouts, or calls that start after a prior one finished are never merged. The independent Header alone retains a process-local unfiltered daily coverage cache: a warm period switch renders immediately, a cold wider switch queries only Header data and shows `??` for unknown detail until accepted, and accepted intervals authoritatively replace cached rows. Failed, cancelled, or stale results preserve the last accepted Header data and freshness.
 
 ## Historical lifecycle
 

@@ -6,6 +6,8 @@ from ccusage_viz.locales import EN_MESSAGES, ZH_MESSAGES
 
 def test_catalogs_have_the_same_keys_and_placeholders() -> None:
     assert EN_MESSAGES.keys() == ZH_MESSAGES.keys()
+    assert EN_MESSAGES["label.monitor_sampling"] == "sampling"
+    assert ZH_MESSAGES["label.monitor_sampling"] == "采样中"
 
 
 @pytest.mark.parametrize(

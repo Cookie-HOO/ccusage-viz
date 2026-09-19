@@ -224,6 +224,24 @@ def test_observed_timeline_uses_wall_clock_axis_and_metric_heading() -> None:
     assert "2026-01-01" not in output
 
 
+def test_observed_timeline_renders_sampling_state_with_real_translator() -> None:
+    model = TimelineModel(
+        (),
+        (),
+        observed_at=(datetime(2026, 1, 1, 10, 0),),
+        observed_series=(ScalarSeries("Total", "Total", (0.0,)),),
+        metric=MetricDescriptor("tpm"),
+        observed_scope=ObservedScope(900, "total", "sampling"),
+    )
+
+    output = render_timeline(
+        model,
+        RenderContext(80, 24, load_translator("en"), color=False, ascii=True),
+    )
+
+    assert "sampling" in output
+
+
 def test_observed_ranking_uses_window_unit_without_historical_percentage() -> None:
     model = RankingModel(
         (),

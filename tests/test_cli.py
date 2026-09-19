@@ -359,6 +359,82 @@ def test_dashboard_rejects_non_positive_or_non_finite_timeout(timeout: str) -> N
     assert caught.value.key == "error.arguments"
 
 
+def test_bare_dashboard_is_equivalent_to_wide_preset() -> None:
+    parser = build_parser(load_translator("en"))
+
+    bare = _to_options(parser.parse_args(["dashboard"]))
+    wide = _to_options(parser.parse_args(["dashboard", "wide"]))
+
+    assert bare == wide
+    assert bare.host.grid == "2x2"
+    assert bare.host.refresh_interval == 60
+    assert bare.host.sampling_interval == 15
+    assert tuple(pane.chart.kind for pane in bare.panes) == (
+        "timeline",
+        "stack",
+        "ranking",
+        "monitor",
+    )
+
+
+def test_dashboard_narrow_and_all_presets_expand_to_concrete_state() -> None:
+    parser = build_parser(load_translator("en"))
+
+    narrow = _to_options(parser.parse_args(["dashboard", "narrow"]))
+    all_panes = _to_options(parser.parse_args(["dashboard", "all"]))
+
+    assert narrow.host.grid == "3x1"
+    assert tuple(pane.chart.kind for pane in narrow.panes) == (
+        "timeline",
+        "ranking",
+        "monitor",
+    )
+    assert narrow.panes[1].chart.by == "project"
+    assert narrow.panes[1].chart.top == 5
+    assert narrow.panes[2].chart.presentation.style == "ranking"
+    assert len(all_panes.panes) == 10
+    assert all_panes.host.grid == "5x2"
+    assert all_panes.host.style == "framed"
+
+
+def test_dashboard_preset_accepts_overrides_and_appended_panes() -> None:
+    parser = build_parser(load_translator("en"))
+    arguments = [
+        "dashboard",
+        "wide",
+        "--refresh-interval",
+        "20",
+        "--pane",
+        "calendar",
+    ]
+
+    options = _to_options(
+        parser.parse_args(arguments), explicit=frozenset({"refresh_interval", "panes"})
+    )
+
+    assert options.host.refresh_interval == 20
+    assert options.host.grid == "3x2"
+    assert len(options.panes) == 5
+    assert options.panes[-1].chart.kind == "calendar"
+
+
+def test_dashboard_rejects_unknown_preset() -> None:
+    parser = build_parser(load_translator("en"))
+
+    with pytest.raises(UsageError, match="error.arguments"):
+        parser.parse_args(["dashboard", "medium"])
+
+
+def test_dashboard_options_require_a_preset_or_pane() -> None:
+    parser = build_parser(load_translator("en"))
+
+    with pytest.raises(UsageError, match="error.arguments"):
+        _to_options(
+            parser.parse_args(["dashboard", "--theme", "nord"]),
+            explicit=frozenset({"color_scheme"}),
+        )
+
+
 def test_dashboard_owns_distinct_pane_cadences() -> None:
     parser = build_parser(load_translator("en"))
     options = _to_options(

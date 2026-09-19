@@ -11,7 +11,7 @@ from typing import Any, Never
 
 from ccusage_viz import __version__
 from ccusage_viz.application import run
-from ccusage_viz.dashboard import DEFAULT_DASHBOARD_PANELS
+from ccusage_viz.dashboard import DASHBOARD_PRESETS
 from ccusage_viz.diagnostics import color_enabled, format_error
 from ccusage_viz.errors import UsageError, VizError
 from ccusage_viz.i18n import Translator, detect_language, load_translator
@@ -331,6 +331,12 @@ def build_parser(tr: Translator) -> argparse.ArgumentParser:
     tui = subparsers.add_parser(
         "dashboard", help=tr.text("help.dashboard"), description=tr.text("help.dashboard")
     )
+    tui.add_argument(
+        "preset",
+        nargs="?",
+        choices=tuple(DASHBOARD_PRESETS),
+        help=tr.text("help.dashboard_preset"),
+    )
     _add_tui(tui, tr)
 
     return parser
@@ -496,14 +502,30 @@ def _to_options(
     if not math.isfinite(process.query_timeout) or process.query_timeout <= 0:
         raise UsageError("error.arguments", detail="--query-timeout must be positive and finite")
     if command == "dashboard":
-        fragments = namespace.panes or list(DEFAULT_DASHBOARD_PANELS)
-        if namespace.grid != "auto":
+        preset_name = namespace.preset
+        if preset_name is None and not namespace.panes:
+            if explicit:
+                raise UsageError(
+                    "error.arguments",
+                    detail="dashboard options require a preset or at least one --pane",
+                )
+            preset_name = "wide"
+        preset = DASHBOARD_PRESETS.get(preset_name)
+        fragments = [*(preset.panels if preset is not None else ()), *namespace.panes]
+        grid = namespace.grid
+        if preset is not None and "grid" not in explicit:
+            grid = preset.grid
+            if namespace.panes:
+                _, columns_text = grid.lower().split("x", 1)
+                columns = int(columns_text)
+                grid = f"{math.ceil(len(fragments) / columns)}x{columns}"
+        if grid != "auto":
             try:
-                rows, columns = (int(item) for item in namespace.grid.lower().split("x", 1))
+                rows, columns = (int(item) for item in grid.lower().split("x", 1))
             except (ValueError, AttributeError):
-                raise UsageError("error.tui_grid", value=namespace.grid) from None
+                raise UsageError("error.tui_grid", value=grid) from None
             if rows < 1 or columns < 1 or rows * columns < len(fragments):
-                raise UsageError("error.tui_grid", value=namespace.grid)
+                raise UsageError("error.tui_grid", value=grid)
         for cadence in (
             namespace.refresh_interval,
             namespace.sampling_interval,
@@ -515,14 +537,26 @@ def _to_options(
             timezone=namespace.timezone,
             ascii=namespace.ascii,
             demo_size=namespace.demo,
-            grid=namespace.grid,
-            refresh_interval=namespace.refresh_interval,
-            sampling_interval=namespace.sampling_interval,
+            grid=grid,
+            refresh_interval=(
+                preset.refresh_interval
+                if preset is not None and "refresh_interval" not in explicit
+                else namespace.refresh_interval
+            ),
+            sampling_interval=(
+                preset.sampling_interval
+                if preset is not None and "sampling_interval" not in explicit
+                else namespace.sampling_interval
+            ),
             header_style=namespace.header_style,
             header_summary=namespace.header_summary,
             header_interval=namespace.header_interval,
             theme=namespace.color_scheme,
-            style=namespace.dashboard_style,
+            style=(
+                preset.style
+                if preset is not None and "style" not in explicit
+                else namespace.dashboard_style
+            ),
         )
         launch = DashboardLaunch(process, host, (), explicit)
         return replace(

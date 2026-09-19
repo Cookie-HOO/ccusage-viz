@@ -60,7 +60,7 @@ def test_dashboard_defaults_to_a_filled_four_pane_dashboard() -> None:
         "monitor",
     )
     assert options.panes[-1].chart.by == "model"
-    assert options.host.refresh_interval == 15.0
+    assert options.host.refresh_interval == 60.0
     assert options.host.sampling_interval == 15.0
     assert options.host.grid == "2x2"
     assert options.host.header_style == "panel"

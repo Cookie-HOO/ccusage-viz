@@ -172,10 +172,15 @@ ccuv monitor --demo small
 ## Dashboard
 
 ```bash
-# 默认填满的 2×2 总览；Monitor 默认按模型显示 TPM
+# 默认使用 wide 预设；narrow 和 all 提供其他启动组合
 ccuv dashboard
+ccuv dashboard narrow
+ccuv dashboard all
 
-# 选择任意支持的子图和启动网格
+# 可覆盖预设设置并追加 Pane
+ccuv dashboard wide --refresh-interval 30 --pane "calendar"
+
+# 也可不使用预设，完整定义 Pane 列表
 ccuv dashboard --pane "timeline --period 7d" --pane "stack" \
   --pane "ranking --by agent" --pane "monitor --by model --top 5" --grid 2x2
 
@@ -186,7 +191,7 @@ ccuv dashboard --refresh-interval 30 --sampling-interval 5
 ccuv dashboard --header-style panel --header-summary quarter --header-interval 90
 ```
 
-`dashboard` 使用一个终端输入循环和合成器；每个 Pane 保留最近结果、失败状态，Monitor Pane 还保留自己的内存观测历史。默认 Dashboard 是填满的 2×2 总览，包含 Timeline、Stack、Ranking，以及按模型分组的 Monitor。自动生成的 Monitor 等同于 `monitor --by model`；独立运行 `monitor` 或显式指定 `--pane "monitor"` 时仍显示权威的总体 TPM。`--pane` 可重复，值是以 `timeline`、`calendar`、`stack`、`ranking` 或 `monitor` 开头的图表片段；片段内禁止 Host、进程和生命周期选项。Dashboard 拥有调度：`--refresh-interval` 控制 Historical Pane 刷新，`--sampling-interval` 控制 Monitor Pane 采样。`--grid ROWSxCOLUMNS` 设置启动网格，`auto` 最多使用两列。
+`dashboard` 使用一个终端输入循环和合成器；每个 Pane 保留最近结果、失败状态，Monitor Pane 还保留自己的内存观测历史。默认 `wide` 预设是填满的 2×2 总览，包含 Timeline、Stack、Ranking，以及按模型分组的 Monitor。裸 `ccuv dashboard` 等价于 `ccuv dashboard wide`；`narrow` 提供三个 Pane 的纵向视图，`all` 将十个代表性视图展开为 framed 5×2 网格。Preset 提供基础 Pane 与设置，显式 Dashboard 参数会覆盖对应设置，重复的 `--pane` 会继续追加；不使用 Preset 时，`--pane` 定义完整列表。Wide 自动生成的 Monitor 等同于 `monitor --by model`；独立运行 `monitor` 或显式指定 `--pane "monitor"` 时仍显示权威的总体 TPM。`--pane` 的值是以 `timeline`、`calendar`、`stack`、`ranking` 或 `monitor` 开头的图表片段；片段内禁止 Host、进程和生命周期选项。Dashboard 拥有调度：`--refresh-interval` 控制 Historical Pane 刷新，`--sampling-interval` 控制 Monitor Pane 采样。`--grid ROWSxCOLUMNS` 设置启动网格，`auto` 最多使用两列。
 
 Dashboard 页眉与子图摘要彼此独立。`--header-style` 支持 `hidden`、`compact`、`banner` 和默认的 `panel`。`--header-summary` 独立选择 `day`、`month`、`quarter`、`year` 或 `none`（默认 `day`）；`none` 保留标题与更新时间但省略详情，`hidden` 隐藏整个页眉。冷切换粒度时会立即显示完整的本地化结构和 `??` 占位，只有已接受的数据才会替换它。页眉使用未筛选的全部 Agent 总量，默认每 60 秒独立刷新；失败或过期结果不会推进成功更新时间。Dashboard 的 `--theme` 只控制外壳、大标题、页眉摘要、占位和分隔，子图保留各自独立的 `--theme`。Dashboard 的 `--style` 将外壳结构统一为 `minimal`、默认的 `split`、`framed` 或 `accent`，不会改变子图图表样式或 Header Style。按 `s` 从第一个子图开始调整，或点击任意子图直接调整；浏览时 `Tab` 不执行操作，子图调整时循环切换子图。
 
@@ -194,7 +199,7 @@ Dashboard 页眉与子图摘要彼此独立。`--header-style` 支持 `hidden`�
 
 Monitor 在独立命令和 Dashboard 中共用带留白且稳定的 y 轴。数据越界时上界立即扩大，持续处于低区间后才缩小，因此小幅变化会表现为折线移动，而不是坐标轴不断移动。指标语义不变：总体与模型仍是观测 TPM，Agent 与项目仍是在可见窗口内的 Token 累计增长。
 
-Dashboard 子图之间不共享已经完成的数据。可执行命令字符串、参数元组和超时完全相同且执行时间重叠的调用会共用一个运行中的子进程，随后每个子图获得独立解码副本；其他调用不会合并。只有独立页眉保留当前进程内、未筛选的每日覆盖缓存：覆盖充分时切换粒度立即渲染；切换到更宽但未覆盖的粒度时只查询页眉数据，并在结果接收前以 `?` 表示未知详情；成功接收的区间会权威替换缓存中的对应记录。失败、取消或过期结果不会改变已接收的页眉数据和更新时间。
+Dashboard 子图之间不共享已经完成的数据。可执行命令字符串、参数元组和超时完全相同且执行时间重叠的调用会共用一个运行中的子进程，随后每个子图获得独立解码副本；其他调用不会合并。只有独立页眉保留当前进程内、未筛选的每日覆盖缓存：覆盖充分时切换粒度立即渲染；切换到更宽但未覆盖的粒度时只查询页眉数据，并在结果接收前以 `??` 表示未知详情；成功接收的区间会权威替换缓存中的对应记录。失败、取消或过期结果不会改变已接收的页眉数据和更新时间。
 
 ## 历史图表生命周期
 
