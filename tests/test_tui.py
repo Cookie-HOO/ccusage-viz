@@ -273,6 +273,7 @@ def test_dashboard_pause_cancels_automatic_panes_and_manual_refresh_remains_allo
     class Submission:
         def __init__(self, generation: int) -> None:
             self.generation = generation
+            self.purpose = tui_module.HistoricalPurpose.PRIMARY
             self.handle = self
             self.cancelled = threading.Event()
 
@@ -281,7 +282,7 @@ def test_dashboard_pause_cancels_automatic_panes_and_manual_refresh_remains_allo
             events.append(("submission-cancel", self.generation))
 
         def result(self) -> object:
-            self.cancelled.wait(1)
+            self.cancelled.wait(10)
             raise RuntimeError("cancelled query must stay hidden")
 
     class Component:
@@ -290,6 +291,8 @@ def test_dashboard_pause_cancels_automatic_panes_and_manual_refresh_remains_allo
             self.accepted_options = None
             self.error = None
             self.generation = 0
+            self.snapshot = None
+            self.accepted_generation = None
 
         def configure(self, selected: object, *, data_affecting: bool) -> None:
             if selected != self.candidate:
@@ -297,13 +300,22 @@ def test_dashboard_pause_cancels_automatic_panes_and_manual_refresh_remains_allo
                 if data_affecting:
                     self.generation += 1
 
-        def submit(self, trigger: QueryTrigger) -> Submission:
+        def missing_comparison_coverage(self) -> DateCoverage:
+            return DateCoverage()
+
+        def submit(self, trigger: QueryTrigger, **_kwargs: object) -> Submission:
             events.append(("submit", trigger, self.generation))
             submission = Submission(self.generation)
             submissions.append(submission)
             return submission
 
-        def fail(self, error: BaseException, *, generation: int) -> bool:
+        def fail(
+            self,
+            error: BaseException,
+            *,
+            generation: int,
+            **_kwargs: object,
+        ) -> bool:
             events.append(("fail", str(error), generation))
             return True
 
@@ -344,6 +356,148 @@ def test_dashboard_pause_cancels_automatic_panes_and_manual_refresh_remains_allo
         ("runtime-cancel",),
         ("finish",),
     ]
+
+
+def test_dashboard_primary_completion_queues_pane_supplement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parser = build_parser(load_translator("en"))
+    options = _to_options(
+        parser.parse_args(
+            [
+                "dashboard",
+                "--demo",
+                "--header-style",
+                "hidden",
+                "--header-summary",
+                "none",
+                "--pane",
+                "timeline --density full",
+            ]
+        )
+    )
+    comparison = DateCoverage((DateInterval(date(2025, 12, 31), date(2025, 12, 31)),))
+    events: list[tuple[object, ...]] = []
+
+    class Runtime:
+        def cancel(self) -> None:
+            events.append(("runtime-cancel",))
+
+    class Submission:
+        def __init__(self, generation: int, purpose: tui_module.HistoricalPurpose) -> None:
+            self.generation = generation
+            self.purpose = purpose
+
+        def cancel(self) -> None:
+            events.append(("submission-cancel", self.purpose))
+
+        def result(self) -> object:
+            events.append(("result", self.purpose))
+            return object()
+
+    class Component:
+        def __init__(self, selected: object, **_kwargs: object) -> None:
+            self.candidate = selected
+            self.accepted_generation = None
+            self.accepted_options = None
+            self.accepted_at = None
+            self.snapshot = None
+            self.error = None
+            self.generation = 0
+            self._missing = DateCoverage()
+
+        def configure(self, selected: object, *, data_affecting: bool) -> None:
+            if selected != self.candidate:
+                self.candidate = selected
+                if data_affecting:
+                    self.generation += 1
+
+        def missing_comparison_coverage(self) -> DateCoverage:
+            return self._missing
+
+        def submit(self, trigger: QueryTrigger, **kwargs: object) -> Submission:
+            purpose = kwargs["purpose"]
+            assert isinstance(purpose, tui_module.HistoricalPurpose)
+            events.append(
+                (
+                    "submit",
+                    trigger,
+                    purpose,
+                    kwargs.get("coverage"),
+                    self.generation,
+                )
+            )
+            return Submission(self.generation, purpose)
+
+        def accept(self, _completion: object) -> bool:
+            chart = self.candidate.chart
+            display = DateCoverage.from_interval(chart.date_range.since, chart.date_range.until)
+            if self.snapshot is None:
+                self.snapshot = UsageSnapshot((), (), 0.1, coverage=display)
+                self.accepted_generation = self.generation
+                self._missing = comparison
+            else:
+                self.snapshot = UsageSnapshot(
+                    (),
+                    (),
+                    0.1,
+                    coverage=self.snapshot.coverage.merge(comparison),
+                )
+                self._missing = DateCoverage()
+            self.accepted_options = self.candidate
+            self.accepted_at = tui_module.datetime.now().astimezone()
+            return True
+
+        def fail(self, *_args: object, **_kwargs: object) -> bool:
+            events.append(("fail",))
+            return True
+
+    class Screen:
+        def __init__(self, _stream: object) -> None:
+            pass
+
+        def paint(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def finish(self) -> None:
+            events.append(("finish",))
+
+    runtime = Runtime()
+
+    def read_when_ready(_decoder: object, _timeout: float) -> KeyEvent | None:
+        results = [event for event in events if event[0] == "result"]
+        if len(results) < 2:
+            threading.Event().wait(0.01)
+            return None
+        return KeyEvent("\x03")
+
+    monkeypatch.setattr(tui_module, "build_query_runtime", lambda: runtime)
+    monkeypatch.setattr(tui_module, "build_chart_registry", lambda: object())
+    monkeypatch.setattr(tui_module, "HistoricalChartComponent", Component)
+    monkeypatch.setattr(tui_module, "FramePainter", Screen)
+    monkeypatch.setattr(tui_module, "tui_input_mode", nullcontext)
+    monkeypatch.setattr(tui_module, "read_event", read_when_ready)
+    monkeypatch.setattr(
+        tui_module, "get_terminal_size", lambda: __import__("os").terminal_size((100, 30))
+    )
+    monkeypatch.setattr(tui_module, "_pane_render", lambda *_args: tui_module.PaneRender("chart"))
+
+    assert tui_module.run_tui(options, load_translator("en")) == 0
+    submissions = [event for event in events if event[0] == "submit"]
+    assert submissions == [
+        ("submit", QueryTrigger.STARTUP, tui_module.HistoricalPurpose.PRIMARY, None, 0),
+        (
+            "submit",
+            QueryTrigger.REFRESH,
+            tui_module.HistoricalPurpose.SUPPLEMENTAL,
+            DateCoverage.from_interval(
+                options.panes[0].chart.date_range.since,
+                options.panes[0].chart.date_range.until,
+            ),
+            0,
+        ),
+    ]
+    assert not any(event[0] == "fail" for event in events)
 
 
 def test_dashboard_pane_render_retains_notices_for_each_source_pane() -> None:

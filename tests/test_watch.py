@@ -14,13 +14,17 @@ from ccusage_viz.charts.builtins import RANKING_DEFINITION
 from ccusage_viz.charts.definition import HistoricalRenderer
 from ccusage_viz.charts.registry import ChartRegistry
 from ccusage_viz.core.time import DateRange
-from ccusage_viz.coverage import DateCoverage
+from ccusage_viz.coverage import DateCoverage, DateInterval
 from ccusage_viz.domain import Notice
 from ccusage_viz.errors import UsageError
 from ccusage_viz.formatting import display_width, strip_ansi
-from ccusage_viz.historical_component import HistoricalChartComponent, UsageSnapshot
+from ccusage_viz.historical_component import (
+    HistoricalChartComponent,
+    HistoricalPurpose,
+    UsageSnapshot,
+)
 from ccusage_viz.i18n import load_translator
-from ccusage_viz.lifecycle import QueryTrigger
+from ccusage_viz.lifecycle import FixedIntervalScheduler, QueryTrigger
 from ccusage_viz.options import (
     CalendarConfig,
     ChartPresentation,
@@ -160,6 +164,7 @@ def test_historical_pause_cancels_automatic_query_and_manual_refresh_remains_all
             self.snapshot = None
             self.model = None
             self.generation = 0
+            self.accepted_generation = None
 
         def configure(self, selected: StandaloneLaunch, *, data_affecting: bool) -> None:
             if selected != self.candidate:
@@ -167,13 +172,22 @@ def test_historical_pause_cancels_automatic_query_and_manual_refresh_remains_all
                 if data_affecting:
                     self.generation += 1
 
-        def submit(self, trigger: object) -> Submission:
+        def missing_comparison_coverage(self) -> DateCoverage:
+            return DateCoverage()
+
+        def submit(self, trigger: object, **_kwargs: object) -> Submission:
             events.append(("submit", trigger, self.generation))
             submission = Submission(self.generation, self.candidate)
             submissions.append(submission)
             return submission
 
-        def fail(self, error: BaseException, *, generation: int) -> bool:
+        def fail(
+            self,
+            error: BaseException,
+            *,
+            generation: int,
+            **_kwargs: object,
+        ) -> bool:
             events.append(("fail", str(error), generation))
             return True
 
@@ -216,6 +230,151 @@ def test_historical_pause_cancels_automatic_query_and_manual_refresh_remains_all
         ("runtime-cancel",),
         ("finish",),
     ]
+
+
+def test_historical_primary_completion_queues_supplement_without_moving_cadence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    launch = replace(options(command="timeline"), host=replace(options().host, watch=True))
+    comparison = DateCoverage((DateInterval(date(2025, 12, 31), date(2025, 12, 31)),))
+    events: list[tuple[object, ...]] = []
+    baselines: list[tuple[float, float]] = []
+
+    class Runtime:
+        def cancel(self) -> None:
+            events.append(("runtime-cancel",))
+
+    class Handle:
+        def done(self) -> bool:
+            return True
+
+    class Submission:
+        def __init__(self, generation: int, purpose: HistoricalPurpose) -> None:
+            self.generation = generation
+            self.purpose = purpose
+            self.handle = Handle()
+
+        def cancel(self) -> None:
+            events.append(("submission-cancel", self.purpose))
+
+        def result(self) -> object:
+            events.append(("result", self.purpose))
+            return object()
+
+    class Component:
+        def __init__(self, selected: StandaloneLaunch, **_kwargs: object) -> None:
+            self.candidate = selected
+            self.accepted_generation = None
+            self.snapshot = None
+            self.model = None
+            self.generation = 0
+            self._missing = DateCoverage()
+
+        def configure(self, selected: StandaloneLaunch, *, data_affecting: bool) -> None:
+            self.candidate = selected
+            if data_affecting:
+                self.generation += 1
+
+        def display_coverage(self) -> DateCoverage:
+            chart = cast(TimelineConfig, self.candidate.chart)
+            return DateCoverage.from_interval(chart.date_range.since, chart.date_range.until)
+
+        def required_coverage(self) -> DateCoverage:
+            return self.display_coverage().merge(comparison)
+
+        def missing_comparison_coverage(self) -> DateCoverage:
+            return self._missing
+
+        def submit(
+            self,
+            trigger: QueryTrigger,
+            **kwargs: object,
+        ) -> Submission:
+            purpose = cast(HistoricalPurpose, kwargs["purpose"])
+            events.append(
+                (
+                    "submit",
+                    trigger,
+                    purpose,
+                    kwargs.get("coverage"),
+                    kwargs.get("required_coverage"),
+                    self.generation,
+                )
+            )
+            return Submission(self.generation, purpose)
+
+        def accept(self, _completion: object) -> bool:
+            if self.snapshot is None:
+                self.snapshot = UsageSnapshot((), (), 0.1, coverage=self.display_coverage())
+                self.accepted_generation = self.generation
+                self._missing = comparison
+            else:
+                self.snapshot = UsageSnapshot(
+                    (),
+                    (),
+                    0.1,
+                    coverage=self.snapshot.coverage.merge(comparison),
+                )
+                self._missing = DateCoverage()
+            return True
+
+        def fail(self, *_args: object, **_kwargs: object) -> bool:
+            events.append(("fail",))
+            return True
+
+    class Scheduler(FixedIntervalScheduler):
+        def __init__(self, interval: float, *, now: float) -> None:
+            super().__init__(interval, now=now)
+            baselines.append((self.baseline, self.next_opportunity))
+
+        def due(self, *, now: float) -> bool:
+            baselines.append((self.baseline, self.next_opportunity))
+            return False
+
+    class Screen:
+        def __init__(self, _stream: object) -> None:
+            pass
+
+        def paint(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def finish(self) -> None:
+            events.append(("finish",))
+
+    keys = iter((None, None, "\x03"))
+    runtime = Runtime()
+    monkeypatch.setattr("ccusage_viz.watch.build_query_runtime", lambda: runtime)
+    monkeypatch.setattr("ccusage_viz.watch.build_chart_registry", lambda: object())
+    monkeypatch.setattr("ccusage_viz.watch.HistoricalChartComponent", Component)
+    monkeypatch.setattr("ccusage_viz.watch.FixedIntervalScheduler", Scheduler)
+    monkeypatch.setattr("ccusage_viz.watch.FramePainter", Screen)
+    monkeypatch.setattr("ccusage_viz.watch.input_mode", nullcontext)
+    monkeypatch.setattr("ccusage_viz.watch.read_key", lambda _timeout: next(keys))
+    monkeypatch.setattr("ccusage_viz.watch.get_terminal_size", lambda: os.terminal_size((100, 30)))
+    monkeypatch.setattr(
+        "ccusage_viz.watch.inspect_terminal",
+        lambda *_args, **_kwargs: Terminal(100, 30, False, True),
+    )
+    monkeypatch.setattr(
+        "ccusage_viz.watch.render_component",
+        lambda *_args, **_kwargs: RefreshResult("chart", (), 0.1),
+    )
+
+    assert run_watch(launch, load_translator("en")) == 0
+    submissions = [event for event in events if event[0] == "submit"]
+    assert submissions == [
+        ("submit", QueryTrigger.STARTUP, HistoricalPurpose.PRIMARY, None, None, 1),
+        (
+            "submit",
+            QueryTrigger.REFRESH,
+            HistoricalPurpose.SUPPLEMENTAL,
+            DateCoverage.from_interval(date(2026, 1, 1), date(2026, 1, 14)),
+            None,
+            1,
+        ),
+    ]
+    assert len(set(baselines)) == 1
+    assert not any(event[0] == "fail" for event in events)
 
 
 def test_watch_paint_places_footer_last_without_refresh_newline(

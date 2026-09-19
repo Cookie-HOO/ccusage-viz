@@ -88,7 +88,9 @@ def historical_query_intent(
         raise TypeError("historical query planning does not support monitor configurations")
     provider = definition.provider
     scope_interval = DateInterval(chart.date_range.since, chart.date_range.until)
-    required_coverage = required_coverage or DateCoverage((scope_interval,))
+    required_coverage = (
+        required_coverage if required_coverage is not None else DateCoverage((scope_interval,))
+    )
     coverage = coverage or DateCoverage()
     project_required = bool(chart.filters.projects) or getattr(chart, "by", None) == "project"
     available_options = {

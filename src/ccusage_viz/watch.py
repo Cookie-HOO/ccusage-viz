@@ -22,6 +22,7 @@ from ccusage_viz.diagnostics import color_enabled, format_error
 from ccusage_viz.errors import UsageError
 from ccusage_viz.historical_component import (
     HistoricalChartComponent,
+    HistoricalPurpose,
     HistoricalSubmission,
     UsageSnapshot,
 )
@@ -509,8 +510,40 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
             force=force,
         )
 
+    def operation_purpose(operation: OperationToken) -> HistoricalPurpose:
+        if (
+            operation.trigger is LifecycleTrigger.CONFIGURATION
+            and component.snapshot is not None
+            and component.accepted_generation == component.generation
+            and component.missing_comparison_coverage().intervals
+        ):
+            return HistoricalPurpose.SUPPLEMENTAL
+        return HistoricalPurpose.PRIMARY
+
     def start(operation: OperationToken) -> tuple[HistoricalSubmission, Callable[[], None]]:
-        submission = component.submit(query_trigger(operation.trigger))
+        purpose = operation_purpose(operation)
+        try:
+            submission = component.submit(
+                query_trigger(operation.trigger),
+                coverage=(
+                    component.snapshot.coverage
+                    if purpose is HistoricalPurpose.SUPPLEMENTAL and component.snapshot is not None
+                    else None
+                ),
+                purpose=purpose,
+                required_coverage=(
+                    component.required_coverage()
+                    if not options.host.watch and purpose is HistoricalPurpose.PRIMARY
+                    else None
+                ),
+            )
+        except BaseException as exc:
+            component.fail(
+                exc,
+                generation=component.generation,
+                purpose=purpose,
+            )
+            raise
         return submission, submission.cancel
 
     def start_ready(now: float) -> bool:
@@ -518,7 +551,6 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
         try:
             return lifecycle.start_ready(now=now, start=start)
         except BaseException as exc:
-            component.fail(exc, generation=component.generation)
             base_status = format_error(
                 exc,
                 translator,
@@ -534,15 +566,17 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
         *,
         now: float,
         replace_active: bool = False,
+        data_affecting: bool = True,
     ) -> bool:
         nonlocal base_status, terminal_error
-        candidate = component.candidate
-        chart = historical_chart(candidate)
-        refreshed = replace(
-            candidate,
-            chart=replace(chart, date_range=refresh_date_range(chart.date_range)),
-        )
-        component.configure(refreshed, data_affecting=True)
+        if data_affecting:
+            candidate = component.candidate
+            chart = historical_chart(candidate)
+            refreshed = replace(
+                candidate,
+                chart=replace(chart, date_range=refresh_date_range(chart.date_range)),
+            )
+            component.configure(refreshed, data_affecting=True)
         try:
             return lifecycle.request(
                 trigger,
@@ -552,7 +586,6 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
                 start=start,
             )
         except BaseException as exc:
-            component.fail(exc, generation=component.generation)
             base_status = format_error(
                 exc,
                 translator,
@@ -684,12 +717,25 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
                                         seconds=f"{outcome.snapshot.elapsed:.2f}",
                                     )
                                 )
+                                if (
+                                    submission.purpose is HistoricalPurpose.PRIMARY
+                                    and component.missing_comparison_coverage().intervals
+                                ):
+                                    request(
+                                        LifecycleTrigger.CONFIGURATION,
+                                        now=time.monotonic(),
+                                        data_affecting=False,
+                                    )
                             else:
                                 lifecycle.abandon(operation)
                     except BaseException as exc:
                         lifecycle.abandon(operation)
                         if current_operation:
-                            component.fail(exc, generation=submission.generation)
+                            component.fail(
+                                exc,
+                                generation=submission.generation,
+                                purpose=submission.purpose,
+                            )
                             base_status = format_error(
                                 exc,
                                 translator,
@@ -752,14 +798,28 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
                         current, translator, last_snapshot, active_screen
                     )
                     if picked is not None:
+                        previous = component.candidate
                         current = picked.options
                         last_chart = picked.seed.chart
                         last_notices = picked.seed.notices
                         last_snapshot = picked.seed.snapshot
-                        component.configure(current, data_affecting=True)
-                        if last_snapshot is not None:
-                            component.seed(current, last_snapshot)
-                        request(LifecycleTrigger.CONFIGURATION, now=time.monotonic())
+                        current_chart = historical_chart(current)
+                        previous_chart = historical_chart(previous)
+                        data_affecting = current_chart != previous_chart and (
+                            current_chart.date_range != previous_chart.date_range
+                            or current_chart.filters != previous_chart.filters
+                            or getattr(current_chart, "by", None)
+                            != getattr(previous_chart, "by", None)
+                        )
+                        component.configure(current, data_affecting=data_affecting)
+                        if data_affecting:
+                            request(LifecycleTrigger.CONFIGURATION, now=time.monotonic())
+                        elif component.missing_comparison_coverage().intervals:
+                            request(
+                                LifecycleTrigger.CONFIGURATION,
+                                now=time.monotonic(),
+                                data_affecting=False,
+                            )
                     paint()
                 elif key == " ":
                     if not lifecycle.paused:

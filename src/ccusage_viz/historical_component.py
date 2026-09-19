@@ -178,8 +178,10 @@ class HistoricalChartComponent:
             raise RuntimeError("historical component has no query runtime")
         submitted = self.candidate
         started = time.monotonic()
-        required = required_coverage or (
-            self.missing_comparison_coverage()
+        required = (
+            required_coverage
+            if required_coverage is not None
+            else self.missing_comparison_coverage()
             if purpose is HistoricalPurpose.SUPPLEMENTAL
             else self.display_coverage()
         )

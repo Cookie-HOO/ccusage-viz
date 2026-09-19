@@ -33,6 +33,7 @@ from ccusage_viz.formatting import (
 from ccusage_viz.historical_component import (
     HistoricalChartComponent,
     HistoricalCompletion,
+    HistoricalPurpose,
     HistoricalSubmission,
     UsageSnapshot,
     snapshot_from_result,
@@ -80,6 +81,7 @@ _PANE_COMMANDS = ("timeline", "calendar", "stack", "ranking", "monitor")
 @dataclass(frozen=True, slots=True)
 class HistoricalOutcome:
     generation: int
+    purpose: HistoricalPurpose = HistoricalPurpose.PRIMARY
     completion: HistoricalCompletion | None = None
     error: BaseException | None = None
 
@@ -574,9 +576,17 @@ def _await_historical(handle: QueryHandle[ProviderResult], started: float) -> Us
 
 def _await_historical_submission(submission: HistoricalSubmission) -> HistoricalOutcome:
     try:
-        return HistoricalOutcome(submission.generation, completion=submission.result())
+        return HistoricalOutcome(
+            submission.generation,
+            submission.purpose,
+            completion=submission.result(),
+        )
     except BaseException as exc:
-        return HistoricalOutcome(submission.generation, error=exc)
+        return HistoricalOutcome(
+            submission.generation,
+            submission.purpose,
+            error=exc,
+        )
 
 
 def _await_monitor_submission(submission: MonitorSubmission) -> MonitorOutcome:
@@ -885,13 +895,41 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
     ) -> tuple[PaneFuture, Callable[[], None]]:
         component = pane.component
         if isinstance(component, MonitorComponent):
-            submission = component.submit(
-                query_trigger(operation.trigger),
-                sample_ordinal=pane.demo_ordinal + 1,
-            )
+            try:
+                submission = component.submit(
+                    query_trigger(operation.trigger),
+                    sample_ordinal=pane.demo_ordinal + 1,
+                )
+            except BaseException as exc:
+                component.fail(exc, generation=component.generation)
+                raise
             monitor_future = executor.submit(_await_monitor_submission, submission)
             return monitor_future, submission.cancel
-        submission = component.submit(query_trigger(operation.trigger))
+        purpose = (
+            HistoricalPurpose.SUPPLEMENTAL
+            if operation.trigger is LifecycleTrigger.CONFIGURATION
+            and component.snapshot is not None
+            and component.accepted_generation == component.generation
+            and component.missing_comparison_coverage().intervals
+            else HistoricalPurpose.PRIMARY
+        )
+        try:
+            submission = component.submit(
+                query_trigger(operation.trigger),
+                coverage=(
+                    component.snapshot.coverage
+                    if purpose is HistoricalPurpose.SUPPLEMENTAL and component.snapshot is not None
+                    else None
+                ),
+                purpose=purpose,
+            )
+        except BaseException as exc:
+            component.fail(
+                exc,
+                generation=component.generation,
+                purpose=purpose,
+            )
+            raise
         historical_future = executor.submit(_await_historical_submission, submission)
         return historical_future, submission.cancel
 
@@ -902,8 +940,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 now=now,
                 start=lambda operation: start_pane_submission(pane, operation),
             )
-        except BaseException as exc:
-            pane.component.fail(exc, generation=pane.component.generation)
+        except BaseException:
             return False
 
     def refresh(
@@ -911,10 +948,11 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         *,
         trigger: LifecycleTrigger,
         replace_active: bool = False,
+        data_affecting: bool = True,
     ) -> bool:
         pane = panes[index]
         component = pane.component
-        if not isinstance(component, MonitorComponent):
+        if not isinstance(component, MonitorComponent) and data_affecting:
             current = component.candidate
             if isinstance(current.chart, MonitorConfig):
                 raise TypeError("historical pane component has monitor configuration")
@@ -935,8 +973,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 replace_active=replace_active,
                 start=lambda operation: start_pane_submission(pane, operation),
             )
-        except BaseException as exc:
-            component.fail(exc, generation=component.generation)
+        except BaseException:
             return False
 
     def start_header_submission(
@@ -1032,14 +1069,33 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             operation, future = completed_pane
             component = pane.component
             observed_at = time.monotonic()
+            purpose = HistoricalPurpose.PRIMARY
             try:
                 loaded = future.result()
+                if isinstance(loaded, HistoricalOutcome):
+                    purpose = loaded.purpose
                 active = pane.lifecycle.accepts(operation, generation=loaded.generation)
                 if not active:
                     pane.lifecycle.abandon(operation)
                     continue
                 if loaded.error is not None:
-                    if component.fail(loaded.error, generation=loaded.generation):
+                    failed = (
+                        component.fail(
+                            loaded.error,
+                            generation=loaded.generation,
+                            purpose=loaded.purpose,
+                        )
+                        if isinstance(
+                            component,
+                            HistoricalChartComponent,
+                        )
+                        and isinstance(loaded, HistoricalOutcome)
+                        else component.fail(
+                            loaded.error,
+                            generation=loaded.generation,
+                        )
+                    )
+                    if failed:
                         pane.lifecycle.complete(operation, generation=loaded.generation)
                         changed = True
                     else:
@@ -1065,12 +1121,32 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         pane.lifecycle.complete(operation, generation=loaded.generation)
                         last_successful_update = component.accepted_at
                         changed = True
+                        if (
+                            isinstance(component, HistoricalChartComponent)
+                            and isinstance(loaded, HistoricalOutcome)
+                            and loaded.purpose is HistoricalPurpose.PRIMARY
+                            and component.missing_comparison_coverage().intervals
+                        ):
+                            refresh(
+                                index,
+                                trigger=LifecycleTrigger.CONFIGURATION,
+                                data_affecting=False,
+                            )
                     else:
                         pane.lifecycle.abandon(operation)
             except Exception as exc:
                 if pane.lifecycle.accepts(operation, generation=operation.generation):
                     pane.lifecycle.abandon(operation)
-                    if component.fail(exc, generation=operation.generation):
+                    failed = (
+                        component.fail(
+                            exc,
+                            generation=operation.generation,
+                            purpose=purpose,
+                        )
+                        if isinstance(component, HistoricalChartComponent)
+                        else component.fail(exc, generation=operation.generation)
+                    )
+                    if failed:
                         changed = True
             start_pane(index, now=observed_at)
         return changed
@@ -1392,6 +1468,15 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                     refresh(
                                         focused,
                                         trigger=LifecycleTrigger.CONFIGURATION,
+                                    )
+                                elif (
+                                    isinstance(component, HistoricalChartComponent)
+                                    and component.missing_comparison_coverage().intervals
+                                ):
+                                    refresh(
+                                        focused,
+                                        trigger=LifecycleTrigger.CONFIGURATION,
+                                        data_affecting=False,
                                     )
                     paint()
                     continue
