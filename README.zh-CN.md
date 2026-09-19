@@ -185,10 +185,10 @@ ccuv dashboard --pane "timeline --period 7d" --pane "stack" \
   --pane "ranking --by agent" --pane "monitor --by model --top 5" --grid 2x2
 
 # 设置 Dashboard 拥有的 Historical 刷新与 Monitor 采样间隔
-ccuv dashboard --refresh-interval 30 --sampling-interval 5
+ccuv dashboard wide --refresh-interval 30 --sampling-interval 5
 
 # 选择页眉样式、摘要粒度及其独立摘要刷新间隔
-ccuv dashboard --header-style panel --header-summary quarter --header-interval 90
+ccuv dashboard wide --header-style panel --header-summary quarter --header-interval 90
 ```
 
 `dashboard` 使用一个终端输入循环和合成器；每个 Pane 保留最近结果、失败状态，Monitor Pane 还保留自己的内存观测历史。默认 `wide` 预设是填满的 2×2 总览，包含 Timeline、Stack、Ranking，以及按模型分组的 Monitor。裸 `ccuv dashboard` 等价于 `ccuv dashboard wide`；`narrow` 提供三个 Pane 的纵向视图，`all` 将十个代表性视图展开为 framed 5×2 网格。Preset 提供基础 Pane 与设置，显式 Dashboard 参数会覆盖对应设置，重复的 `--pane` 会继续追加；不使用 Preset 时，`--pane` 定义完整列表。Wide 自动生成的 Monitor 等同于 `monitor --by model`；独立运行 `monitor` 或显式指定 `--pane "monitor"` 时仍显示权威的总体 TPM。`--pane` 的值是以 `timeline`、`calendar`、`stack`、`ranking` 或 `monitor` 开头的图表片段；片段内禁止 Host、进程和生命周期选项。Dashboard 拥有调度：`--refresh-interval` 控制 Historical Pane 刷新，`--sampling-interval` 控制 Monitor Pane 采样。`--grid ROWSxCOLUMNS` 设置启动网格，`auto` 最多使用两列。

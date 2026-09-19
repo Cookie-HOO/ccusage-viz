@@ -185,10 +185,10 @@ ccuv dashboard --pane "timeline --period 7d" --pane "stack" \
   --pane "ranking --by agent" --pane "monitor --by model --top 5" --grid 2x2
 
 # Set Dashboard-owned Historical refresh and Monitor sampling cadences
-ccuv dashboard --refresh-interval 30 --sampling-interval 5
+ccuv dashboard wide --refresh-interval 30 --sampling-interval 5
 
 # Choose header presentation, summary period, and independent summary cadence
-ccuv dashboard --header-style panel --header-summary quarter --header-interval 90
+ccuv dashboard wide --header-style panel --header-summary quarter --header-interval 90
 ```
 
 `dashboard` owns one terminal input loop and compositor while each Pane keeps its latest result, failure state, and—when it is a Monitor Pane—its own in-memory observation history. It starts with a compact loading state rather than an empty framed grid. The default `wide` preset is a filled 2×2 overview: Timeline, Stack, Ranking, and Monitor grouped by Model. Bare `ccuv dashboard` is equivalent to `ccuv dashboard wide`; `narrow` provides a three-pane vertical view and `all` expands all ten representative views into a framed 5×2 grid. A preset supplies the base panes and settings, explicit Dashboard options override it, and repeated `--pane` values append. Without a preset, `--pane` defines the complete list. The generated Wide Monitor is equivalent to `monitor --by model`; standalone `monitor` and an explicit `--pane "monitor"` still show authoritative Total TPM. `--pane` takes a quoted chart fragment beginning with `timeline`, `calendar`, `stack`, `ranking`, or `monitor`; Host, process, and lifecycle options are rejected inside fragments. Dashboard owns cadence: `--refresh-interval` refreshes Historical Panes and `--sampling-interval` samples Monitor Panes. `--grid ROWSxCOLUMNS` selects the startup grid (`auto` uses up to two columns).
