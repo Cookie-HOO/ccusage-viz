@@ -79,7 +79,7 @@ MESSAGES = {
     "notice.model_breakdown_missing": "部分用量未展示，因为 ccusage 没有提供模型明细。",
     "notice.model_overattributed": "部分模型明细超过对应记录的总量，因此未加入残差“其他”。",
     "notice.other_not_needed": "未生成“其他”：筛选后剩余 {count} 个分组，未超过 --top {top}。",
-    "notice.summary_excludes_session_agent": "摘要未包含 {agent} 项目会话用量；ccusage 不提供按日数据",
+    "notice.summary_excludes_session_agent": "排名包含 {agent} 项目会话用量；ccusage 不提供按日数据，因此每日摘要未包含这部分用量",
     "prompt.ccusage_install": "尚未安装 ccusage。按 Enter 执行下方命令；输入其他内容、按 Ctrl-C 或发送 EOF 可取消。\n{command}",
     "prompt.ccusage_install_confirm": "安装 ccusage？",
     "status.loading": "正在加载…",

@@ -34,6 +34,7 @@ from ccusage_viz.tui import (
     _header_lines,
     _header_options,
     _header_refresh_interval,
+    _local_pane_content,
     _new_header,
     _new_pane,
     _new_pane_options,
@@ -42,8 +43,7 @@ from ccusage_viz.tui import (
     _query_affecting_adjustment,
     _replace_header_interval,
     _set_header_theme,
-    _unique_notices,
-    compose_panels,
+    compose_panes,
     pane_at,
     pane_rects,
     parse_grid,
@@ -328,7 +328,7 @@ def test_dashboard_pause_cancels_automatic_panes_and_manual_refresh_remains_allo
     ]
 
 
-def test_dashboard_pane_render_retains_chart_notices_and_deduplicates_them() -> None:
+def test_dashboard_pane_render_retains_notices_for_each_source_pane() -> None:
     parser = build_parser(load_translator("en"))
     options = _to_options(parser.parse_args(["dashboard", "--demo"]))
     ranking = parse_dashboard_pane("ranking --by project", host=options)
@@ -360,10 +360,11 @@ def test_dashboard_pane_render_retains_chart_notices_and_deduplicates_them() -> 
     ]
 
     assert rendered[0].notices == (
-        "Summary excludes Codex project-session usage; ccusage has no per-day values",
+        "Ranking includes Codex project-session usage; daily Summary excludes it because ccusage "
+        "has no per-day values",
     )
     assert rendered[0].notices[0] not in rendered[0].chart
-    assert _unique_notices(rendered) == rendered[0].notices
+    assert rendered[1].notices == rendered[0].notices
 
 
 def test_dashboard_monitor_forwards_component_changes_to_chart_renderer(
@@ -672,9 +673,41 @@ def test_tui_accepts_repeatable_pane_fragments_and_grid() -> None:
     assert options.host.grid == "1x2"
 
 
+def test_dashboard_pane_notices_are_local_and_bounded() -> None:
+    left = _local_pane_content("Left title\nleft chart", ("! left warning",), height=4)
+    right = _local_pane_content("Right title\nright chart", (), height=4)
+    output = compose_panes([left, right], 25, 4, 1, 2, frame_style="none", ascii=True)
+    lines = output.splitlines()
+
+    assert len(lines) == 4
+    assert "Left title" in lines[0]
+    assert "Right title" in lines[0]
+    assert "! left" in lines[-1]
+    assert lines[-1].count("! left") == 1
+    assert lines[1].index("right chart") == lines[0].index("Right title")
+
+
+def test_dashboard_identical_notices_remain_in_each_source_pane() -> None:
+    notice = ("! same warning",)
+    panes = [
+        _local_pane_content("First", notice, height=4),
+        _local_pane_content("Second", notice, height=4),
+    ]
+
+    output = compose_panes(panes, 25, 4, 1, 2, frame_style="none", ascii=True)
+
+    assert output.count("! same") == 2
+
+
+def test_dashboard_constrained_pane_preserves_identity_before_local_notices() -> None:
+    pane = _local_pane_content("Identity\nbody\nstatus", ("notice one", "notice two"), height=3)
+
+    assert pane.splitlines() == ["Identity", "body", "status"]
+
+
 def test_tui_grid_auto_and_compositor() -> None:
     assert _grid_shape("auto", 3) == (2, 2)
-    output = compose_panels(["a\nb", "c\nd"], 12, 4, 1, 2, focused=0)
+    output = compose_panes(["a\nb", "c\nd"], 12, 4, 1, 2, focused=0)
     lines = output.splitlines()
     assert len(lines) == 4
     assert "a" in lines[1]
@@ -684,10 +717,10 @@ def test_tui_grid_auto_and_compositor() -> None:
 
 
 def test_tui_default_frame_has_no_browse_outline_and_adjustment_outline_is_external() -> None:
-    browsing = compose_panels(
+    browsing = compose_panes(
         ["Title\nvalue"], 12, 4, 1, 1, focused=-1, frame_style="none", ascii=True
     )
-    adjusting = compose_panels(
+    adjusting = compose_panes(
         ["Title\nvalue"], 12, 4, 1, 1, focused=0, frame_style="none", ascii=True
     )
 
@@ -697,8 +730,8 @@ def test_tui_default_frame_has_no_browse_outline_and_adjustment_outline_is_exter
 
 
 def test_tui_persistent_frame_does_not_depend_on_focus() -> None:
-    unfocused = compose_panels(["Title"], 12, 4, 1, 1, focused=-1, frame_style="subtle", ascii=True)
-    focused = compose_panels(["Title"], 12, 4, 1, 1, focused=0, frame_style="subtle", ascii=True)
+    unfocused = compose_panes(["Title"], 12, 4, 1, 1, focused=-1, frame_style="subtle", ascii=True)
+    focused = compose_panes(["Title"], 12, 4, 1, 1, focused=0, frame_style="subtle", ascii=True)
 
     assert unfocused == focused
     assert unfocused.splitlines()[1].startswith("|Title")
@@ -790,7 +823,7 @@ def test_tui_panel_layout_allocates_remainders_and_compositor_height() -> None:
     assert layout.widths == (5, 5)
     assert layout.heights == (4, 4)
     assert (layout.width, layout.height) == (11, 9)
-    assert len(compose_panels(["a", "b", "c"], 11, 9, 2, 2, divider_style="line").splitlines()) == 9
+    assert len(compose_panes(["a", "b", "c"], 11, 9, 2, 2, divider_style="line").splitlines()) == 9
 
 
 def test_tui_pane_rects_hit_test_grid_without_empty_cells() -> None:

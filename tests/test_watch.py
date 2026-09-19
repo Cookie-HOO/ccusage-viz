@@ -353,7 +353,8 @@ def test_ranking_render_shows_daily_summary_and_separate_scope_warning() -> None
         "Today’s tokens 0; vs yesterday = unchanged; vs last We = unchanged"
     )
     assert rendered.notices == (
-        "Summary excludes Codex project-session usage; ccusage has no per-day values",
+        "Ranking includes Codex project-session usage; daily Summary excludes it because ccusage "
+        "has no per-day values",
     )
     assert rendered.notices[0] not in rendered.chart
 

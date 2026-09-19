@@ -79,7 +79,7 @@ MESSAGES = {
     "notice.model_breakdown_missing": "Some usage was omitted because ccusage did not provide model breakdowns.",
     "notice.model_overattributed": "Some model breakdowns exceed their record total, so no residual Other was added.",
     "notice.other_not_needed": "Other was not added: {count} groups remain after filtering, which does not exceed --top {top}.",
-    "notice.summary_excludes_session_agent": "Summary excludes {agent} project-session usage; ccusage has no per-day values",
+    "notice.summary_excludes_session_agent": "Ranking includes {agent} project-session usage; daily Summary excludes it because ccusage has no per-day values",
     "prompt.ccusage_install": "ccusage is not installed. Press Enter to run the command below; type anything else, Ctrl-C, or EOF to cancel.\n{command}",
     "prompt.ccusage_install_confirm": "Install ccusage? ",
     "status.loading": "Loading…",

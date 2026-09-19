@@ -355,7 +355,7 @@ class PaneRect:
 
 
 @dataclass(frozen=True, slots=True)
-class PanelLayout:
+class PaneLayout:
     """The exact cell geometry shared by rendering and pointer hit testing."""
 
     widths: tuple[int, ...]
@@ -382,14 +382,14 @@ def _dashboard_structure(style: str) -> tuple[str, str]:
 
 def resolve_panel_layout(
     *, width: int, height: int, rows: int, columns: int, divider_style: str
-) -> PanelLayout:
+) -> PaneLayout:
     """Allocate every grid row and column, including uneven remainders."""
     gutter = 0 if divider_style == "none" else 1
     available_width = max(columns * 4, width - gutter * (columns - 1))
     available_height = max(rows * 3, height - gutter * (rows - 1))
     width_base, width_remainder = divmod(available_width, columns)
     height_base, height_remainder = divmod(available_height, rows)
-    return PanelLayout(
+    return PaneLayout(
         tuple(width_base + int(index < width_remainder) for index in range(columns)),
         tuple(height_base + int(index < height_remainder) for index in range(rows)),
         gutter,
@@ -482,7 +482,7 @@ def _frame(
     ]
 
 
-def compose_panels(
+def compose_panes(
     charts: list[str],
     width: int,
     height: int,
@@ -684,8 +684,18 @@ def _pane_render(pane: TuiPane, translator: Translator, terminal: Terminal) -> P
     return candidate
 
 
-def _unique_notices(panes: list[PaneRender]) -> tuple[str, ...]:
-    return tuple(dict.fromkeys(notice for pane in panes for notice in pane.notices))
+def _local_pane_content(
+    chart: str,
+    notices: tuple[str, ...],
+    *,
+    height: int,
+) -> str:
+    """Keep a bounded notice band inside one pane's content area."""
+    notice_rows = min(len(notices), max(0, height - 3))
+    chart_height = max(0, height - notice_rows)
+    chart_lines = chart.splitlines()[:chart_height]
+    chart_lines.extend("" for _ in range(chart_height - len(chart_lines)))
+    return "\n".join((*chart_lines, *notices[:notice_rows]))
 
 
 def _cycle(values: tuple[str, ...], current: str, step: int) -> str:
@@ -861,7 +871,6 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
     copied_status: str | None = None
     last_successful_update: datetime | None = None
     last_size: tuple[int, int] | None = None
-    footer_notice_rows = 0
     screen = FramePainter(sys.stdout)
 
     def allocate_pane_owner_id() -> str:
@@ -1109,10 +1118,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         size_lines: int,
         header_rows: int,
         status_rows: int,
-        notice_rows: int = 0,
-    ) -> tuple[int, int, PanelLayout]:
+    ) -> tuple[int, int, PaneLayout]:
         rows, columns = _grid_shape(active_grid, len(panes))
-        grid_height = max(3, size_lines - len(controls()) - header_rows - status_rows - notice_rows)
+        grid_height = max(3, size_lines - len(controls()) - header_rows - status_rows)
         return (
             rows,
             columns,
@@ -1126,7 +1134,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         )
 
     def paint(*, force: bool = False) -> None:
-        nonlocal footer_notice_rows, last_size
+        nonlocal last_size
         size = get_terminal_size()
         last_size = (size.columns, size.lines)
         header_terminal = Terminal(
@@ -1142,7 +1150,6 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             translator=translator,
         )
         if body_view != "chart":
-            footer_notice_rows = 0
             body = format_full_command_display(full_dashboard_command(), size.columns)
             screen.paint(compose_frame(body, status, controls(), height=size.lines), force=force)
             return
@@ -1160,8 +1167,8 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             screen.paint(compose_frame(body, status, controls(), height=size.lines), force=force)
             return
 
-        def render_panes(layout: PanelLayout, columns: int) -> list[PaneRender]:
-            rendered_panes = []
+        def render_panes(layout: PaneLayout, columns: int) -> list[str]:
+            rendered_panes: list[str] = []
             for index, pane in enumerate(panes):
                 cell_width = layout.widths[index % columns]
                 cell_height = layout.heights[index // columns]
@@ -1169,49 +1176,38 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 # interior too; its content is never overwritten by the indicator.
                 framed = frame_style != "none" or index == focused
                 pane_options = _pane_options(pane)
+                interior_width = max(1, cell_width - 2 if framed else cell_width)
+                interior_height = max(1, cell_height - 2 if framed else cell_height)
                 terminal = Terminal(
-                    max(1, cell_width - 2 if framed else cell_width),
-                    max(1, cell_height - 2 if framed else cell_height),
+                    interior_width,
+                    interior_height,
                     pane_options.chart.presentation.theme != "no-color",
                     pane_options.host.ascii,
                 )
-                rendered_panes.append(_pane_render(pane, translator, terminal))
+                rendered = _pane_render(pane, translator, terminal)
+                local_notices = format_notice_lines(
+                    rendered.notices,
+                    width=interior_width,
+                    color=terminal.color,
+                    ascii=terminal.ascii,
+                    translator=translator,
+                    color_scheme=pane_options.chart.presentation.theme,
+                )
+                rendered_panes.append(
+                    _local_pane_content(
+                        rendered.chart,
+                        local_notices,
+                        height=interior_height,
+                    )
+                )
             return rendered_panes
 
         rows, columns, layout = grid_geometry(
             size.columns, size.lines, len(header_lines), int(status is not None)
         )
         pane_renders = render_panes(layout, columns)
-        notices = _unique_notices(pane_renders)
-        notice_lines = format_notice_lines(
-            notices,
-            width=size.columns,
-            color=dashboard_theme != "no-color",
-            ascii=options.host.ascii,
-            translator=translator,
-            color_scheme=dashboard_theme,
-        )
-        if notice_lines:
-            rows, columns, layout = grid_geometry(
-                size.columns,
-                size.lines,
-                len(header_lines),
-                int(status is not None),
-                len(notice_lines),
-            )
-            pane_renders = render_panes(layout, columns)
-            notices = _unique_notices(pane_renders)
-            notice_lines = format_notice_lines(
-                notices,
-                width=size.columns,
-                color=dashboard_theme != "no-color",
-                ascii=options.host.ascii,
-                translator=translator,
-                color_scheme=dashboard_theme,
-            )
-        footer_notice_rows = len(notice_lines)
-        grid = compose_panels(
-            [pane.chart for pane in pane_renders],
+        grid = compose_panes(
+            pane_renders,
             size.columns,
             layout.height,
             rows,
@@ -1231,7 +1227,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         )
         body = "\n".join((*header_lines, grid))
         screen.paint(
-            compose_frame(body, status, controls(), notice_lines, height=size.lines),
+            compose_frame(body, status, controls(), height=size.lines),
             force=force,
         )
 
@@ -1302,7 +1298,6 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                             size.lines,
                             header_rows,
                             int(status is not None),
-                            footer_notice_rows,
                         )
                         selected = pane_at(
                             pane_rects(
