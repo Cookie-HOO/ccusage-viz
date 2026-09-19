@@ -221,10 +221,10 @@ def adjust_chart(chart: ChartConfig, key: str, *, demo: bool = False) -> ChartCo
                 density=_cycle(DENSITIES, chart.presentation.density, 1),
             ),
         )
-    if key in {"s", "S"}:
+    if key == "s":
         styles = compatible_styles(chart.kind, getattr(chart, "by", None))
         current = chart.presentation.style
-        style = _cycle(styles, current if current in styles else styles[0], 1 if key == "s" else -1)
+        style = _cycle(styles, current if current in styles else styles[0], 1)
         return replace(chart, presentation=replace(chart.presentation, style=style))
     if key in {"t", "T"}:
         from ccusage_viz.render.palette import COLOR_SCHEMES
@@ -246,11 +246,11 @@ def adjust_chart(chart: ChartConfig, key: str, *, demo: bool = False) -> ChartCo
                 chart.date_range, since=natural_period_start(end, next_value, unit), period=period
             ),
         )
-    if key in {"g", "G"} and isinstance(chart, (TimelineConfig, StackConfig)):
+    if key == "g" and isinstance(chart, (TimelineConfig, StackConfig)):
         return replace(chart, granularity=_cycle(GRANULARITIES, chart.granularity, 1))
-    if key in {"k", "K"} and isinstance(chart, (TimelineConfig, StackConfig)):
+    if key == "k" and isinstance(chart, (TimelineConfig, StackConfig)):
         return replace(chart, weekdays=_cycle(WEEKDAY_MODES, chart.weekdays, 1))
-    if key in {"l", "L"} and isinstance(chart, (TimelineConfig, StackConfig, MonitorConfig)):
+    if key == "l" and isinstance(chart, (TimelineConfig, StackConfig, MonitorConfig)):
         values = (
             ("below-title", "hidden")
             if isinstance(chart, StackConfig)
@@ -264,9 +264,9 @@ def adjust_chart(chart: ChartConfig, key: str, *, demo: bool = False) -> ChartCo
                 chart.presentation, legend=_cycle(values, chart.presentation.legend, 1)
             ),
         )
-    if key in {"c", "C"} and isinstance(chart, StackConfig):
+    if key == "c" and isinstance(chart, StackConfig):
         return replace(chart, cache=_cycle(CACHE_MODES, chart.cache, 1))
-    if key in {"b", "B"} and isinstance(chart, (TimelineConfig, RankingConfig, MonitorConfig)):
+    if key == "b" and isinstance(chart, (TimelineConfig, RankingConfig, MonitorConfig)):
         values: tuple[Dimension | None, ...] = (
             (None, "agent", "model", "project")
             if not isinstance(chart, RankingConfig)
@@ -294,9 +294,9 @@ def adjust_chart(chart: ChartConfig, key: str, *, demo: bool = False) -> ChartCo
         and chart.by is not None
     ):
         return replace(chart, top=max(1, (chart.top or 1) - 1))
-    if key in {"o", "O"} and isinstance(chart, (TimelineConfig, RankingConfig)):
+    if key == "o" and isinstance(chart, (TimelineConfig, RankingConfig)):
         return replace(chart, other=_cycle(OTHER_MODES, chart.other, 1))
-    if key in {"w", "W"} and isinstance(chart, MonitorConfig):
+    if key == "w" and isinstance(chart, MonitorConfig):
         values = (300, 900, 1800, 3600, 21600, 43200, 86400)
         nearest = min(values, key=lambda value: abs(value - chart.window_seconds))
         return replace(chart, window_seconds=values[(values.index(nearest) + 1) % len(values)])
@@ -308,7 +308,7 @@ def replace_chart_filters(config: StandaloneLaunch, filters: Filters) -> Standal
 
 
 def adjust_standalone(config: StandaloneLaunch, key: str) -> StandaloneLaunch:
-    if key in {"i", "I"} and isinstance(config.chart, MonitorConfig):
+    if key == "i" and isinstance(config.chart, MonitorConfig):
         values = (1.0, 5.0, 15.0, 30.0, 60.0) if config.host.demo_size else (5.0, 15.0, 30.0, 60.0)
         current = config.host.interval
         index = values.index(current) if current in values else 2
