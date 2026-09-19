@@ -56,6 +56,24 @@ Dashboard Route 不调用 Standalone Route。两者都从同一 Definition 创�
 
 图表产品使用四个概念层级：
 
+| 层级 | 所属概念 | 具体例子 |
+| --- | --- | --- |
+| **1. Route** | Route、launch request | `ccuv monitor` 选择 Standalone Monitor 操作；`ccuv dashboard` 选择 Dashboard 并描述其中的 Pane。Route 不拥有运行节奏或 Component 状态。 |
+| **2. Query / Data Acquisition** | Config 中的数据范围、Query Intent、Provider、Provider Result | Monitor Config 指定 `by=model` 和 Filters；逻辑规划器结合 Host context 生成 Query Intent；`ccusage` Provider 执行查询并返回规范化累计 records。 |
+| **3. Result Processing** | Processor/projector、语义 Chart Model | Monitor processing 使用 Component 保存的 previous snapshot 与 Observer 推导增量、TPM 和时间桶，再投影为 Timeline 或 Ranking Model；历史 processing 独立聚合每日 records。 |
+| **4. Rendering** | Chart renderer、Chart Model、Theme、Style、Chart Render、Host composition、Painter | 选中的 Timeline 或 Ranking renderer 消费投影后的 Model。Host 加入 Controls、Header、边框等产品内容并创建完整 Frame；Painter 只比较 Frame 并写入变化行。 |
+
+还有一些概念与这四个阶段正交：
+
+| 概念 | 边界 |
+| --- | --- |
+| **Chart Definition** | 标识一种展示 Chart 并引用各层协作者的无状态目录元数据；不包含具体会话配置或运行状态。 |
+| **Chart Component** | 运行实例，跨 Query、Processing 与 Rendering 独立保存 candidate/accepted 配置、事实、语义结果、generation 和 error。 |
+| **Host** | 拥有节奏、输入、取消编排、几何、完整 Frame 组合和终端生命周期。 |
+| **Pane** | 一个 Component 在 Dashboard 中的位置与运行上下文：identity、几何、顺序、焦点和 Dashboard 拥有的节奏上下文；不复制 Component 业务状态。 |
+
+因此 Definition 与 Component 更接近蓝图和运行实例，不是简单的 Python 类与对象关系。Monitor 是特殊的实时 runtime/data mode，而不是另一种 Chart Definition：它的时间序列形态使用已注册的 Timeline Chart，ranking 形态使用已注册的 Ranking Chart。
+
 ```text
 1. Route
 2. Query / Data Acquisition

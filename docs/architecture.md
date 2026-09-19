@@ -56,6 +56,24 @@ A Dashboard Route does not call the Standalone Route. Both construct Components 
 
 Chart products use four conceptual layers:
 
+| Layer | Concepts | Example |
+| --- | --- | --- |
+| **1. Route** | Route, launch request | `ccuv monitor` selects the Standalone Monitor operation. `ccuv dashboard` selects Dashboard and describes its Panes. Routing does not own runtime cadence or Component state. |
+| **2. Query / Data Acquisition** | Config data scope, Query Intent, Provider, Provider Result | A Monitor Config specifies `by=model` and Filters. The logical planner combines them with Host context to produce a Query Intent. The `ccusage` Provider runs the query and returns normalized cumulative records. |
+| **3. Result Processing** | Processor/projector, semantic Chart Model | Monitor processing uses the Component's previous snapshot and Observer to derive increments, TPM, and time buckets, then projects those semantics to a Timeline or Ranking Model. Historical processing aggregates daily records independently. |
+| **4. Rendering** | Chart renderer, Chart Model, Theme, Style, Chart Render, Host composition, Painter | The selected Timeline or Ranking renderer consumes the projected Model. The Host adds Controls, Header, borders, and other product content to create a complete Frame; the Painter only diffs Frames and writes changed rows. |
+
+Several concepts are orthogonal to the four stages:
+
+| Concept | Boundary |
+| --- | --- |
+| **Chart Definition** | Stateless catalog metadata that identifies a presentation Chart and references its layered collaborators. It contains no concrete session configuration or runtime state. |
+| **Chart Component** | A running instance with independent accepted/candidate configuration, facts, semantic result, generation, and errors across Query, Processing, and Rendering. |
+| **Host** | Owns cadence, input, cancellation orchestration, geometry, complete-Frame composition, and terminal lifecycle. |
+| **Pane** | Dashboard placement and runtime context for one Component: identity, geometry, order, focus, and Dashboard-owned cadence context. It does not duplicate Component business state. |
+
+Definition and Component are therefore closer to blueprint and running instance than to a Python class and object relationship. Monitor is a special realtime runtime/data mode, not another Chart Definition: its timeline forms use the registered Timeline Chart and its ranking form uses the registered Ranking Chart.
+
 ```text
 1. Route
 2. Query / Data Acquisition

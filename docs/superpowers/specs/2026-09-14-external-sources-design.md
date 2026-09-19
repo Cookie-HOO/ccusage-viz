@@ -1,7 +1,12 @@
 # External Sources Design
 
-**Status:** approved design; implementation intentionally deferred  
+**Status:** superseded protocol draft; never implemented
+
 **Date:** 2026-09-14
+
+**Superseded:** 2026-09-19 by the future Source contract in [`../../source-plugin-guide.md`](../../source-plugin-guide.md)
+
+> This document is retained only as design history. It is not an approved implementation contract. The replacement contract discards this draft's timestamp/range resolutions, Monitor interval increments, optional dimensions, source-side selector ownership, shell/script CLI surface, and additive same-Source row/refresh semantics. A future Source instead returns natural-day cumulative Token facts with mandatory `agent`, `model`, and `project` values; a newer same-Source snapshot replaces the earlier value for the complete identity key.
 
 ## Purpose
 
