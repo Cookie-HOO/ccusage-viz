@@ -223,26 +223,6 @@ class QueryKind(StrEnum):
     CODEX_SESSIONS = "Codex project sessions"
 
 
-@dataclass(frozen=True, slots=True)
-class QuerySpec:
-    kind: QueryKind
-    args: tuple[str, ...]
-    daily_coverage: DateInterval | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class QueryPlan:
-    queries: tuple[QuerySpec, ...]
-    notices: tuple[Notice, ...] = field(default_factory=tuple)
-    summary_notices: tuple[Notice, ...] = field(default_factory=tuple)
-
-
-@dataclass(frozen=True, slots=True)
-class QueryResult:
-    kind: QueryKind
-    data: object
-
-
 def _execution_key(context: ExecutionContext | None) -> object:
     if context is None:
         return None
