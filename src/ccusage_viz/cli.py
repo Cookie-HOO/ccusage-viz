@@ -7,7 +7,7 @@ import shlex
 import sys
 from dataclasses import dataclass, replace
 from enum import StrEnum
-from typing import Any, Never
+from typing import Any, Never, cast
 
 from ccusage_viz import __version__
 from ccusage_viz.application import run
@@ -21,6 +21,7 @@ from ccusage_viz.options import (
     COMMAND_STYLES,
     DASHBOARD_STYLES,
     DEFAULT_STYLES,
+    DENSITIES,
     GRANULARITIES,
     HEADER_SUMMARIES,
     OTHER_MODES,
@@ -30,6 +31,7 @@ from ccusage_viz.options import (
     DashboardHostConfig,
     DashboardLaunch,
     DashboardRoute,
+    Density,
     Filters,
     LaunchConfig,
     LaunchRoute,
@@ -153,6 +155,12 @@ def _add_presentation(parser: argparse.ArgumentParser, tr: Translator, command: 
         choices=COMMAND_STYLES[command],
         default=DEFAULT_STYLES[command],
         help=tr.text("help.style"),
+    )
+    parser.add_argument(
+        "--density",
+        choices=DENSITIES,
+        default="full",
+        help=tr.text("help.density"),
     )
     if command in {"timeline", "monitor", "stack"}:
         parser.add_argument(
@@ -379,7 +387,10 @@ def _chart_from_namespace(namespace: argparse.Namespace, *, timezone: str | None
         or compatible_styles(command, getattr(namespace, "by", None))[0]
     )
     presentation = ChartPresentation(
-        namespace.color_scheme, style, getattr(namespace, "legend", "below-title")
+        theme=namespace.color_scheme,
+        style=style,
+        legend=getattr(namespace, "legend", "below-title"),
+        density=cast(Density, getattr(namespace, "density", "full")),
     )
     top = getattr(namespace, "top", None)
     if command in {"timeline", "monitor"} and namespace.by is not None and top is None:
@@ -481,6 +492,11 @@ def parse_pane_fragment(fragment: str, *, host: DashboardLaunch | None = None) -
     try:
         namespace = build_parser(Translator("en", dict(CATALOGS["en"]))).parse_args(tokens)
         chart = _chart_from_namespace(namespace, timezone=None)
+        if "density" not in explicit:
+            chart = replace(
+                chart,
+                presentation=replace(chart.presentation, density="compact"),
+            )
         if host is not None and host.host.ascii and "color_scheme" in explicit:
             raise UsageError(
                 "error.arguments",

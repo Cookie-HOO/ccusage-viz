@@ -207,6 +207,7 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                     "top": top,
                     "theme": chart.presentation.theme,
                     "style": chart.presentation.style,
+                    "density": chart.presentation.density,
                 }
                 if adjustment_page == "quick"
                 else {
@@ -276,6 +277,7 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                 adjustment_page == "quick"
                 and key
                 in {
+                    "d",
                     "s",
                     "S",
                     "t",

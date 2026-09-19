@@ -33,6 +33,7 @@ COMMAND_STYLES = {
 DEFAULT_STYLES = {command: styles[0] for command, styles in COMMAND_STYLES.items()}
 DASHBOARD_STYLES = ("minimal", "split", "framed", "accent")
 DEFAULT_DASHBOARD_STYLE = "split"
+DENSITIES = ("minimal", "compact", "full")
 MINIMUM_SIZES = {
     "timeline": (58, 16),
     "calendar": (58, 16),
@@ -42,6 +43,7 @@ MINIMUM_SIZES = {
 }
 
 Dimension: TypeAlias = Literal["agent", "model", "project"]
+Density: TypeAlias = Literal["minimal", "compact", "full"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,6 +66,7 @@ class ChartPresentation:
     theme: str = "classic"
     style: str = "linear"
     legend: str = "below-title"
+    density: Density = "full"
 
 
 @dataclass(frozen=True, slots=True)
@@ -210,6 +213,14 @@ def _cycle(values: tuple[str, ...], current: str, step: int) -> str:
 
 
 def adjust_chart(chart: ChartConfig, key: str, *, demo: bool = False) -> ChartConfig:
+    if key == "d":
+        return replace(
+            chart,
+            presentation=replace(
+                chart.presentation,
+                density=_cycle(DENSITIES, chart.presentation.density, 1),
+            ),
+        )
     if key in {"s", "S"}:
         styles = compatible_styles(chart.kind, getattr(chart, "by", None))
         current = chart.presentation.style

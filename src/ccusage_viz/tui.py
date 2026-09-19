@@ -712,11 +712,11 @@ def _new_pane_options(command: str, base: DashboardLaunch) -> StandaloneLaunch:
 
 
 _QUICK_KEYS = {
-    "timeline": frozenset("pPgbB+-=tTsS"),
-    "calendar": frozenset("pPtTsS"),
-    "stack": frozenset("pPgtTsS"),
-    "ranking": frozenset("pPbB+-=tTsS"),
-    "monitor": frozenset("wWbB+-=tTsS"),
+    "timeline": frozenset("dpPgbB+-=tTsS"),
+    "calendar": frozenset("dpPtTsS"),
+    "stack": frozenset("dpPgtTsS"),
+    "ranking": frozenset("dpPbB+-=tTsS"),
+    "monitor": frozenset("dwWbB+-=tTsS"),
 }
 _ADVANCED_KEYS = {
     "timeline": frozenset("olkuOLKU"),

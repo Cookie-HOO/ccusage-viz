@@ -26,7 +26,8 @@ def default_pane(kind: str, *, dashboard: DashboardLaunch) -> PaneConfig:
             "stack": "stacked",
             "ranking": "bar",
             "monitor": "bars",
-        }[kind]
+        }[kind],
+        density="compact",
     )
     if kind == "monitor":
         chart = MonitorConfig("monitor", 3600, presentation=presentation)

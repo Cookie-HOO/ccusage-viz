@@ -65,10 +65,10 @@ class RuntimeAdjustmentResult:
 
 
 _ADJUSTMENT_QUICK_KEYS = {
-    "timeline": frozenset("pPgbB+-=tTsS"),
-    "calendar": frozenset("pPtTsS"),
-    "stack": frozenset("pPgtTsS"),
-    "ranking": frozenset("pPbB+-=tTsS"),
+    "timeline": frozenset("dpPgbB+-=tTsS"),
+    "calendar": frozenset("dpPtTsS"),
+    "stack": frozenset("dpPgtTsS"),
+    "ranking": frozenset("dpPbB+-=tTsS"),
 }
 _ADJUSTMENT_ADVANCED_KEYS = {
     "timeline": frozenset("olkOLK"),
@@ -239,6 +239,7 @@ def run_runtime_adjustment(
             else ()
         )
         common = {
+            "density": current.chart.presentation.density,
             "theme_index": theme_index + 1,
             "theme_count": len(COLOR_SCHEMES),
             "theme": theme,

@@ -94,6 +94,8 @@ def _chart_args(config: StandaloneLaunch, *, full: bool, pane: bool = False) -> 
         args.extend(("--theme", theme))
     if full or chart.presentation.style != DEFAULT_STYLES[chart.kind]:
         args.extend(("--style", chart.presentation.style))
+    if full or chart.presentation.density != "full":
+        args.extend(("--density", chart.presentation.density))
     if chart.kind in {"timeline", "stack", "monitor"} and (
         full or chart.presentation.legend != "below-title"
     ):

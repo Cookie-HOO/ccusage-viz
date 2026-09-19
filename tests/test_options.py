@@ -10,6 +10,7 @@ from ccusage_viz.errors import UsageError
 from ccusage_viz.formatting import display_width
 from ccusage_viz.i18n import load_translator
 from ccusage_viz.options import (
+    DENSITIES,
     ChartPresentation,
     Filters,
     MonitorConfig,
@@ -95,11 +96,28 @@ def test_invalid_ranges_fail(period: str | None, since: str | None, until: str |
         )
 
 
+def test_chart_density_has_exactly_three_values_and_defaults_to_full() -> None:
+    assert DENSITIES == ("minimal", "compact", "full")
+    assert ChartPresentation().density == "full"
+
+
 def test_runtime_adjustments_replace_owned_nested_configs() -> None:
     source = timeline(by="model", top=10)
     assert adjust_standalone(source, "p").chart.date_range.period == "30d"
     assert adjust_standalone(source, "g").chart.granularity == "month"
     assert adjust_standalone(source, "s").chart.presentation.style == "step"
+    assert adjust_standalone(source, "d").chart.presentation.density == "minimal"
+    assert (
+        adjust_standalone(adjust_standalone(source, "d"), "d").chart.presentation.density
+        == "compact"
+    )
+    assert (
+        adjust_standalone(
+            adjust_standalone(adjust_standalone(source, "d"), "d"), "d"
+        ).chart.presentation.density
+        == "full"
+    )
+    assert adjust_standalone(source, "D") == source
     assert adjust_standalone(source, "+").chart.top == 11
     assert adjust_standalone(source, "k").chart.weekdays == "hide"
     assert adjust_standalone(timeline(rolling=False), "p") == timeline(rolling=False)
@@ -146,7 +164,7 @@ def test_command_serializers_round_trip_typed_launch() -> None:
                 models=("public model",),
                 projects=("/private/project", "demo-project"),
             ),
-            presentation=ChartPresentation(theme="nord", style="stem"),
+            presentation=ChartPresentation(theme="nord", style="stem", density="compact"),
             by="model",
             top=3,
         ),
@@ -155,9 +173,12 @@ def test_command_serializers_round_trip_typed_launch() -> None:
     assert "/private" not in safe
     assert "--project /private/project" in full
     assert "--ccusage-bin /private/bin/ccusage" in full
+    assert "--density compact" in safe
+    assert "--density compact" in full
     parser = build_parser(load_translator("en"))
     for generated in (safe, full):
         reparsed = _to_options(parser.parse_args(shlex.split(generated)[1:]))
         assert isinstance(reparsed, StandaloneLaunch)
         assert reparsed.chart.kind == "timeline"
+        assert reparsed.chart.presentation.density == "compact"
         assert reparsed.host.interval == 5

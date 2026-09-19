@@ -53,9 +53,7 @@ def test_component_acquires_and_accepts_provider_snapshot() -> None:
         completion = chart.submit(QueryTrigger.STARTUP).result()
         assert completion.options == chart.candidate
         assert completion.snapshot.records
-        assert completion.snapshot.coverage.covers(
-            DateInterval(date(2026, 1, 1), date(2026, 1, 7))
-        )
+        assert completion.snapshot.coverage.covers(DateInterval(date(2026, 1, 1), date(2026, 1, 7)))
         assert completion.snapshot.includes_project_attribution
         assert completion.snapshot.elapsed >= 0
         assert chart.accept(completion)
@@ -109,7 +107,11 @@ def test_component_rejects_stale_success_and_failure_without_mutation() -> None:
 def test_component_keeps_render_only_candidate_when_query_completes() -> None:
     chart = component()
     submission_options = chart.candidate
-    presentation = replace(chart.candidate.chart.presentation, style="points")
+    presentation = replace(
+        chart.candidate.chart.presentation,
+        style="points",
+        density="compact",
+    )
     updated = replace(
         chart.candidate,
         host=replace(chart.candidate.host, ascii=True),
@@ -122,6 +124,7 @@ def test_component_keeps_render_only_candidate_when_query_completes() -> None:
     )
     assert chart.candidate.host.ascii
     assert chart.candidate.chart.presentation.style == "points"
+    assert chart.candidate.chart.presentation.density == "compact"
     assert chart.accepted_options == chart.candidate
 
 
@@ -158,7 +161,11 @@ def test_component_separates_data_generation_from_render_revision() -> None:
     chart.seed(chart.candidate, UsageSnapshot((), (), 0.1))
     generation = chart.generation
     revision = chart.render_revision
-    presentation = replace(chart.candidate.chart.presentation, style="points")
+    presentation = replace(
+        chart.candidate.chart.presentation,
+        style="points",
+        density="compact",
+    )
 
     chart.configure(
         replace(chart.candidate, chart=replace(chart.candidate.chart, presentation=presentation)),

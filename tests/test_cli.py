@@ -78,6 +78,24 @@ def test_stack_accepts_supported_legend_modes(mode: str) -> None:
     assert parser.parse_args(["stack", "--legend", mode]).legend == mode
 
 
+def test_all_commands_accept_exactly_three_density_values() -> None:
+    parser = build_parser(load_translator("en"))
+    for command in ("timeline", "calendar", "stack", "ranking", "monitor"):
+        for density in ("minimal", "compact", "full"):
+            assert parser.parse_args([command, "--density", density]).density == density
+        assert parser.parse_args([command]).density == "full"
+    with pytest.raises(UsageError) as caught:
+        parser.parse_args(["timeline", "--density", "standard"])
+    assert caught.value.key == "error.arguments"
+
+
+def test_dashboard_has_no_global_density_option() -> None:
+    parser = build_parser(load_translator("en"))
+    with pytest.raises(UsageError) as caught:
+        parser.parse_args(["dashboard", "--density", "compact"])
+    assert caught.value.key == "error.arguments"
+
+
 def test_all_commands_accept_themes() -> None:
     parser = build_parser(load_translator("en"))
     for command in ("timeline", "calendar", "stack", "ranking", "monitor"):

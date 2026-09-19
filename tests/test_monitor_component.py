@@ -108,7 +108,9 @@ def test_monitor_component_accepts_cumulative_samples_and_projects_timeline() ->
 
 
 def test_monitor_component_uses_bucket_token_growth_for_agent_ranking() -> None:
-    component = MonitorComponent(options(by="agent", style="ranking"), registry=build_chart_registry())
+    component = MonitorComponent(
+        options(by="agent", style="ranking"), registry=build_chart_registry()
+    )
     wall = datetime(2026, 9, 19, 12, 0, tzinfo=UTC)
     component.accept(completion(component, (record(100),)), now=0, wall=wall)
     component.accept(completion(component, (record(130),)), now=10, wall=wall)
@@ -124,10 +126,16 @@ def test_monitor_component_projects_model_top_other_and_tracks_changes() -> None
         options(by="model", style="ranking", top=1), registry=build_chart_registry()
     )
     wall = datetime(2026, 9, 19, 12, 0, tzinfo=UTC)
-    component.accept(completion(component, (record(100, models={"a": 60, "b": 40}),)), now=0, wall=wall)
-    component.accept(completion(component, (record(160, models={"a": 100, "b": 60}),)), now=10, wall=wall)
+    component.accept(
+        completion(component, (record(100, models={"a": 60, "b": 40}),)), now=0, wall=wall
+    )
+    component.accept(
+        completion(component, (record(160, models={"a": 100, "b": 60}),)), now=10, wall=wall
+    )
     first = component.ranking_model(now=10, count=4, wall=wall)
-    component.accept(completion(component, (record(250, models={"a": 130, "b": 120}),)), now=20, wall=wall)
+    component.accept(
+        completion(component, (record(250, models={"a": 130, "b": 120}),)), now=20, wall=wall
+    )
     second = component.ranking_model(now=20, count=4, wall=wall)
 
     assert [entry.key for entry in first.observed_entries] == ["a", "Other"]
@@ -160,11 +168,18 @@ def test_monitor_component_reconfigures_without_losing_observed_history() -> Non
         component.candidate,
         chart=replace(
             component.candidate.chart,
-            presentation=replace(component.candidate.chart.presentation, style="line"),
+            presentation=replace(
+                component.candidate.chart.presentation,
+                style="line",
+                density="compact",
+            ),
         ),
     )
+    revision = component.render_revision
     component.configure(presentation, data_affecting=False)
     assert component.generation == generation
+    assert component.render_revision == revision + 1
+    assert component.candidate.chart.presentation.density == "compact"
     assert tuple(component.observer.intervals) == intervals
 
     top = replace(

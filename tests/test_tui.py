@@ -70,6 +70,7 @@ def test_dashboard_defaults_to_a_filled_four_pane_dashboard() -> None:
     assert options.host.header_summary == "day"
     assert options.host.header_interval == 60.0
     assert options.host.style == "split"
+    assert all(pane.chart.presentation.density == "compact" for pane in options.panes)
 
 
 def test_dashboard_timezone_is_host_owned_and_round_trips() -> None:
@@ -100,7 +101,7 @@ def test_full_dashboard_command_includes_private_and_runtime_configuration() -> 
                 "--query-timeout",
                 "42",
                 "--pane",
-                "timeline --project /private/project",
+                "timeline --project /private/project --density minimal",
             ]
         )
     )
@@ -121,6 +122,8 @@ def test_full_dashboard_command_includes_private_and_runtime_configuration() -> 
     assert "--interval" not in tokens
     reparsed = _to_options(parser.parse_args(tokens[1:]))
     assert reparsed.panes[0].chart.filters.projects == ("/private/project",)
+    assert reparsed.panes[0].chart.presentation.density == "minimal"
+    assert "--density minimal" in tokens[tokens.index("--pane") + 1]
 
 
 def test_dashboard_pane_copy_materializes_canonical_standalone_interval() -> None:
@@ -132,13 +135,28 @@ def test_dashboard_pane_copy_materializes_canonical_standalone_interval() -> Non
 
     assert format_dashboard_pane_command(
         standalone_from_pane(base, timeline), refresh_interval=30
-    ) == ("ccuv timeline --period 7d --interval 30")
+    ) == ("ccuv timeline --period 7d --interval 30 --density compact")
     assert format_dashboard_pane_command(
         standalone_from_pane(base, stack), refresh_interval=30
-    ) == ("ccuv stack --period 14d --interval 30")
+    ) == ("ccuv stack --period 14d --interval 30 --density compact")
     assert format_dashboard_pane_command(
         standalone_from_pane(base, monitor), refresh_interval=30, sampling_interval=15
-    ) == ("ccuv monitor --window 1h --by model --top 3 --style line")
+    ) == ("ccuv monitor --window 1h --by model --top 3 --style line --density compact")
+
+
+def test_dashboard_pane_density_defaults_to_compact_and_preserves_explicit_values() -> None:
+    parser = build_parser(load_translator("en"))
+    base = _to_options(parser.parse_args(["dashboard"]))
+
+    assert parse_dashboard_pane("timeline", host=base).chart.presentation.density == "compact"
+    assert (
+        parse_dashboard_pane("timeline --density full", host=base).chart.presentation.density
+        == "full"
+    )
+    assert (
+        parse_dashboard_pane("timeline --density minimal", host=base).chart.presentation.density
+        == "minimal"
+    )
 
 
 def test_dashboard_monitor_default_does_not_change_explicit_or_standalone_total() -> None:
@@ -450,6 +468,8 @@ def test_dashboard_pane_retains_last_render_for_localized_renderer_warnings(
 
 def test_query_affecting_adjustments_are_explicit() -> None:
     assert _query_affecting_adjustment("timeline", "p")
+    assert not _query_affecting_adjustment("timeline", "d")
+    assert not _query_affecting_adjustment("monitor", "d")
     assert not _query_affecting_adjustment("timeline", "g")
     assert _query_affecting_adjustment("ranking", "b")
     assert _query_affecting_adjustment("monitor", "B")
