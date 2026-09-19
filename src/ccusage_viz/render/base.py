@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Hashable, Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from math import ceil
 
 import plotext as plt
@@ -93,10 +93,21 @@ def y_tick_spec(values: Iterable[int | float], *, count: int = 5) -> tuple[list[
     return positions, [format_tokens(round(position)) for position in positions]
 
 
-def configure_y_ticks(values: Iterable[int], *, count: int = 5) -> None:
-    """Use stable decimal token labels instead of plotext's scientific notation."""
-    positions, labels = y_tick_spec(values, count=count)
+def configure_y_ticks(
+    values: Iterable[int | float], *, count: int = 5, maximum: float | None = None
+) -> None:
+    """Use stable decimal labels instead of plotext's scientific notation."""
+    positions, labels = y_tick_spec((maximum,) if maximum is not None else values, count=count)
+    if maximum is not None:
+        plt.figure.ruler("y").lim(0, maximum)
     plt.figure.ruler("y").ticks(positions, labels)
+
+
+def observed_ticks(points: tuple[datetime, ...]) -> tuple[list[int], list[str]]:
+    if not points:
+        return [], []
+    positions = sorted({0, len(points) // 2, len(points) - 1})
+    return positions, [points[index].strftime("%H:%M") for index in positions]
 
 
 def date_ticks(

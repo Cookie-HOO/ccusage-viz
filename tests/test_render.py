@@ -3,7 +3,7 @@ import re
 import subprocess
 import sys
 from dataclasses import replace
-from datetime import date
+from datetime import date, datetime
 
 import plotext as plt
 import pytest
@@ -13,9 +13,13 @@ from ccusage_viz.chart_models import (
     CalendarModel,
     ChangeDirection,
     DailySummary,
+    MetricDescriptor,
+    ObservedScope,
     PercentChange,
     RankingEntry,
     RankingModel,
+    ScalarRankingEntry,
+    ScalarSeries,
     Series,
     StackModel,
     TimelineModel,
@@ -201,6 +205,43 @@ def test_empty_ranking_keeps_localized_effective_range() -> None:
     lines = output.splitlines()
     assert lines[0].strip() == "累计排名 · 2026-01-01–2026-01-14"
     assert lines[1] == "所选范围内没有 Token 用量。"
+
+
+def test_observed_timeline_uses_wall_clock_axis_and_metric_heading() -> None:
+    model = TimelineModel(
+        (),
+        (),
+        observed_at=(datetime(2026, 1, 1, 10, 0), datetime(2026, 1, 1, 10, 5)),
+        observed_series=(ScalarSeries("Total", "Total", (1000.0, 2500.0)),),
+        metric=MetricDescriptor("tpm"),
+        observed_scope=ObservedScope(900, "total"),
+    )
+
+    output = render_timeline(model, context(True))
+
+    assert "Total TPM · window 15m" in output
+    assert "10:00" in output and "10:05" in output
+    assert "2026-01-01" not in output
+
+
+def test_observed_ranking_uses_window_unit_without_historical_percentage() -> None:
+    model = RankingModel(
+        (),
+        None,
+        observed_entries=(
+            ScalarRankingEntry("alpha", "Alpha", 1200.0),
+            ScalarRankingEntry("beta", "Beta", 800.0),
+        ),
+        metric=MetricDescriptor("tokens"),
+        observed_scope=ObservedScope(900, "agent"),
+    )
+
+    output = render_ranking(model, context(True))
+
+    assert "Agent · tokens · 15m" in output
+    assert "1.2K" in output and "800" in output
+    assert "%" not in output
+    assert "2026-01-01" not in output
 
 
 def test_calendar_absolute_style_has_stable_token_band_legend() -> None:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ccusage_viz.chart_models import RankingModel
+from ccusage_viz.chart_models import RankingEntry, RankingModel, ScalarRankingEntry
 from ccusage_viz.formatting import (
     center_text,
     display_width,
@@ -20,6 +20,24 @@ from ccusage_viz.render.base import (
 from ccusage_viz.render.palette import get_color_scheme
 from ccusage_viz.render.summary import render_summary
 from ccusage_viz.trends import trend_glyph
+
+
+def _observed_heading(model: RankingModel, context: RenderContext) -> str:
+    scope = model.observed_scope
+    if scope is None:
+        raise ValueError("observed ranking is missing its scope")
+    window = (
+        f"{scope.window_seconds // 3600}h"
+        if scope.window_seconds % 3600 == 0
+        else f"{scope.window_seconds // 60}m"
+    )
+    mode = context.translator.text(f"label.monitor_{scope.mode}_mode")
+    unit = "TPM" if model.metric.unit == "tpm" else context.translator.text("label.tokens")
+    return center_text(f"{mode} · {unit} · {window}", context.width)
+
+
+def _entry_value(entry: RankingEntry | ScalarRankingEntry) -> int | float:
+    return entry.value if isinstance(entry, ScalarRankingEntry) else entry.usage.total
 
 
 def _compact_labels(labels: list[str], width: int) -> list[str]:
@@ -65,21 +83,30 @@ def _compact_labels(labels: list[str], width: int) -> list[str]:
 
 def render_ranking(model: RankingModel, context: RenderContext) -> str:
     title = context.translator.text("label.ranking")
-    heading = center_text(
-        content_heading(title, model.date_range.since, model.date_range.until, context)
-        if context.title_content
-        else date_range_heading(title, model.date_range.since, model.date_range.until, context),
-        context.width,
-    )
-    summary = render_summary(model.summary, context) if model.summary else ""
-    if not model.entries:
-        return "\n".join(
-            line for line in (summary, heading, context.translator.text("message.no_data")) if line
+    scope = model.observed_scope
+    if scope is not None:
+        heading = _observed_heading(model, context)
+    else:
+        date_range = model.date_range
+        if date_range is None:
+            raise ValueError("historical ranking is missing its date range")
+        heading = center_text(
+            content_heading(title, date_range.since, date_range.until, context)
+            if context.title_content
+            else date_range_heading(title, date_range.since, date_range.until, context),
+            context.width,
         )
-    total = model.percentage_total.total
+    summary = render_summary(model.summary, context) if model.summary else ""
+    entries: tuple[RankingEntry | ScalarRankingEntry, ...] = (
+        model.observed_entries if model.is_observed else model.entries
+    )
+    if not entries:
+        message = "message.monitor_empty" if model.is_observed else "message.no_data"
+        return "\n".join(line for line in (summary, heading, context.translator.text(message)) if line)
+    total = None if model.is_observed else model.percentage_total.total
     label_width = max(12, min(28, context.width // 3))
     bar_width = max(8, context.width - label_width - 25)
-    maximum = max(entry.usage.total for entry in model.entries) or 1
+    maximum = max(_entry_value(entry) for entry in entries) or 1
     full, empty = ("█", "░") if not context.ascii else ("#", ".")
     dot, track = ("●", "·") if not context.ascii else ("o", ".")
     scheme = get_color_scheme(context.color_scheme)
@@ -88,17 +115,18 @@ def render_ranking(model: RankingModel, context: RenderContext) -> str:
     rank_growth = context.rank_deltas or {}
     raw_labels = [
         context.translator.text("label.other") if entry.is_other else entry.label
-        for entry in model.entries
+        for entry in entries
     ]
-    regular_indexes = [index for index, entry in enumerate(model.entries) if not entry.is_other]
+    regular_indexes = [index for index, entry in enumerate(entries) if not entry.is_other]
     compact = _compact_labels([raw_labels[index] for index in regular_indexes], label_width)
     labels = list(raw_labels)
     for index, label in zip(regular_indexes, compact, strict=True):
         labels[index] = label
 
     lines = [line for line in (summary, heading) if line]
-    for rank, (entry, label) in enumerate(zip(model.entries, labels, strict=True), start=1):
-        length = round(entry.usage.total / maximum * bar_width)
+    for rank, (entry, label) in enumerate(zip(entries, labels, strict=True), start=1):
+        value = _entry_value(entry)
+        length = round(value / maximum * bar_width)
         if context.style == "dot":
             mark = (
                 track * max(0, length - 1)
@@ -134,10 +162,11 @@ def render_ranking(model: RankingModel, context: RenderContext) -> str:
                 activity = styled_text(
                     "*" if context.ascii else "●", scheme.highlight, context, bold=True
                 )
+        formatted = format_tokens(round(value))
+        percentage = f" {format_percent(round(value), total):>6}" if total is not None else ""
         lines.append(
             f"{rank:>2} {rank_marker} {activity} "
             f"{pad_width(truncate_width(label, label_width), label_width)} {mark} "
-            f"{format_tokens(entry.usage.total):>6} {value_marker} "
-            f"{format_percent(entry.usage.total, total):>6}"
+            f"{formatted:>6} {value_marker}{percentage}"
         )
     return "\n".join(lines)

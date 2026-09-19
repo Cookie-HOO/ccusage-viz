@@ -2,13 +2,29 @@ from __future__ import annotations
 
 from collections.abc import Hashable
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime
 from enum import StrEnum
+from typing import Literal
 
 from ccusage_viz.core.time import DateRange
 from ccusage_viz.domain import Notice, TokenUsage
 
 GroupKey = Hashable
+ChartValue = int | float
+MetricUnit = Literal["tokens", "tpm"]
+
+
+@dataclass(frozen=True, slots=True)
+class MetricDescriptor:
+    unit: MetricUnit = "tokens"
+
+
+@dataclass(frozen=True, slots=True)
+class ObservedScope:
+    window_seconds: int
+    mode: Literal["total", "agent", "model", "project"]
+    state: Literal["ready", "baseline", "sampling"] = "ready"
+    agents: tuple[str, ...] = ()
 
 
 class ChangeDirection(StrEnum):
@@ -72,12 +88,37 @@ class Series:
 
 
 @dataclass(frozen=True, slots=True)
+class ScalarSeries:
+    key: GroupKey
+    label: str
+    values: tuple[ChartValue | None, ...]
+    is_other: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class TimelineModel:
     days: tuple[date, ...]
     series: tuple[Series, ...]
     notices: tuple[Notice, ...] = field(default_factory=tuple)
     summary: PeriodSummary | DailySummary | None = None
     aggregation: str = "day"
+    observed_at: tuple[datetime, ...] = field(default_factory=tuple)
+    observed_series: tuple[ScalarSeries, ...] = field(default_factory=tuple)
+    metric: MetricDescriptor = field(default_factory=MetricDescriptor)
+    observed_scope: ObservedScope | None = None
+    y_axis_max: float | None = None
+
+    def __post_init__(self) -> None:
+        if not self.observed_at and not self.observed_series and self.observed_scope is None:
+            return
+        if self.days or self.series or self.observed_scope is None:
+            raise ValueError("observed timelines require only observed axis and series data")
+        if any(len(series.values) != len(self.observed_at) for series in self.observed_series):
+            raise ValueError("observed timeline values must align with observed timestamps")
+
+    @property
+    def is_observed(self) -> bool:
+        return self.observed_scope is not None
 
     @property
     def total(self) -> TokenUsage:
@@ -159,12 +200,37 @@ class RankingEntry:
 
 
 @dataclass(frozen=True, slots=True)
+class ScalarRankingEntry:
+    key: GroupKey
+    label: str
+    value: ChartValue
+    is_other: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class RankingModel:
     entries: tuple[RankingEntry, ...]
-    date_range: DateRange
+    date_range: DateRange | None
     notices: tuple[Notice, ...] = field(default_factory=tuple)
     denominator: TokenUsage | None = None
     summary: PeriodSummary | DailySummary | None = None
+    observed_entries: tuple[ScalarRankingEntry, ...] = field(default_factory=tuple)
+    metric: MetricDescriptor = field(default_factory=MetricDescriptor)
+    observed_scope: ObservedScope | None = None
+
+    def __post_init__(self) -> None:
+        if not self.observed_entries and self.observed_scope is None:
+            if self.date_range is None:
+                raise ValueError("historical rankings require a date range")
+            return
+        if self.entries or self.observed_scope is None or self.date_range is not None:
+            raise ValueError("observed rankings require only observed entries and scope")
+        if self.denominator is not None or self.summary is not None:
+            raise ValueError("observed rankings do not support historical percentages or summaries")
+
+    @property
+    def is_observed(self) -> bool:
+        return self.observed_scope is not None
 
     @property
     def total(self) -> TokenUsage:
@@ -172,5 +238,5 @@ class RankingModel:
 
     @property
     def percentage_total(self) -> TokenUsage:
-        """Return the full filtered total used for entry percentages."""
+        """Return the full filtered total used for historical entry percentages."""
         return self.denominator if self.denominator is not None else self.total

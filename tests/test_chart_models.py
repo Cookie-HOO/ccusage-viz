@@ -1,6 +1,19 @@
-from datetime import date
+from datetime import date, datetime
 
-from ccusage_viz.chart_models import CalendarDay, CalendarModel, Series, TimelineModel
+import pytest
+
+from ccusage_viz.chart_models import (
+    CalendarDay,
+    CalendarModel,
+    MetricDescriptor,
+    ObservedScope,
+    RankingModel,
+    ScalarRankingEntry,
+    ScalarSeries,
+    Series,
+    TimelineModel,
+)
+from ccusage_viz.core.time import DateRange
 from ccusage_viz.domain import TokenUsage
 
 
@@ -26,3 +39,40 @@ def test_model_operations_sum_breakdowns_and_calendar_statistics() -> None:
     assert calendar.current_streak == 1
     assert calendar.peak is not None
     assert calendar.peak.day == date(2026, 1, 4)
+
+
+def test_observed_timeline_keeps_scalar_metrics_separate_from_token_breakdowns() -> None:
+    timestamp = datetime(2026, 1, 1, 12, 0)
+    model = TimelineModel(
+        (),
+        (),
+        observed_at=(timestamp,),
+        observed_series=(ScalarSeries("Total", "Total", (1234.5,)),),
+        metric=MetricDescriptor("tpm"),
+        observed_scope=ObservedScope(900, "total"),
+        y_axis_max=2000.0,
+    )
+
+    assert model.is_observed
+    assert model.observed_series[0].values == (1234.5,)
+    assert model.metric.unit == "tpm"
+    assert model.total == TokenUsage.zero()
+
+
+def test_observed_models_reject_historical_semantics() -> None:
+    scope = ObservedScope(900, "model")
+    with pytest.raises(ValueError, match="only observed axis"):
+        TimelineModel(
+            (date(2026, 1, 1),),
+            (),
+            observed_at=(datetime(2026, 1, 1, 12, 0),),
+            observed_scope=scope,
+        )
+
+    with pytest.raises(ValueError, match="only observed entries"):
+        RankingModel(
+            (),
+            DateRange(date(2026, 1, 1), date(2026, 1, 1), None),
+            observed_entries=(ScalarRankingEntry("a", "A", 10.0),),
+            observed_scope=scope,
+        )
