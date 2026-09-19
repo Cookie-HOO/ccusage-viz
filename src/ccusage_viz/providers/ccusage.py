@@ -59,7 +59,7 @@ class CcusageProvider:
             "project_ranking"
             if chart_kind == "ranking" and project_required
             else "claude_daily_projects"
-            if chart_kind in {"timeline", "calendar", "stack"} and project_required
+            if chart_kind in {"timeline", "calendar", "stack", "monitor"} and project_required
             else "unified_daily"
         )
         queries: list[PhysicalQuery] = []

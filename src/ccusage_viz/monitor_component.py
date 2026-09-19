@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import time
 from collections.abc import Hashable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 
+from ccusage_viz.acquisition import historical_provider_id, monitor_query_intent
 from ccusage_viz.chart_models import (
     MetricDescriptor,
     ObservedScope,
@@ -18,6 +20,9 @@ from ccusage_viz.deltas import RefreshDeltas, RefreshRanks
 from ccusage_viz.domain import UsageRecord
 from ccusage_viz.options import MonitorConfig, StandaloneLaunch
 from ccusage_viz.processing.monitor import ObservedTPM, monitor_counters, monitor_rank_keys
+from ccusage_viz.query.coordinator import QueryHandle
+from ccusage_viz.query.models import ProviderResult, QueryTrigger
+from ccusage_viz.query.runtime import QueryRuntime
 from ccusage_viz.render.base import RenderContext
 
 
@@ -27,6 +32,26 @@ class MonitorCompletion:
     options: StandaloneLaunch
     records: tuple[UsageRecord, ...]
     elapsed: float
+
+
+@dataclass(frozen=True, slots=True)
+class MonitorSubmission:
+    generation: int
+    options: StandaloneLaunch
+    handle: QueryHandle[ProviderResult]
+    started: float
+
+    def result(self) -> MonitorCompletion:
+        result = self.handle.result()
+        return MonitorCompletion(
+            self.generation,
+            self.options,
+            result.records,
+            time.monotonic() - self.started,
+        )
+
+    def cancel(self) -> None:
+        self.handle.cancel()
 
 
 class MonitorComponent:
@@ -40,17 +65,28 @@ class MonitorComponent:
         "generation",
         "last_elapsed",
         "observer",
+        "owner_id",
         "rank_changes",
         "rebaseline_pending",
         "refreshed_at",
         "registry",
         "render_revision",
+        "runtime",
         "value_changes",
     )
 
-    def __init__(self, options: StandaloneLaunch, *, registry: ChartRegistry) -> None:
+    def __init__(
+        self,
+        options: StandaloneLaunch,
+        *,
+        registry: ChartRegistry,
+        owner_id: str = "monitor",
+        runtime: QueryRuntime | None = None,
+    ) -> None:
         chart = self._monitor_config(options)
         self.registry = registry
+        self.owner_id = owner_id
+        self.runtime = runtime
         self.candidate = options
         self.accepted_options: StandaloneLaunch | None = None
         self.observer = ObservedTPM(
@@ -90,6 +126,31 @@ class MonitorComponent:
             self.render_revision += 1
             if self.accepted_options is not None:
                 self.accepted_options = options
+
+    def submit(
+        self,
+        trigger: QueryTrigger,
+        *,
+        sample_ordinal: int = 0,
+        today: date | None = None,
+    ) -> MonitorSubmission:
+        if self.runtime is None:
+            raise RuntimeError("monitor component has no query runtime")
+        submitted = self.candidate
+        started = time.monotonic()
+        provider_id = historical_provider_id(submitted)
+        intent = monitor_query_intent(
+            submitted,
+            self.runtime.definition(provider_id),
+            owner_id=self.owner_id,
+            generation=self.generation,
+            trigger=trigger,
+            sample_ordinal=sample_ordinal,
+            today=today,
+        )
+        handle = self.runtime.submit(intent)
+        self.error = None
+        return MonitorSubmission(self.generation, submitted, handle, started)
 
     def accept(
         self,

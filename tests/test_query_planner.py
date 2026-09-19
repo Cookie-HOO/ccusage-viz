@@ -1,13 +1,14 @@
 from dataclasses import replace
 from datetime import date
 
-from ccusage_viz.acquisition import historical_query_intent
+from ccusage_viz.acquisition import historical_query_intent, monitor_query_intent
 from ccusage_viz.core.time import DateRange
 from ccusage_viz.coverage import DateCoverage, DateInterval
 from ccusage_viz.domain import Notice
 from ccusage_viz.options import (
     CalendarConfig,
     Filters,
+    MonitorConfig,
     ProcessConfig,
     RankingConfig,
     StackConfig,
@@ -54,6 +55,66 @@ def intent(
         trigger=trigger,
         coverage=coverage,
     )
+
+
+def monitor_options(*, by: str | None = None, demo_size: str | None = None) -> StandaloneLaunch:
+    return StandaloneLaunch(
+        ProcessConfig(),
+        StandaloneHostConfig(timezone="UTC", demo_size=demo_size),
+        MonitorConfig("monitor", 300, by=by),
+    )
+
+
+def test_monitor_intent_always_queries_complete_yesterday_today_scope() -> None:
+    selected = monitor_query_intent(
+        monitor_options(),
+        CCUSAGE_DEFINITION,
+        owner_id="standalone:monitor",
+        generation=3,
+        trigger=QueryTrigger.TICK,
+        today=date(2026, 1, 3),
+    )
+
+    expected = DateInterval(date(2026, 1, 2), date(2026, 1, 3))
+    assert selected.scope.intervals == (expected,)
+    assert selected.missing_intervals == (expected,)
+    assert selected.scope.timezone == "UTC"
+    assert selected.dimensions == ("agent",)
+    assert dict(selected.execution_options) == {"chart_kind": "monitor"}
+    assert CCUSAGE_DEFINITION.provider.compile(selected).queries[0].operation == "unified_daily"
+
+
+def test_monitor_project_mode_uses_only_claude_daily_projects() -> None:
+    selected = monitor_query_intent(
+        monitor_options(by="project"),
+        CCUSAGE_DEFINITION,
+        owner_id="dashboard:pane:1",
+        generation=0,
+        trigger=QueryTrigger.STARTUP,
+        today=date(2026, 1, 3),
+    )
+    plan = CCUSAGE_DEFINITION.provider.compile(selected)
+
+    assert [query.operation for query in plan.queries] == ["claude_daily_projects"]
+    assert plan.notices == (Notice("notice.daily_project_omitted", {"agent": "Codex"}),)
+
+
+def test_monitor_demo_sample_ordinal_changes_physical_fingerprint() -> None:
+    first = monitor_query_intent(
+        monitor_options(demo_size="small"),
+        DEMO_DEFINITION,
+        owner_id="standalone:monitor",
+        generation=0,
+        trigger=QueryTrigger.TICK,
+        sample_ordinal=1,
+        today=date(2026, 1, 3),
+    )
+    second = replace(first, execution_options=(("demo_size", "small"), ("sample_ordinal", 2)))
+    first_query = DEMO_DEFINITION.provider.compile(first).queries[0]
+    second_query = DEMO_DEFINITION.provider.compile(second).queries[0]
+
+    assert first_query.arguments == ("small", "2026-01-02", "2026-01-03", "1")
+    assert first_query.fingerprint != second_query.fingerprint
 
 
 def test_default_plan_uses_unified_by_agent_query() -> None:

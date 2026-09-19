@@ -1,7 +1,7 @@
 from dataclasses import replace
 from datetime import UTC, date, datetime
 
-from ccusage_viz.bootstrap import build_chart_registry
+from ccusage_viz.bootstrap import build_chart_registry, build_query_runtime
 from ccusage_viz.domain import ModelBreakdown, SourceKind, TokenUsage, UsageRecord
 from ccusage_viz.monitor_component import MonitorCompletion, MonitorComponent
 from ccusage_viz.options import (
@@ -12,6 +12,7 @@ from ccusage_viz.options import (
     StandaloneHostConfig,
     StandaloneLaunch,
 )
+from ccusage_viz.query.models import QueryTrigger
 
 
 def usage(total: int) -> TokenUsage:
@@ -57,6 +58,29 @@ def completion(
     elapsed: float = 0.1,
 ) -> MonitorCompletion:
     return MonitorCompletion(component.generation, component.candidate, records, elapsed)
+
+
+def test_monitor_component_submits_provider_backed_demo_samples() -> None:
+    launch = replace(options(), host=replace(options().host, demo_size="small"))
+    component = MonitorComponent(
+        launch,
+        registry=build_chart_registry(),
+        owner_id="standalone:monitor",
+        runtime=build_query_runtime(),
+    )
+
+    first = component.submit(QueryTrigger.STARTUP, sample_ordinal=1, today=date(2026, 9, 19))
+    first_result = first.result()
+    second = component.submit(QueryTrigger.TICK, sample_ordinal=2, today=date(2026, 9, 19))
+    second_result = second.result()
+
+    assert first.generation == component.generation
+    assert first.options == launch
+    assert first_result.records
+    assert sum(record.usage.total for record in second_result.records) > sum(
+        record.usage.total for record in first_result.records
+    )
+    assert first_result.elapsed >= 0
 
 
 def test_monitor_component_accepts_cumulative_samples_and_projects_timeline() -> None:
