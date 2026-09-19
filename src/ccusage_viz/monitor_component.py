@@ -19,7 +19,12 @@ from ccusage_viz.charts.registry import ChartRegistry
 from ccusage_viz.deltas import RefreshDeltas, RefreshRanks
 from ccusage_viz.domain import UsageRecord
 from ccusage_viz.options import MonitorConfig, StandaloneLaunch
-from ccusage_viz.processing.monitor import ObservedTPM, monitor_counters, monitor_rank_keys
+from ccusage_viz.processing.monitor import (
+    ObservedTPM,
+    _copy_observer,
+    monitor_counters,
+    monitor_rank_keys,
+)
 from ccusage_viz.query.coordinator import QueryHandle
 from ccusage_viz.query.models import ProviderResult, QueryTrigger
 from ccusage_viz.query.runtime import QueryRuntime
@@ -123,6 +128,7 @@ class MonitorComponent:
             self.rebaseline_pending = True
             self.clear_changes()
         else:
+            self._configure_observer(self._monitor_config(options))
             self.render_revision += 1
             if self.accepted_options is not None:
                 self.accepted_options = options
@@ -158,6 +164,7 @@ class MonitorComponent:
         *,
         now: float,
         wall: datetime | None = None,
+        detect_gap: bool = True,
     ) -> bool:
         if completion.generation != self.generation:
             return False
@@ -167,13 +174,15 @@ class MonitorComponent:
         counters = monitor_counters(self.candidate, completion.records)
         self._configure_observer(chart)
         gap_limit = self.candidate.host.interval * 2
-        should_rebaseline = self.rebaseline_pending or self.observer.is_discontinuous(
-            now, wall, gap_limit
+        should_rebaseline = self.rebaseline_pending or (
+            detect_gap and self.observer.is_discontinuous(now, wall, gap_limit)
         )
         if should_rebaseline:
             self.observer.rebaseline(counters, now, wall)
             self.clear_changes()
             self.rebaseline_pending = False
+            values = self.current_values(now, wall=wall)
+            self.observer.update_y_axis(max(values.values(), default=0.0))
         else:
             self.observer.add(counters, now, wall)
             values = self.current_values(now, wall=wall)
@@ -193,6 +202,13 @@ class MonitorComponent:
             return False
         self.error = error
         return True
+
+    def preview(self, options: StandaloneLaunch) -> MonitorComponent:
+        preview = MonitorComponent(options, registry=self.registry)
+        preview.accepted_options = options
+        preview.observer = _copy_observer(self.observer)
+        preview._configure_observer(self._monitor_config(options))
+        return preview
 
     def clear_changes(self) -> None:
         self.value_changes.clear()

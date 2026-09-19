@@ -167,6 +167,14 @@ def test_monitor_component_reconfigures_without_losing_observed_history() -> Non
     assert component.generation == generation
     assert tuple(component.observer.intervals) == intervals
 
+    top = replace(
+        component.candidate,
+        chart=replace(component.candidate.chart, top=1),
+    )
+    component.configure(top, data_affecting=False)
+    assert component.observer.top == 1
+    assert tuple(component.observer.intervals) == intervals
+
     changed = replace(
         component.candidate,
         chart=replace(component.candidate.chart, filters=Filters(agents=("claude",))),
@@ -192,6 +200,8 @@ def test_monitor_component_gap_rebaselines_and_stale_failure_keeps_accepted_stat
     assert tuple(component.observer.intervals) == intervals
     assert component.observer.previous is not None
     assert component.observer.previous.total.total == 220
+    assert component.observer.y_axis_max is not None
+    assert component.observer.y_axis_max > 0
 
     assert component.fail(RuntimeError("current"), generation=component.generation)
     assert isinstance(component.error, RuntimeError)

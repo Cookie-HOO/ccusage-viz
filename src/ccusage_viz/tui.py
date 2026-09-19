@@ -95,6 +95,7 @@ class TuiPane:
     last_render: PaneRender | None = None
     copied: bool = False
     pending_trigger: QueryTrigger | None = None
+    discard_completion: bool = False
     previous_values: dict[Hashable, float] = field(default_factory=dict)
     deltas: dict[Hashable, float] = field(default_factory=dict)
     values_initialized: bool = False
@@ -880,6 +881,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             )
             pane.query_handle = submission.handle
             pane.future = executor.submit(_await_monitor_submission, submission)
+            pane.discard_completion = False
             return
         current = component.candidate
         if isinstance(current.chart, MonitorConfig):
@@ -966,13 +968,17 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             if future is None or not future.done():
                 continue
             component = pane.component
+            discard_completion = pane.discard_completion
             pane.future = None
             pane.query_handle = None
+            pane.discard_completion = False
             observed_at = time.monotonic()
             outcome_generation: int | None = None
             try:
                 loaded = future.result()
                 outcome_generation = loaded.generation
+                if discard_completion:
+                    continue
                 if loaded.error is not None:
                     if component.fail(loaded.error, generation=loaded.generation):
                         pane.refreshed_at = observed_at
@@ -1487,8 +1493,12 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     now = time.monotonic()
                     if scheduling_paused:
                         for item in panes:
+                            item.pending_trigger = None
                             if isinstance(item.component, MonitorComponent):
                                 item.component.pause()
+                                if item.query_handle is not None:
+                                    item.discard_completion = True
+                                    item.query_handle.cancel()
                     else:
                         wall = datetime.now().astimezone()
                         header.refreshed_at = now
