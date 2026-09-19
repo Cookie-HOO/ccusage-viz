@@ -1,0 +1,298 @@
+from __future__ import annotations
+
+from collections.abc import Hashable
+from dataclasses import dataclass
+from datetime import datetime
+
+from ccusage_viz.chart_models import (
+    MetricDescriptor,
+    ObservedScope,
+    RankingModel,
+    ScalarRankingEntry,
+    ScalarSeries,
+    TimelineModel,
+)
+from ccusage_viz.charts.definition import ChartDefinition
+from ccusage_viz.charts.registry import ChartRegistry
+from ccusage_viz.deltas import RefreshDeltas, RefreshRanks
+from ccusage_viz.domain import UsageRecord
+from ccusage_viz.options import MonitorConfig, StandaloneLaunch
+from ccusage_viz.processing.monitor import ObservedTPM, monitor_counters, monitor_rank_keys
+from ccusage_viz.render.base import RenderContext
+
+
+@dataclass(frozen=True, slots=True)
+class MonitorCompletion:
+    generation: int
+    options: StandaloneLaunch
+    records: tuple[UsageRecord, ...]
+    elapsed: float
+
+
+class MonitorComponent:
+    """One Monitor runtime's host-independent cumulative-sample lifecycle."""
+
+    __slots__ = (
+        "accepted_at",
+        "accepted_options",
+        "candidate",
+        "error",
+        "generation",
+        "last_elapsed",
+        "observer",
+        "rank_changes",
+        "rebaseline_pending",
+        "refreshed_at",
+        "registry",
+        "render_revision",
+        "value_changes",
+    )
+
+    def __init__(self, options: StandaloneLaunch, *, registry: ChartRegistry) -> None:
+        chart = self._monitor_config(options)
+        self.registry = registry
+        self.candidate = options
+        self.accepted_options: StandaloneLaunch | None = None
+        self.observer = ObservedTPM(
+            window_seconds=chart.window_seconds,
+            by=chart.by,
+            top=chart.top,
+            model_selectors=chart.filters.models,
+        )
+        self.generation = 0
+        self.render_revision = 0
+        self.accepted_at: datetime | None = None
+        self.refreshed_at: float | None = None
+        self.last_elapsed: float | None = None
+        self.error: BaseException | None = None
+        self.rebaseline_pending = False
+        self.value_changes = RefreshDeltas()
+        self.rank_changes = RefreshRanks()
+
+    @property
+    def deltas(self) -> dict[Hashable, float]:
+        return self.value_changes.current
+
+    @property
+    def rank_deltas(self) -> dict[Hashable, int]:
+        return self.rank_changes.current
+
+    def configure(self, options: StandaloneLaunch, *, data_affecting: bool) -> None:
+        self._monitor_config(options)
+        if options == self.candidate:
+            return
+        self.candidate = options
+        if data_affecting:
+            self.generation += 1
+            self.rebaseline_pending = True
+            self.clear_changes()
+        else:
+            self.render_revision += 1
+            if self.accepted_options is not None:
+                self.accepted_options = options
+
+    def accept(
+        self,
+        completion: MonitorCompletion,
+        *,
+        now: float,
+        wall: datetime | None = None,
+    ) -> bool:
+        if completion.generation != self.generation:
+            return False
+        self._monitor_config(completion.options)
+        chart = self._monitor_config(self.candidate)
+        wall = wall or datetime.now().astimezone()
+        counters = monitor_counters(self.candidate, completion.records)
+        self._configure_observer(chart)
+        gap_limit = self.candidate.host.interval * 2
+        should_rebaseline = self.rebaseline_pending or self.observer.is_discontinuous(
+            now, wall, gap_limit
+        )
+        if should_rebaseline:
+            self.observer.rebaseline(counters, now, wall)
+            self.clear_changes()
+            self.rebaseline_pending = False
+        else:
+            self.observer.add(counters, now, wall)
+            values = self.current_values(now, wall=wall)
+            self.value_changes.accept(values)
+            self.rank_changes.accept(monitor_rank_keys(values))
+            self.observer.update_y_axis(max(values.values(), default=0.0))
+        self.accepted_options = self.candidate
+        self.accepted_at = wall
+        self.refreshed_at = now
+        self.last_elapsed = completion.elapsed
+        self.error = None
+        self.render_revision += 1
+        return True
+
+    def fail(self, error: BaseException, *, generation: int) -> bool:
+        if generation != self.generation:
+            return False
+        self.error = error
+        return True
+
+    def clear_changes(self) -> None:
+        self.value_changes.clear()
+        self.rank_changes.clear()
+
+    def pause(self) -> None:
+        self.clear_changes()
+
+    def resume(self, *, now: float, wall: datetime | None = None) -> None:
+        wall = wall or datetime.now().astimezone()
+        if self.observer.previous is not None:
+            self.observer.rebaseline(self.observer.previous, now, wall)
+        self.clear_changes()
+
+    def current_values(self, now: float, *, wall: datetime | None = None) -> dict[str, float]:
+        buckets = self._buckets(now, 32, wall)
+        names = dict.fromkeys(key for bucket in buckets for key in bucket.values)
+        return {
+            name: value
+            for name in names
+            if (
+                value := next(
+                    (bucket.values[name] for bucket in reversed(buckets) if name in bucket.values),
+                    None,
+                )
+            )
+            is not None
+        }
+
+    def timeline_model(
+        self,
+        *,
+        now: float,
+        count: int,
+        wall: datetime | None = None,
+    ) -> TimelineModel:
+        buckets = self._buckets(now, count, wall)
+        names = tuple(dict.fromkeys(key for bucket in buckets for key in bucket.values))
+        series = tuple(
+            ScalarSeries(
+                name,
+                name,
+                tuple(bucket.values.get(name) for bucket in buckets),
+                name == "Other",
+            )
+            for name in names
+        )
+        return TimelineModel(
+            (),
+            (),
+            observed_at=tuple(bucket.ended_wall for bucket in buckets),
+            observed_series=series,
+            metric=self._metric(),
+            observed_scope=self._scope(),
+            y_axis_max=self.observer.y_axis_max,
+        )
+
+    def ranking_model(
+        self,
+        *,
+        now: float,
+        count: int = 32,
+        wall: datetime | None = None,
+    ) -> RankingModel:
+        values = self._latest_bucket_values(now, count, wall)
+        entries = tuple(
+            ScalarRankingEntry(name, name, value, name == "Other")
+            for name, value in sorted(
+                values.items(), key=lambda item: (-item[1], item[0].casefold())
+            )
+        )
+        return RankingModel(
+            (),
+            None,
+            observed_entries=entries,
+            metric=self._metric(),
+            observed_scope=self._scope(),
+        )
+
+    def model(
+        self,
+        *,
+        now: float,
+        count: int,
+        wall: datetime | None = None,
+    ) -> TimelineModel | RankingModel:
+        chart = self._monitor_config(self._active_options())
+        if chart.presentation.style == "ranking":
+            return self.ranking_model(now=now, count=count, wall=wall)
+        return self.timeline_model(now=now, count=count, wall=wall)
+
+    def render(
+        self,
+        context: RenderContext,
+        *,
+        now: float,
+        count: int,
+        wall: datetime | None = None,
+    ) -> str:
+        model = self.model(now=now, count=count, wall=wall)
+        definition = self._definition(model)
+        return definition.renderer(model, context)
+
+    def _buckets(self, now: float, count: int, wall: datetime | None):
+        return self.observer.buckets(self.observer.display_now(now), count, wall)
+
+    def _latest_bucket_values(
+        self, now: float, count: int, wall: datetime | None
+    ) -> dict[str, float]:
+        buckets = self._buckets(now, count, wall)
+        names = dict.fromkeys(key for bucket in buckets for key in bucket.values)
+        return {
+            name: value
+            for name in names
+            if (
+                value := next(
+                    (bucket.values[name] for bucket in reversed(buckets) if name in bucket.values),
+                    None,
+                )
+            )
+            is not None
+        }
+
+    def _scope(self) -> ObservedScope:
+        chart = self._monitor_config(self._active_options())
+        state = (
+            "baseline"
+            if self.observer.previous is None
+            else "ready"
+            if self.observer.sample_generation > 0
+            else "sampling"
+        )
+        return ObservedScope(
+            chart.window_seconds,
+            chart.by or "total",
+            state,
+            chart.filters.agents,
+        )
+
+    def _metric(self) -> MetricDescriptor:
+        chart = self._monitor_config(self._active_options())
+        return MetricDescriptor("tpm" if chart.by in {None, "model"} else "tokens")
+
+    def _active_options(self) -> StandaloneLaunch:
+        return self.accepted_options or self.candidate
+
+    def _configure_observer(self, chart: MonitorConfig) -> None:
+        self.observer.window_seconds = chart.window_seconds
+        self.observer.by = chart.by
+        self.observer.top = chart.top
+        self.observer.model_selectors = chart.filters.models
+
+    def _definition(self, model: TimelineModel | RankingModel) -> ChartDefinition:
+        chart_id = "ranking" if isinstance(model, RankingModel) else "timeline"
+        definition = self.registry.get(chart_id)
+        if not isinstance(model, definition.model_type):
+            raise TypeError(f"{chart_id} definition received incompatible Monitor model")
+        return definition
+
+    @staticmethod
+    def _monitor_config(options: StandaloneLaunch) -> MonitorConfig:
+        if not isinstance(options.chart, MonitorConfig):
+            raise TypeError("monitor components require a monitor configuration")
+        return options.chart
