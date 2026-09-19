@@ -126,6 +126,21 @@ def test_runtime_adjustments_replace_owned_nested_configs() -> None:
     assert adjust_standalone(timeline(rolling=False), "p") == timeline(rolling=False)
 
 
+def test_period_keys_cycle_distinct_trailing_and_natural_families() -> None:
+    source = timeline()
+
+    trailing = adjust_standalone(source, "p")
+    natural = adjust_standalone(source, "P")
+
+    assert trailing.chart.date_range.period == "30d"
+    assert trailing.chart.date_range.since == date(2026, 8, 14)
+    assert natural.chart.date_range.period == "1mo"
+    assert natural.chart.date_range.since == date(2026, 9, 1)
+    assert adjust_standalone(natural, "P").chart.date_range.period == "1q"
+    assert adjust_standalone(trailing, "P").chart.date_range.period == "1mo"
+    assert adjust_standalone(timeline(rolling=False), "P") == timeline(rolling=False)
+
+
 def test_replace_chart_filters_preserves_every_other_setting() -> None:
     source = timeline(by="model", top=10)
     filters = Filters(agents=("Claude Code",), models=("sonnet",))

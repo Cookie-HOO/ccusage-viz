@@ -13,12 +13,8 @@ GRANULARITIES = ("day", "month", "quarter", "year")
 HEADER_SUMMARIES = (*GRANULARITIES, "none")
 PERIOD_UNITS = {"day": "d", "month": "mo", "quarter": "q", "year": "y"}
 UNIT_GRANULARITIES = {unit: granularity for granularity, unit in PERIOD_UNITS.items()}
-PERIOD_PRESETS = {
-    "d": (7, 14, 30, 365),
-    "mo": (3, 6, 13, 24),
-    "q": (4, 8, 12),
-    "y": (3, 5, 10),
-}
+TRAILING_PERIOD_PRESETS = ("7d", "14d", "30d", "365d")
+NATURAL_PERIOD_PRESETS = ("1mo", "1q", "1y")
 COMMAND_DEFAULT_PERIODS = {"timeline": "14d", "calendar": "365d", "stack": "14d", "ranking": "14d"}
 WEEKDAY_MODES = ("show", "hide")
 OTHER_MODES = ("show", "hide")
@@ -234,16 +230,19 @@ def adjust_chart(chart: ChartConfig, key: str, *, demo: bool = False) -> ChartCo
     if key in {"p", "P"} and not isinstance(chart, MonitorConfig):
         if not chart.date_range.relative_until or chart.date_range.period is None:
             return chart
-        value, unit = parse_period(chart.date_range.period)
-        presets = PERIOD_PRESETS[unit]
-        nearest = min(presets, key=lambda preset: abs(preset - value))
-        next_value = presets[(presets.index(nearest) + 1) % len(presets)]
-        period = f"{next_value}{unit}"
+        presets = TRAILING_PERIOD_PRESETS if key == "p" else NATURAL_PERIOD_PRESETS
+        current = chart.date_range.period
+        period = (
+            presets[(presets.index(current) + 1) % len(presets)]
+            if current in presets
+            else presets[0]
+        )
+        value, unit = parse_period(period)
         end = chart.date_range.until
         return replace(
             chart,
             date_range=replace(
-                chart.date_range, since=natural_period_start(end, next_value, unit), period=period
+                chart.date_range, since=natural_period_start(end, value, unit), period=period
             ),
         )
     if key == "g" and isinstance(chart, (TimelineConfig, StackConfig)):
