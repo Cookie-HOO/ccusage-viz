@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from datetime import datetime, timedelta
 from shutil import get_terminal_size
 
@@ -18,7 +19,7 @@ from ccusage_viz.errors import UsageError
 from ccusage_viz.i18n import Translator
 from ccusage_viz.lifecycle import (
     FixedIntervalScheduler,
-    LifecycleCoordinator,
+    LifecycleOperation,
     LifecycleTrigger,
     OperationToken,
     QueryTrigger,
@@ -49,8 +50,7 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
     screen = FramePainter()
     started_at = time.monotonic()
     scheduler = FixedIntervalScheduler(options.host.interval, now=started_at)
-    lifecycle = LifecycleCoordinator("standalone:monitor")
-    active: tuple[OperationToken, MonitorSubmission] | None = None
+    lifecycle: LifecycleOperation[MonitorSubmission] = LifecycleOperation("standalone:monitor")
     controls_hidden = False
     body_view: BodyView = "chart"
     demo_ordinal = 0
@@ -299,29 +299,29 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                 continue
             paint_picker()
 
+    def start(operation: OperationToken) -> tuple[MonitorSubmission, Callable[[], None]]:
+        submission = component.submit(
+            query_trigger(operation.trigger),
+            sample_ordinal=demo_ordinal + 1,
+        )
+        return submission, submission.cancel
+
+    def report_start_failure(exc: BaseException) -> None:
+        nonlocal status
+        component.fail(exc, generation=component.generation)
+        status = translator.text(
+            "status.monitor_source",
+            source=str(exc),
+            interval=f"{component.candidate.host.interval:g}",
+            state=(f" · {translator.text('status.paused')}" if lifecycle.paused else ""),
+        ).rstrip(" ·")
+
     def start_ready(now: float) -> bool:
-        nonlocal active, status
-        operation = lifecycle.take_ready(now=now)
-        if operation is None:
-            return False
         try:
-            submission = component.submit(
-                query_trigger(operation.trigger),
-                sample_ordinal=demo_ordinal + 1,
-            )
+            return lifecycle.start_ready(now=now, start=start)
         except BaseException as exc:
-            lifecycle.abandon(operation)
-            component.fail(exc, generation=component.generation)
-            status = translator.text(
-                "status.monitor_source",
-                source=str(exc),
-                interval=f"{component.candidate.host.interval:g}",
-                state=(f" · {translator.text('status.paused')}" if lifecycle.paused else ""),
-            ).rstrip(" ·")
+            report_start_failure(exc)
             return False
-        active = (operation, submission)
-        lifecycle.attach(operation, submission.cancel)
-        return True
 
     def request(
         trigger: LifecycleTrigger,
@@ -329,13 +329,17 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
         now: float,
         replace_active: bool = False,
     ) -> bool:
-        requested = lifecycle.request(
-            trigger,
-            generation=component.generation,
-            now=now,
-            replace_active=replace_active,
-        )
-        return requested and start_ready(now)
+        try:
+            return lifecycle.request(
+                trigger,
+                generation=component.generation,
+                now=now,
+                replace_active=replace_active,
+                start=start,
+            )
+        except BaseException as exc:
+            report_start_failure(exc)
+            return False
 
     try:
         if options.host.demo_size:
@@ -378,9 +382,9 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                         )
                     if started or component.error is not None:
                         paint()
-                if active is not None and active[1].handle.done():
-                    operation, submission = active
-                    active = None
+                completed = lifecycle.take_completed(lambda submission: submission.handle.done())
+                if completed is not None:
+                    operation, submission = completed
                     current = lifecycle.accepts(
                         operation,
                         generation=submission.generation,
