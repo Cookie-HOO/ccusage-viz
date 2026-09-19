@@ -177,6 +177,21 @@ def test_pause_cancels_automatic_work_but_allows_manual_and_configuration_work()
     assert configuration.trigger is LifecycleTrigger.CONFIGURATION
 
 
+def test_pause_keeps_manual_work_active_until_it_completes() -> None:
+    coordinator = LifecycleCoordinator("pane-1")
+    coordinator.request(LifecycleTrigger.MANUAL, generation=0, now=0)
+    manual = coordinator.take_ready(now=0)
+    assert manual is not None
+    cancelled: list[bool] = []
+    coordinator.attach(manual, lambda: cancelled.append(True))
+
+    coordinator.pause()
+
+    assert coordinator.active == manual
+    assert cancelled == []
+    assert coordinator.complete(manual, generation=0)
+
+
 def test_shutdown_rejects_late_completion_and_new_intent() -> None:
     coordinator = LifecycleCoordinator("pane-1")
     coordinator.request(LifecycleTrigger.STARTUP, generation=0, now=0)

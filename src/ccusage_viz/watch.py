@@ -752,7 +752,8 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
                     if not lifecycle.paused:
                         scheduler.pause()
                         lifecycle.pause()
-                        active = None
+                        if active is not None and lifecycle.active is None:
+                            active = None
                     else:
                         now = time.monotonic()
                         lifecycle.resume()
