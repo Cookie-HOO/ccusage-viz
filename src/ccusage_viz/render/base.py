@@ -5,11 +5,20 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date, datetime
 from math import ceil
+from typing import Literal
 
 import plotext as plt
 
 from ccusage_viz.formatting import format_tokens, strip_ansi
 from ccusage_viz.i18n import Translator
+
+
+@dataclass(frozen=True, slots=True)
+class RenderAudit:
+    accepted_at: datetime | None = None
+    query_elapsed: float | None = None
+    interval: float | None = None
+    cadence: Literal["refresh", "sample"] = "refresh"
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,6 +37,8 @@ class RenderContext:
     weekday_mode: str = "auto"
     period: str | None = None
     title_content: str | None = None
+    density: Literal["minimal", "compact", "full"] = "full"
+    audit: RenderAudit | None = None
 
 
 @contextmanager
@@ -69,6 +80,35 @@ _ASCII_PLOT_GLYPHS = str.maketrans(
         "░": "#",
     }
 )
+
+
+def render_audit(context: RenderContext) -> str:
+    if context.density != "full" or context.audit is None:
+        return ""
+    audit = context.audit
+    parts = []
+    if audit.accepted_at is not None:
+        parts.append(
+            context.translator.text(
+                "status.updated",
+                time=audit.accepted_at.strftime("%H:%M:%S"),
+            )
+        )
+    if audit.query_elapsed is not None:
+        parts.append(
+            context.translator.text(
+                "status.query_time",
+                seconds=f"{audit.query_elapsed:.2f}",
+            )
+        )
+    if audit.interval is not None:
+        parts.append(
+            context.translator.text(
+                "status.sample_every" if audit.cadence == "sample" else "status.refresh_every",
+                seconds=f"{audit.interval:g}",
+            )
+        )
+    return " · ".join(parts)
 
 
 def date_range_heading(name: str, since: date, until: date, context: RenderContext) -> str:

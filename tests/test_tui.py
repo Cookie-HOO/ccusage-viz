@@ -559,6 +559,8 @@ def test_dashboard_monitor_forwards_component_changes_to_chart_renderer(
     def fake_render(self: MonitorComponent, context, **kwargs: object) -> str:
         captured["deltas"] = context.deltas
         captured["rank_deltas"] = context.rank_deltas
+        captured["density"] = context.density
+        captured["audit"] = context.audit
         return "monitor"
 
     monkeypatch.setattr(MonitorComponent, "render", fake_render)
@@ -568,6 +570,9 @@ def test_dashboard_monitor_forwards_component_changes_to_chart_renderer(
     assert rendered.chart == "monitor"
     assert captured["deltas"] == {"sonnet": 4.0}
     assert captured["rank_deltas"] == {"sonnet": 1}
+    assert captured["density"] == "compact"
+    assert captured["audit"].interval == monitor.scheduler.interval
+    assert captured["audit"].cadence == "sample"
 
 
 def test_dashboard_monitor_and_error_panes_do_not_contribute_chart_notices() -> None:

@@ -103,8 +103,9 @@ def render_calendar(model: CalendarModel, context: RenderContext) -> str:
 
     separator = " " * (stride - 1)
     lines = []
-    if model.summary:
-        lines.append(render_summary(model.summary, context))
+    summary = render_summary(model.summary, context) if model.summary else ""
+    if summary:
+        lines.append(summary)
     lines.append(
         center_text(
             date_range_heading(context.translator.text("label.calendar"), first, last, context),

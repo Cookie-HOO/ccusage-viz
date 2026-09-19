@@ -424,6 +424,7 @@ def test_standalone_pause_discards_active_sample_and_preserves_paused_status(
             self.candidate = selected
             self.accepted_options = None
             self.error = None
+            self.accepted_at = None
             self.last_elapsed = None
             self.deltas = {}
             self.rank_deltas = {}

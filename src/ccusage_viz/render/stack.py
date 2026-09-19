@@ -171,7 +171,10 @@ def render_stack(model: StackModel, context: RenderContext) -> str:
             plt.figure.plot_size(
                 context.width,
                 plot_height(
-                    context, text_rows=1 + int(show_legend) + int(model.summary is not None)
+                    context,
+                    text_rows=1
+                    + int(show_legend)
+                    + int(model.summary is not None and context.density != "minimal"),
                 ),
             )
             component_count = len(model.components)

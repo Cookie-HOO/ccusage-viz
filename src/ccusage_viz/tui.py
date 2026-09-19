@@ -68,7 +68,7 @@ from ccusage_viz.processing import build_period_summary, required_summary_covera
 from ccusage_viz.query.coordinator import QueryHandle
 from ccusage_viz.query.models import ProviderResult
 from ccusage_viz.query.runtime import QueryRuntime
-from ccusage_viz.render.base import RenderContext, styled_text
+from ccusage_viz.render.base import RenderAudit, RenderContext, styled_text
 from ccusage_viz.render.palette import COLOR_SCHEMES, get_color_scheme
 from ccusage_viz.render.summary import render_summary, render_summary_placeholder
 from ccusage_viz.terminal import FramePainter, Terminal, compose_frame
@@ -648,7 +648,10 @@ def _pane_render(pane: TuiPane, translator: Translator, terminal: Terminal) -> P
         if isinstance(component, MonitorComponent):
             context = RenderContext(
                 terminal.width,
-                terminal.height,
+                max(
+                    1,
+                    terminal.height - int(active.chart.presentation.density == "full"),
+                ),
                 translator,
                 color=terminal.color,
                 ascii=terminal.ascii,
@@ -658,6 +661,13 @@ def _pane_render(pane: TuiPane, translator: Translator, terminal: Terminal) -> P
                 hide_upper_right_axes=True,
                 deltas=component.deltas,
                 rank_deltas=component.rank_deltas,
+                density=active.chart.presentation.density,
+                audit=RenderAudit(
+                    component.accepted_at,
+                    component.last_elapsed,
+                    pane.scheduler.interval,
+                    "sample",
+                ),
             )
             candidate = PaneRender(
                 component.render(
@@ -679,6 +689,7 @@ def _pane_render(pane: TuiPane, translator: Translator, terminal: Terminal) -> P
                 hide_upper_right_axes=True,
                 ranking_deltas=pane.deltas if active.chart.kind == "ranking" else None,
                 ranking_rank_deltas=pane.rank_deltas if active.chart.kind == "ranking" else None,
+                interval=pane.scheduler.interval,
             )
             candidate = PaneRender(rendered.chart, rendered.notices)
     except UsageError as exc:

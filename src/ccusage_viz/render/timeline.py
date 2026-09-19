@@ -123,7 +123,8 @@ def render_timeline(model: TimelineModel, context: RenderContext) -> str:
             plot_height(
                 context,
                 text_rows=1
-                + int(model.summary is not None)
+                + int(model.summary is not None and context.density != "minimal")
+                + int(observed and context.density != "minimal")
                 + int(show_legend and context.legend_position == "below-title"),
             ),
         )
@@ -159,7 +160,9 @@ def render_timeline(model: TimelineModel, context: RenderContext) -> str:
                 if context.style in {"stem", "area"}:
                     signal.fillx()
             if show_legend and context.legend_position == "inside":
-                signal.label(context.translator.text("label.other") if item.is_other else item.label)
+                signal.label(
+                    context.translator.text("label.other") if item.is_other else item.label
+                )
             plt.figure.draw(signal)
         if context.legend_position == "inside":
             plt.figure.legend(active=True)

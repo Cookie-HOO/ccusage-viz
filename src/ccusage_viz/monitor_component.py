@@ -28,7 +28,8 @@ from ccusage_viz.processing.monitor import (
 from ccusage_viz.query.coordinator import QueryHandle
 from ccusage_viz.query.models import ProviderResult, QueryTrigger
 from ccusage_viz.query.runtime import QueryRuntime
-from ccusage_viz.render.base import RenderContext
+from ccusage_viz.render.base import RenderContext, render_audit
+from ccusage_viz.render.observation import render_observation
 
 
 @dataclass(frozen=True, slots=True)
@@ -310,7 +311,10 @@ class MonitorComponent:
     ) -> str:
         model = self.model(now=now, count=count, wall=wall)
         definition = self._definition(model)
-        return definition.renderer(model, context)
+        chart = definition.renderer(model, context)
+        observation = render_observation(model, context)
+        audit = render_audit(context)
+        return "\n".join(line for line in (observation, chart, audit) if line)
 
     def _buckets(self, now: float, count: int, wall: datetime | None):
         return self.observer.buckets(self.observer.display_now(now), count, wall)

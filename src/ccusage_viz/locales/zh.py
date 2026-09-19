@@ -89,6 +89,7 @@ MESSAGES = {
     "status.paused": "已暂停",
     "status.updated": "更新于 {time}",
     "status.refresh_every": "每 {seconds} 秒刷新",
+    "status.sample_every": "每 {seconds} 秒采样",
     "status.query_time": "ccusage {seconds}秒",
     "status.demo": "演示数据 · {size} · 未调用 ccusage",
     "status.runtime_adjustment_timeline_quick": "密度 {density} · 主题 {theme_index}/{theme_count} {theme} · 样式 {style_index}/{style_count} {style} · 分组 {grouping} · TOP {top}",

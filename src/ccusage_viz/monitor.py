@@ -27,7 +27,7 @@ from ccusage_viz.lifecycle import (
 )
 from ccusage_viz.monitor_component import MonitorComponent, MonitorSubmission
 from ccusage_viz.options import MonitorConfig, StandaloneLaunch, adjust_standalone
-from ccusage_viz.render.base import RenderContext
+from ccusage_viz.render.base import RenderAudit, RenderContext
 from ccusage_viz.terminal import FramePainter, Terminal, compose_frame, inspect_terminal
 from ccusage_viz.terminal_ui import controls_line, input_mode, read_key
 
@@ -86,7 +86,10 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
     ) -> str:
         context = RenderContext(
             terminal.width,
-            max(1, terminal.height - control_rows),
+            max(
+                1,
+                terminal.height - control_rows - int(config.chart.presentation.density == "full"),
+            ),
             translator,
             color=terminal.color,
             ascii=terminal.ascii,
@@ -96,6 +99,13 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
             deltas=target.deltas,
             rank_deltas=target.rank_deltas,
             title_content=translator.text(f"label.{monitor_chart(config).by or 'total'}"),
+            density=config.chart.presentation.density,
+            audit=RenderAudit(
+                target.accepted_at,
+                target.last_elapsed,
+                config.host.interval,
+                "sample",
+            ),
         )
         return target.render(
             context,

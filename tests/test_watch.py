@@ -572,7 +572,7 @@ def test_one_shot_reserves_one_more_row_than_watch(monkeypatch: pytest.MonkeyPat
     render_component(chart, translator, terminal, reserve_prompt=True)
     render_component(chart, translator, terminal, control_rows=1)
 
-    assert heights == [29, 28, 28]
+    assert heights == [28, 27, 27]
 
 
 @pytest.mark.parametrize(

@@ -12,6 +12,7 @@ from ccusage_viz.chart_models import (
     CalendarDay,
     CalendarModel,
     ChangeDirection,
+    ComparisonState,
     MetricDescriptor,
     ObservedScope,
     PercentChange,
@@ -29,8 +30,9 @@ from ccusage_viz.domain import TokenUsage
 from ccusage_viz.errors import UsageError
 from ccusage_viz.formatting import display_width, strip_ansi
 from ccusage_viz.i18n import load_translator
-from ccusage_viz.render.base import RenderContext, isolated_plot
+from ccusage_viz.render.base import RenderAudit, RenderContext, isolated_plot, render_audit
 from ccusage_viz.render.calendar import render_calendar
+from ccusage_viz.render.observation import render_observation
 from ccusage_viz.render.palette import (
     CATEGORICAL,
     COLOR_SCHEMES,
@@ -86,6 +88,138 @@ def test_ranking_heading_shows_hidden_top_coverage() -> None:
     output = render_ranking(model, context(True))
 
     assert "Ranking · 2026-01-01–2026-01-14 · Top 1 · 60.0% of total" in output
+
+
+@pytest.mark.parametrize(
+    ("density", "current", "comparison"),
+    [
+        ("minimal", False, False),
+        ("compact", True, False),
+        ("full", True, True),
+    ],
+)
+def test_historical_density_controls_summary_structure(
+    density: str,
+    current: bool,
+    comparison: bool,
+) -> None:
+    summary = PeriodSummary(
+        "day",
+        date(2026, 1, 2),
+        20,
+        PercentChange(ChangeDirection.INCREASE, 25),
+        PercentChange(ChangeDirection.DECREASE, 10),
+        date(2025, 12, 26),
+        filter_count=1,
+    )
+    model = TimelineModel(
+        (date(2026, 1, 2),),
+        (Series("total", "Total", (usage(20),)),),
+        summary=summary,
+    )
+
+    output = render_timeline(
+        model,
+        RenderContext(
+            80,
+            24,
+            load_translator("en"),
+            color=False,
+            density=density,
+        ),
+    )
+
+    assert ("Today’s tokens 20; 1 filter" in output) is current
+    assert ("vs yesterday" in output) is comparison
+    assert "Timeline" in output
+
+
+@pytest.mark.parametrize("state", [ComparisonState.PENDING, ComparisonState.FAILED])
+def test_full_summary_marks_unknown_applicable_comparisons(state: ComparisonState) -> None:
+    summary = PeriodSummary(
+        "day",
+        date(2026, 1, 2),
+        20,
+        None,
+        None,
+        date(2025, 12, 26),
+        sequential_state=state,
+        year_over_year_state=state,
+    )
+    model = TimelineModel(
+        (date(2026, 1, 2),),
+        (Series("total", "Total", (usage(20),)),),
+        summary=summary,
+    )
+
+    output = render_timeline(
+        model,
+        RenderContext(
+            80,
+            24,
+            load_translator("en"),
+            color=False,
+            density="full",
+        ),
+    )
+
+    assert output.count("??") == 2
+    assert "Today’s tokens 20" in output
+
+
+@pytest.mark.parametrize(
+    ("renderer", "model"),
+    [
+        (
+            render_timeline,
+            TimelineModel(
+                (date(2026, 1, 2),),
+                (Series("total", "Total", (usage(20),)),),
+            ),
+        ),
+        (
+            render_calendar,
+            CalendarModel((CalendarDay(date(2026, 1, 2), usage(20)),)),
+        ),
+        (
+            render_stack,
+            StackModel(
+                (date(2026, 1, 2),),
+                (Series("input", "input", (usage(20),)),),
+            ),
+        ),
+        (
+            render_ranking,
+            RankingModel((RankingEntry("a", "A", usage(20)),), period()),
+        ),
+    ],
+)
+def test_all_historical_renderers_omit_summary_at_minimal_density(renderer, model) -> None:
+    summary = PeriodSummary(
+        "day",
+        date(2026, 1, 2),
+        20,
+        PercentChange(ChangeDirection.UNCHANGED),
+        PercentChange(ChangeDirection.UNCHANGED),
+        date(2025, 12, 26),
+    )
+    model = replace(model, summary=summary)
+
+    output = renderer(
+        model,
+        RenderContext(
+            100,
+            24,
+            load_translator("en"),
+            color=False,
+            ascii=True,
+            density="minimal",
+            style="stacked" if isinstance(model, StackModel) else None,
+        ),
+    )
+
+    assert "Today’s tokens" not in output
+    assert "vs yesterday" not in output
 
 
 def test_summary_shows_filter_dimension_count() -> None:
@@ -276,6 +410,56 @@ def test_observed_timeline_renders_sampling_state_with_real_translator() -> None
     )
 
     assert "sampling" in output
+
+
+@pytest.mark.parametrize(
+    ("density", "current"),
+    [("minimal", False), ("compact", True), ("full", True)],
+)
+def test_monitor_density_controls_current_observation(
+    density: str,
+    current: bool,
+) -> None:
+    model = TimelineModel(
+        (),
+        (),
+        observed_at=(datetime(2026, 1, 1, 10, 0),),
+        observed_series=(ScalarSeries("Total", "Total", (1200.0,)),),
+        metric=MetricDescriptor("tpm"),
+        observed_scope=ObservedScope(900, "total"),
+    )
+    render_context = RenderContext(
+        80,
+        24,
+        load_translator("en"),
+        color=False,
+        density=density,
+    )
+
+    output = render_observation(model, render_context)
+
+    assert ("observed · Total 1.2K TPM" in output) is current
+    assert "vs " not in output
+
+
+def test_full_audit_uses_host_supplied_sample_cadence() -> None:
+    output = render_audit(
+        RenderContext(
+            80,
+            24,
+            load_translator("en"),
+            color=False,
+            density="full",
+            audit=RenderAudit(
+                datetime(2026, 1, 1, 10, 5),
+                0.25,
+                15,
+                "sample",
+            ),
+        )
+    )
+
+    assert output == "updated 10:05:00 · ccusage 0.25s · sample every 15s"
 
 
 def test_observed_ranking_uses_window_unit_without_historical_percentage() -> None:

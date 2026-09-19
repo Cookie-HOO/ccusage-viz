@@ -110,6 +110,7 @@ def render_component(
         ranking_deltas=ranking_deltas,
         ranking_rank_deltas=ranking_rank_deltas,
         normalize_titles=normalize_titles,
+        interval=options.host.interval,
     )
     return RefreshResult(
         rendered.chart,

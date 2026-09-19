@@ -89,6 +89,7 @@ MESSAGES = {
     "status.paused": "paused",
     "status.updated": "updated {time}",
     "status.refresh_every": "refresh every {seconds}s",
+    "status.sample_every": "sample every {seconds}s",
     "status.query_time": "ccusage {seconds}s",
     "status.demo": "DEMO DATA · {size} · ccusage not invoked",
     "status.runtime_adjustment_timeline_quick": "DENSITY {density} · THEME {theme_index}/{theme_count} {theme} · STYLE {style_index}/{style_count} {style} · BY {grouping} · TOP {top}",

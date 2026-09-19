@@ -79,6 +79,8 @@ def render_summary_placeholder(
 
 
 def render_summary(summary: PeriodSummary, context: RenderContext) -> str:
+    if context.density == "minimal":
+        return ""
     plain_value = format_summary_tokens(summary.total)
     value = styled_text(
         plain_value,
@@ -94,6 +96,8 @@ def render_summary(summary: PeriodSummary, context: RenderContext) -> str:
     ]
     if summary.filter_count:
         pieces.append(context.translator.text("summary.filters", count=summary.filter_count))
+    if context.density == "compact":
+        return clip_width(_summary_line(pieces, context), context.width)
     scheme = get_color_scheme(context.color_scheme)
     unknown = styled_text("??", scheme.muted, context)
     if summary.sequential_state in {ComparisonState.PENDING, ComparisonState.FAILED}:

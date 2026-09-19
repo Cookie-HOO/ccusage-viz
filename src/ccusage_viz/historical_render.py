@@ -7,6 +7,7 @@ from ccusage_viz.historical_component import HistoricalChartComponent
 from ccusage_viz.i18n import Translator
 from ccusage_viz.options import HistoricalChartConfig, MonitorConfig, StandaloneLaunch
 from ccusage_viz.render import RenderContext
+from ccusage_viz.render.base import RenderAudit, render_audit
 from ccusage_viz.terminal import Terminal
 
 
@@ -33,6 +34,7 @@ def render_historical_component(
     ranking_deltas: Mapping[Hashable, float] | None = None,
     ranking_rank_deltas: Mapping[Hashable, int] | None = None,
     normalize_titles: bool = False,
+    interval: float | None = None,
 ) -> RenderedChart:
     options = component.accepted_options
     model = component.model
@@ -48,7 +50,15 @@ def render_historical_component(
     )
     context = RenderContext(
         terminal.width,
-        max(1, terminal.height - 1 - len(model.notices) - int(reserve_prompt) - control_rows),
+        max(
+            1,
+            terminal.height
+            - 1
+            - len(model.notices)
+            - int(reserve_prompt)
+            - control_rows
+            - int(chart.presentation.density == "full"),
+        ),
         translator,
         color=terminal.color,
         ascii=terminal.ascii,
@@ -61,7 +71,16 @@ def render_historical_component(
         weekday_mode=getattr(options.chart, "weekdays", "show"),
         period=chart.date_range.period if chart.date_range.relative_until else None,
         title_content=title_content,
+        density=chart.presentation.density,
+        audit=RenderAudit(
+            component.accepted_at,
+            component.snapshot.elapsed if component.snapshot is not None else None,
+            interval,
+        ),
     )
     rendered = component.render(context)
+    audit = render_audit(context)
+    if audit:
+        rendered = f"{rendered}\n{audit}"
     notices = tuple(translator.text(notice.key, **notice.values) for notice in model.notices)
     return RenderedChart(rendered, notices)
