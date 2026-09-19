@@ -4,7 +4,9 @@ from io import StringIO
 import pytest
 
 from ccusage_viz.errors import UsageError
+from ccusage_viz.formatting import display_width
 from ccusage_viz.terminal import FramePainter, compose_frame, inspect_terminal
+from ccusage_viz.terminal_ui import AdjustmentAction, adjustment_rows
 
 
 class Stream(StringIO):
@@ -78,6 +80,51 @@ def test_compose_frame_reserves_each_control_row() -> None:
         "layout controls",
         "appearance controls",
     )
+
+
+def test_adjustment_rows_keep_semantic_actions_at_wide_width() -> None:
+    rows = adjustment_rows(
+        "Current status: running · density compact",
+        "Quick adjustment",
+        (
+            AdjustmentAction("d", "density", 0),
+            AdjustmentAction("t/T", "theme", 1),
+            AdjustmentAction("s", "style", 2),
+        ),
+        width=120,
+        color=False,
+        switch_action="a Advanced",
+        finish_action="Enter/Esc finish",
+    )
+
+    assert rows == (
+        "Current status: running · density compact",
+        "Quick adjustment: d density · t/T theme · s style · a Advanced · Enter/Esc finish",
+    )
+
+
+def test_adjustment_rows_omit_whole_low_priority_actions() -> None:
+    rows = adjustment_rows(
+        "当前状态：运行中 · 密度 compact",
+        "Quick 调整",
+        (
+            AdjustmentAction("d", "密度", 0),
+            AdjustmentAction("t/T", "主题", 1),
+            AdjustmentAction("s", "样式", 2),
+            AdjustmentAction("b", "分组", 3),
+        ),
+        width=58,
+        color=False,
+        switch_action="a 高级",
+        finish_action="Enter/Esc 完成",
+    )
+
+    assert display_width(rows[1]) <= 58
+    assert rows[1].startswith("Quick 调整：")
+    assert "a 高级" in rows[1]
+    assert "Enter/Esc 完成" in rows[1]
+    assert "…(+" in rows[1]
+    assert not any(fragment in rows[1] for fragment in ("s 样", "b 分"))
 
 
 def test_terminal_rejects_non_tty() -> None:

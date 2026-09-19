@@ -6,9 +6,10 @@ import sys
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 
 from ccusage_viz.errors import UsageError
-from ccusage_viz.formatting import clip_width
+from ccusage_viz.formatting import clip_width, display_width
 from ccusage_viz.i18n import Translator
 from ccusage_viz.render.base import RenderContext, styled_text
 from ccusage_viz.render.palette import WARNING_COLOR
@@ -76,6 +77,51 @@ def notice_lines(
     return tuple(
         clip_width(styled_text(f"{glyph} {notice}", notice_color, context, bold=True), width)
         for notice in notices
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class AdjustmentAction:
+    key: str
+    label: str
+    priority: int
+
+    @property
+    def text(self) -> str:
+        return f"{self.key} {self.label}"
+
+
+def adjustment_rows(
+    state: str,
+    page_label: str,
+    actions: tuple[AdjustmentAction, ...],
+    *,
+    width: int,
+    color: bool,
+    switch_action: str,
+    finish_action: str,
+) -> tuple[str, str]:
+    """Compose two adjustment rows while omitting whole optional actions."""
+    separator = " · "
+    prefix = f"{page_label}：" if any(ord(char) > 127 for char in page_label) else f"{page_label}: "
+    mandatory = (switch_action, finish_action)
+    ordered = tuple(sorted(actions, key=lambda action: action.priority))
+
+    def compose(visible: tuple[AdjustmentAction, ...]) -> str:
+        omitted = len(ordered) - len(visible)
+        parts = [*(action.text for action in visible)]
+        if omitted:
+            parts.append(f"…(+{omitted})")
+        parts.extend(mandatory)
+        return prefix + separator.join(parts)
+
+    visible = ordered
+    while visible and display_width(compose(visible)) > width:
+        visible = visible[:-1]
+    action_row = compose(visible)
+    return (
+        controls_line(state, width=width, color=color),
+        controls_line(action_row, width=width, color=color),
     )
 
 
