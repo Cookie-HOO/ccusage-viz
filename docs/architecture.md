@@ -146,7 +146,7 @@ Semantic Chart Model
 
 Renderers never query data or write directly to stdout. Status, Controls, Notices, settings, inspection content, and chart bodies are composed into a complete logical Frame. The Painter compares complete Frames and writes only changed terminal rows; a complete logical repaint does not imply an unconditional terminal clear.
 
-Plotext rendering remains behind a serialized adapter because Plotext uses process-global state. Rendering work runs outside the reducer and terminal input loop; generation-tagged completion returns a `ChartRender` for acceptance before Frame composition.
+Plotext rendering remains behind a serialized adapter because Plotext uses process-global state. Query is the only pipeline stage required to run asynchronously: Provider work commonly takes seconds, while current processing and rendering are millisecond-scale operations. Processing therefore remains a synchronous, isolated semantic transformation, and rendering remains synchronous through the serialized adapter. If profiling later demonstrates material input latency, the existing render boundary may move behind one serial worker without changing Component or Host semantics.
 
 ## Runtime state
 
@@ -156,7 +156,7 @@ Hosts and Components communicate through actions and effects:
 Action → reduce(state, action) → new state + effects
 ```
 
-Actions include ticks, manual refresh, pause/resume, resize, input, settings changes, query completion, query failure, and debounce expiry. Effects include query submission, bounded generation-tagged result processing, debounce scheduling, scheduler rebuilding, copy, repaint, and exit. Processing and serialized Plotext work run outside the reducer and terminal input loop.
+Actions include ticks, manual refresh, pause/resume, resize, input, settings changes, query completion, query failure, and debounce expiry. Effects include asynchronous query submission, debounce scheduling, scheduler rebuilding, copy, repaint, and exit. Accepted query completion is processed synchronously into a semantic model, then rendered synchronously through the serialized Plotext adapter before complete-Frame composition.
 
 Each data-owning Component keeps an independent lifecycle envelope:
 
@@ -164,21 +164,40 @@ Each data-owning Component keeps an independent lifecycle envelope:
 Component State
 ├── candidate chart payload + resolved Host context
 ├── accepted data
-├── data generation + render revision
+├── data generation + processing/render revision
 ├── Coverage
-├── query / processing / rendering activity
+├── active operation + subscription
 ├── debounce handle
-├── pending triggers by kind
+├── pending trigger
 ├── observer
 ├── accepted success time
 └── last error
 ```
 
-A data-affecting adjustment increments the generation immediately and detaches obsolete effects. Data and its Coverage are accepted atomically only for the current generation; stale delivery updates neither. Theme/Style, viewport, and transient-only changes advance a separate render revision. The redesign introduces no completed-result cache.
+### Runtime identity and result acceptance
+
+Four identities keep product ownership, data intent, logical execution, and shared physical work separate:
+
+| Identity | Meaning | Assigned by | Changes when |
+| --- | --- | --- | --- |
+| **Owner ID** | The Component or other data owner to which a result belongs | Host when the owner is created | The owner is destroyed and a new owner is created; moving or reconfiguring a Pane does not change it |
+| **Generation** | The current version of the owner's data intent | Component when committed configuration requires data not satisfied by accepted facts and Coverage | Data requirements change; repaint, local reprocessing, periodic refresh, and manual refresh do not change it |
+| **Operation ID** | One logical execution for an owner | Lifecycle coordinator when work is actually submitted | Every startup, periodic, manual, configuration, resume, or retry submission, including repeated work in the same generation |
+| **Subscription ID** | One owner's interest in an in-flight physical query | Execution coordinator when attaching the operation | Every attachment or reattachment, even when an existing physical query can be reused |
+
+A completion may mutate Component state only when its Owner ID and Generation match the current owner and data intent, its Operation ID is still the active operation, and its Subscription has not been detached. The stopping state rejects all completion. Rejection does not update data, Coverage, error, loading placeholders, pending intent, or a newer active operation.
+
+Generation is not a query counter. For example, a periodic refresh and a later manual refresh of the same configuration share one Generation but receive different Operation IDs. This prevents a delayed periodic completion from being mistaken for the current manual operation. Conversely, changing a Theme keeps the Generation and active subscription because the facts remain valid; widening a date range beyond accepted Coverage increments the Generation, detaches obsolete work, and marks affected values `??`.
+
+A Subscription is distinct from its physical query. If two Panes request the same physical data, each has its own Owner, Generation, Operation, and Subscription while the coordinator may run one physical query. When one Pane changes configuration, only its Subscription detaches. Physical cancellation is attempted only after the final subscriber detaches. A later manual request may attach with a new Operation and Subscription to a still-reusable physical query; the old subscription never becomes valid again.
+
+A data-affecting adjustment increments the Generation immediately and detaches obsolete effects. Data and Coverage are accepted atomically only for the current Generation; stale success and stale failure update neither. Theme/Style, viewport, and transient-only changes advance a separate render revision. Changes computable from accepted facts advance processing/render revision without changing data Generation. The redesign introduces no completed-result cache.
+
+Intentional detachment is not a business error. Configuration replacement, automatic-work cancellation on Pause, owner removal, and shutdown suppress the detached completion. Pause cancels automatic Startup, Periodic, and Resume work and clears periodic backlog, while an explicit manual refresh and committed-configuration completion remain allowed; their completion does not resume periodic scheduling. Shutdown detaches every subscription, clears pending and debounce state, rejects all later completion, then closes runtime and terminal resources in order.
 
 Refresh, Sampling, debounce, manual refresh, resume, and committed configuration work remain distinguishable trigger sources. Fixed scheduler baselines do not move because of query duration, success, failure, manual refresh, pause, or resume. A slow Component never overlaps one pipeline stage for the same generation, and equivalent pending opportunities coalesce within their own trigger kind.
 
-Workers return immutable completion actions through one serialized runtime queue. Only the runtime owner mutates state, composes Frames, and paints. Plotext serialization keeps only the latest queued render revision per Component. Shutdown stops admission, detaches/cancels work, suppresses late completions, stops painting, and restores terminal state last.
+Asynchronous Query workers return immutable completion actions through one serialized runtime queue. Only the runtime owner mutates state, synchronously processes accepted facts, serially renders charts, composes Frames, and paints. Render revision still distinguishes successive visible states, but no render worker or render-completion queue is introduced without measured need. Shutdown stops admission, detaches/cancels work, suppresses late completions, stops painting, and restores terminal state last.
 
 Historical no-Watch uses the same startup, query, acceptance, processing, Frame, and Painter path as Historical Watch, then exits after the first accepted Frame.
 
@@ -193,7 +212,7 @@ The implementation uses private, static registries for built-in capabilities:
 
 Registries use explicit registration, reject duplicate IDs, preserve deterministic order, and freeze before parsing or runtime begins. Only the application bootstrap composes production registries.
 
-These registries are internal dependency-inversion seams, not a supported third-party Python API. The current architecture does not implement plugin discovery, manifests, installation, package scanning, dynamic Python imports, sandboxing, or public capability protocols.
+These registries are private dependency-inversion seams for composing the current built-in application. They are not public APIs.
 
 ### Providers
 
@@ -206,7 +225,7 @@ Provider code does not import charts or presentation code. Chart code does not i
 
 ### Charts
 
-Each built-in chart has one Definition and can create any number of Components. Bootstrap assembles a Definition from narrow per-layer collaborators: configuration descriptor, data-requirements descriptor, processor/projector, renderer, runtime-settings descriptor, and inspection descriptor. Query, processing, and presentation import only the collaborator contract they consume, not the complete Definition. This catalog entry is not a public plugin wire contract.
+Each built-in chart has one Definition and can create any number of Components. Bootstrap assembles a Definition from narrow per-layer collaborators: configuration descriptor, data-requirements descriptor, processor/projector, renderer, runtime-settings descriptor, and inspection descriptor. Query, processing, and presentation import only the collaborator contract they consume, not the complete Definition.
 
 ### Theme and Style
 
@@ -224,7 +243,7 @@ A future Animation resource may:
 
 Chart Components require Query and Result Processing; Animation Components do not. Both may eventually share Host, viewport, Frame, input, and Painter infrastructure, but no common hosted-component protocol is frozen until both real implementations exist.
 
-The current architecture keeps Route dispatch and Host/content composition extensible, but adds no unused Animation route case or resource discriminator yet. It does not define an Animation schema, plugin protocol, resource budget, frame cadence, or Dashboard Header integration. Header branding, static logos, and animation remain separate future design questions.
+The current architecture keeps Route dispatch and Host/content composition extensible, but adds no unused Animation route case or resource discriminator. Animation schema, resource budget, frame cadence, and Dashboard Header integration remain outside the current design. Header branding, static logos, and animation are separate future design questions.
 
 ## Dependency direction
 

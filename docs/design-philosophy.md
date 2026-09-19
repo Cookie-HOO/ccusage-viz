@@ -82,7 +82,7 @@ This document records the stable product concepts and design constraints of `ccu
 
 1. **`??` means only that required data has not arrived.**
 
-   `??` is the uniform loading placeholder: data required by the current state is missing and has entered the query lifecycle, including debounce, pending execution, or active execution. It must not represent a real zero, no-data result, error, unavailable capability, or inapplicable field; each of those states requires its own explicit presentation. Until Coverage is complete, stale values or results from another candidate configuration must not substitute for unknown data. A missing record may be treated as a real zero only inside authoritative covered intervals.
+   `??` is the uniform loading placeholder: data required by the current effective state is unknown and has entered the refresh lifecycle, including debounce, pending execution, or active execution. It appears as soon as a committed change invalidates the corresponding value; stale values or results from another configuration must not be presented as if they matched the new state. Only affected values become unknown—presentation-only changes and values that can be recomputed from accepted data remain available. `??` must not represent a real zero, no-data result, error, unavailable capability, or inapplicable field; each of those states requires its own explicit presentation. A missing record may be treated as a real zero only inside authoritative covered intervals.
 
 2. **Every data-affecting adjustment creates a new generation.**
 
@@ -142,31 +142,37 @@ This document records the stable product concepts and design constraints of `ccu
 
    **Exception:** Layout Weights adjust directly from the current integer proportions rather than restarting from a preset sequence. Free-form or execution parameters without a runtime entry are also outside this rule.
 
-5. **Ordinary continuous-TUI settings take effect immediately.**
+5. **Configuration takes effect immediately unless a valid value requires a draft.**
 
-   Enter and Escape both return from an ordinary settings surface while preserving the effective state. Layout and Weights are immediate as well.
+   Most settings commit on each adjustment. The visible configuration updates at once, and any data already derivable from accepted facts is recomputed immediately. Enter and Escape therefore have the same meaning in an ordinary settings surface: both leave the surface while preserving the effective state. They do not save, discard, or roll back changes that have already taken effect. Layout and Weights follow the same rule.
 
-   **Exception:** A nested editor with an uncommitted draft uses Enter to confirm and Escape to discard, as in the Filter Editor or pending Pane creation.
+   **Exception:** An operation that cannot produce a valid value until the user completes input or selection uses an isolated draft, as in the Filter Editor or pending Pane creation. For a multi-select draft, Space toggles a choice, Enter confirms the complete draft, and Escape discards it without changing effective configuration, generation, or active work. A second confirmation is reserved for consequences that are destructive, difficult to reverse, or otherwise unclear; ordinary reversible configuration does not require one.
 
-6. **Keys express stable concepts, not a generic capitalization rule.**
+6. **Committed configuration and displayed data must describe the same state.**
+
+   A committed data-affecting change updates visible configuration and invalidates obsolete work immediately. Values not yet known for the new state display `??`, and an immediate refresh intent is created. A short trailing debounce may replace repeated intermediate refreshes with one request for the latest state, but it must not delay the visible configuration, invalidation, placeholder, or generation change. Enter or Escape leaving an immediate settings surface flushes a refresh intent still waiting in the debounce window.
+
+   Only affected values become unknown. Presentation-only changes require only repaint; changes fully computable from accepted data reprocess immediately; changes requiring new data use `??` until the current generation is accepted. Obsolete completion cannot restore stale values or clear the placeholder. Pause suppresses periodic backlog, not an explicit refresh caused by committed configuration or manual refresh, and such a completion does not resume periodic scheduling.
+
+7. **Keys express stable concepts, not a generic capitalization rule.**
 
    `m` always means modify the current chart: it modifies the current view in Standalone and the current Pane in Dashboard browse mode; clicking a Pane selects it and performs the equivalent action. Uppercase `G` opens Dashboard-global settings, and clicking the Header is equivalent. Uppercase letters do not generally reverse their lowercase options. Related keys may instead represent distinct, stable families of the same concept: `p` cycles common trailing periods, while `P` cycles common natural periods to date. The interface names the active family so a calendar-aligned period is not mistaken for a trailing duration.
 
    **Exception:** Theme has a large, growing choice set, so `t` advances and `T` reverses.
 
-7. **Directional operations support both arrow keys and `hjkl`.**
+8. **Directional operations support both arrow keys and `hjkl`.**
 
    Any context that offers up, down, left, or right navigation or adjustment must also accept `k`, `j`, `h`, or `l` respectively and perform the identical state transition. Controls may combine both key sets in space-sensitive guidance, but the two entry paths must never differ in boundaries, cycling, or confirmation behavior.
 
-8. **Responsibility boundaries prevent semantic confusion rather than useful multiple entry points.**
+9. **Responsibility boundaries prevent semantic confusion rather than useful multiple entry points.**
 
    Standalone, Dashboard, and Pane share terminology, ordering, state representation, and adjustment behavior, but each operation appears only where its target is unambiguous. Multiple entry points are valid when they express the same intent and produce the same result. One interaction concept must not silently change another; for example, changing Granularity does not change Period.
 
-9. **Startup-blocking configuration errors provide uniform, actionable diagnostics.**
+10. **Startup-blocking configuration errors provide uniform, actionable diagnostics.**
 
    Startup configuration is validated atomically before entering the TUI. A diagnostic locates the exact command scope, Pane, option, or value; explains the violated constraint; and, when intent can be inferred reliably, provides a complete recommended command with the smallest semantic edit and a change summary. Repairs preserve intent before removing input: trustworthy near-match correction, ownership-aware movement, structural reconciliation, or numeric boundary clamping take precedence over deleting a meaningless option. When intent cannot be determined reliably, the diagnostic offers a small set of explicit alternatives rather than fabricating one answer. Runtime data, Provider, terminal-space, and no-data conditions are not command repairs.
 
-10. **Inspection shows content before enabling copy.**
+11. **Inspection shows content before enabling copy.**
 
    Chart mode does not expose copy. Non-Chart views such as Command, Markdown Table, and JSON identify both the current content and the next view, and copy always captures the complete current content.
 
@@ -218,7 +224,7 @@ This document records the stable product concepts and design constraints of `ccu
 
    Summary and Panes produce logical requests carrying owner, generation, trigger, logical plan, source mode, and execution options. The Coordinator deduplicates strictly identical in-flight physical queries and may share a common Monitor raw snapshot that the product has explicitly proven safe, then delivers immutable results independently to each owner.
 
-   **Exception:** The Coordinator currently does not union date ranges or differing Filters, create Provider field supersets, reuse completed stale results, or delay Ticks to collect a batch. A future Provider plugin may perform advanced optimization only through explicit coalescing and distribution contracts. Interval semantics always remain outside the Coordinator.
+   **Exception:** The Coordinator currently does not union date ranges or differing Filters, create Provider field supersets, reuse completed stale results, or delay Ticks to collect a batch. A Provider-specific implementation may perform advanced optimization only through explicit coalescing and distribution contracts. Interval semantics always remain outside the Coordinator.
 
 6. **Automatic updates submit a complete logical Frame.**
 

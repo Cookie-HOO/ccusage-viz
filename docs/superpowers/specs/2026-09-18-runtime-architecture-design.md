@@ -1,10 +1,10 @@
 # Runtime Architecture Redesign
 
-**Status:** Approved design; ready for phased implementation
+**Status:** Approved design; core architecture implemented, lifecycle consolidation in progress
 
 ## Purpose
 
-This redesign replaces the current command-specific execution loops with one capability-oriented runtime while preserving the converged product contract. It prepares internal seams for future Provider, Chart, declarative Theme/Style, and Animation capabilities without implementing a public plugin system.
+This redesign replaces command-specific execution loops with shared runtime mechanics while preserving the converged product contract. Abstractions are introduced only where the current built-in application needs them.
 
 No backward compatibility is required. Removed and renamed options, data structures, and internal entry points are deleted rather than aliased or wrapped.
 
@@ -16,17 +16,14 @@ No backward compatibility is required. Removed and renamed options, data structu
 - Give configuration an immutable, ownership-specific representation.
 - Unify lifecycle, scheduling, input, generation, Coverage, and Frame painting.
 - Preserve only the two approved Dashboard query-sharing optimizations.
-- Establish private static registries as future capability seams.
-- Keep Chart and future Animation as distinct resource categories.
+- Keep private static registries as deterministic built-in composition seams.
 - Encode dependency directions in tests.
 
 ## Non-goals
 
 This change does not implement:
 
-- plugin discovery, installation, manifests, marketplace behavior, or dynamic imports;
-- a public Provider, Chart, Theme, Style, or Animation protocol;
-- external-source runtime support from the separately approved external-source design;
+- external-source runtime support;
 - Animation configuration, lifecycle cadence, interaction, resource budgets, or rendering protocol;
 - Dashboard Header animation, logo slots, or generalized Header content;
 - date-range union, Filter merging, Provider field supersets, generic batching/splitting, stale completed-result reuse, delayed Tick collection, automatic source deduplication, or adaptive intervals;
@@ -197,7 +194,7 @@ NormalizedResult
 └── provider_metadata
 ```
 
-Usage records preserve Token composition, Agent, model, project identity, timestamps/dates, and original Provider provenance. The current closed `SourceKind` assumption is replaced by an extensible Provider reference without introducing public plugin registration.
+Usage records preserve Token composition, Agent, model, project identity, timestamps/dates, and original Provider provenance. Provider identity remains explicit rather than being collapsed into one global source kind.
 
 ## Result processing
 
@@ -236,42 +233,40 @@ No compatibility facade remains for deleted syntax.
 
 ## Runtime and scheduling
 
-One shared lifecycle engine replaces separate Historical Watch, Monitor, and Dashboard loops.
+A minimal shared Scheduler and Lifecycle Coordinator replace repeated lifecycle rules without turning product Hosts into one inheritance hierarchy.
 
 ```text
-Action
-  → reduce(SessionState, Action)
-  → New State + Effects
+Scheduler
+├── fixed monotonic baseline
+├── interval
+├── next opportunity
+└── periodic enable/pause state
+
+Lifecycle Coordinator
+├── owner identity
+├── generation
+├── active operation/subscription
+├── one pending trigger
+├── debounce deadline
+├── paused
+└── stopping
 ```
 
-Representative actions:
+Hosts continue to own input, product-specific controls, geometry, status and notices, complete-Frame composition, Painter use, and terminal setup/teardown. The Coordinator owns only admission, trigger coalescing and priority, operation identity, detach/cancel decisions, and completion acceptance. Dashboard Header reuses these mechanics as an independent data owner without becoming a Chart Component.
 
-- Started, Tick, ManualRefresh;
-- Pause, Resume, Resize;
-- KeyPressed, MousePressed;
-- SettingChanged, DraftCommitted, DraftDiscarded;
-- QuerySucceeded, QueryFailed;
-- DebounceElapsed.
+Trigger sources remain explicit: `STARTUP`, `PERIODIC`, `MANUAL`, `CONFIGURATION`, and `RESUME`. One owner has at most one Active operation and one Pending intent. Configuration work has priority over manual/resume work, which has priority over periodic work. Repeated periodic opportunities coalesce; manual refresh upgrades periodic pending work; a configuration change invalidates obsolete intent and debounces only the latest generation.
 
-Representative effects:
+Every data-required committed setting change advances Generation immediately, updates the visible configuration, detaches obsolete work, and displays `??` only for affected unknown values. A paint-only change advances render revision and repaints. A change fully computable from accepted facts synchronously reprocesses and renders without changing Generation. Draft interactions change none of these until committed.
 
-- SubmitQuery;
-- ScheduleDebounce, CancelDebounce;
-- SubmitProcessing, CancelProcessing;
-- RebuildTickSequence;
-- CopyContent;
-- Repaint;
-- Exit.
+Operation ID changes for every submitted logical execution, including several refreshes in one Generation. Subscription ID changes whenever that operation attaches to physical work. A completion is accepted only when Owner ID and Generation match, Operation ID is still Active, the Subscription remains attached, and the owner is not stopping. Intentional detach is not a business failure. Shared physical work is cancelled only after its final subscriber detaches.
 
-Every data-affecting setting change creates a new generation immediately. The candidate configuration and visible structure update immediately. `??` is used only when required data is missing and its query/processing lifecycle is in debounce, pending, or execution. Real zero is valid only inside authoritative Coverage; no-data, error, unavailable, and not-applicable states remain distinct. Only current-generation query and processing results alter visible accepted content. Advancing the generation immediately detaches obsolete query subscriptions and requests cancellation of obsolete processing and queued render work so stale tasks do not retain bounded execution slots.
+Only Query runs asynchronously. Accepted Query completion is synchronously processed into a semantic model and synchronously rendered through the serialized Plotext adapter. Processing and rendering remain isolated boundaries, but no processing worker, render worker, or render-completion queue is added without profiling evidence.
 
-Query, processing, and rendering activity are tracked independently rather than collapsed into one execution flag. Pending trigger state preserves trigger identity: at minimum periodic backlog, manual refresh, resume, and committed configuration/debounce work remain distinguishable. Pausing discards periodic backlog but does not erase an explicit manual refresh or the one completion required by a committed configuration change. Equivalent opportunities may coalesce within their own trigger class, while a Component still never overlaps the same pipeline stage for one generation.
+Historical Refresh, Monitor Sampling, Dashboard Refresh, and Dashboard Sampling use fixed monotonic baselines. Query duration, success, failure, manual refresh, pause, and resume do not shift a baseline. Interval changes rebuild only the relevant sequence from modification time. Debounce is independent and can be satisfied by an earlier periodic, manual, or resume opportunity.
 
-Result Processing runs as bounded, cancellable, generation-tagged effects outside the reducer and terminal event loop. Workers return immutable completion events through one serialized runtime action queue. Only the runtime owner mutates state, composes Frames, or invokes the Painter. The first implementation does not add shared cross-owner indexes or pre-aggregations; this preserves the intentionally narrow optimization boundary, while bounded execution keeps one expensive projection from blocking input or another Component's result acceptance.
+Pause detaches automatic `STARTUP`, `PERIODIC`, and `RESUME` work and clears periodic backlog. Explicit manual refresh and the one completion required by committed configuration remain allowed while paused and do not restart periodic scheduling.
 
-Historical Refresh, Monitor Sampling, Dashboard Refresh, and Dashboard Sampling use fixed monotonic baselines. Query duration, success, failure, manual refresh, pause, and resume do not shift the baseline. Debounce is independent and can be satisfied by an earlier Tick, manual refresh, or resume according to the preserved trigger state.
-
-Historical no-Watch enters the same interactive TUI startup path, obtains the required result, paints one accepted Frame, and exits. Monitor and Dashboard reject no-Watch. Exit is ordered: stop admitting scheduler and debounce work; detach query subscriptions and cancel unshared work; cancel or drain processing and render work; suppress all late completion events; stop painting; restore terminal state last.
+Historical no-Watch uses the same Historical startup, query, acceptance, processing, Frame, and Painter path, then exits after its first accepted current-generation complete Frame. Monitor and Dashboard reject no-Watch. Shutdown is ordered: mark stopping and stop admission; clear Pending and debounce; detach Active subscriptions; reject late completions; finish any safe final Frame; call `Painter.finish()` and restore terminal state; then close QueryRuntime and remaining resources.
 
 ## Input and interaction
 
@@ -287,7 +282,7 @@ Chart processing produces immutable semantic models. A chart renderer receives a
 
 Host composition combines all visible content into one complete `Frame`. `FramePainter` compares the complete Frame with the previous Frame and writes changed rows. No status, error, chart, or query path may bypass the current Frame with partial stdout writes.
 
-Plotext remains isolated behind a serialized rendering adapter because of its process-global state. The adapter is invoked outside the reducer and terminal input loop; completion is tagged with both data generation and `render_revision`, where `render_revision` also advances for Theme/Style, viewport, and transient-annotation changes that do not require new data. The adapter keeps at most the running job plus the latest queued request for each Component, replacing older queued revisions; obsolete work is cancelled where supported and otherwise allowed to finish only for its completion to be discarded. UI-thread-only terminal composition and painting therefore remain responsive without letting stale render jobs delay the latest revision indefinitely.
+Plotext remains isolated behind a serialized rendering adapter because of its process-global state. Rendering is synchronous and serialized; `render_revision` advances for Theme/Style, viewport, and transient-annotation changes that do not require new data. No render worker or render-completion queue is introduced without profiling evidence.
 
 The Dashboard Safety Minimum is derived before implementation only from shared shell and Pane structural invariants: every Pane retains a non-empty body row plus identity/focus and one compact diagnostic/status row, and the Dashboard retains its always-present Header identity. Border and separator costs are added by the selected shell Style. These invariants determine the tested global width/height floor. A renderer-specific minimum is not folded into that global constant; when one renderer cannot represent useful content inside an otherwise structurally valid Pane, that Pane degrades locally and displays its compact notice.
 
@@ -312,9 +307,7 @@ The composition root creates and explicitly populates:
 - `ThemeRegistry`;
 - `StyleRegistry`.
 
-Each registry rejects duplicate IDs, has deterministic order, and freezes before parser construction or runtime. Tests may construct isolated registries. Production modules do not scan filesystems, Python entry points, installed packages, or manifests.
-
-There is no universal `Plugin` interface. Each capability seam remains narrow and typed to its own responsibility.
+Each registry rejects duplicate IDs, has deterministic order, and freezes before parser construction or runtime. Tests may construct isolated registries. Each capability seam remains narrow and typed to its own responsibility.
 
 ## Chart and future Animation resources
 

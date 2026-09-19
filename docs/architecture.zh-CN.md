@@ -146,7 +146,7 @@ Semantic Chart Model
 
 Renderer 不查询数据，也不直接写 stdout。Status、Controls、Notices、设置、检查内容和图表正文会被组合为完整逻辑 Frame。Painter 比较完整 Frame，只写入变化的终端行；完整逻辑重绘不代表无条件清屏。
 
-Plotext 使用进程级全局状态，因此其渲染位于串行 adapter 之后。渲染工作在 reducer 与终端输入循环之外执行；带 generation 的完成结果返回 `ChartRender`，经接受后再参与 Frame composition。
+Plotext 使用进程级全局状态，因此其渲染位于串行 adapter 之后。Query 是当前管线中唯一必须异步执行的阶段：Provider 工作通常耗时数秒，而当前 Processing 与 Rendering 都是毫秒级操作。因此，Processing 保持为同步且隔离的语义转换，Rendering 通过串行 adapter 同步执行。只有后续 profiling 证明渲染明显影响输入响应时，才在不改变 Component 与 Host 语义的前提下把现有渲染边界移入单个串行 worker。
 
 ## 运行时状态
 
@@ -156,7 +156,7 @@ Host 与 Component 通过 Action 和 Effect 协作：
 Action → reduce(state, action) → new state + effects
 ```
 
-Action 包括 Tick、手动刷新、暂停/继续、Resize、输入、设置变化、查询成功、查询失败和防抖到期。Effect 包括提交查询、有界且带 generation 的结果处理、安排防抖、重建调度器、复制、重绘和退出。结果处理与串行 Plotext 工作在 reducer 和终端输入循环之外执行。
+Action 包括 Tick、手动刷新、暂停/继续、Resize、输入、设置变化、查询成功、查询失败和防抖到期。Effect 包括异步提交查询、安排防抖、重建调度器、复制、重绘和退出。已接受的查询 completion 会同步处理为语义模型，再通过 Plotext 串行 adapter 同步渲染，之后才组合完整 Frame。
 
 每个拥有数据的 Component 都维护独立的生命周期 envelope：
 
@@ -164,21 +164,40 @@ Action 包括 Tick、手动刷新、暂停/继续、Resize、输入、设置变�
 Component State
 ├── candidate chart payload + resolved Host context
 ├── accepted data
-├── data generation + render revision
+├── data generation + processing/render revision
 ├── Coverage
-├── query / processing / rendering activity
+├── active operation + subscription
 ├── debounce handle
-├── pending triggers by kind
+├── pending trigger
 ├── observer
 ├── accepted success time
 └── last error
 ```
 
-数据相关调整立即递增 generation，并分离过时 effect。数据及其 Coverage 只会为当前 generation 原子接受；过时交付不会更新任何一项。Theme/Style、viewport 与仅 transient 的变化递增独立的 render revision。本次重构不引入已完成结果缓存。
+### 运行时身份与结果接受
+
+四种身份分别表达产品所有权、数据意图、逻辑执行和共享物理工作，不能相互替代：
+
+| 身份 | 含义 | 设置者 | 变化时机 |
+| --- | --- | --- | --- |
+| **Owner ID** | 结果属于哪个 Component 或其他数据 owner | Host 在创建 owner 时设置 | owner 终止并创建新 owner 时变化；移动或重新配置 Pane 不改变它 |
+| **Generation** | owner 当前数据意图的版本 | 已提交配置需要 accepted facts 与 Coverage 尚不能满足的数据时，由 Component 更新 | 数据需求变化时递增；重绘、本地重新处理、周期刷新和手动刷新不改变它 |
+| **Operation ID** | 一个 owner 的某一次逻辑执行 | Lifecycle coordinator 真正提交工作时分配 | 每次 Startup、Periodic、Manual、Configuration、Resume 或重试提交都变化，同一 Generation 内也不复用 |
+| **Subscription ID** | 一个 owner 对某项 in-flight 物理查询的一次需求 | Execution coordinator 将 operation 挂接到物理工作时分配 | 每次挂接或重新挂接都变化，即使可以复用已有物理查询 |
+
+只有 Owner ID 与当前 owner 匹配、Generation 与当前数据意图匹配、Operation ID 仍是当前 active operation，且 Subscription 尚未 detach 时，completion 才能修改 Component 状态。进入 stopping 后拒绝所有 completion。被拒绝的 completion 不更新数据、Coverage、error、加载占位、pending intent，也不能清除更新的 active operation。
+
+Generation 不是查询计数器。例如，同一配置的一次周期刷新与稍后的手动刷新使用同一 Generation，但各自获得不同 Operation ID，从而防止迟到的周期 completion 被误认为当前手动 operation。相反，修改 Theme 时事实仍然有效，因此 Generation 与当前 subscription 均不变化；把日期范围扩大到 accepted Coverage 之外时，Generation 递增、过时工作 detach，受影响的数值显示 `??`。
+
+Subscription 与物理查询相互独立。两个 Pane 请求相同物理数据时，各自拥有 Owner、Generation、Operation 和 Subscription，Coordinator 可以只执行一次物理查询。某个 Pane 修改配置时只 detach 自己的 Subscription；只有最后一个 subscriber detach 后，Coordinator 才尝试取消物理工作。稍后的手动请求可以用新的 Operation 与 Subscription 挂接到仍可安全复用的物理查询，但旧 subscription 永远不会重新有效。
+
+数据相关调整立即递增 Generation，并 detach 过时 effect。数据及 Coverage 只为当前 Generation 原子接受；过时 success 与 failure 都不更新状态。Theme/Style、viewport 与仅 transient 的变化递增独立的 render revision。可以由 accepted facts 计算的变化只递增 processing/render revision，不改变 data Generation。本次重构不引入已完成结果缓存。
+
+主动 detach 不是业务错误。配置替换、Pause 取消自动工作、owner 删除和 shutdown 都应抑制已 detach 的 completion。Pause 取消自动的 Startup、Periodic 与 Resume 工作并清除周期 backlog，同时仍允许显式手动刷新和已提交配置产生的一次性补齐；它们完成后不会恢复周期调度。Shutdown detach 所有 subscription，清除 pending 与 debounce 状态，拒绝后续所有 completion，再按顺序关闭 runtime 与终端资源。
 
 Refresh、Sampling、debounce、手动刷新、继续和已提交配置工作保持为可区分的触发来源。固定调度基线不因查询耗时、成功、失败、手动刷新、暂停或继续而移动。慢 Component 不会为同一 generation 重叠执行同一管线阶段；等价的等待机会只在各自 trigger kind 内合并。
 
-Worker 通过一条串行 runtime queue 返回不可变 completion action。只有 runtime owner 可以修改状态、组合 Frame 与绘制。Plotext 串行层对每个 Component 只保留最新的排队 render revision。关闭时依次停止接纳新工作、分离或取消工作、抑制延迟 completion、停止绘制，最后恢复终端状态。
+异步 Query worker 通过一条串行 runtime queue 返回不可变 completion action。只有 runtime owner 可以修改状态、同步处理已接受事实、串行渲染图表、组合 Frame 与绘制。Render revision 仍用于区分连续可见状态，但没有性能数据时不引入 render worker 或 render completion queue。关闭时依次停止接纳新工作、分离或取消工作、抑制延迟 completion、停止绘制，最后恢复终端状态。
 
 Historical no-Watch 与 Historical Watch 使用相同的启动、查询、接受、处理、Frame 和 Painter 路径，只是在第一份已接受 Frame 后退出。
 
@@ -193,7 +212,7 @@ Historical no-Watch 与 Historical Watch 使用相同的启动、查询、接受
 
 Registry 显式注册能力、拒绝重复 ID、保持确定性顺序，并在解析或运行前冻结。只有应用 bootstrap 会组合生产 Registry。
 
-这些 Registry 是内部依赖倒置接缝，不是受支持的第三方 Python API。当前架构不实现插件发现、manifest、安装、包扫描、动态 Python import、沙箱或公开能力协议。
+这些 Registry 是用于组合当前内置应用的私有依赖倒置接缝，不是公开 API。
 
 ### Provider
 
@@ -206,7 +225,7 @@ Provider 代码不导入图表或展示代码。图表代码不调用 Provider�
 
 ### Chart
 
-每种内置图表拥有一个 Definition，并可创建任意数量的 Component。Bootstrap 使用彼此狭窄的分层协作者组装 Definition：配置描述、数据需求描述、processor/projector、renderer、运行时设置描述和检查描述。Query、processing 与 presentation 只导入自身需要的协作者 contract，不导入完整 Definition。该目录项不是公开插件协议。
+每种内置图表拥有一个 Definition，并可创建任意数量的 Component。Bootstrap 使用彼此狭窄的分层协作者组装 Definition：配置描述、数据需求描述、processor/projector、renderer、运行时设置描述和检查描述。Query、processing 与 presentation 只导入自身需要的协作者 contract，不导入完整 Definition。
 
 ### Theme 与 Style
 
@@ -224,7 +243,7 @@ Animation 是独立资源类型，不是 Chart 变体，也不是所有图表默
 
 Chart Component 需要 Query 与 Result Processing；Animation Component 不需要。两者未来可能共享 Host、viewport、Frame、input 和 Painter 基础设施，但应等两类真实实现都存在后，再提取共同 Hosted Component 协议。
 
-当前架构让 Route dispatch 与 Host/content composition 保持可扩展，但暂不添加无实现的 Animation route case 或资源 discriminator，也不定义 Animation Schema、插件协议、资源预算、帧节奏或 Dashboard Header 集成。Header 品牌、静态 Logo 与动画仍是彼此独立的未来设计问题。
+当前架构让 Route dispatch 与 Host/content composition 保持可扩展，但不添加无实现的 Animation route case 或资源 discriminator。Animation Schema、资源预算、帧节奏和 Dashboard Header 集成不属于当前设计。Header 品牌、静态 Logo 与动画仍是彼此独立的未来设计问题。
 
 ## 依赖方向
 
