@@ -22,7 +22,6 @@ from ccusage_viz.monitor_component import MonitorComponent
 from ccusage_viz.query.models import QueryTrigger
 from ccusage_viz.terminal import Terminal
 from ccusage_viz.tui import (
-    DashboardHeader,
     _adjustment_controls,
     _adjustment_footer,
     _adjustment_key_supported,
@@ -523,6 +522,10 @@ def test_dashboard_header_uses_host_summary_and_tracks_global_theme() -> None:
     runtime = build_query_runtime()
     header = _new_header(options, runtime)
     assert header.runtime is runtime
+    assert isinstance(header.scheduler, FixedIntervalScheduler)
+    assert isinstance(header.lifecycle, LifecycleCoordinator)
+    assert header.scheduler.interval == options.host.header_interval
+    assert header.lifecycle.owner_id == "dashboard:header"
     assert header.summary_period == "quarter"
     assert header.options.chart.presentation.theme == "nord"
 
@@ -559,9 +562,7 @@ def test_header_summary_cycle_includes_none_and_wraps() -> None:
 def test_header_refresh_uses_missing_coverage_then_current_day() -> None:
     parser = build_parser(load_translator("en"))
     options = _to_options(parser.parse_args(["dashboard", "--header-summary", "month"]))
-    header = DashboardHeader(
-        _header_options(options), build_query_runtime(), summary_period=options.host.header_summary
-    )
+    header = _new_header(options, build_query_runtime())
     today = date(2026, 3, 15)
 
     cold = _header_refresh_interval(header, today=today)
@@ -582,9 +583,7 @@ def test_header_refresh_uses_missing_coverage_then_current_day() -> None:
 def test_header_date_rollover_requests_new_current_day() -> None:
     parser = build_parser(load_translator("en"))
     options = _to_options(parser.parse_args(["dashboard", "--header-summary", "day"]))
-    header = DashboardHeader(
-        _header_options(options), build_query_runtime(), summary_period=options.host.header_summary
-    )
+    header = _new_header(options, build_query_runtime())
     previous = date(2026, 3, 15)
     header.coverage = DateCoverage((DateInterval(previous.replace(day=8), previous),))
     header.records = (UsageRecord(previous, "claude", TokenUsage.zero(), SourceKind.UNIFIED_DAILY),)
@@ -597,9 +596,7 @@ def test_header_date_rollover_requests_new_current_day() -> None:
 def test_header_none_keeps_title_without_unknown_detail() -> None:
     parser = build_parser(load_translator("en"))
     options = _to_options(parser.parse_args(["dashboard", "--header-summary", "none"]))
-    header = DashboardHeader(
-        _header_options(options), build_query_runtime(), summary_period=options.host.header_summary
-    )
+    header = _new_header(options, build_query_runtime())
 
     compact = _header_lines(header, "compact", load_translator("en"), Terminal(60, 4, False, True))
     banner = _header_lines(header, "banner", load_translator("en"), Terminal(60, 4, False, True))
@@ -613,9 +610,7 @@ def test_header_none_keeps_title_without_unknown_detail() -> None:
 def test_header_cold_period_keeps_structure_with_unknown_detail() -> None:
     parser = build_parser(load_translator("en"))
     options = _to_options(parser.parse_args(["dashboard", "--header-summary", "quarter"]))
-    header = DashboardHeader(
-        _header_options(options), build_query_runtime(), summary_period=options.host.header_summary
-    )
+    header = _new_header(options, build_query_runtime())
 
     lines = _header_lines(header, "banner", load_translator("en"), Terminal(60, 4, False, True))
 

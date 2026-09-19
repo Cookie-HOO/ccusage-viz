@@ -65,7 +65,7 @@ from ccusage_viz.options import (
 )
 from ccusage_viz.processing import build_period_summary, required_summary_coverage
 from ccusage_viz.query.coordinator import QueryHandle
-from ccusage_viz.query.models import ProviderResult, QueryTrigger
+from ccusage_viz.query.models import ProviderResult
 from ccusage_viz.query.runtime import QueryRuntime
 from ccusage_viz.render.base import RenderContext, styled_text
 from ccusage_viz.render.palette import COLOR_SCHEMES, get_color_scheme
@@ -121,15 +121,13 @@ def _pane_options(pane: TuiPane) -> StandaloneLaunch:
 class DashboardHeader:
     options: StandaloneLaunch
     runtime: QueryRuntime
+    scheduler: FixedIntervalScheduler
+    lifecycle: LifecycleCoordinator
     snapshot: UsageSnapshot | None = None
     future: Future[UsageSnapshot] | None = None
-    query_handle: QueryHandle[ProviderResult] | None = None
-    refreshed_at: float = 0.0
+    operation: OperationToken | None = None
     error: str | None = None
     generation: int = 0
-    submitted_generation: int | None = None
-    submitted_options: StandaloneLaunch | None = None
-    pending_trigger: QueryTrigger | None = None
     records: tuple[UsageRecord, ...] = ()
     coverage: DateCoverage = field(default_factory=DateCoverage)
     accepted_at: datetime | None = None
@@ -165,6 +163,8 @@ def _new_header(options: DashboardLaunch, runtime: QueryRuntime) -> DashboardHea
     return DashboardHeader(
         _header_options(options),
         runtime,
+        FixedIntervalScheduler(options.host.header_interval, now=time.monotonic()),
+        LifecycleCoordinator("dashboard:header"),
         summary_period=options.host.header_summary,
     )
 
@@ -860,7 +860,6 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
     browse_controls_hidden = False
     body_view: DashboardBodyView = "chart"
     copied_status: str | None = None
-    header_scheduling_paused = False
     last_successful_update: datetime | None = None
     last_size: tuple[int, int] | None = None
     footer_notice_rows = 0
@@ -925,23 +924,17 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         )
         return requested and start_pane(index, now=now)
 
-    def refresh_header(
-        *,
-        trigger: QueryTrigger,
-        queue_if_running: bool = False,
-        aggressive: bool = False,
-    ) -> None:
-        requested = _header_refresh_interval(header, aggressive=aggressive)
+    def start_header(*, now: float) -> bool:
+        operation = header.lifecycle.take_ready(now=now)
+        if operation is None:
+            return False
+        requested = _header_refresh_interval(
+            header,
+            aggressive=operation.trigger is LifecycleTrigger.MANUAL,
+        )
         if requested is None:
-            return
-        if header.future is not None and not header.future.done():
-            if queue_if_running:
-                header.pending_trigger = trigger
-                if header.query_handle is not None:
-                    header.query_handle.cancel()
-            return
-        header.error = None
-        header.submitted_generation = header.generation
+            header.lifecycle.abandon(operation)
+            return False
         submitted = replace(
             header.options,
             chart=replace(
@@ -949,47 +942,68 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 date_range=DateRange(requested.since, requested.until, options.host.timezone),
             ),
         )
-        header.submitted_options = submitted
-        header.refreshed_at = time.monotonic()
-        intent = historical_query_intent(
-            submitted,
-            header.runtime.definition(historical_provider_id(submitted)),
-            owner_id="dashboard:header",
+        try:
+            intent = historical_query_intent(
+                submitted,
+                header.runtime.definition(historical_provider_id(submitted)),
+                owner_id=operation.owner_id,
+                generation=operation.generation,
+                trigger=query_trigger(operation.trigger),
+            )
+            started = time.monotonic()
+            handle = header.runtime.submit(intent)
+        except BaseException as exc:
+            header.lifecycle.abandon(operation)
+            header.error = str(exc)
+            return False
+        header.options = submitted
+        header.error = None
+        header.operation = operation
+        header.future = executor.submit(_await_historical, handle, started)
+        header.lifecycle.attach(operation, handle.cancel)
+        return True
+
+    def refresh_header(
+        *,
+        trigger: LifecycleTrigger,
+        replace_active: bool = False,
+    ) -> bool:
+        now = time.monotonic()
+        requested = header.lifecycle.request(
+            trigger,
             generation=header.generation,
-            trigger=trigger,
+            now=now,
+            replace_active=replace_active,
         )
-        started = time.monotonic()
-        header.query_handle = header.runtime.submit(intent)
-        header.future = executor.submit(_await_historical, header.query_handle, started)
+        return requested and start_header(now=now)
 
     def collect() -> bool:
         nonlocal last_successful_update
         changed = False
         future = header.future
         if future is not None and future.done():
-            submitted_generation = header.submitted_generation
-            submitted_options = header.submitted_options
+            operation = header.operation
             header.future = None
-            header.query_handle = None
-            header.submitted_generation = None
-            header.submitted_options = None
-            try:
-                result = future.result()
-                if submitted_generation == header.generation and submitted_options is not None:
-                    header.records = _replace_header_interval(header.records, result)
-                    header.coverage = header.coverage.merge(result.coverage)
-                    header.snapshot = result
-                    header.accepted_at = datetime.now().astimezone()
-                    last_successful_update = header.accepted_at
-                    changed = True
-            except Exception as exc:
-                if submitted_generation == header.generation:
-                    header.error = str(exc)
-                    changed = True
-            if header.pending_trigger is not None:
-                trigger = header.pending_trigger
-                header.pending_trigger = None
-                refresh_header(trigger=trigger)
+            header.operation = None
+            observed_at = time.monotonic()
+            if operation is not None:
+                try:
+                    result = future.result()
+                    if header.lifecycle.accepts(operation, generation=header.generation):
+                        header.records = _replace_header_interval(header.records, result)
+                        header.coverage = header.coverage.merge(result.coverage)
+                        header.snapshot = result
+                        header.accepted_at = datetime.now().astimezone()
+                        last_successful_update = header.accepted_at
+                        header.error = None
+                        header.lifecycle.complete(operation, generation=header.generation)
+                        changed = True
+                except Exception as exc:
+                    if header.lifecycle.accepts(operation, generation=header.generation):
+                        header.lifecycle.complete(operation, generation=header.generation)
+                        header.error = str(exc)
+                        changed = True
+                start_header(now=observed_at)
         for index, pane in enumerate(panes):
             future = pane.future
             if future is None or not future.done():
@@ -1217,7 +1231,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             for index in range(len(panes)):
                 refresh(index, trigger=LifecycleTrigger.STARTUP)
             if header_style != "hidden":
-                refresh_header(trigger=QueryTrigger.STARTUP)
+                refresh_header(trigger=LifecycleTrigger.STARTUP)
             paint()
             while True:
                 size = get_terminal_size()
@@ -1225,13 +1239,8 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     paint(force=True)
                 changed = collect()
                 now = time.monotonic()
-                if (
-                    not header_scheduling_paused
-                    and header_style != "hidden"
-                    and header.future is None
-                    and now - header.refreshed_at >= options.host.header_interval
-                ):
-                    refresh_header(trigger=QueryTrigger.TICK)
+                if header_style != "hidden" and header.scheduler.due(now=now):
+                    refresh_header(trigger=LifecycleTrigger.PERIODIC)
                 for index, pane in enumerate(panes):
                     if pane.scheduler.due(now=now):
                         refresh(index, trigger=LifecycleTrigger.PERIODIC)
@@ -1410,17 +1419,21 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                 header.summary_period,
                             )
                             if any(not header.coverage.covers(item) for item in required.intervals):
-                                refresh_header(trigger=QueryTrigger.REFRESH, queue_if_running=True)
+                                refresh_header(trigger=LifecycleTrigger.CONFIGURATION)
                     elif adjustment_page == "quick" and key == "u":
                         next_summary = _next_header_summary(header.summary_period)
                         header.summary_period = next_summary
                         header.generation += 1
+                        detached = header.lifecycle.detach_active()
+                        if detached is not None:
+                            header.future = None
+                            header.operation = None
                         if header_style != "hidden" and next_summary != "none":
                             required = required_summary_coverage(
                                 today_for_timezone(header.options.host.timezone), next_summary
                             )
                             if any(not header.coverage.covers(item) for item in required.intervals):
-                                refresh_header(trigger=QueryTrigger.REFRESH, queue_if_running=True)
+                                refresh_header(trigger=LifecycleTrigger.CONFIGURATION)
                     elif adjustment_page == "quick" and key == "z":
                         grid_draft = ""
                         grid_error = None
@@ -1490,9 +1503,8 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                             replace_active=True,
                         )
                     refresh_header(
-                        trigger=QueryTrigger.REFRESH,
-                        queue_if_running=True,
-                        aggressive=True,
+                        trigger=LifecycleTrigger.MANUAL,
+                        replace_active=True,
                     )
                 elif key in {"v", "V"}:
                     body_view = next_dashboard_body_view(body_view)
@@ -1508,8 +1520,12 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 elif key == " ":
                     paused = all(item.lifecycle.paused for item in panes)
                     now = time.monotonic()
-                    header_scheduling_paused = not paused
                     if not paused:
+                        header.scheduler.pause()
+                        header.lifecycle.pause()
+                        if header.operation is not None and header.lifecycle.active is None:
+                            header.future = None
+                            header.operation = None
                         for item in panes:
                             item.scheduler.pause()
                             item.lifecycle.pause()
@@ -1520,7 +1536,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                 item.component.pause()
                     else:
                         wall = datetime.now().astimezone()
-                        header.refreshed_at = now
+                        header.lifecycle.resume()
+                        header.scheduler.resume(now=now)
+                        refresh_header(trigger=LifecycleTrigger.RESUME)
                         for index, item in enumerate(panes):
                             item.lifecycle.resume()
                             item.scheduler.resume(now=now)
@@ -1547,6 +1565,8 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         for pane in panes:
             pane.scheduler.shutdown()
             pane.lifecycle.shutdown()
+        header.scheduler.shutdown()
+        header.lifecycle.shutdown()
         runtime.cancel()
         executor.shutdown(wait=False, cancel_futures=True)
         screen.finish()
