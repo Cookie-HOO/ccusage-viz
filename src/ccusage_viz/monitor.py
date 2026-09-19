@@ -417,11 +417,11 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                                     else ""
                                 ),
                             ).rstrip(" ·")
-                        elif current:
+                        else:
                             lifecycle.abandon(operation)
                     except BaseException as exc:
+                        lifecycle.abandon(operation)
                         if current:
-                            lifecycle.abandon(operation)
                             component.fail(exc, generation=submission.generation)
                             status = translator.text(
                                 "status.monitor_source",

@@ -636,6 +636,8 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
                         operation,
                         generation=submission.generation,
                     )
+                    if not current_operation:
+                        lifecycle.abandon(operation)
                     try:
                         outcome = submission.result()
                         if current_operation:
@@ -684,8 +686,8 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
                             else:
                                 lifecycle.abandon(operation)
                     except BaseException as exc:
+                        lifecycle.abandon(operation)
                         if current_operation:
-                            lifecycle.abandon(operation)
                             component.fail(exc, generation=submission.generation)
                             base_status = format_error(
                                 exc,

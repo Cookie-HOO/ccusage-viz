@@ -171,6 +171,8 @@ class LifecycleOperation(Generic[_Submission]):
         submission = self.submission
         if operation is None or submission is None or not done(submission):
             return None
+        self.operation = None
+        self.submission = None
         return operation, submission
 
     def accepts(self, operation: OperationToken, *, generation: int) -> bool:

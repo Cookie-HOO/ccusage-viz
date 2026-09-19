@@ -74,7 +74,7 @@ def test_operation_starts_current_intent_and_collects_completed_submission() -> 
         OperationToken("pane-1", 0, 1, LifecycleTrigger.STARTUP),
         "submission-1",
     )
-    assert lifecycle.submission == "submission-1"
+    assert lifecycle.operation is lifecycle.submission is None
     operation, _submission = completed
     assert lifecycle.complete(operation, generation=0)
     assert lifecycle.operation is lifecycle.submission is None
@@ -168,6 +168,35 @@ def test_operation_pause_clears_automatic_but_keeps_manual_submission() -> None:
     lifecycle.pause()
     assert lifecycle.submission == "manual"
     assert cancelled == ["periodic"]
+
+
+def test_operation_consumes_a_stale_completion_before_pending_restart() -> None:
+    lifecycle: LifecycleOperation[str] = LifecycleOperation("pane-1")
+    lifecycle.request(
+        LifecycleTrigger.STARTUP,
+        generation=0,
+        now=0,
+        start=lambda _operation: ("stale", lambda: None),
+    )
+    lifecycle.request(
+        LifecycleTrigger.PERIODIC,
+        generation=1,
+        now=1,
+        start=lambda _operation: ("current", lambda: None),
+    )
+
+    completed = lifecycle.take_completed(lambda _submission: True)
+    assert completed is not None
+    operation, _submission = completed
+    assert not lifecycle.accepts(operation, generation=1)
+    assert lifecycle.take_completed(lambda _submission: True) is None
+
+    lifecycle.abandon(operation)
+    assert lifecycle.start_ready(
+        now=1,
+        start=lambda _operation: ("current", lambda: None),
+    )
+    assert lifecycle.submission == "current"
 
 
 def test_operation_finalization_releases_pending_work_for_restart() -> None:

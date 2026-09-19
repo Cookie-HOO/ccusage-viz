@@ -1027,6 +1027,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 loaded = future.result()
                 active = pane.lifecycle.accepts(operation, generation=loaded.generation)
                 if not active:
+                    pane.lifecycle.abandon(operation)
                     continue
                 if loaded.error is not None:
                     if component.fail(loaded.error, generation=loaded.generation):
