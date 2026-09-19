@@ -13,14 +13,12 @@ from ccusage_viz.coverage import DateCoverage, DateInterval
 from ccusage_viz.deltas import RefreshRanks
 from ccusage_viz.domain import Notice, SourceKind, TokenUsage, UsageRecord
 from ccusage_viz.errors import UsageError
-from ccusage_viz.historical_component import UsageSnapshot
+from ccusage_viz.historical_component import HistoricalChartComponent, UsageSnapshot
 from ccusage_viz.i18n import load_translator
-from ccusage_viz.processing.monitor import ObservedTPM
-from ccusage_viz.query.client import QueryRunner
+from ccusage_viz.monitor_component import MonitorComponent
 from ccusage_viz.terminal import Terminal
 from ccusage_viz.tui import (
     DashboardHeader,
-    TuiPane,
     _adjustment_controls,
     _adjustment_footer,
     _adjustment_key_supported,
@@ -39,8 +37,6 @@ from ccusage_viz.tui import (
     _next_header_summary,
     _pane_render,
     _query_affecting_adjustment,
-    _refresh_deltas,
-    _refresh_ranks,
     _replace_header_interval,
     _set_header_theme,
     _unique_notices,
@@ -203,7 +199,7 @@ def test_dashboard_panes_have_no_details_state() -> None:
     assert not hasattr(pane, "show_details")
 
 
-def test_dashboard_panes_only_own_monitor_query_runners() -> None:
+def test_dashboard_panes_host_chart_components_without_legacy_runners() -> None:
     parser = build_parser(load_translator("en"))
     options = _to_options(parser.parse_args(["dashboard", "--demo"]))
 
@@ -216,8 +212,10 @@ def test_dashboard_panes_only_own_monitor_query_runners() -> None:
         "pane:monitor",
     )
 
-    assert historical.monitor_runner is None
-    assert isinstance(monitor.monitor_runner, QueryRunner)
+    assert isinstance(historical.component, HistoricalChartComponent)
+    assert isinstance(monitor.component, MonitorComponent)
+    assert not hasattr(historical, "monitor_runner")
+    assert not hasattr(monitor, "monitor_runner")
 
 
 def test_dashboard_pane_render_retains_chart_notices_and_deduplicates_them() -> None:
@@ -259,7 +257,9 @@ def test_dashboard_pane_render_retains_chart_notices_and_deduplicates_them() -> 
     assert _unique_notices(rendered) == rendered[0].notices
 
 
-def test_dashboard_monitor_forwards_value_and_rank_deltas(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_dashboard_monitor_forwards_component_changes_to_chart_renderer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     parser = build_parser(load_translator("en"))
     options = _to_options(parser.parse_args(["dashboard", "--demo"]))
     monitor = _new_pane(
@@ -269,16 +269,17 @@ def test_dashboard_monitor_forwards_value_and_rank_deltas(monkeypatch: pytest.Mo
         ),
         "pane:monitor",
     )
-    monitor.observer = ObservedTPM(window_seconds=3600, by="model", top=3)
-    monitor.deltas = {"sonnet": 4.0}
-    monitor.rank_deltas = {"sonnet": 1}
+    assert isinstance(monitor.component, MonitorComponent)
+    monitor.component.deltas["sonnet"] = 4.0
+    monitor.component.rank_deltas["sonnet"] = 1
     captured: dict[str, object] = {}
 
-    def fake_render(*args: object, **kwargs: object) -> str:
-        captured.update(kwargs)
+    def fake_render(self: MonitorComponent, context, **kwargs: object) -> str:
+        captured["deltas"] = context.deltas
+        captured["rank_deltas"] = context.rank_deltas
         return "monitor"
 
-    monkeypatch.setattr(tui_module, "render_monitor_snapshot", fake_render)
+    monkeypatch.setattr(MonitorComponent, "render", fake_render)
 
     rendered = _pane_render(monitor, load_translator("en"), Terminal(58, 16, False, True))
 
@@ -294,7 +295,7 @@ def test_dashboard_monitor_and_error_panes_do_not_contribute_chart_notices() -> 
         standalone_from_pane(options, parse_dashboard_pane("monitor", host=options)),
         "pane:monitor",
     )
-    monitor.monitor_error = "pane failed"
+    monitor.component.fail(RuntimeError("pane failed"), generation=monitor.component.generation)
 
     rendered = _pane_render(monitor, load_translator("en"), Terminal(58, 16, False, True))
 
@@ -598,18 +599,6 @@ def test_tui_persistent_frame_does_not_depend_on_focus() -> None:
     assert unfocused.splitlines()[1].startswith("|Title")
 
 
-def test_tui_refresh_deltas_mark_new_keys_after_the_baseline() -> None:
-    pane = TuiPane.__new__(TuiPane)
-    pane.previous_values = {}
-    pane.deltas = {}
-    pane.values_initialized = False
-
-    _refresh_deltas(pane, {"a": 10, "new": 20})
-    assert pane.deltas == {}
-    _refresh_deltas(pane, {"a": 15, "new": 17, "later": 30})
-    assert pane.deltas == {"a": 5, "new": -3, "later": 30}
-
-
 def test_refresh_ranks_tracks_movement_and_clear() -> None:
     ranks = RefreshRanks()
 
@@ -619,17 +608,6 @@ def test_refresh_ranks_tracks_movement_and_clear() -> None:
     assert ranks.current == {"b": 1, "a": -1}
     ranks.clear()
     assert ranks.previous == ranks.current == {}
-
-
-def test_tui_refresh_ranks_require_an_existing_stable_key() -> None:
-    pane = TuiPane.__new__(TuiPane)
-    pane.previous_ranks = {}
-    pane.rank_deltas = {}
-
-    _refresh_ranks(pane, ("a", "b"))
-    assert pane.rank_deltas == {}
-    _refresh_ranks(pane, ("b", "new", "a"))
-    assert pane.rank_deltas == {"b": 1, "a": -2}
 
 
 def test_pane_chooser_reuses_dashboard_decoder_and_ignores_mouse(
