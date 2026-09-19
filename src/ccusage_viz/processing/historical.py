@@ -6,7 +6,7 @@ from ccusage_viz.chart_models import CalendarModel, RankingModel, StackModel, Ti
 from ccusage_viz.coverage import DateCoverage
 from ccusage_viz.domain import Notice, UsageRecord
 from ccusage_viz.options import HistoricalChartConfig
-from ccusage_viz.processing.filtering import filter_records
+from ccusage_viz.processing.filtering import prepare_filtered_scope
 from ccusage_viz.processing.projection import (
     build_calendar,
     build_ranking,
@@ -28,17 +28,17 @@ def process_historical(
     include_summary: bool = True,
 ) -> HistoricalModel:
     """Project accepted normalized records into one immutable chart model."""
-    filtered, filter_notices = filter_records(
+    scope = prepare_filtered_scope(
         records,
         chart.date_range,
         agents=chart.filters.agents,
         models=chart.filters.models,
         projects=chart.filters.projects,
     )
-    all_notices = (*notices, *filter_notices)
+    all_notices = (*notices, *scope.notices)
     if chart.kind == "timeline":
         return build_timeline(
-            filtered,
+            scope.records,
             chart.date_range,
             by=None if chart.by == "total" else chart.by,
             top=chart.top,
@@ -47,27 +47,30 @@ def process_historical(
             notices=all_notices,
             aggregation=chart.granularity,
             coverage=coverage,
+            filter_count=scope.filter_count,
         )
     if chart.kind == "calendar":
         return build_calendar(
-            filtered,
+            scope.records,
             chart.date_range,
             include_summary=include_summary,
             notices=all_notices,
             coverage=coverage,
+            filter_count=scope.filter_count,
         )
     if chart.kind == "stack":
         return build_stack(
-            filtered,
+            scope.records,
             chart.date_range,
             split_cache=chart.cache == "split",
             include_summary=include_summary,
             notices=all_notices,
             aggregation=chart.granularity,
             coverage=coverage,
+            filter_count=scope.filter_count,
         )
     return build_ranking(
-        filtered,
+        scope.records,
         chart.date_range,
         by=chart.by,
         top=chart.top,
@@ -76,4 +79,5 @@ def process_historical(
         notices=all_notices,
         summary_notices=summary_notices,
         coverage=coverage,
+        filter_count=scope.filter_count,
     )

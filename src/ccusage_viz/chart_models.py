@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Hashable
-from dataclasses import dataclass, field
+from dataclasses import KW_ONLY, dataclass, field
 from datetime import date, datetime
 from enum import StrEnum
 from typing import Literal
@@ -34,6 +34,13 @@ class ChangeDirection(StrEnum):
     FROM_ZERO = "from_zero"
 
 
+class ComparisonState(StrEnum):
+    READY = "ready"
+    PENDING = "pending"
+    UNAVAILABLE = "unavailable"
+    FAILED = "failed"
+
+
 @dataclass(frozen=True, slots=True)
 class PercentChange:
     direction: ChangeDirection
@@ -49,8 +56,10 @@ class PeriodSummary:
     year_over_year: PercentChange | None = None
     previous_week_day: date | None = None
     all_agents: bool = False
-    current_filter_total: bool = False
-    chart_top: int | None = None
+    _: KW_ONLY
+    filter_count: int = 0
+    sequential_state: ComparisonState = ComparisonState.READY
+    year_over_year_state: ComparisonState = ComparisonState.READY
 
     @property
     def day_over_day(self) -> PercentChange | None:
@@ -59,20 +68,6 @@ class PeriodSummary:
     @property
     def week_over_week(self) -> PercentChange | None:
         return self.year_over_year
-
-
-@dataclass(frozen=True, slots=True)
-class DailySummary:
-    """Legacy daily summary input retained for API compatibility."""
-
-    day: date
-    total: int
-    day_over_day: PercentChange
-    week_over_week: PercentChange
-    previous_week_day: date
-    all_agents: bool = False
-    current_filter_total: bool = False
-    chart_top: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,7 +95,7 @@ class TimelineModel:
     days: tuple[date, ...]
     series: tuple[Series, ...]
     notices: tuple[Notice, ...] = field(default_factory=tuple)
-    summary: PeriodSummary | DailySummary | None = None
+    summary: PeriodSummary | None = None
     aggregation: str = "day"
     observed_at: tuple[datetime, ...] = field(default_factory=tuple)
     observed_series: tuple[ScalarSeries, ...] = field(default_factory=tuple)
@@ -135,7 +130,7 @@ class CalendarDay:
 class CalendarModel:
     days: tuple[CalendarDay, ...]
     notices: tuple[Notice, ...] = field(default_factory=tuple)
-    summary: PeriodSummary | DailySummary | None = None
+    summary: PeriodSummary | None = None
 
     @property
     def total(self) -> TokenUsage:
@@ -181,7 +176,7 @@ class StackModel:
     days: tuple[date, ...]
     components: tuple[Series, ...]
     notices: tuple[Notice, ...] = field(default_factory=tuple)
-    summary: PeriodSummary | DailySummary | None = None
+    summary: PeriodSummary | None = None
     aggregation: str = "day"
 
     @property
@@ -213,7 +208,9 @@ class RankingModel:
     date_range: DateRange | None
     notices: tuple[Notice, ...] = field(default_factory=tuple)
     denominator: TokenUsage | None = None
-    summary: PeriodSummary | DailySummary | None = None
+    summary: PeriodSummary | None = None
+    top: int | None = None
+    top_share: float | None = None
     observed_entries: tuple[ScalarRankingEntry, ...] = field(default_factory=tuple)
     metric: MetricDescriptor = field(default_factory=MetricDescriptor)
     observed_scope: ObservedScope | None = None
@@ -222,10 +219,22 @@ class RankingModel:
         if not self.observed_entries and self.observed_scope is None:
             if self.date_range is None:
                 raise ValueError("historical rankings require a date range")
+            if self.top_share is not None:
+                if self.top is None or not 0 <= self.top_share <= 1:
+                    raise ValueError("ranking coverage requires Top and a valid share")
+                if self.denominator is None or self.denominator.total <= 0:
+                    raise ValueError("ranking coverage requires a positive denominator")
+            elif self.top is not None:
+                raise ValueError("ranking Top metadata requires coverage")
             return
         if self.entries or self.observed_scope is None or self.date_range is not None:
             raise ValueError("observed rankings require only observed entries and scope")
-        if self.denominator is not None or self.summary is not None:
+        if (
+            self.denominator is not None
+            or self.summary is not None
+            or self.top is not None
+            or self.top_share is not None
+        ):
             raise ValueError("observed rankings do not support historical percentages or summaries")
 
     @property

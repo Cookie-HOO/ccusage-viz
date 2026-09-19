@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Hashable, Iterable
-from dataclasses import replace
 from datetime import date, timedelta
 
 from ccusage_viz.chart_models import (
     CalendarDay,
     CalendarModel,
+    PeriodSummary,
     RankingEntry,
     RankingModel,
     Series,
@@ -17,7 +17,7 @@ from ccusage_viz.chart_models import (
 from ccusage_viz.core.time import DateRange
 from ccusage_viz.coverage import DateCoverage
 from ccusage_viz.domain import Notice, TokenUsage, UsageRecord
-from ccusage_viz.processing.summaries import build_period_summary, period_start
+from ccusage_viz.processing.summaries import build_period_summary, build_range_summary, period_start
 from ccusage_viz.project_identity import project_label, unique_projects
 
 _OTHER_KEY = ("other",)
@@ -123,6 +123,33 @@ def _top_other(
     return visible, len(excluded_groups)
 
 
+def _build_summary(
+    records: Iterable[UsageRecord],
+    date_range: DateRange,
+    period: str,
+    coverage: DateCoverage,
+    *,
+    enabled: bool,
+    filter_count: int,
+) -> PeriodSummary | None:
+    if date_range.fixed_bounds:
+        return build_range_summary(
+            records,
+            date_range,
+            coverage,
+            enabled=enabled,
+            filter_count=filter_count,
+        )
+    return build_period_summary(
+        records,
+        date_range.until,
+        period,
+        coverage,
+        enabled=enabled,
+        filter_count=filter_count,
+    )
+
+
 def build_timeline(
     records: Iterable[UsageRecord],
     date_range: DateRange,
@@ -134,6 +161,7 @@ def build_timeline(
     notices: Iterable[Notice] = (),
     aggregation: str = "day",
     coverage: DateCoverage = _EMPTY_COVERAGE,
+    filter_count: int = 0,
 ) -> TimelineModel:
     records = tuple(records)
     days = period_axis(date_range, aggregation)
@@ -156,15 +184,14 @@ def build_timeline(
         model_notices += (Notice("notice.model_overattributed"),)
     if show_other and top is not None and groups and excluded == 0:
         model_notices += (Notice("notice.other_not_needed", {"count": len(groups), "top": top}),)
-    summary = build_period_summary(
+    summary = _build_summary(
         records,
-        date_range.until,
+        date_range,
         aggregation,
         coverage,
-        enabled=include_summary and not date_range.fixed_bounds,
+        enabled=include_summary,
+        filter_count=filter_count,
     )
-    if summary is not None and excluded and not show_other:
-        summary = replace(summary, current_filter_total=True, chart_top=top)
     return TimelineModel(days, series, model_notices, summary, aggregation)
 
 
@@ -175,6 +202,7 @@ def build_calendar(
     include_summary: bool = True,
     notices: Iterable[Notice] = (),
     coverage: DateCoverage = _EMPTY_COVERAGE,
+    filter_count: int = 0,
 ) -> CalendarModel:
     records = tuple(records)
     totals: dict[date, TokenUsage] = defaultdict(TokenUsage.zero)
@@ -186,12 +214,13 @@ def build_calendar(
     return CalendarModel(
         tuple(CalendarDay(day, value) for day, value in zip(days, values, strict=True)),
         tuple(notices),
-        build_period_summary(
+        _build_summary(
             records,
-            date_range.until,
+            date_range,
             "day",
             coverage,
-            enabled=include_summary and not date_range.fixed_bounds,
+            enabled=include_summary,
+            filter_count=filter_count,
         ),
     )
 
@@ -209,6 +238,7 @@ def build_stack(
     notices: Iterable[Notice] = (),
     aggregation: str = "day",
     coverage: DateCoverage = _EMPTY_COVERAGE,
+    filter_count: int = 0,
 ) -> StackModel:
     records = tuple(records)
     totals: dict[date, TokenUsage] = defaultdict(TokenUsage.zero)
@@ -241,12 +271,13 @@ def build_stack(
         days,
         components,
         tuple(notices),
-        build_period_summary(
+        _build_summary(
             records,
-            date_range.until,
+            date_range,
             aggregation,
             coverage,
-            enabled=include_summary and not date_range.fixed_bounds,
+            enabled=include_summary,
+            filter_count=filter_count,
         ),
         aggregation,
     )
@@ -263,6 +294,7 @@ def build_ranking(
     notices: Iterable[Notice] = (),
     summary_notices: Iterable[Notice] = (),
     coverage: DateCoverage = _EMPTY_COVERAGE,
+    filter_count: int = 0,
 ) -> RankingModel:
     records = tuple(records)
     ranked_groups = _ranked_groups(_grouped_daily(records, by))
@@ -285,15 +317,30 @@ def build_ranking(
         model_notices += (Notice("notice.model_overattributed"),)
     if show_other and top is not None and groups and excluded == 0:
         model_notices += (Notice("notice.other_not_needed", {"count": len(groups), "top": top}),)
-    summary = build_period_summary(
+    summary = _build_summary(
         records,
-        date_range.until,
+        date_range,
         "day",
         coverage,
-        enabled=include_summary and not date_range.fixed_bounds,
+        enabled=include_summary,
+        filter_count=filter_count,
     )
     if summary is not None:
         model_notices += tuple(summary_notices)
-        if excluded and not show_other:
-            summary = replace(summary, current_filter_total=True, chart_top=top)
-    return RankingModel(entries, date_range, model_notices, denominator, summary)
+    visible_regular_total = sum(
+        (entry.usage.total for entry in entries if not entry.is_other), start=0
+    )
+    top_share = (
+        visible_regular_total / denominator.total
+        if excluded and not show_other and denominator.total > 0
+        else None
+    )
+    return RankingModel(
+        entries,
+        date_range,
+        model_notices,
+        denominator,
+        summary,
+        top if top_share is not None else None,
+        top_share,
+    )

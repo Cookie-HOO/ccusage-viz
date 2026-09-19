@@ -5,7 +5,13 @@ from collections import defaultdict
 from collections.abc import Iterable
 from datetime import date, timedelta
 
-from ccusage_viz.chart_models import ChangeDirection, PercentChange, PeriodSummary
+from ccusage_viz.chart_models import (
+    ChangeDirection,
+    ComparisonState,
+    PercentChange,
+    PeriodSummary,
+)
+from ccusage_viz.core.time import DateRange
 from ccusage_viz.coverage import DateCoverage, DateInterval
 from ccusage_viz.domain import UsageRecord
 
@@ -36,7 +42,9 @@ def _period_end(start: date, period: str) -> date:
 
 
 def _elapsed_interval(start: date, elapsed_days: int, period: str) -> DateInterval:
-    return DateInterval(start, min(start + timedelta(days=elapsed_days - 1), _period_end(start, period)))
+    return DateInterval(
+        start, min(start + timedelta(days=elapsed_days - 1), _period_end(start, period))
+    )
 
 
 def summary_intervals(end: date, period: str) -> tuple[DateInterval, ...]:
@@ -86,6 +94,32 @@ def percent_change(current: int, baseline: int) -> PercentChange:
     return PercentChange(ChangeDirection.DECREASE, (baseline - current) / baseline * 100)
 
 
+def build_range_summary(
+    records: Iterable[UsageRecord],
+    date_range: DateRange,
+    coverage: DateCoverage,
+    *,
+    enabled: bool = True,
+    filter_count: int = 0,
+) -> PeriodSummary | None:
+    if not enabled or not coverage.covers(DateInterval(date_range.since, date_range.until)):
+        return None
+    total = sum(
+        record.usage.total
+        for record in records
+        if record.day is not None and date_range.since <= record.day <= date_range.until
+    )
+    return PeriodSummary(
+        "range",
+        date_range.until,
+        total,
+        None,
+        filter_count=filter_count,
+        sequential_state=ComparisonState.UNAVAILABLE,
+        year_over_year_state=ComparisonState.UNAVAILABLE,
+    )
+
+
 def build_period_summary(
     records: Iterable[UsageRecord],
     end: date,
@@ -93,6 +127,7 @@ def build_period_summary(
     coverage: DateCoverage,
     *,
     enabled: bool = True,
+    filter_count: int = 0,
 ) -> PeriodSummary | None:
     if not enabled:
         return None
@@ -112,12 +147,11 @@ def build_period_summary(
         )
 
     current = total(current_interval)
-    sequential = (
-        percent_change(current, total(intervals[1])) if coverage.covers(intervals[1]) else None
-    )
-    yearly = None
-    if len(intervals) > 2 and coverage.covers(intervals[2]):
-        yearly = percent_change(current, total(intervals[2]))
+    sequential_ready = coverage.covers(intervals[1])
+    sequential = percent_change(current, total(intervals[1])) if sequential_ready else None
+    yearly_interval = intervals[2] if len(intervals) > 2 else None
+    yearly_ready = yearly_interval is not None and coverage.covers(yearly_interval)
+    yearly = percent_change(current, total(yearly_interval)) if yearly_ready else None
     return PeriodSummary(
         period,
         end,
@@ -125,4 +159,13 @@ def build_period_summary(
         sequential,
         yearly,
         end - timedelta(days=7) if period == "day" else None,
+        filter_count=filter_count,
+        sequential_state=(ComparisonState.READY if sequential_ready else ComparisonState.PENDING),
+        year_over_year_state=(
+            ComparisonState.READY
+            if yearly_ready
+            else ComparisonState.UNAVAILABLE
+            if yearly_interval is None
+            else ComparisonState.PENDING
+        ),
     )

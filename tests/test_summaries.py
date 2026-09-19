@@ -1,13 +1,15 @@
 from datetime import date
 
-from ccusage_viz.chart_models import ChangeDirection
+from ccusage_viz.chart_models import ChangeDirection, ComparisonState
 from ccusage_viz.coverage import DateCoverage, DateInterval
 from ccusage_viz.domain import SourceKind, TokenUsage, UsageRecord
 from ccusage_viz.processing.summaries import build_period_summary, summary_intervals
 
 
 def record(day: date, total: int) -> UsageRecord:
-    return UsageRecord(day, "claude", TokenUsage(total, total, 0, 0, 0, 0), SourceKind.UNIFIED_DAILY)
+    return UsageRecord(
+        day, "claude", TokenUsage(total, total, 0, 0, 0, 0), SourceKind.UNIFIED_DAILY
+    )
 
 
 def test_month_to_date_uses_calendar_aligned_comparisons() -> None:
@@ -38,7 +40,20 @@ def test_missing_comparison_coverage_hides_only_that_comparison() -> None:
     assert summary is not None
     assert summary.sequential is not None
     assert summary.sequential.direction == ChangeDirection.FROM_ZERO
+    assert summary.sequential_state == ComparisonState.READY
     assert summary.year_over_year is None
+    assert summary.year_over_year_state == ComparisonState.PENDING
+
+
+def test_year_summary_marks_year_over_year_as_unavailable() -> None:
+    end = date(2026, 3, 15)
+    coverage = DateCoverage(summary_intervals(end, "year"))
+    summary = build_period_summary((), end, "year", coverage)
+
+    assert summary is not None
+    assert summary.sequential_state == ComparisonState.READY
+    assert summary.year_over_year is None
+    assert summary.year_over_year_state == ComparisonState.UNAVAILABLE
 
 
 def test_uncovered_current_period_has_no_numeric_summary() -> None:

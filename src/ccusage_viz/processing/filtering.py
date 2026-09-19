@@ -1,12 +1,24 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from dataclasses import dataclass
 
 from ccusage_viz.core.time import DateRange
 from ccusage_viz.domain import Notice, TokenUsage, UsageRecord
 from ccusage_viz.errors import UsageError
 from ccusage_viz.project_identity import project_label, resolve_projects, unique_projects
 from ccusage_viz.selectors import SelectorCandidate, resolve_selectors
+
+
+@dataclass(frozen=True, slots=True)
+class FilteredScope:
+    records: tuple[UsageRecord, ...]
+    notices: tuple[Notice, ...]
+    filter_count: int
+
+    @property
+    def total(self) -> TokenUsage:
+        return sum((record.usage for record in self.records), start=TokenUsage.zero())
 
 
 def _simple_selection(
@@ -45,14 +57,14 @@ def _usage_for_models(record: UsageRecord, selected: set[str]) -> TokenUsage | N
     return usage if usage.total > 0 else None
 
 
-def filter_records(
+def prepare_filtered_scope(
     records: Iterable[UsageRecord],
     date_range: DateRange,
     *,
     agents: Iterable[str] = (),
     models: Iterable[str] = (),
     projects: Iterable[str] = (),
-) -> tuple[tuple[UsageRecord, ...], tuple[Notice, ...]]:
+) -> FilteredScope:
     """Resolve independent candidates, then apply AND across selected dimensions."""
     records = tuple(records)
     ranged = tuple(
@@ -165,4 +177,25 @@ def filter_records(
         )
     if missing_breakdown:
         notices.append(Notice("notice.model_breakdown_missing"))
-    return tuple(filtered), tuple(notices)
+    filter_count = sum(
+        bool(selectors) for selectors in (agent_selectors, model_selectors, project_selectors)
+    )
+    return FilteredScope(tuple(filtered), tuple(notices), filter_count)
+
+
+def filter_records(
+    records: Iterable[UsageRecord],
+    date_range: DateRange,
+    *,
+    agents: Iterable[str] = (),
+    models: Iterable[str] = (),
+    projects: Iterable[str] = (),
+) -> tuple[tuple[UsageRecord, ...], tuple[Notice, ...]]:
+    scope = prepare_filtered_scope(
+        records,
+        date_range,
+        agents=agents,
+        models=models,
+        projects=projects,
+    )
+    return scope.records, scope.notices

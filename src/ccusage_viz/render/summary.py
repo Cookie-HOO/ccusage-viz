@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
-from ccusage_viz.chart_models import ChangeDirection, DailySummary, PercentChange, PeriodSummary
+from ccusage_viz.chart_models import (
+    ChangeDirection,
+    ComparisonState,
+    PercentChange,
+    PeriodSummary,
+)
 from ccusage_viz.formatting import clip_width, format_summary_tokens
 from ccusage_viz.render.base import RenderContext, styled_text
 from ccusage_viz.render.palette import get_color_scheme
@@ -27,10 +32,7 @@ def _relation(change: PercentChange, value: str, context: RenderContext) -> str:
         if change.direction == ChangeDirection.DECREASE
         else 0
     )
-    text = (
-        f"{trend_glyph(direction, ascii=context.ascii)} "
-        f"{context.translator.text(key, **values)}"
-    )
+    text = f"{trend_glyph(direction, ascii=context.ascii)} {context.translator.text(key, **values)}"
     scheme = get_color_scheme(context.color_scheme)
     if direction > 0:
         return styled_text(text, scheme.trend_increase, context, bold=True)
@@ -39,12 +41,8 @@ def _relation(change: PercentChange, value: str, context: RenderContext) -> str:
     return styled_text(text, scheme.trend_neutral, context)
 
 
-def _current_key(period: str, *, all_agents: bool, current_filter_total: bool) -> str:
-    if all_agents:
-        return f"summary.current.{period}.all_agents"
-    if current_filter_total:
-        return f"summary.current.{period}.current_filter"
-    return f"summary.current.{period}"
+def _current_key(period: str, *, all_agents: bool) -> str:
+    return f"summary.current.{period}.all_agents" if all_agents else f"summary.current.{period}"
 
 
 def _summary_line(pieces: list[str], context: RenderContext) -> str:
@@ -64,7 +62,7 @@ def render_summary_placeholder(
     unknown = styled_text("??", scheme.muted, context)
     pieces = [
         context.translator.text(
-            _current_key(period, all_agents=all_agents, current_filter_total=False),
+            _current_key(period, all_agents=all_agents),
             value=unknown,
         ),
         context.translator.text(f"summary.sequential.{period}", relation=unknown),
@@ -80,19 +78,7 @@ def render_summary_placeholder(
     return clip_width(_summary_line(pieces, context), context.width)
 
 
-def render_summary(summary: PeriodSummary | DailySummary, context: RenderContext) -> str:
-    if isinstance(summary, DailySummary):
-        summary = PeriodSummary(
-            "day",
-            summary.day,
-            summary.total,
-            summary.day_over_day,
-            summary.week_over_week,
-            summary.previous_week_day,
-            summary.all_agents,
-            summary.current_filter_total,
-            summary.chart_top,
-        )
+def render_summary(summary: PeriodSummary, context: RenderContext) -> str:
     plain_value = format_summary_tokens(summary.total)
     value = styled_text(
         plain_value,
@@ -102,22 +88,36 @@ def render_summary(summary: PeriodSummary | DailySummary, context: RenderContext
     )
     pieces = [
         context.translator.text(
-            _current_key(
-                summary.period,
-                all_agents=summary.all_agents,
-                current_filter_total=summary.current_filter_total,
-            ),
+            _current_key(summary.period, all_agents=summary.all_agents),
             value=value,
         )
     ]
-    if summary.sequential is not None:
+    if summary.filter_count:
+        pieces.append(context.translator.text("summary.filters", count=summary.filter_count))
+    scheme = get_color_scheme(context.color_scheme)
+    unknown = styled_text("??", scheme.muted, context)
+    if summary.sequential_state in {ComparisonState.PENDING, ComparisonState.FAILED}:
+        pieces.append(
+            context.translator.text(
+                f"summary.sequential.{summary.period}",
+                relation=unknown,
+            )
+        )
+    elif summary.sequential is not None:
         pieces.append(
             context.translator.text(
                 f"summary.sequential.{summary.period}",
                 relation=_relation(summary.sequential, plain_value, context),
             )
         )
-    if summary.year_over_year is not None:
+    if summary.year_over_year_state in {ComparisonState.PENDING, ComparisonState.FAILED}:
+        values = {"relation": unknown}
+        if summary.period == "day" and summary.previous_week_day is not None:
+            values["weekday"] = context.translator.text(
+                f"calendar.weekday.{summary.previous_week_day.weekday()}"
+            )
+        pieces.append(context.translator.text(f"summary.year_over_year.{summary.period}", **values))
+    elif summary.year_over_year is not None:
         key = f"summary.year_over_year.{summary.period}"
         values = {"relation": _relation(summary.year_over_year, plain_value, context)}
         if summary.period == "day" and summary.previous_week_day is not None:
@@ -125,7 +125,4 @@ def render_summary(summary: PeriodSummary | DailySummary, context: RenderContext
                 f"calendar.weekday.{summary.previous_week_day.weekday()}"
             )
         pieces.append(context.translator.text(key, **values))
-    line = _summary_line(pieces, context)
-    if summary.chart_top is not None:
-        line = context.translator.text("summary.chart_top", summary=line, top=summary.chart_top)
-    return clip_width(line, context.width)
+    return clip_width(_summary_line(pieces, context), context.width)

@@ -7,6 +7,7 @@ from ccusage_viz.chart_models import (
     CalendarModel,
     MetricDescriptor,
     ObservedScope,
+    RankingEntry,
     RankingModel,
     ScalarRankingEntry,
     ScalarSeries,
@@ -57,6 +58,31 @@ def test_observed_timeline_keeps_scalar_metrics_separate_from_token_breakdowns()
     assert model.observed_series[0].values == (1234.5,)
     assert model.metric.unit == "tpm"
     assert model.total == TokenUsage.zero()
+
+
+@pytest.mark.parametrize(
+    ("top", "share", "denominator"),
+    [
+        (None, 0.5, 100),
+        (1, -0.1, 100),
+        (1, 1.1, 100),
+        (1, 0.5, 0),
+        (1, None, 100),
+    ],
+)
+def test_ranking_hidden_coverage_requires_consistent_metadata(
+    top: int | None,
+    share: float | None,
+    denominator: int,
+) -> None:
+    with pytest.raises(ValueError):
+        RankingModel(
+            (RankingEntry("a", "A", usage(50)),),
+            DateRange(date(2026, 1, 1), date(2026, 1, 1), None),
+            denominator=usage(denominator),
+            top=top,
+            top_share=share,
+        )
 
 
 def test_observed_models_reject_historical_semantics() -> None:

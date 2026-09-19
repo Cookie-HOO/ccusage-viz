@@ -6,6 +6,7 @@ from ccusage_viz.chart_models import ChangeDirection
 from ccusage_viz.core.time import DateRange
 from ccusage_viz.coverage import DateCoverage
 from ccusage_viz.domain import ModelBreakdown, Notice, SourceKind, TokenUsage, UsageRecord
+from ccusage_viz.options import Filters, TimelineConfig
 from ccusage_viz.processing import (
     build_calendar,
     build_ranking,
@@ -54,15 +55,11 @@ def test_filter_candidates_are_independent_across_dimensions() -> None:
     )
     period = DateRange(date(2026, 1, 1), date(2026, 1, 2), None)
 
-    filtered, notices = filter_records(
-        records, period, agents=("claude",), models=("cod",)
-    )
+    filtered, notices = filter_records(records, period, agents=("claude",), models=("cod",))
     assert filtered == ()
     assert notices[-1].values == {"dimension": "model", "values": "codex"}
 
-    filtered, notices = filter_records(
-        records, period, agents=("claude",), projects=("ool",)
-    )
+    filtered, notices = filter_records(records, period, agents=("claude",), projects=("ool",))
     assert filtered == ()
     assert notices[-1].values == {"dimension": "project", "values": "tool"}
 
@@ -78,6 +75,30 @@ def test_filters_remain_and_across_independently_resolved_dimensions() -> None:
         records, period, agents=("claude",), projects=("app",), models=("son",)
     )
     assert [item.usage.total for item in filtered] == [10]
+
+
+def test_process_historical_carries_filter_dimension_count_into_summary() -> None:
+    from ccusage_viz.processing import process_historical
+
+    records = (
+        record(1, "claude", "/a/app", "sonnet", 10),
+        record(1, "codex", "/b/tool", "codex", 20),
+    )
+    period = DateRange(date(2026, 1, 1), date(2026, 1, 1), None)
+    chart = TimelineConfig(
+        "timeline",
+        period,
+        filters=Filters(agents=("claude", "other"), models=("sonnet",), projects=("app",)),
+    )
+    model = process_historical(
+        chart,
+        records,
+        coverage=DateCoverage.from_interval(period.since - timedelta(days=7), period.until),
+    )
+
+    assert model.summary is not None
+    assert model.summary.total == 10
+    assert model.summary.filter_count == 3
 
 
 def test_timeline_zero_fills_and_other_is_final() -> None:
@@ -125,7 +146,7 @@ def test_relative_summary_zero_fills_comparisons_outside_the_range(days: int) ->
         assert timeline.week_over_week.direction == ChangeDirection.FROM_ZERO
 
 
-def test_explicit_start_and_end_hide_summary() -> None:
+def test_explicit_start_and_end_keep_total_without_comparisons() -> None:
     records = tuple(record(day, "claude", "/a", "sonnet", day * 10) for day in range(1, 15))
     period = DateRange(
         date(2026, 1, 1),
@@ -134,9 +155,20 @@ def test_explicit_start_and_end_hide_summary() -> None:
         fixed_bounds=True,
     )
 
-    assert build_timeline(records, period).summary is None
-    assert build_calendar(records, period).summary is None
-    assert build_stack(records, period).summary is None
+    coverage = DateCoverage.from_interval(period.since, period.until)
+    summaries = (
+        build_timeline(records, period, coverage=coverage).summary,
+        build_calendar(records, period, coverage=coverage).summary,
+        build_stack(records, period, coverage=coverage).summary,
+    )
+
+    assert all(summary is not None for summary in summaries)
+    for summary in summaries:
+        assert summary is not None
+        assert summary.period == "range"
+        assert summary.total == 1_050
+        assert summary.sequential is None
+        assert summary.year_over_year is None
 
 
 def test_summary_can_be_disabled_for_supported_charts() -> None:
@@ -187,12 +219,8 @@ def test_timeline_summary_uses_full_filter_scope_when_top_hides_groups() -> None
 
     assert top_only.summary is not None
     assert top_only.summary.total == 60
-    assert top_only.summary.current_filter_total
-    assert top_only.summary.chart_top == 1
     assert with_other.summary is not None
     assert with_other.summary.total == 60
-    assert not with_other.summary.current_filter_total
-    assert with_other.summary.chart_top is None
 
 
 def test_summary_handles_zero_and_equal_baselines() -> None:
@@ -328,6 +356,29 @@ def test_model_grouping_notices_invalid_overattribution_without_negative_other()
     assert [notice.key for notice in model.notices] == ["notice.model_overattributed"]
 
 
+def test_model_ranking_top_share_excludes_authoritative_residual_other() -> None:
+    records = (
+        UsageRecord(
+            date(2026, 1, 1),
+            "claude",
+            usage(100),
+            SourceKind.UNIFIED_DAILY,
+            make_project_ref("claude", "/a"),
+            (ModelBreakdown("a", usage(60)), ModelBreakdown("b", usage(30))),
+        ),
+    )
+    period = DateRange(date(2026, 1, 1), date(2026, 1, 1), None)
+
+    ranking = build_ranking(records, period, by="model", top=1)
+
+    assert [(entry.label, entry.usage.total) for entry in ranking.entries] == [
+        ("a", 60),
+        ("Other", 10),
+    ]
+    assert ranking.top == 1
+    assert ranking.top_share == pytest.approx(0.6)
+
+
 def test_ranking_summary_uses_only_daily_records_and_marks_session_omission() -> None:
     period = DateRange(date(2026, 1, 1), date(2026, 1, 1), None)
     dated = record(1, "claude", "/daily", "sonnet", 10)
@@ -383,3 +434,9 @@ def test_ranking_percentage_uses_full_filtered_total() -> None:
 
     assert ranking.total.total == 60
     assert ranking.percentage_total.total == 100
+    assert ranking.top == 1
+    assert ranking.top_share == pytest.approx(0.6)
+
+    with_other = build_ranking(records, period, by="model", top=1, show_other=True)
+    assert with_other.top_share is None
+    assert with_other.top is None

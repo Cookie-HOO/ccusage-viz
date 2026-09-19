@@ -90,19 +90,28 @@ def render_ranking(model: RankingModel, context: RenderContext) -> str:
         date_range = model.date_range
         if date_range is None:
             raise ValueError("historical ranking is missing its date range")
-        heading = center_text(
+        heading_text = (
             content_heading(title, date_range.since, date_range.until, context)
             if context.title_content
-            else date_range_heading(title, date_range.since, date_range.until, context),
-            context.width,
+            else date_range_heading(title, date_range.since, date_range.until, context)
         )
+        if model.top is not None and model.top_share is not None:
+            heading_text = context.translator.text(
+                "label.ranking_top_share",
+                heading=heading_text,
+                top=model.top,
+                share=f"{model.top_share:.1%}",
+            )
+        heading = center_text(heading_text, context.width)
     summary = render_summary(model.summary, context) if model.summary else ""
     entries: tuple[RankingEntry | ScalarRankingEntry, ...] = (
         model.observed_entries if model.is_observed else model.entries
     )
     if not entries:
         message = "message.monitor_empty" if model.is_observed else "message.no_data"
-        return "\n".join(line for line in (summary, heading, context.translator.text(message)) if line)
+        return "\n".join(
+            line for line in (summary, heading, context.translator.text(message)) if line
+        )
     total = None if model.is_observed else model.percentage_total.total
     label_width = max(12, min(28, context.width // 3))
     bar_width = max(8, context.width - label_width - 25)

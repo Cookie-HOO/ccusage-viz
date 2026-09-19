@@ -12,10 +12,10 @@ from ccusage_viz.chart_models import (
     CalendarDay,
     CalendarModel,
     ChangeDirection,
-    DailySummary,
     MetricDescriptor,
     ObservedScope,
     PercentChange,
+    PeriodSummary,
     RankingEntry,
     RankingModel,
     ScalarRankingEntry,
@@ -72,6 +72,42 @@ def test_normalized_content_headings_prefix_timeline_and_ranking() -> None:
 
     assert "Total · Timeline · 10d" in timeline_output
     assert "Project · Ranking · 14d" in ranking_output
+
+
+def test_ranking_heading_shows_hidden_top_coverage() -> None:
+    model = RankingModel(
+        (RankingEntry("a", "A", usage(60)),),
+        period(),
+        denominator=usage(100),
+        top=1,
+        top_share=0.6,
+    )
+
+    output = render_ranking(model, context(True))
+
+    assert "Ranking · 2026-01-01–2026-01-14 · Top 1 · 60.0% of total" in output
+
+
+def test_summary_shows_filter_dimension_count() -> None:
+    summary = PeriodSummary(
+        "day",
+        date(2026, 1, 2),
+        20,
+        PercentChange(ChangeDirection.UNCHANGED),
+        PercentChange(ChangeDirection.UNCHANGED),
+        date(2025, 12, 26),
+        filter_count=2,
+    )
+    model = TimelineModel(
+        (date(2026, 1, 2),),
+        (Series("total", "Total", (usage(20),)),),
+        summary=summary,
+    )
+
+    assert "Today’s tokens 20; 2 filters" in render_timeline(model, context(True))
+    assert "今日 Token 20，2 项筛选" in render_timeline(
+        model, RenderContext(80, 24, load_translator("zh"), color=False)
+    )
 
 
 def test_rolling_heading_shows_period_while_fixed_heading_shows_dates() -> None:
@@ -788,7 +824,8 @@ def test_color_schemes_allocate_distinct_visible_series() -> None:
 
 @pytest.mark.parametrize("scheme", ["classic", "vivid", "contrast"])
 def test_summary_uses_theme_semantic_colors(scheme: str) -> None:
-    summary = DailySummary(
+    summary = PeriodSummary(
+        "day",
         date(2026, 1, 2),
         21_400_000,
         PercentChange(ChangeDirection.INCREASE, 12.4),
@@ -811,7 +848,8 @@ def test_summary_uses_theme_semantic_colors(scheme: str) -> None:
 
 def test_summary_is_localized_and_color_is_foreground_only() -> None:
     days = (date(2026, 1, 1), date(2026, 1, 2))
-    summary = DailySummary(
+    summary = PeriodSummary(
+        "day",
         date(2026, 1, 2),
         21_400_000,
         PercentChange(ChangeDirection.INCREASE, 12.4),
@@ -836,7 +874,8 @@ def test_summary_is_localized_and_color_is_foreground_only() -> None:
 
 
 def test_mono_summary_uses_grayscale() -> None:
-    summary = DailySummary(
+    summary = PeriodSummary(
+        "day",
         date(2026, 1, 2),
         21_400_000,
         PercentChange(ChangeDirection.INCREASE, 12.4),
@@ -857,7 +896,8 @@ def test_mono_summary_uses_grayscale() -> None:
 
 
 def test_from_zero_summary_describes_the_transition() -> None:
-    summary = DailySummary(
+    summary = PeriodSummary(
+        "day",
         date(2026, 1, 14),
         58_300_000,
         PercentChange(ChangeDirection.DECREASE, 49.1),
