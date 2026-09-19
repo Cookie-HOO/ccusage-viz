@@ -19,7 +19,7 @@ from ccusage_viz.core.time import refresh_date_range
 from ccusage_viz.data_view import BodyView, next_body_view, render_snapshot_data
 from ccusage_viz.deltas import RefreshDeltas, RefreshRanks
 from ccusage_viz.diagnostics import color_enabled, format_error
-from ccusage_viz.errors import UsageError
+from ccusage_viz.errors import QueryError, UsageError
 from ccusage_viz.historical_component import (
     HistoricalChartComponent,
     HistoricalPurpose,
@@ -82,6 +82,11 @@ _ADJUSTMENT_ADVANCED_KEYS = {
 def _adjustment_key_supported(command: str, page: str, key: str) -> bool:
     keys = _ADJUSTMENT_QUICK_KEYS if page == "quick" else _ADJUSTMENT_ADVANCED_KEYS
     return key in keys[command]
+
+
+def _require_complete_coverage(submission: HistoricalSubmission, snapshot: UsageSnapshot) -> None:
+    if snapshot.coverage.missing_coverage(submission.requested_coverage).intervals:
+        raise QueryError("error.incomplete_coverage")
 
 
 def render_component(
@@ -609,6 +614,7 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
                 completion = submission.result()
                 if not lifecycle.accepts(operation, generation=submission.generation):
                     return 1
+                _require_complete_coverage(submission, completion.snapshot)
                 if not component.accept(completion):
                     return 1
                 lifecycle.complete(operation, generation=submission.generation)

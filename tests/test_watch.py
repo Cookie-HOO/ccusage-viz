@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sys
+from concurrent.futures import Future
 from contextlib import nullcontext
 from dataclasses import replace
 from datetime import date
@@ -16,11 +17,12 @@ from ccusage_viz.charts.registry import ChartRegistry
 from ccusage_viz.core.time import DateRange
 from ccusage_viz.coverage import DateCoverage, DateInterval
 from ccusage_viz.domain import Notice
-from ccusage_viz.errors import UsageError
+from ccusage_viz.errors import QueryError, UsageError
 from ccusage_viz.formatting import display_width, strip_ansi
 from ccusage_viz.historical_component import (
     HistoricalChartComponent,
     HistoricalPurpose,
+    HistoricalSubmission,
     UsageSnapshot,
 )
 from ccusage_viz.i18n import load_translator
@@ -36,6 +38,7 @@ from ccusage_viz.options import (
     StandaloneLaunch,
     TimelineConfig,
 )
+from ccusage_viz.query.coordinator import QueryHandle
 from ccusage_viz.terminal import FramePainter, Terminal
 from ccusage_viz.terminal_ui import controls_line, notice_lines
 from ccusage_viz.watch import (
@@ -43,6 +46,7 @@ from ccusage_viz.watch import (
     RuntimeAdjustmentResult,
     _paint,
     _refreshing_status,
+    _require_complete_coverage,
     _watch_status,
     render_component,
     run_runtime_adjustment,
@@ -125,6 +129,35 @@ def test_one_shot_paints_one_complete_interactive_frame(
     assert events[1][1].rows[0] == "DEMO DATA · small · ccusage not invoked"
     assert "complete chart" in events[1][1].rows
     assert len(events[1][1].rows) == 30
+
+
+def test_one_shot_requires_complete_atomic_coverage() -> None:
+    selected = options()
+    required = DateCoverage.from_interval(date(2025, 12, 25), date(2026, 1, 14))
+    future: Future[object] = Future()
+    submission = HistoricalSubmission(
+        0,
+        selected,
+        cast(QueryHandle, QueryHandle(future, lambda: None)),
+        0.0,
+        requested_coverage=required,
+    )
+
+    with pytest.raises(QueryError, match="error.incomplete_coverage"):
+        _require_complete_coverage(
+            submission,
+            UsageSnapshot(
+                (),
+                (),
+                0.1,
+                coverage=DateCoverage.from_interval(date(2026, 1, 1), date(2026, 1, 14)),
+            ),
+        )
+
+    _require_complete_coverage(
+        submission,
+        UsageSnapshot((), (), 0.1, coverage=required),
+    )
 
 
 def test_historical_pause_cancels_automatic_query_and_manual_refresh_remains_allowed(

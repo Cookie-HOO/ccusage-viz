@@ -70,6 +70,7 @@ MESSAGES = {
     "error.ccusage_utf8": "{query} 返回的输出不是有效 UTF-8。",
     "error.ccusage_json": "{query} 返回了无效 JSON。",
     "error.ccusage_output_limit": "{query} 返回的数据超过 {limit} 字节限制。",
+    "error.incomplete_coverage": "数据提供方未返回完整的请求日期范围。",
     "error.schema": "ccusage 在 {path} 返回了不兼容的数据：{reason}。已测试 ccusage 20.0.20。",
     "error.selector_no_match": "没有匹配“{selector}”的{dimension}。",
     "error.selector_ambiguous": "{dimension}选择器“{selector}”匹配到多个值。请输入更长或精确的值（项目可增加 --agent 缩小范围）：\n{candidates}",

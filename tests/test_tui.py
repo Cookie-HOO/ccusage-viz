@@ -653,6 +653,8 @@ def test_tui_adjustment_footer_has_quick_advanced_and_three_rows() -> None:
     assert not _adjustment_key_supported("timeline", "quick", "k")
     assert _adjustment_key_supported("timeline", "advanced", "k")
     assert _adjustment_key_supported("timeline", "quick", "b")
+    assert _adjustment_key_supported("timeline", "quick", "d")
+    assert _adjustment_key_supported("monitor", "quick", "d")
     assert not _adjustment_key_supported("timeline", "advanced", "b")
     assert not _adjustment_key_supported("monitor", "quick", "i")
 

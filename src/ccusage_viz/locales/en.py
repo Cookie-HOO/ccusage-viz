@@ -70,6 +70,7 @@ MESSAGES = {
     "error.ccusage_utf8": "{query} returned output that is not valid UTF-8.",
     "error.ccusage_json": "{query} returned invalid JSON.",
     "error.ccusage_output_limit": "{query} returned more than {limit} bytes.",
+    "error.incomplete_coverage": "The data provider did not return the complete requested date coverage.",
     "error.schema": "Unsupported ccusage data at {path}: {reason}. Tested with ccusage 20.0.20.",
     "error.selector_no_match": 'No match for "{selector}" in {dimension}.',
     "error.selector_ambiguous": '{dimension} selector "{selector}" matches multiple values. Use a longer or exact value (add --agent for projects):\n{candidates}',
