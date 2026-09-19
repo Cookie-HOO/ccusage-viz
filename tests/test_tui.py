@@ -17,7 +17,7 @@ from ccusage_viz.domain import Notice, SourceKind, TokenUsage, UsageRecord
 from ccusage_viz.errors import UsageError
 from ccusage_viz.historical_component import HistoricalChartComponent, UsageSnapshot
 from ccusage_viz.i18n import load_translator
-from ccusage_viz.lifecycle import FixedIntervalScheduler, LifecycleCoordinator
+from ccusage_viz.lifecycle import FixedIntervalScheduler, LifecycleOperation
 from ccusage_viz.monitor_component import MonitorComponent
 from ccusage_viz.query.models import QueryTrigger
 from ccusage_viz.terminal import Terminal
@@ -219,10 +219,10 @@ def test_dashboard_panes_host_chart_components_without_legacy_runners() -> None:
     assert isinstance(monitor.component, MonitorComponent)
     assert isinstance(historical.scheduler, FixedIntervalScheduler)
     assert isinstance(monitor.scheduler, FixedIntervalScheduler)
-    assert isinstance(historical.lifecycle, LifecycleCoordinator)
-    assert isinstance(monitor.lifecycle, LifecycleCoordinator)
-    assert historical.lifecycle.owner_id == "pane:historical"
-    assert monitor.lifecycle.owner_id == "pane:monitor"
+    assert isinstance(historical.lifecycle, LifecycleOperation)
+    assert isinstance(monitor.lifecycle, LifecycleOperation)
+    assert historical.lifecycle.coordinator.owner_id == "pane:historical"
+    assert monitor.lifecycle.coordinator.owner_id == "pane:monitor"
     assert not hasattr(historical, "monitor_runner")
     assert not hasattr(monitor, "monitor_runner")
 
@@ -523,9 +523,9 @@ def test_dashboard_header_uses_host_summary_and_tracks_global_theme() -> None:
     header = _new_header(options, runtime)
     assert header.runtime is runtime
     assert isinstance(header.scheduler, FixedIntervalScheduler)
-    assert isinstance(header.lifecycle, LifecycleCoordinator)
+    assert isinstance(header.lifecycle, LifecycleOperation)
     assert header.scheduler.interval == options.host.header_interval
-    assert header.lifecycle.owner_id == "dashboard:header"
+    assert header.lifecycle.coordinator.owner_id == "dashboard:header"
     assert header.summary_period == "quarter"
     assert header.options.chart.presentation.theme == "nord"
 

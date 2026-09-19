@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sys
 import time
-from collections.abc import Hashable
+from collections.abc import Callable, Hashable
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
@@ -41,7 +41,7 @@ from ccusage_viz.historical_render import render_historical_component
 from ccusage_viz.i18n import Translator
 from ccusage_viz.lifecycle import (
     FixedIntervalScheduler,
-    LifecycleCoordinator,
+    LifecycleOperation,
     LifecycleTrigger,
     OperationToken,
     query_trigger,
@@ -91,13 +91,14 @@ class MonitorOutcome:
     error: BaseException | None = None
 
 
+PaneFuture = Future[HistoricalOutcome] | Future[MonitorOutcome]
+
+
 @dataclass(slots=True)
 class TuiPane:
     component: HistoricalChartComponent | MonitorComponent
     scheduler: FixedIntervalScheduler
-    lifecycle: LifecycleCoordinator
-    future: Future[HistoricalOutcome | MonitorOutcome] | None = None
-    operation: OperationToken | None = None
+    lifecycle: LifecycleOperation[PaneFuture]
     demo_ordinal: int = 0
     render_warning: UsageError | None = None
     last_render: PaneRender | None = None
@@ -122,10 +123,8 @@ class DashboardHeader:
     options: StandaloneLaunch
     runtime: QueryRuntime
     scheduler: FixedIntervalScheduler
-    lifecycle: LifecycleCoordinator
+    lifecycle: LifecycleOperation[Future[UsageSnapshot]]
     snapshot: UsageSnapshot | None = None
-    future: Future[UsageSnapshot] | None = None
-    operation: OperationToken | None = None
     error: str | None = None
     generation: int = 0
     records: tuple[UsageRecord, ...] = ()
@@ -164,7 +163,7 @@ def _new_header(options: DashboardLaunch, runtime: QueryRuntime) -> DashboardHea
         _header_options(options),
         runtime,
         FixedIntervalScheduler(options.host.header_interval, now=time.monotonic()),
-        LifecycleCoordinator("dashboard:header"),
+        LifecycleOperation("dashboard:header"),
         summary_period=options.host.header_summary,
     )
 
@@ -565,7 +564,7 @@ def _new_pane(
     return TuiPane(
         component,
         FixedIntervalScheduler(options.host.interval, now=now),
-        LifecycleCoordinator(owner_id),
+        LifecycleOperation(owner_id),
     )
 
 
@@ -871,29 +870,32 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         next_pane_id += 1
         return owner_id
 
+    def start_pane_submission(
+        pane: TuiPane,
+        operation: OperationToken,
+    ) -> tuple[PaneFuture, Callable[[], None]]:
+        component = pane.component
+        if isinstance(component, MonitorComponent):
+            submission = component.submit(
+                query_trigger(operation.trigger),
+                sample_ordinal=pane.demo_ordinal + 1,
+            )
+            monitor_future = executor.submit(_await_monitor_submission, submission)
+            return monitor_future, submission.cancel
+        submission = component.submit(query_trigger(operation.trigger))
+        historical_future = executor.submit(_await_historical_submission, submission)
+        return historical_future, submission.cancel
+
     def start_pane(index: int, *, now: float) -> bool:
         pane = panes[index]
-        operation = pane.lifecycle.take_ready(now=now)
-        if operation is None:
-            return False
-        component = pane.component
         try:
-            if isinstance(component, MonitorComponent):
-                submission = component.submit(
-                    query_trigger(operation.trigger),
-                    sample_ordinal=pane.demo_ordinal + 1,
-                )
-                pane.future = executor.submit(_await_monitor_submission, submission)
-            else:
-                submission = component.submit(query_trigger(operation.trigger))
-                pane.future = executor.submit(_await_historical_submission, submission)
+            return pane.lifecycle.start_ready(
+                now=now,
+                start=lambda operation: start_pane_submission(pane, operation),
+            )
         except BaseException as exc:
-            pane.lifecycle.abandon(operation)
-            component.fail(exc, generation=component.generation)
+            pane.component.fail(exc, generation=pane.component.generation)
             return False
-        pane.operation = operation
-        pane.lifecycle.attach(operation, submission.cancel)
-        return True
 
     def refresh(
         index: int,
@@ -916,25 +918,27 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             )
             component.configure(submitted, data_affecting=True)
         now = time.monotonic()
-        requested = pane.lifecycle.request(
-            trigger,
-            generation=component.generation,
-            now=now,
-            replace_active=replace_active,
-        )
-        return requested and start_pane(index, now=now)
-
-    def start_header(*, now: float) -> bool:
-        operation = header.lifecycle.take_ready(now=now)
-        if operation is None:
+        try:
+            return pane.lifecycle.request(
+                trigger,
+                generation=component.generation,
+                now=now,
+                replace_active=replace_active,
+                start=lambda operation: start_pane_submission(pane, operation),
+            )
+        except BaseException as exc:
+            component.fail(exc, generation=component.generation)
             return False
+
+    def start_header_submission(
+        operation: OperationToken,
+    ) -> tuple[Future[UsageSnapshot], Callable[[], None]]:
         requested = _header_refresh_interval(
             header,
             aggressive=operation.trigger is LifecycleTrigger.MANUAL,
         )
         if requested is None:
-            header.lifecycle.abandon(operation)
-            return False
+            raise AssertionError("admitted header refresh must require data")
         submitted = replace(
             header.options,
             chart=replace(
@@ -942,79 +946,83 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 date_range=DateRange(requested.since, requested.until, options.host.timezone),
             ),
         )
-        try:
-            intent = historical_query_intent(
-                submitted,
-                header.runtime.definition(historical_provider_id(submitted)),
-                owner_id=operation.owner_id,
-                generation=operation.generation,
-                trigger=query_trigger(operation.trigger),
-            )
-            started = time.monotonic()
-            handle = header.runtime.submit(intent)
-        except BaseException as exc:
-            header.lifecycle.abandon(operation)
-            header.error = str(exc)
-            return False
+        intent = historical_query_intent(
+            submitted,
+            header.runtime.definition(historical_provider_id(submitted)),
+            owner_id=operation.owner_id,
+            generation=operation.generation,
+            trigger=query_trigger(operation.trigger),
+        )
+        started = time.monotonic()
+        handle = header.runtime.submit(intent)
         header.options = submitted
         header.error = None
-        header.operation = operation
-        header.future = executor.submit(_await_historical, handle, started)
-        header.lifecycle.attach(operation, handle.cancel)
-        return True
+        return executor.submit(_await_historical, handle, started), handle.cancel
+
+    def start_header(*, now: float) -> bool:
+        try:
+            return header.lifecycle.start_ready(now=now, start=start_header_submission)
+        except BaseException as exc:
+            header.error = str(exc)
+            return False
 
     def refresh_header(
         *,
         trigger: LifecycleTrigger,
         replace_active: bool = False,
     ) -> bool:
+        if (
+            _header_refresh_interval(
+                header,
+                aggressive=trigger is LifecycleTrigger.MANUAL,
+            )
+            is None
+        ):
+            return False
         now = time.monotonic()
-        requested = header.lifecycle.request(
-            trigger,
-            generation=header.generation,
-            now=now,
-            replace_active=replace_active,
-        )
-        return requested and start_header(now=now)
+        try:
+            return header.lifecycle.request(
+                trigger,
+                generation=header.generation,
+                now=now,
+                replace_active=replace_active,
+                start=start_header_submission,
+            )
+        except BaseException as exc:
+            header.error = str(exc)
+            return False
 
     def collect() -> bool:
         nonlocal last_successful_update
         changed = False
-        future = header.future
-        if future is not None and future.done():
-            operation = header.operation
-            header.future = None
-            header.operation = None
+        completed_header = header.lifecycle.take_completed(lambda future: future.done())
+        if completed_header is not None:
+            operation, future = completed_header
             observed_at = time.monotonic()
-            if operation is not None:
-                try:
-                    result = future.result()
-                    if header.lifecycle.accepts(operation, generation=header.generation):
-                        header.records = _replace_header_interval(header.records, result)
-                        header.coverage = header.coverage.merge(result.coverage)
-                        header.snapshot = result
-                        header.accepted_at = datetime.now().astimezone()
-                        last_successful_update = header.accepted_at
-                        header.error = None
-                        header.lifecycle.complete(operation, generation=header.generation)
-                        changed = True
-                except Exception as exc:
-                    if header.lifecycle.accepts(operation, generation=header.generation):
-                        header.lifecycle.complete(operation, generation=header.generation)
-                        header.error = str(exc)
-                        changed = True
-                start_header(now=observed_at)
+            try:
+                result = future.result()
+                if header.lifecycle.accepts(operation, generation=header.generation):
+                    header.records = _replace_header_interval(header.records, result)
+                    header.coverage = header.coverage.merge(result.coverage)
+                    header.snapshot = result
+                    header.accepted_at = datetime.now().astimezone()
+                    last_successful_update = header.accepted_at
+                    header.error = None
+                    header.lifecycle.complete(operation, generation=header.generation)
+                    changed = True
+            except Exception as exc:
+                if header.lifecycle.accepts(operation, generation=header.generation):
+                    header.lifecycle.complete(operation, generation=header.generation)
+                    header.error = str(exc)
+                    changed = True
+            start_header(now=observed_at)
         for index, pane in enumerate(panes):
-            future = pane.future
-            if future is None or not future.done():
+            completed_pane = pane.lifecycle.take_completed(lambda future: future.done())
+            if completed_pane is None:
                 continue
+            operation, future = completed_pane
             component = pane.component
-            operation = pane.operation
-            pane.future = None
-            pane.operation = None
             observed_at = time.monotonic()
-            if operation is None:
-                continue
             try:
                 loaded = future.result()
                 active = pane.lifecycle.accepts(operation, generation=loaded.generation)
@@ -1142,7 +1150,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             for pane in panes
         )
         if initial_pending:
-            completed = sum(pane.future is None for pane in panes)
+            completed = sum(pane.lifecycle.submission is None for pane in panes)
             loading = center_text(
                 f"{translator.text('label.dashboard')} · {translator.text('status.loading')} {completed}/{len(panes)}",
                 size.columns,
@@ -1424,10 +1432,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         next_summary = _next_header_summary(header.summary_period)
                         header.summary_period = next_summary
                         header.generation += 1
-                        detached = header.lifecycle.detach_active()
-                        if detached is not None:
-                            header.future = None
-                            header.operation = None
+                        header.lifecycle.detach_active()
                         if header_style != "hidden" and next_summary != "none":
                             required = required_summary_coverage(
                                 today_for_timezone(header.options.host.timezone), next_summary
@@ -1523,15 +1528,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     if not paused:
                         header.scheduler.pause()
                         header.lifecycle.pause()
-                        if header.operation is not None and header.lifecycle.active is None:
-                            header.future = None
-                            header.operation = None
                         for item in panes:
                             item.scheduler.pause()
                             item.lifecycle.pause()
-                            if item.operation is not None and item.lifecycle.active is None:
-                                item.future = None
-                                item.operation = None
                             if isinstance(item.component, MonitorComponent):
                                 item.component.pause()
                     else:
