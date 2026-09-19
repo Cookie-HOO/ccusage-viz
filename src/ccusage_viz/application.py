@@ -31,10 +31,8 @@ def run(options: LaunchConfig, translator: Translator) -> int:
 
         return run_monitor(options, translator)
 
-    from ccusage_viz.watch import run_once, run_watch
+    from ccusage_viz.watch import run_watch
 
-    if not options.host.watch:
-        return run_once(options, translator)
     return run_watch(options, translator)
 
 

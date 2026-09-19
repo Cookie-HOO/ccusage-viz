@@ -75,12 +75,16 @@ def test_preflight_requires_explicit_ascii_for_dumb_terminal(
         assert dependency_calls == []
 
 
-def test_historical_lifecycle_dispatches_from_no_watch(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_historical_modes_share_one_lifecycle_runner(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(application, "interactive_streams", lambda: True)
     monkeypatch.delenv("TERM", raising=False)
     monkeypatch.setattr(application, "ensure_provider_dependencies", lambda *_args: None)
-    monkeypatch.setattr("ccusage_viz.watch.run_once", lambda *_args: 3)
-    monkeypatch.setattr("ccusage_viz.watch.run_watch", lambda *_args: 4)
+    received: list[StandaloneLaunch] = []
+    monkeypatch.setattr(
+        "ccusage_viz.watch.run_watch",
+        lambda selected, _translator: received.append(selected) or len(received),
+    )
 
-    assert application.run(options(no_watch=True), load_translator("en")) == 3
-    assert application.run(options(no_watch=False), load_translator("en")) == 4
+    assert application.run(options(no_watch=True), load_translator("en")) == 1
+    assert application.run(options(no_watch=False), load_translator("en")) == 2
+    assert [selected.host.watch for selected in received] == [False, True]

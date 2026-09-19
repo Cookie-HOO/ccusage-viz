@@ -20,6 +20,7 @@ from ccusage_viz.errors import UsageError
 from ccusage_viz.formatting import display_width, strip_ansi
 from ccusage_viz.historical_component import HistoricalChartComponent, UsageSnapshot
 from ccusage_viz.i18n import load_translator
+from ccusage_viz.lifecycle import QueryTrigger
 from ccusage_viz.options import (
     CalendarConfig,
     ChartPresentation,
@@ -40,8 +41,8 @@ from ccusage_viz.watch import (
     _refreshing_status,
     _watch_status,
     render_component,
-    run_once,
     run_runtime_adjustment,
+    run_watch,
 )
 
 
@@ -115,11 +116,106 @@ def test_one_shot_paints_one_complete_interactive_frame(
     )
     monkeypatch.setattr("ccusage_viz.watch.FramePainter", Screen)
 
-    assert run_once(options(), load_translator("en")) == 0
+    assert run_watch(options(), load_translator("en")) == 0
     assert [event[0] for event in events] == ["init", "paint", "finish"]
     assert events[1][1].rows[0] == "DEMO DATA · small · ccusage not invoked"
     assert "complete chart" in events[1][1].rows
     assert len(events[1][1].rows) == 30
+
+
+def test_historical_pause_cancels_automatic_query_and_manual_refresh_remains_allowed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    launch = replace(options(), host=replace(options().host, watch=True))
+    events: list[tuple[object, ...]] = []
+    submissions: list[Submission] = []
+
+    class Runtime:
+        def cancel(self) -> None:
+            events.append(("runtime-cancel",))
+
+    class Submission:
+        handle: Submission
+
+        def __init__(self, generation: int, selected: StandaloneLaunch) -> None:
+            self.generation = generation
+            self.options = selected
+            self.handle = self
+            self.cancelled = False
+
+        def done(self) -> bool:
+            return self.cancelled
+
+        def cancel(self) -> None:
+            self.cancelled = True
+            events.append(("submission-cancel", self.generation))
+
+        def result(self) -> object:
+            raise RuntimeError("cancelled query must stay hidden")
+
+    class Component:
+        def __init__(self, selected: StandaloneLaunch, **_kwargs: object) -> None:
+            self.candidate = selected
+            self.accepted_options = None
+            self.snapshot = None
+            self.model = None
+            self.generation = 0
+
+        def configure(self, selected: StandaloneLaunch, *, data_affecting: bool) -> None:
+            if selected != self.candidate:
+                self.candidate = selected
+                if data_affecting:
+                    self.generation += 1
+
+        def submit(self, trigger: object) -> Submission:
+            events.append(("submit", trigger, self.generation))
+            submission = Submission(self.generation, self.candidate)
+            submissions.append(submission)
+            return submission
+
+        def fail(self, error: BaseException, *, generation: int) -> bool:
+            events.append(("fail", str(error), generation))
+            return True
+
+    class Screen:
+        def __init__(self, _stream: object) -> None:
+            pass
+
+        def paint(self, frame: object, **_kwargs: object) -> None:
+            events.append(("paint", frame))
+
+        def finish(self) -> None:
+            events.append(("finish",))
+
+    keys = iter((" ", "r", "\x03"))
+    runtime = Runtime()
+    monkeypatch.setattr("ccusage_viz.watch.build_query_runtime", lambda: runtime)
+    monkeypatch.setattr("ccusage_viz.watch.build_chart_registry", lambda: object())
+    monkeypatch.setattr("ccusage_viz.watch.HistoricalChartComponent", Component)
+    monkeypatch.setattr("ccusage_viz.watch.FramePainter", Screen)
+    monkeypatch.setattr("ccusage_viz.watch.input_mode", nullcontext)
+    monkeypatch.setattr("ccusage_viz.watch.read_key", lambda _timeout: next(keys))
+    monkeypatch.setattr("ccusage_viz.watch.get_terminal_size", lambda: os.terminal_size((100, 30)))
+    monkeypatch.setattr(
+        "ccusage_viz.watch.inspect_terminal",
+        lambda *_args, **_kwargs: Terminal(100, 30, False, True),
+    )
+
+    assert run_watch(launch, load_translator("en")) == 0
+    assert [(event[1], event[2]) for event in events if event[0] == "submit"] == [
+        (QueryTrigger.STARTUP, 0),
+        (QueryTrigger.REFRESH, 0),
+    ]
+    assert len(submissions) == 2
+    assert submissions[0].cancelled
+    assert submissions[1].cancelled
+    assert not any(event[0] == "fail" for event in events)
+    assert any(event[0] == "paint" and "paused" in str(event[1]) for event in events)
+    assert events[-3:] == [
+        ("submission-cancel", 0),
+        ("runtime-cancel",),
+        ("finish",),
+    ]
 
 
 def test_watch_paint_places_footer_last_without_refresh_newline(

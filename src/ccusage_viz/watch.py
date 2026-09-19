@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import os
-import queue
 import sys
-import threading
 import time
 from collections.abc import Hashable, Mapping
 from dataclasses import dataclass, replace
@@ -24,11 +22,18 @@ from ccusage_viz.diagnostics import color_enabled, format_error
 from ccusage_viz.errors import UsageError
 from ccusage_viz.historical_component import (
     HistoricalChartComponent,
-    HistoricalCompletion,
+    HistoricalSubmission,
     UsageSnapshot,
 )
 from ccusage_viz.historical_render import render_historical_component
 from ccusage_viz.i18n import Translator
+from ccusage_viz.lifecycle import (
+    FixedIntervalScheduler,
+    LifecycleCoordinator,
+    LifecycleTrigger,
+    OperationToken,
+    query_trigger,
+)
 from ccusage_viz.options import (
     HistoricalChartConfig,
     MonitorConfig,
@@ -39,8 +44,6 @@ from ccusage_viz.options import (
     adjust_standalone,
     compatible_styles,
 )
-from ccusage_viz.query.coordinator import QueryHandle
-from ccusage_viz.query.models import ProviderResult, QueryTrigger
 from ccusage_viz.render.palette import COLOR_SCHEMES
 from ccusage_viz.terminal import FramePainter, Terminal, compose_frame, inspect_terminal
 from ccusage_viz.terminal_ui import controls_line, dimmed, input_mode, notice_lines, read_key
@@ -116,64 +119,6 @@ def render_component(
     )
 
 
-def run_once(options: StandaloneLaunch, translator: Translator) -> int:
-    if isinstance(options.chart, MonitorConfig):
-        raise TypeError("one-shot historical rendering does not support monitor configurations")
-    current = replace(
-        options,
-        chart=replace(options.chart, date_range=refresh_date_range(options.chart.date_range)),
-    )
-    terminal = inspect_terminal(
-        current.chart.kind,
-        no_color=current.chart.presentation.theme == "no-color",
-        ascii=current.host.ascii,
-    )
-    runtime = build_query_runtime()
-    component = HistoricalChartComponent(
-        current,
-        owner_id="standalone",
-        runtime=runtime,
-        registry=build_chart_registry(),
-    )
-    try:
-        completion = component.submit(QueryTrigger.STARTUP).result()
-        if not component.accept(completion):
-            raise RuntimeError("startup historical result was rejected")
-        result = render_component(
-            component,
-            translator,
-            terminal,
-            reserve_prompt=True,
-            normalize_titles=True,
-        )
-        status = (
-            translator.text("status.demo", size=current.host.demo_size)
-            if current.host.demo_size
-            else translator.text("status.query_time", seconds=f"{result.elapsed:.2f}")
-        )
-        screen = FramePainter(sys.stdout)
-        screen.paint(
-            compose_frame(
-                result.chart,
-                status,
-                "",
-                notice_lines(
-                    result.notices,
-                    width=terminal.width,
-                    color=terminal.color,
-                    ascii=terminal.ascii,
-                    translator=translator,
-                    color_scheme=current.chart.presentation.theme,
-                ),
-                height=terminal.height,
-            )
-        )
-        screen.finish()
-        return 0
-    finally:
-        runtime.cancel()
-
-
 def _paint(
     body: str,
     status: str,
@@ -182,9 +127,7 @@ def _paint(
     *,
     height: int | None = None,
 ) -> None:
-    FramePainter(sys.stdout).paint(
-        compose_frame(body, status, controls, notices, height=height)
-    )
+    FramePainter(sys.stdout).paint(compose_frame(body, status, controls, notices, height=height))
 
 
 def _refreshing_status(status: str, translator: Translator, *, color: bool) -> str:
@@ -400,47 +343,32 @@ def run_runtime_adjustment(
         return None
 
 
-def run_watch(
-    options: StandaloneLaunch,
-    translator: Translator,
-    *,
-    seed: RefreshResult | None = None,
-    screen: FramePainter | None = None,
-) -> int:
+def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
     if isinstance(options.chart, MonitorConfig):
         raise TypeError("historical watch mode does not support monitor configurations")
-    active_screen = screen or FramePainter(sys.stdout)
+    active_screen = FramePainter(sys.stdout)
     interval = options.host.interval or 10.0
     runtime = build_query_runtime()
-    current = seed.options if seed and seed.options is not None else options
+    current = options
     component = HistoricalChartComponent(
         current,
         owner_id="standalone",
         runtime=runtime,
         registry=build_chart_registry(),
     )
-    results: queue.Queue[tuple[int, HistoricalCompletion | BaseException]] = queue.Queue()
-    running = False
-    pending_trigger: QueryTrigger | None = None
-    active_handle: QueryHandle[ProviderResult] | None = None
-    paused = False
+    started_at = time.monotonic()
+    scheduler = FixedIntervalScheduler(interval, now=started_at)
+    lifecycle = LifecycleCoordinator("standalone")
+    active: tuple[OperationToken, HistoricalSubmission] | None = None
     controls_hidden = False
     body_view: BodyView = "chart"
-    last_chart = seed.chart if seed else ""
-    last_notices: tuple[str, ...] = seed.notices if seed else ()
-    last_snapshot = seed.snapshot if seed else None
+    last_chart = ""
+    last_notices: tuple[str, ...] = ()
+    last_snapshot: UsageSnapshot | None = None
     terminal_error: UsageError | None = None
     render_warning: str | None = None
     last_size: tuple[int, int] | None = None
-    base_status = (
-        translator.text("status.demo", size=options.host.demo_size)
-        if seed and options.host.demo_size
-        else translator.text("status.query_time", seconds=f"{seed.elapsed:.2f}")
-        if seed
-        else translator.text("status.loading")
-    )
-    if seed is not None and seed.snapshot is not None:
-        component.seed(current, seed.snapshot)
+    base_status = translator.text("status.loading")
 
     def historical_chart(config: StandaloneLaunch) -> HistoricalChartConfig:
         if isinstance(config.chart, MonitorConfig):
@@ -453,7 +381,6 @@ def run_watch(
     if current.chart.kind == "ranking" and component.model is not None:
         ranking_deltas.accept(component.ranking_values())
         ranking_ranks.accept(component.ranking_keys())
-    next_refresh = time.monotonic() + interval if seed else time.monotonic()
 
     def style_enabled() -> bool:
         return color_enabled(sys.stdout, no_color=current.chart.presentation.theme == "no-color")
@@ -466,8 +393,8 @@ def run_watch(
             base_status,
             translator,
             interval=interval,
-            paused=paused,
-            running=running,
+            paused=lifecycle.paused,
+            running=active is not None,
             color=style_enabled(),
         )
 
@@ -582,33 +509,102 @@ def run_watch(
             force=force,
         )
 
-    def start_refresh(trigger: QueryTrigger) -> None:
-        nonlocal active_handle, running
-        chart = historical_chart(current)
-        submitted = replace(
-            current,
+    def start_ready(now: float) -> bool:
+        nonlocal active, base_status, terminal_error
+        operation = lifecycle.take_ready(now=now)
+        if operation is None:
+            return False
+        try:
+            submission = component.submit(query_trigger(operation.trigger))
+        except BaseException as exc:
+            lifecycle.abandon(operation)
+            component.fail(exc, generation=component.generation)
+            base_status = format_error(
+                exc,
+                translator,
+                color=style_enabled(),
+                color_scheme=current.chart.presentation.theme,
+            )
+            if isinstance(exc, UsageError):
+                terminal_error = exc
+            return False
+        active = (operation, submission)
+        lifecycle.attach(operation, submission.cancel)
+        return True
+
+    def request(
+        trigger: LifecycleTrigger,
+        *,
+        now: float,
+        replace_active: bool = False,
+    ) -> bool:
+        candidate = component.candidate
+        chart = historical_chart(candidate)
+        refreshed = replace(
+            candidate,
             chart=replace(chart, date_range=refresh_date_range(chart.date_range)),
         )
-        component.configure(submitted, data_affecting=True)
-        generation = component.generation
-        try:
-            submission = component.submit(trigger)
-        except BaseException as exc:
-            results.put((generation, exc))
-            running = True
-            return
-        active_handle = submission.handle
-
-        def work() -> None:
-            try:
-                results.put((generation, submission.result()))
-            except BaseException as exc:
-                results.put((generation, exc))
-
-        running = True
-        threading.Thread(target=work, name="ccusage-viz-refresh", daemon=True).start()
+        component.configure(refreshed, data_affecting=True)
+        requested = lifecycle.request(
+            trigger,
+            generation=component.generation,
+            now=now,
+            replace_active=replace_active,
+        )
+        return requested and start_ready(now)
 
     try:
+        request(LifecycleTrigger.STARTUP, now=started_at)
+        if not options.host.watch:
+            if active is None:
+                paint()
+                return 1
+            operation, submission = active
+            try:
+                completion = submission.result()
+                if not lifecycle.accepts(operation, generation=submission.generation):
+                    return 1
+                if not component.accept(completion):
+                    return 1
+                lifecycle.complete(operation, generation=submission.generation)
+                current = component.candidate
+                terminal = inspect_terminal(
+                    current.chart.kind,
+                    no_color=current.chart.presentation.theme == "no-color",
+                    ascii=current.host.ascii,
+                )
+                result = render_component(
+                    component,
+                    translator,
+                    terminal,
+                    reserve_prompt=True,
+                    normalize_titles=True,
+                )
+                base_status = (
+                    translator.text("status.demo", size=current.host.demo_size)
+                    if current.host.demo_size
+                    else translator.text("status.query_time", seconds=f"{result.elapsed:.2f}")
+                )
+                active_screen.paint(
+                    compose_frame(
+                        result.chart,
+                        base_status,
+                        "",
+                        notice_lines(
+                            result.notices,
+                            width=terminal.width,
+                            color=terminal.color,
+                            ascii=terminal.ascii,
+                            translator=translator,
+                            color_scheme=current.chart.presentation.theme,
+                        ),
+                        height=terminal.height,
+                    )
+                )
+                return 0
+            finally:
+                active = None
+
         with input_mode():
             paint()
             while True:
@@ -616,33 +612,71 @@ def run_watch(
                 if (size.columns, size.lines) != last_size:
                     paint(force=True)
                 now = time.monotonic()
-                if terminal_error is None and not running:
-                    trigger = pending_trigger
-                    if trigger is None and not paused and now >= next_refresh:
-                        trigger = QueryTrigger.STARTUP if last_snapshot is None else QueryTrigger.TICK
-                    if trigger is not None:
-                        pending_trigger = None
-                        start_refresh(trigger)
-                        paint()
+                if (
+                    terminal_error is None
+                    and scheduler.due(now=now)
+                    and request(LifecycleTrigger.PERIODIC, now=now)
+                ):
+                    paint()
 
-                try:
-                    outcome = results.get_nowait()
-                except queue.Empty:
-                    outcome = None
-                if outcome is not None:
-                    outcome_generation, outcome = outcome
-                    running = False
-                    active_handle = None
-                    next_refresh = time.monotonic() + interval
-                    if outcome_generation != component.generation:
-                        next_refresh = time.monotonic()
-                        continue
-                    if isinstance(outcome, HistoricalCompletion):
-                        previous_options = current
-                        try:
+                if active is not None and active[1].handle.done():
+                    operation, submission = active
+                    active = None
+                    current_operation = lifecycle.accepts(
+                        operation,
+                        generation=submission.generation,
+                    )
+                    try:
+                        outcome = submission.result()
+                        if current_operation:
+                            previous_options = current
                             accepted = component.accept(outcome)
-                        except BaseException as exc:
-                            component.fail(exc, generation=outcome_generation)
+                            if accepted:
+                                lifecycle.complete(
+                                    operation,
+                                    generation=submission.generation,
+                                )
+                                current = component.candidate
+                                last_snapshot = component.snapshot
+                                if (
+                                    isinstance(current.chart, RankingConfig)
+                                    and last_snapshot is not None
+                                ):
+                                    if not isinstance(previous_options.chart, RankingConfig) or (
+                                        previous_options.chart.by,
+                                        previous_options.chart.top,
+                                        previous_options.chart.other,
+                                        previous_options.chart.filters.agents,
+                                        previous_options.chart.filters.models,
+                                        previous_options.chart.filters.projects,
+                                        previous_options.chart.date_range,
+                                    ) != (
+                                        current.chart.by,
+                                        current.chart.top,
+                                        current.chart.other,
+                                        current.chart.filters.agents,
+                                        current.chart.filters.models,
+                                        current.chart.filters.projects,
+                                        current.chart.date_range,
+                                    ):
+                                        ranking_deltas.clear()
+                                        ranking_ranks.clear()
+                                    ranking_deltas.accept(component.ranking_values())
+                                    ranking_ranks.accept(component.ranking_keys())
+                                base_status = (
+                                    translator.text("status.demo", size=current.host.demo_size)
+                                    if current.host.demo_size
+                                    else translator.text(
+                                        "status.query_time",
+                                        seconds=f"{outcome.snapshot.elapsed:.2f}",
+                                    )
+                                )
+                            else:
+                                lifecycle.abandon(operation)
+                    except BaseException as exc:
+                        if current_operation:
+                            lifecycle.abandon(operation)
+                            component.fail(exc, generation=submission.generation)
                             base_status = format_error(
                                 exc,
                                 translator,
@@ -651,65 +685,19 @@ def run_watch(
                             )
                             if isinstance(exc, UsageError):
                                 terminal_error = exc
-                            paint()
-                            continue
-                        if not accepted:
-                            next_refresh = time.monotonic()
-                            continue
-                        current = component.candidate
-                        last_snapshot = component.snapshot
-                        if isinstance(current.chart, RankingConfig) and last_snapshot is not None:
-                            if not isinstance(previous_options.chart, RankingConfig) or (
-                                previous_options.chart.by,
-                                previous_options.chart.top,
-                                previous_options.chart.other,
-                                previous_options.chart.filters.agents,
-                                previous_options.chart.filters.models,
-                                previous_options.chart.filters.projects,
-                                previous_options.chart.date_range,
-                            ) != (
-                                current.chart.by,
-                                current.chart.top,
-                                current.chart.other,
-                                current.chart.filters.agents,
-                                current.chart.filters.models,
-                                current.chart.filters.projects,
-                                current.chart.date_range,
-                            ):
-                                ranking_deltas.clear()
-                                ranking_ranks.clear()
-                            ranking_deltas.accept(component.ranking_values())
-                            ranking_ranks.accept(component.ranking_keys())
-                        base_status = (
-                            translator.text("status.demo", size=current.host.demo_size)
-                            if current.host.demo_size
-                            else translator.text(
-                                "status.query_time", seconds=f"{outcome.snapshot.elapsed:.2f}"
-                            )
-                        )
-                    else:
-                        component.fail(outcome, generation=outcome_generation)
-                        base_status = format_error(
-                            outcome,
-                            translator,
-                            color=style_enabled(),
-                            color_scheme=current.chart.presentation.theme,
-                        )
-                        if isinstance(outcome, UsageError):
-                            terminal_error = outcome
                     paint()
-                    if pending_trigger is not None:
-                        next_refresh = time.monotonic()
+                    start_ready(time.monotonic())
 
                 key = read_key(0.05)
                 if key == "\x03":
                     raise KeyboardInterrupt
                 if key == "r":
-                    pending_trigger = QueryTrigger.REFRESH
-                    if running and active_handle is not None:
-                        active_handle.cancel()
-                    else:
-                        next_refresh = time.monotonic()
+                    if not request(
+                        LifecycleTrigger.MANUAL,
+                        now=time.monotonic(),
+                        replace_active=True,
+                    ):
+                        paint()
                 elif key in {"h", "H"}:
                     controls_hidden = not controls_hidden
                     paint(force=True)
@@ -758,31 +746,29 @@ def run_watch(
                         component.configure(current, data_affecting=True)
                         if last_snapshot is not None:
                             component.seed(current, last_snapshot)
-                        pending_trigger = QueryTrigger.REFRESH
-                        if running and active_handle is not None:
-                            active_handle.cancel()
-                        else:
-                            next_refresh = time.monotonic()
+                        request(LifecycleTrigger.CONFIGURATION, now=time.monotonic())
                     paint()
                 elif key == " ":
-                    paused = not paused
-                    if not paused:
-                        next_refresh = time.monotonic() + interval
+                    if not lifecycle.paused:
+                        scheduler.pause()
+                        lifecycle.pause()
+                        active = None
+                    else:
+                        now = time.monotonic()
+                        lifecycle.resume()
+                        scheduler.resume(now=now)
+                        request(LifecycleTrigger.RESUME, now=now)
                     paint()
                 elif current.host.demo_size and key in {"s", "d", "l"}:
                     size = {"s": "small", "d": "medium", "l": "large"}[key]
                     current = replace(current, host=replace(current.host, demo_size=size))
                     component.configure(current, data_affecting=True)
-                    pending_trigger = QueryTrigger.REFRESH
-                    if running and active_handle is not None:
-                        active_handle.cancel()
-                    else:
-                        next_refresh = time.monotonic()
+                    request(LifecycleTrigger.CONFIGURATION, now=time.monotonic())
+                    paint()
     except KeyboardInterrupt:
         return 0
     finally:
-        if active_handle is not None:
-            active_handle.cancel()
+        scheduler.shutdown()
+        lifecycle.shutdown()
         runtime.cancel()
-        if screen is None:
-            active_screen.finish()
+        active_screen.finish()
