@@ -10,3 +10,7 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Local agent and brainstorming state
+.claude/
+.superpowers/
