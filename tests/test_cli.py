@@ -461,6 +461,41 @@ def test_dashboard_accepts_named_layout_for_arbitrary_panes() -> None:
     assert tuple(pane.chart.kind for pane in options.panes) == ("monitor", "calendar")
 
 
+def test_dashboard_accepts_spotlight_wide2_as_a_layout_only() -> None:
+    parser = build_parser(load_translator("en"))
+    arguments = [
+        "dashboard",
+        "--pane",
+        "timeline",
+        "--pane",
+        "ranking",
+        "--pane",
+        "monitor --style list",
+        "--grid",
+        "spotlight-wide2",
+        "--column-weight",
+        "2",
+        "--column-weight",
+        "1",
+        "--row-weight",
+        "1",
+        "--row-weight",
+        "1",
+        "--row-weight",
+        "1",
+    ]
+
+    options = _to_options(parser.parse_args(arguments))
+
+    assert options.host.grid == "spotlight-wide2"
+    assert options.host.column_weights == (2, 1)
+    assert options.host.row_weights == (1, 1, 1)
+    for preset in ("wide", "narrow", "all"):
+        with pytest.raises(UsageError) as caught:
+            _to_options(parser.parse_args(["dashboard", "--pane", "timeline", "--grid", preset]))
+        assert caught.value.key == "error.tui_grid"
+
+
 def test_dashboard_accepts_layout_weights_and_tracks_explicit_aliases() -> None:
     parser = build_parser(load_translator("en"))
     arguments = [

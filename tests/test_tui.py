@@ -480,17 +480,20 @@ def test_dashboard_layout_editor_is_visible_transactional_and_returns_to_global(
     assert tui_module.run_tui(options, load_translator("en")) == 0
     painted = ["\n".join(frame.rows) for frame in frames]
     assert any(
-        "Set layout (auto, ROWSxCOLUMNS, spotlight-wide, or spotlight-tall): 2x2" in frame
+        "Set layout (auto, ROWSxCOLUMNS, spotlight-wide, spotlight-wide2, or spotlight-tall): 2x2"
+        in frame
         for frame in painted
     )
     assert any(
-        "Set layout (auto, ROWSxCOLUMNS, spotlight-wide, or spotlight-tall): 1x1" in frame
+        "Set layout (auto, ROWSxCOLUMNS, spotlight-wide, spotlight-wide2, or spotlight-tall): 1x1"
+        in frame
         and "Layout '1x1' cannot display all 4 panes." in frame
         for frame in painted
     )
     assert (
         sum(
-            "Set layout (auto, ROWSxCOLUMNS, spotlight-wide, or spotlight-tall): 3x2" in frame
+            "Set layout (auto, ROWSxCOLUMNS, spotlight-wide, spotlight-wide2, or spotlight-tall): 3x2"
+            in frame
             for frame in painted
         )
         >= 2
@@ -1422,6 +1425,8 @@ def test_tui_input_decodes_keys_and_fragmented_mouse_press() -> None:
 def test_tui_parses_runtime_grid_with_capacity() -> None:
     assert parse_grid("AUTO", 3) == "auto"
     assert parse_grid("2X2", 3) == "2x2"
+    assert parse_grid("spotlight-wide2", 3) == "spotlight-wide2"
+    assert parse_grid("wide", 3) is None
     assert parse_grid("1x2", 3) is None
 
 
