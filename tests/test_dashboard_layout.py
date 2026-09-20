@@ -5,6 +5,7 @@ import inspect
 import pytest
 
 from ccusage_viz.dashboard_layout import (
+    PaneRect,
     adjust_weight,
     layout_bands,
     layout_for_pane_count,
@@ -75,10 +76,24 @@ def test_weights_are_positive_canonical_and_reconciled_by_trailing_band() -> Non
     assert normalize_weights((2, 4, 6)) == (1, 2, 3)
     assert reconcile_weights((2, 4), 3) == (1, 2, 1)
     assert reconcile_weights((2, 4, 6), 2) == (1, 2)
-    assert adjust_weight((2, 2), 0, 2) == (3, 1)
-    assert adjust_weight((1, 3), 0, -4) == (1, 3)
+    assert adjust_weight((1, 1), 0, 1) == (3, 1)
+    assert adjust_weight((1, 1), 0, -1) == (1, 3)
+    assert adjust_weight((1, 1, 1), 1, 1) == (2, 3, 1)
+    assert adjust_weight((1, 1, 1), 2, -1) == (2, 3, 1)
+    assert adjust_weight((2, 3), 0, 1) == (3, 2)
+    assert adjust_weight((2, 3), 1, 1) == (1, 4)
+    assert adjust_weight((2, 3), 0, -1) == (1, 4)
+    assert adjust_weight((2, 3), 1, -1) == (3, 2)
+    assert adjust_weight((1, 2, 3), 1, 2) == (1, 4, 1)
+    assert adjust_weight((1, 2, 3), 0, 2) == (5, 1, 6)
+    assert adjust_weight((2, 3, 4), 1, 0) == (2, 3, 4)
+    assert adjust_weight((1,), 0, 1) == (1,)
     with pytest.raises(ValueError):
         normalize_weights((1, 0))
+    with pytest.raises(IndexError):
+        adjust_weight((1, 2), -1, 1)
+    with pytest.raises(IndexError):
+        adjust_weight((1, 2), 2, 1)
 
 
 def test_fixed_grid_geometry_preserves_empty_cell_and_dividers() -> None:
@@ -120,6 +135,25 @@ def test_spotlight_wide_features_first_pane_over_fresh_auxiliary_grid() -> None:
     assert layout.topology.slot(0).column_span == 2
 
 
+def test_spotlight_wide_spans_dividers_and_preserves_auxiliary_hit_testing() -> None:
+    layout = resolve_pane_layout(
+        layout="spotlight-wide", pane_count=5, width=11, height=9, divider_style="line"
+    )
+
+    assert layout.column_sizes == (5, 5)
+    assert layout.row_sizes == (3, 2, 2)
+    assert layout.panes == (
+        PaneRect(0, 0, 0, 11, 3),
+        PaneRect(1, 0, 4, 5, 2),
+        PaneRect(2, 6, 4, 5, 2),
+        PaneRect(3, 0, 7, 5, 2),
+        PaneRect(4, 6, 7, 5, 2),
+    )
+    assert pane_at(layout, 5, 0) == 0
+    assert pane_at(layout, 0, 3) is None
+    assert pane_at(layout, 5, 4) is None
+
+
 @pytest.mark.parametrize(
     ("count", "rows", "columns"),
     [(1, 1, 1), (2, 2, 1), (3, 3, 2), (4, 3, 2), (5, 4, 2), (7, 5, 2)],
@@ -140,6 +174,23 @@ def test_spotlight_wide2_has_two_full_width_leading_panes(
         assert layout.topology.slot(2).column == 0
 
 
+def test_spotlight_wide2_spans_two_leading_rows_and_preserves_auxiliary_hit_testing() -> None:
+    layout = resolve_pane_layout(
+        layout="spotlight-wide2", pane_count=4, width=13, height=10, divider_style="line"
+    )
+
+    assert layout.panes == (
+        PaneRect(0, 0, 0, 13, 3),
+        PaneRect(1, 0, 4, 13, 3),
+        PaneRect(2, 0, 8, 6, 2),
+        PaneRect(3, 7, 8, 6, 2),
+    )
+    assert pane_at(layout, 5, 8) == 2
+    assert pane_at(layout, 6, 9) is None
+    assert pane_at(layout, 0, 3) is None
+    assert pane_at(layout, 12, 6) == 1
+
+
 def test_spotlight_tall_features_first_pane_beside_auxiliary_grid() -> None:
     layout = resolve_pane_layout(layout="spotlight-tall", pane_count=5, width=81, height=31)
 
@@ -149,6 +200,26 @@ def test_spotlight_tall_features_first_pane_beside_auxiliary_grid() -> None:
     assert featured.height == 31
     assert all(rect.left > featured.left for rect in layout.panes[1:])
     assert layout.topology.slot(0).row_span == 2
+
+
+def test_spotlight_tall_spans_dividers_and_preserves_auxiliary_hit_testing() -> None:
+    layout = resolve_pane_layout(
+        layout="spotlight-tall", pane_count=5, width=17, height=9, divider_style="line"
+    )
+
+    assert layout.column_sizes == (5, 5, 5)
+    assert layout.row_sizes == (4, 4)
+    assert layout.panes == (
+        PaneRect(0, 0, 0, 5, 9),
+        PaneRect(1, 6, 0, 5, 4),
+        PaneRect(2, 12, 0, 5, 4),
+        PaneRect(3, 6, 5, 5, 4),
+        PaneRect(4, 12, 5, 5, 4),
+    )
+    assert pane_at(layout, 6, 3) == 1
+    assert pane_at(layout, 5, 0) is None
+    assert pane_at(layout, 6, 4) is None
+    assert pane_at(layout, 11, 8) is None
 
 
 def test_narrow_tall_falls_back_without_mutating_configured_layout() -> None:

@@ -126,13 +126,23 @@ def reconcile_weights(weights: tuple[int, ...] | None, count: int) -> tuple[int,
 
 
 def adjust_weight(weights: tuple[int, ...], index: int, delta: int) -> tuple[int, ...]:
-    """Adjust one band immediately while keeping every weight positive and normalized."""
+    """Transfer shares between a selected band and its deterministic neighbor."""
     normalized = normalize_weights(weights)
     if not 0 <= index < len(normalized):
         raise IndexError(index)
-    adjusted = list(normalized)
-    adjusted[index] = max(1, adjusted[index] + delta)
-    return normalize_weights(tuple(adjusted))
+    if len(normalized) == 1 or delta == 0:
+        return normalized
+    neighbor = index + 1 if index + 1 < len(normalized) else index - 1
+    adjusted = normalized
+    for _ in range(abs(delta)):
+        source, target = (neighbor, index) if delta > 0 else (index, neighbor)
+        working = list(adjusted)
+        if working[source] == 1:
+            working = [weight * 2 for weight in working]
+        working[source] -= 1
+        working[target] += 1
+        adjusted = normalize_weights(tuple(working))
+    return adjusted
 
 
 def layout_bands(layout: str, pane_count: int) -> LayoutBands:
