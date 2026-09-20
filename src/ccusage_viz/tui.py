@@ -1697,8 +1697,6 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                         trigger=LifecycleTrigger.CONFIGURATION,
                                         data_affecting=False,
                                     )
-                            elif key == "c":
-                                select_terminal_text()
                             elif adjustment_page == "quick" and key == "v":
                                 pane.body_view = next_body_view(pane.body_view)
                             elif adjustment_page == "advanced" and key == "r":
@@ -1887,9 +1885,6 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 if key in {"h", "H"}:
                     browse_controls_hidden = not browse_controls_hidden
                     paint(force=True)
-                    continue
-                if key == "c":
-                    select_terminal_text()
                     continue
                 if key == "r":
                     for index in range(len(panes)):
