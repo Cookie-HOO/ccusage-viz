@@ -397,6 +397,74 @@ def test_bare_dashboard_is_equivalent_to_wide_preset() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("preset", "kinds"),
+    [
+        ("spotlight-wide", ("timeline", "stack", "ranking")),
+        ("spotlight-tall", ("ranking", "timeline", "stack")),
+    ],
+)
+def test_dashboard_spotlight_presets_feature_the_first_pane(
+    preset: str, kinds: tuple[str, ...]
+) -> None:
+    parser = build_parser(load_translator("en"))
+
+    options = _to_options(parser.parse_args(["dashboard", preset]))
+
+    assert options.host.grid == preset
+    assert options.host.style == "framed"
+    assert tuple(pane.chart.kind for pane in options.panes) == kinds
+    assert {pane.chart.presentation.density for pane in options.panes} == {"compact"}
+
+
+def test_dashboard_spotlight_preset_keeps_named_layout_when_extended() -> None:
+    parser = build_parser(load_translator("en"))
+
+    options = _to_options(
+        parser.parse_args(["dashboard", "spotlight-tall", "--pane", "calendar"])
+    )
+
+    assert options.host.grid == "spotlight-tall"
+    assert tuple(pane.chart.kind for pane in options.panes) == (
+        "ranking",
+        "timeline",
+        "stack",
+        "calendar",
+    )
+
+
+def test_dashboard_accepts_named_layout_for_arbitrary_panes() -> None:
+    parser = build_parser(load_translator("en"))
+
+    options = _to_options(
+        parser.parse_args(
+            [
+                "dashboard",
+                "--pane",
+                "monitor --by model",
+                "--pane",
+                "calendar",
+                "--grid",
+                "spotlight-tall",
+            ]
+        )
+    )
+
+    assert options.host.grid == "spotlight-tall"
+    assert tuple(pane.chart.kind for pane in options.panes) == ("monitor", "calendar")
+
+
+def test_dashboard_spotlight_accepts_explicit_layout_override() -> None:
+    parser = build_parser(load_translator("en"))
+
+    options = _to_options(
+        parser.parse_args(["dashboard", "spotlight-wide", "--grid", "2x2"]),
+        explicit=frozenset({"grid"}),
+    )
+
+    assert options.host.grid == "2x2"
+
+
 def test_dashboard_narrow_and_all_presets_expand_to_concrete_state() -> None:
     parser = build_parser(load_translator("en"))
 

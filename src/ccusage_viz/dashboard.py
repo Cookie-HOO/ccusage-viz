@@ -21,6 +21,18 @@ DEFAULT_DASHBOARD_PANELS = (
 DEFAULT_DASHBOARD_MONITOR_PANEL = DEFAULT_DASHBOARD_PANELS[-1]
 DASHBOARD_PRESETS = {
     "wide": DashboardPreset(DEFAULT_DASHBOARD_PANELS, "2x2", style="framed"),
+    "spotlight-wide": DashboardPreset(
+        DEFAULT_DASHBOARD_PANELS[:3], "spotlight-wide", style="framed"
+    ),
+    "spotlight-tall": DashboardPreset(
+        (
+            DEFAULT_DASHBOARD_PANELS[2],
+            DEFAULT_DASHBOARD_PANELS[0],
+            DEFAULT_DASHBOARD_PANELS[1],
+        ),
+        "spotlight-tall",
+        style="framed",
+    ),
     "narrow": DashboardPreset(
         (
             "timeline --period 14d --style points --theme nord --density compact",

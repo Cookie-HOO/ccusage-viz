@@ -12,6 +12,7 @@ from typing import Any, Never, cast
 from ccusage_viz import __version__
 from ccusage_viz.application import run
 from ccusage_viz.dashboard import DASHBOARD_PRESETS
+from ccusage_viz.dashboard_layout import layout_for_pane_count, parse_layout
 from ccusage_viz.diagnostics import color_enabled, format_error
 from ccusage_viz.errors import UsageError, VizError
 from ccusage_viz.i18n import Translator, detect_language, load_translator
@@ -532,16 +533,10 @@ def _to_options(
         if preset is not None and "grid" not in explicit:
             grid = preset.grid
             if namespace.panes:
-                _, columns_text = grid.lower().split("x", 1)
-                columns = int(columns_text)
-                grid = f"{math.ceil(len(fragments) / columns)}x{columns}"
-        if grid != "auto":
-            try:
-                rows, columns = (int(item) for item in grid.lower().split("x", 1))
-            except (ValueError, AttributeError):
-                raise UsageError("error.tui_grid", value=grid) from None
-            if rows < 1 or columns < 1 or rows * columns < len(fragments):
-                raise UsageError("error.tui_grid", value=grid)
+                grid = layout_for_pane_count(grid, len(fragments))
+        grid = parse_layout(grid, len(fragments))
+        if grid is None:
+            raise UsageError("error.tui_grid", value=namespace.grid)
         for cadence in (
             namespace.refresh_interval,
             namespace.sampling_interval,
