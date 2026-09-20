@@ -21,6 +21,7 @@ from ccusage_viz.dashboard_layout import (
     [
         ("AUTO", 3, "auto"),
         ("SPOTLIGHT-WIDE", 3, "spotlight-wide"),
+        ("Spotlight-Wide2", 3, "spotlight-wide2"),
         ("spotlight-TALL", 3, "spotlight-tall"),
         ("2X2", 4, "2x2"),
     ],
@@ -41,6 +42,9 @@ def test_parse_layout_normalizes_valid_values(value: str, count: int, expected: 
         ("-1x2", 1),
         ("1x1", 2),
         ("auto", 0),
+        ("wide", 4),
+        ("narrow", 4),
+        ("all", 4),
     ],
 )
 def test_parse_layout_rejects_invalid_or_insufficient_values(value: str, count: int) -> None:
@@ -57,6 +61,7 @@ def test_parse_layout_rejects_invalid_or_insufficient_values(value: str, count: 
         ("1x4", 3, "1x4"),
         ("auto", 5, "auto"),
         ("spotlight-wide", 5, "spotlight-wide"),
+        ("spotlight-wide2", 5, "spotlight-wide2"),
         ("spotlight-tall", 5, "spotlight-tall"),
     ],
 )
@@ -113,6 +118,26 @@ def test_spotlight_wide_features_first_pane_over_fresh_auxiliary_grid() -> None:
     assert featured.width == 81
     assert all(rect.top > featured.top for rect in layout.panes[1:])
     assert layout.topology.slot(0).column_span == 2
+
+
+@pytest.mark.parametrize(
+    ("count", "rows", "columns"),
+    [(1, 1, 1), (2, 2, 1), (3, 3, 2), (4, 3, 2), (5, 4, 2), (7, 5, 2)],
+)
+def test_spotlight_wide2_has_two_full_width_leading_panes(
+    count: int, rows: int, columns: int
+) -> None:
+    layout = resolve_pane_layout(layout="spotlight-wide2", pane_count=count, width=81, height=31)
+
+    assert layout.rendered == "spotlight-wide2"
+    assert (layout.topology.rows, layout.topology.columns) == (rows, columns)
+    if count > 1:
+        assert layout.pane(0).width == layout.pane(1).width == 81
+        assert layout.pane(0).top < layout.pane(1).top
+    if count > 2:
+        assert layout.topology.slot(0).column_span == layout.topology.slot(1).column_span == 2
+        assert layout.topology.slot(2).row == 2
+        assert layout.topology.slot(2).column == 0
 
 
 def test_spotlight_tall_features_first_pane_beside_auxiliary_grid() -> None:

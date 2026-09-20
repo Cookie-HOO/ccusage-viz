@@ -4,11 +4,11 @@ from dataclasses import dataclass
 from math import ceil, gcd
 from typing import Literal
 
-NAMED_LAYOUTS = frozenset(("auto", "spotlight-wide", "spotlight-tall"))
+NAMED_LAYOUTS = frozenset(("auto", "spotlight-wide", "spotlight-wide2", "spotlight-tall"))
 MIN_PANE_WIDTH = 4
 MIN_PANE_HEIGHT = 3
 
-RenderedLayout = Literal["grid", "spotlight-wide", "spotlight-tall"]
+RenderedLayout = Literal["grid", "spotlight-wide", "spotlight-wide2", "spotlight-tall"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -225,6 +225,17 @@ def _build_topology(
             for index in range(1, pane_count)
         )
         return PaneTopology(1 + aux_rows, columns, tuple(slots)), "spotlight-wide"
+    if configured == "spotlight-wide2":
+        if pane_count == 2:
+            return PaneTopology(2, 1, (PaneSlot(0, 0, 0), PaneSlot(1, 1, 0))), "spotlight-wide2"
+        slots = [
+            PaneSlot(0, 0, 0, column_span=2),
+            PaneSlot(1, 1, 0, column_span=2),
+        ]
+        slots.extend(
+            PaneSlot(index, 2 + (index - 2) // 2, (index - 2) % 2) for index in range(2, pane_count)
+        )
+        return PaneTopology(2 + ceil((pane_count - 2) / 2), 2, tuple(slots)), "spotlight-wide2"
     if configured == "spotlight-tall":
         rows, aux_columns = _auto_shape(pane_count - 1)
         slots = [PaneSlot(0, 0, 0, row_span=rows)]
@@ -244,6 +255,8 @@ def _build_topology(
 def _rendered_name(configured: str) -> RenderedLayout:
     if configured == "spotlight-wide":
         return "spotlight-wide"
+    if configured == "spotlight-wide2":
+        return "spotlight-wide2"
     if configured == "spotlight-tall":
         return "spotlight-tall"
     return "grid"
