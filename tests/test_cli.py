@@ -12,6 +12,7 @@ from ccusage_viz.cli import (
     main,
     probe_short_circuit,
 )
+from ccusage_viz.dashboard import DASHBOARD_PRESETS
 from ccusage_viz.errors import UsageError
 from ccusage_viz.i18n import load_translator
 from ccusage_viz.options import DEFAULT_STYLES
@@ -407,12 +408,21 @@ def test_dashboard_narrow_and_all_presets_expand_to_concrete_state() -> None:
         "ranking",
         "monitor",
     )
+    assert narrow.host.style == "framed"
+    assert narrow.panes[0].chart.presentation.style == "points"
     assert narrow.panes[1].chart.by == "project"
-    assert narrow.panes[1].chart.top == 5
+    assert narrow.panes[1].chart.top == 10
+    assert narrow.panes[2].chart.window_seconds == 3600
     assert narrow.panes[2].chart.presentation.style == "ranking"
+    assert narrow.panes[2].chart.top == 3
+    assert all("--top" not in panel for panel in DASHBOARD_PRESETS["narrow"].panels)
+
     assert len(all_panes.panes) == 10
     assert all_panes.host.grid == "5x2"
     assert all_panes.host.style == "framed"
+    assert all("--top" not in panel for panel in DASHBOARD_PRESETS["all"].panels)
+    assert {pane.chart.presentation.density for pane in all_panes.panes} == {"compact"}
+    assert len({pane.chart.presentation.theme for pane in all_panes.panes}) > 3
 
 
 def test_dashboard_preset_accepts_overrides_and_appended_panes() -> None:

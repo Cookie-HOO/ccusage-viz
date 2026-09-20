@@ -71,7 +71,7 @@ def test_dashboard_defaults_to_a_filled_four_pane_dashboard() -> None:
     assert options.host.header_style == "panel"
     assert options.host.header_summary == "day"
     assert options.host.header_interval == 60.0
-    assert options.host.style == "split"
+    assert options.host.style == "framed"
     assert all(pane.chart.presentation.density == "compact" for pane in options.panes)
 
 

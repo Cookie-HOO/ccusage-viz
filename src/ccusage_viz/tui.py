@@ -214,7 +214,7 @@ def _header_summary(header: DashboardHeader, period: str):
         period,
         header.coverage,
     )
-    return replace(summary, all_agents=True) if summary is not None else None
+    return summary
 
 
 def _replace_header_interval(
@@ -268,7 +268,6 @@ def _header_lines(
                 ascii=terminal.ascii,
                 color_scheme=header.options.chart.presentation.theme,
             ),
-            all_agents=True,
         )
     else:
         detail = render_summary(
