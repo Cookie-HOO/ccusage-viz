@@ -222,6 +222,13 @@ def colored_mark(mark: str, color: int, context: RenderContext) -> str:
     return styled_text(mark, color, context)
 
 
+def background_mark(mark: str, color: int, context: RenderContext) -> str:
+    """Render a terminal cell with a themed background when color is available."""
+    if not context.color:
+        return mark
+    return plt.colorize(mark, plt.pixel(background=color)).string()
+
+
 def plot_height(context: RenderContext, *, text_rows: int) -> int:
     """Reserve renderer-owned text rows and plotext's final margin."""
     return max(8, context.height - text_rows - 1)

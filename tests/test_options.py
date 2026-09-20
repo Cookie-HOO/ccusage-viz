@@ -12,6 +12,7 @@ from ccusage_viz.formatting import display_width
 from ccusage_viz.i18n import load_translator
 from ccusage_viz.options import (
     DENSITIES,
+    CalendarConfig,
     ChartPresentation,
     Filters,
     MonitorConfig,
@@ -125,6 +126,28 @@ def test_runtime_adjustments_replace_owned_nested_configs() -> None:
     assert adjust_standalone(source, "+").chart.top == 11
     assert adjust_standalone(source, "k").chart.weekdays == "hide"
     assert adjust_standalone(timeline(rolling=False), "p") == timeline(rolling=False)
+
+
+def test_calendar_style_key_cycles_between_relative_and_grid() -> None:
+    source = StandaloneLaunch(
+        ProcessConfig(),
+        StandaloneHostConfig(),
+        CalendarConfig(
+            "calendar",
+            resolve_date_range(
+                "calendar",
+                period="7d",
+                since=None,
+                until=None,
+                timezone=None,
+                today=date(2026, 9, 12),
+            ),
+        ),
+    )
+
+    grid = adjust_standalone(source, "s")
+    assert grid.chart.presentation.style == "grid"
+    assert adjust_standalone(grid, "s").chart.presentation.style == "relative"
 
 
 def test_period_keys_cycle_distinct_trailing_and_natural_families() -> None:

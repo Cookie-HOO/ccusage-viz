@@ -5,7 +5,7 @@ from datetime import timedelta
 
 from ccusage_viz.chart_models import CalendarModel
 from ccusage_viz.formatting import center_text, clip_width, display_width, format_tokens, pad_width
-from ccusage_viz.render.base import RenderContext, colored_mark, date_range_heading
+from ccusage_viz.render.base import RenderContext, background_mark, date_range_heading
 from ccusage_viz.render.palette import get_color_scheme
 from ccusage_viz.render.summary import render_summary
 
@@ -24,8 +24,10 @@ def _positive_levels(values: list[int]) -> dict[int, int]:
     }
 
 
-def _month_header(months: list[tuple[int, str]], *, week_count: int, stride: int) -> str:
-    grid_width = week_count * stride - (stride - 1)
+def _month_header(
+    months: list[tuple[int, str]], *, week_count: int, stride: int, gap_width: int
+) -> str:
+    grid_width = week_count * stride - gap_width
     last_week, last_label = months[-1]
     width = max(grid_width, last_week * stride + display_width(last_label))
     canvas = [" "] * width
@@ -45,6 +47,25 @@ def _month_header(months: list[tuple[int, str]], *, week_count: int, stride: int
     return "".join(canvas).rstrip()
 
 
+def _cell_geometry(week_count: int, context: RenderContext) -> tuple[int, int]:
+    """Return a square-ish cell width and inter-week gutter width."""
+    available_width = max(1, context.width - 3)
+    grid = context.style == "grid"
+    if grid and week_count * 3 - 1 <= available_width:
+        return 2, 1
+    if not grid and week_count * 2 <= available_width:
+        return 2, 0
+    if grid and week_count * 2 - 1 <= available_width:
+        return 1, 1
+    return 1, 0
+
+
+def _fallback_marks(context: RenderContext) -> tuple[str, str, str, str, str]:
+    if context.ascii:
+        return "-", ".", "o", "O", "#"
+    return "·", "░", "▒", "▓", "█"
+
+
 def render_calendar(model: CalendarModel, context: RenderContext) -> str:
     if not model.days:
         return context.translator.text("message.no_data")
@@ -53,34 +74,45 @@ def render_calendar(model: CalendarModel, context: RenderContext) -> str:
     start = first - timedelta(days=first.weekday())
     end = last + timedelta(days=6 - last.weekday())
     week_count = (end - start).days // 7 + 1
-    # Prefer separated cells, but a full year still fits at the minimum width
-    # by falling back to one terminal cell per week.
-    stride = 2 if 3 + week_count * 2 - 1 <= context.width else 1
+    cell_width, gap_width = _cell_geometry(week_count, context)
+    stride = cell_width + gap_width
+    grid = context.style == "grid"
     cells: dict[int, list[str]] = defaultdict(list)
-    empty_mark = "-" if context.ascii else "·"
-    marks = (empty_mark, ".", "o", "O", "#") if context.ascii else (empty_mark, "░", "▒", "▓", "█")
+    fallback_marks = _fallback_marks(context)
     levels = _positive_levels(list(usage.values()))
-    colors = get_color_scheme(context.color_scheme).calendar
+    scheme = get_color_scheme(context.color_scheme)
     months: list[tuple[int, str]] = []
     labeled_months: set[tuple[int, int]] = set()
+
+    def fill(mark: str) -> str:
+        return mark.ljust(cell_width)
+
+    def cell(level: int, *, valid: bool) -> str:
+        if not valid:
+            return " " * cell_width
+        if context.color:
+            if level:
+                return background_mark(" " * cell_width, scheme.calendar[level - 1], context)
+            if grid:
+                return background_mark(" " * cell_width, scheme.other, context)
+            return " " * cell_width
+        if level:
+            return fill(fallback_marks[level])
+        return fill(fallback_marks[0]) if grid else " " * cell_width
+
     for week in range(week_count):
         week_start = start + timedelta(days=week * 7)
         for weekday in range(7):
             day = week_start + timedelta(days=weekday)
-            if first <= day <= last:
+            valid = first <= day <= last
+            if valid:
                 month = (day.year, day.month)
                 if month not in labeled_months:
                     months.append((week, context.translator.text(f"calendar.month.{day.month}")))
                     labeled_months.add(month)
-                level = levels.get(usage.get(day, 0), 0)
-                mark = marks[level]
-                if level:
-                    mark = colored_mark(mark, colors[level - 1], context)
-            else:
-                mark = " "
-            cells[weekday].append(mark)
+            cells[weekday].append(cell(levels.get(usage.get(day, 0), 0), valid=valid))
 
-    separator = " " * (stride - 1)
+    separator = " " * gap_width
     lines = []
     summary = render_summary(model.summary, context) if model.summary else ""
     if summary:
@@ -93,7 +125,10 @@ def render_calendar(model: CalendarModel, context: RenderContext) -> str:
     )
     label_width = 2
     prefix_width = label_width + 1
-    lines.append(" " * prefix_width + _month_header(months, week_count=week_count, stride=stride))
+    lines.append(
+        " " * prefix_width
+        + _month_header(months, week_count=week_count, stride=stride, gap_width=gap_width)
+    )
     for weekday in range(7):
         weekday_name = (
             context.translator.text(f"calendar.weekday.{weekday}") if weekday in {0, 2, 4} else ""
@@ -121,11 +156,23 @@ def render_calendar(model: CalendarModel, context: RenderContext) -> str:
                 "label.peak", date=peak.day.isoformat(), value=format_tokens(peak.usage.total)
             )
         )
+
+    def legend_cell(level: int) -> str:
+        if context.color:
+            if level:
+                return background_mark(" " * cell_width, scheme.calendar[level - 1], context)
+            return (
+                background_mark(" " * cell_width, scheme.other, context)
+                if grid
+                else " " * cell_width
+            )
+        return fallback_marks[level] if level or grid else ""
+
+    legend_cells = ((0,) if grid else ()) + (1, 2, 3, 4)
     legend = " ".join(
         (
             context.translator.text("calendar.legend.less"),
-            marks[0],
-            *(colored_mark(marks[level], colors[level - 1], context) for level in range(1, 5)),
+            *(legend_cell(level) for level in legend_cells),
             context.translator.text("calendar.legend.more"),
         )
     )
