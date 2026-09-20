@@ -127,6 +127,11 @@ def render_ranking(model: RankingModel, context: RenderContext) -> str:
     total = None if model.is_observed else model.percentage_total.total
     label_width = max(12, min(28, context.width // 3))
     bar_width = max(8, context.width - label_width - 25)
+    if model.is_observed:
+        label_width += min(
+            7,
+            max(0, context.width - label_width - bar_width - 18),
+        )
     maximum = max(_entry_value(entry) for entry in entries) or 1
     full, empty = ("█", "░") if not context.ascii else ("#", ".")
     dot, track = ("●", "·") if not context.ascii else ("o", ".")

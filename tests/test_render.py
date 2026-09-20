@@ -506,6 +506,27 @@ def test_observed_ranking_uses_recent_range_without_historical_percentage() -> N
     assert "2026-01-01" not in output
 
 
+def test_observed_ranking_reclaims_percentage_space_for_labels() -> None:
+    label = "gpt-5.6-very-long-model-name"
+    model = RankingModel(
+        (),
+        None,
+        observed_entries=(ScalarRankingEntry("model", label, 1200.0),),
+        metric=MetricDescriptor("tpm"),
+        observed_scope=ObservedScope(900, "model"),
+    )
+
+    wide = render_ranking(model, context(True)).splitlines()[-1]
+    narrow = render_ranking(
+        model,
+        RenderContext(40, 24, load_translator("en"), color=False, ascii=True),
+    )
+
+    assert "gpt-5.6-very-long-model-name" in wide
+    assert display_width(wide) == 79
+    assert all(display_width(line) <= 40 for line in narrow.splitlines())
+
+
 @pytest.mark.parametrize(
     ("ascii", "zero_mark", "levels"),
     [
