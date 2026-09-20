@@ -500,7 +500,7 @@ def test_observed_ranking_uses_recent_range_without_historical_percentage() -> N
 
     output = render_ranking(model, context(True))
 
-    assert "Agent · recent 15m Token" in output
+    assert "Agent · current Token" in output
     assert "1.2K" in output and "800" in output
     assert "%" not in output
     assert "2026-01-01" not in output
