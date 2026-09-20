@@ -102,9 +102,15 @@ class TimelineModel:
     metric: MetricDescriptor = field(default_factory=MetricDescriptor)
     observed_scope: ObservedScope | None = None
     y_axis_max: float | None = None
+    observed_current: tuple[ScalarRankingEntry, ...] = field(default_factory=tuple)
 
     def __post_init__(self) -> None:
-        if not self.observed_at and not self.observed_series and self.observed_scope is None:
+        if (
+            not self.observed_at
+            and not self.observed_series
+            and not self.observed_current
+            and self.observed_scope is None
+        ):
             return
         if self.days or self.series or self.observed_scope is None:
             raise ValueError("observed timelines require only observed axis and series data")

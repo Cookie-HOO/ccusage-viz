@@ -10,12 +10,7 @@ def _format_value(value: int | float) -> str:
 
 
 def _timeline_values(model: TimelineModel) -> tuple[tuple[str, int | float], ...]:
-    values = []
-    for series in model.observed_series:
-        current = next((value for value in reversed(series.values) if value is not None), None)
-        if current is not None:
-            values.append((series.label, current))
-    return tuple(values)
+    return tuple((entry.label, entry.value) for entry in model.observed_current)
 
 
 def render_observation(

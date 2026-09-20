@@ -166,7 +166,9 @@ def test_monitor_component_next_accept_advances_projection_but_stale_does_not() 
     stale = completion(component, (record(220),))
     component.configure(options(window_seconds=600), data_affecting=True)
     assert not component.accept(stale, now=20, wall=wall)
-    assert component.timeline_model(now=1800, count=4, wall=wall) == accepted
+    cleared = component.timeline_model(now=1800, count=4, wall=wall)
+    assert cleared.observed_series == accepted.observed_series
+    assert cleared.observed_current == ()
 
     component.accept(completion(component, (record(220),)), now=20, wall=wall)
     advanced = component.timeline_model(now=20, count=4, wall=wall)
@@ -276,6 +278,36 @@ def test_monitor_component_reconfigures_without_losing_observed_history() -> Non
     assert not component.rebaseline_pending
 
 
+def test_monitor_component_clears_current_across_pause_resume_and_restores_next_pair() -> None:
+    component = MonitorComponent(
+        options(by="model", style="ranking"), registry=build_chart_registry()
+    )
+    wall = datetime(2026, 9, 19, 12, 0, tzinfo=UTC)
+    component.accept(
+        completion(component, (record(100, models={"a": 100}),)), now=0, wall=wall
+    )
+    component.accept(
+        completion(component, (record(160, models={"a": 160}),)), now=10, wall=wall
+    )
+    assert [(entry.key, entry.value) for entry in component.ranking_model(now=10).observed_entries] == [
+        ("a", 360.0)
+    ]
+
+    intervals = tuple(component.observer.intervals)
+    component.pause()
+    assert component.ranking_model(now=10).observed_entries == ()
+    assert tuple(component.observer.intervals) == intervals
+
+    component.resume(now=20, wall=wall)
+    component.accept(
+        completion(component, (record(190, models={"a": 190}),)), now=30, wall=wall
+    )
+    assert [(entry.key, entry.value) for entry in component.ranking_model(now=30).observed_entries] == [
+        ("a", 180.0)
+    ]
+    assert tuple(component.observer.intervals)[:1] == intervals
+
+
 def test_monitor_component_gap_rebaselines_and_stale_failure_keeps_accepted_state() -> None:
     component = MonitorComponent(options(), registry=build_chart_registry())
     wall = datetime(2026, 9, 19, 12, 0, tzinfo=UTC)
@@ -284,6 +316,8 @@ def test_monitor_component_gap_rebaselines_and_stale_failure_keeps_accepted_stat
     intervals = tuple(component.observer.intervals)
 
     component.accept(completion(component, (record(220),)), now=40, wall=wall)
+    assert component.current_values(40, wall=wall) == {}
+    assert component.timeline_model(now=40, count=4, wall=wall).observed_current == ()
     assert tuple(component.observer.intervals) == intervals
     assert component.observer.previous is not None
     assert component.observer.previous.total.total == 220

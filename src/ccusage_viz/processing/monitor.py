@@ -78,6 +78,7 @@ class ObservedTPM:
         self.clock_offset = 0.0
         self.intervals: deque[ObservedInterval] = deque()
         self.rollups: deque[MinuteRollup] = deque()
+        self.current_interval: ObservedInterval | None = None
         self.tracked_models: set[str] = set()
         self.resets = 0
         self.overflowed_models = False
@@ -137,6 +138,7 @@ class ObservedTPM:
         current = self._normalize(counters)
         display_now = now + self.clock_offset
         if self.previous is None or self.previous_at is None:
+            self.current_interval = None
             self.previous = current
             self.previous_at = display_now
             self.previous_raw_at = now
@@ -151,9 +153,12 @@ class ObservedTPM:
         self.previous_wall = wall
         now = display_now
         if seconds <= 0:
+            self.current_interval = None
             return False
         total_delta = current.total.total - previous.total.total
+        resets_before = self.resets
         if total_delta < 0:
+            self.current_interval = None
             self.resets += 1
             self._maintain(now)
             return False
@@ -184,18 +189,18 @@ class ObservedTPM:
                 values["Other"] = values.get("Other", 0) + residual
             return values
 
-        self.intervals.append(
-            ObservedInterval(
-                started_at,
-                now,
-                wall,
-                seconds,
-                total_delta,
-                deltas(current.models, previous.models),
-                deltas(current.agents, previous.agents),
-                deltas(current.projects, previous.projects, new_as_zero=True),
-            )
+        interval = ObservedInterval(
+            started_at,
+            now,
+            wall,
+            seconds,
+            total_delta,
+            deltas(current.models, previous.models),
+            deltas(current.agents, previous.agents),
+            deltas(current.projects, previous.projects, new_as_zero=True),
         )
+        self.intervals.append(interval)
+        self.current_interval = interval if self.resets == resets_before else None
         self.sample_generation += 1
         self._maintain(now)
         return True
@@ -221,6 +226,7 @@ class ObservedTPM:
             wall_elapsed = max(0.0, (wall - self.previous_wall).total_seconds())
             self.clock_offset += max(0.0, wall_elapsed - raw_elapsed)
         display_now = now + self.clock_offset
+        self.current_interval = None
         self.previous = self._normalize(counters)
         self.previous_at = display_now
         self.previous_raw_at = now
@@ -391,6 +397,20 @@ class ObservedTPM:
             buckets.append(ObservedBucket(bucket_start, bucket_end, ended_wall, projected))
         return tuple(buckets)
 
+    def current_values(self) -> dict[str, float]:
+        """Project only the newest valid sample pair into the current display."""
+        interval = self.current_interval
+        if interval is None:
+            return {}
+        values = self._values(interval)
+        if self.by in {None, "model"}:
+            values = {key: value / interval.seconds * 60 for key, value in values.items()}
+        return _top_other(
+            values,
+            self.top if self.by is not None else None,
+            totals=self._values(interval),
+        )
+
     def rates(self, now: float) -> dict[str, float]:
         cutoff = now - self.window_seconds
         tokens: defaultdict[str, float] = defaultdict(float)
@@ -448,6 +468,7 @@ def _copy_observer(observer: ObservedTPM) -> ObservedTPM:
     copy.clock_offset = observer.clock_offset
     copy.intervals = deque(observer.intervals)
     copy.rollups = deque(observer.rollups)
+    copy.current_interval = observer.current_interval
     copy.tracked_models = set(observer.tracked_models)
     copy.resets = observer.resets
     copy.overflowed_models = observer.overflowed_models

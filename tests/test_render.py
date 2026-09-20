@@ -427,6 +427,7 @@ def test_monitor_density_controls_current_observation(
         observed_series=(ScalarSeries("Total", "Total", (1200.0,)),),
         metric=MetricDescriptor("tpm"),
         observed_scope=ObservedScope(900, "total"),
+        observed_current=(ScalarRankingEntry("Total", "Total", 1200.0),),
     )
     render_context = RenderContext(
         80,

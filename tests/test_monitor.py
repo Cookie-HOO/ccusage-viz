@@ -1,6 +1,7 @@
 from contextlib import nullcontext
 from datetime import UTC, datetime, timedelta
 from os import terminal_size
+from typing import Literal
 
 import pytest
 
@@ -135,9 +136,44 @@ def test_observed_tpm_requires_a_baseline_and_uses_elapsed_monotonic_seconds() -
     observer = ObservedTPM(window_seconds=3600, by=None, top=None)
 
     assert not observer.add(snapshot(100), 10.0)
+    assert observer.current_values() == {}
     assert observer.rates(10.0) == {}
     assert observer.add(snapshot(160), 40.0)
+    assert observer.current_values() == {"Total": 120.0}
     assert observer.rates(40.0) == {"Total": 120.0}
+
+
+def test_current_values_use_only_newest_valid_interval_without_history_fallback() -> None:
+    observer = ObservedTPM(window_seconds=3600, by=None, top=None)
+    observer.add(snapshot(100), 0.0)
+    observer.add(snapshot(160), 60.0)
+    assert observer.current_values() == {"Total": 60.0}
+
+    observer.rebaseline(snapshot(160), 120.0)
+    assert observer.current_values() == {}
+    assert observer.rates(120.0) == {"Total": 60.0}
+
+    observer.add(snapshot(190), 180.0)
+    assert observer.current_values() == {"Total": 30.0}
+
+
+@pytest.mark.parametrize("by", ("agent", "project"))
+def test_agent_and_project_current_values_are_latest_pair_token_delta(
+    by: Literal["agent", "project"],
+) -> None:
+    observer = ObservedTPM(window_seconds=3600, by=by, top=None)
+    if by == "agent":
+        before = CounterSnapshot(usage(100), agents={"claude": usage(100)})
+        after = CounterSnapshot(usage(130), agents={"claude": usage(130)})
+    else:
+        before = CounterSnapshot(usage(100), projects={"claude": usage(100)})
+        after = CounterSnapshot(usage(130), projects={"claude": usage(130)})
+    observer.add(before, 0.0)
+    observer.add(after, 10.0)
+    assert observer.current_values() == {"claude": 30.0}
+
+    observer.add(after, 20.0)
+    assert observer.current_values() == {"claude": 0.0}
 
 
 def test_model_projection_preserves_authoritative_total_with_residual_other() -> None:
@@ -265,8 +301,10 @@ def test_observed_tpm_rebaselines_decreased_total_without_negative_rate() -> Non
     assert not observer.add(snapshot(10), 60.0)
 
     assert observer.resets == 1
+    assert observer.current_values() == {}
     assert observer.rates(60.0) == {}
     assert observer.add(snapshot(30), 120.0)
+    assert observer.current_values() == {"Total": 20.0}
     assert observer.rates(120.0) == {"Total": 20.0}
 
 

@@ -129,6 +129,7 @@ class MonitorComponent:
         if data_affecting:
             self.generation += 1
             self.rebaseline_pending = True
+            self.observer.current_interval = None
             self.clear_changes()
         else:
             self._configure_observer(self._monitor_config(options))
@@ -184,13 +185,16 @@ class MonitorComponent:
             self.observer.rebaseline(counters, now, wall)
             self.clear_changes()
             self.rebaseline_pending = False
-            values = self._latest_bucket_values_at(now, 32, wall)
+            values = self.observer.current_values()
             self.observer.update_y_axis(max(values.values(), default=0.0))
         else:
             self.observer.add(counters, now, wall)
-            values = self._latest_bucket_values_at(now, 32, wall)
-            self.value_changes.accept(values)
-            self.rank_changes.accept(monitor_rank_keys(values))
+            values = self.observer.current_values()
+            if values:
+                self.value_changes.accept(values)
+                self.rank_changes.accept(monitor_rank_keys(values))
+            else:
+                self.clear_changes()
             self.observer.update_y_axis(max(values.values(), default=0.0))
         self.accepted_options = self.candidate
         self.accepted_records = completion.records
@@ -233,6 +237,7 @@ class MonitorComponent:
         self.rank_changes.clear()
 
     def pause(self) -> None:
+        self.observer.current_interval = None
         self.clear_changes()
 
     def resume(self, *, now: float, wall: datetime | None = None) -> None:
@@ -242,19 +247,8 @@ class MonitorComponent:
         self.clear_changes()
 
     def current_values(self, now: float, *, wall: datetime | None = None) -> dict[str, float]:
-        buckets = self._buckets(now, 32, wall)
-        names = dict.fromkeys(key for bucket in buckets for key in bucket.values)
-        return {
-            name: value
-            for name in names
-            if (
-                value := next(
-                    (bucket.values[name] for bucket in reversed(buckets) if name in bucket.values),
-                    None,
-                )
-            )
-            is not None
-        }
+        del now, wall
+        return self.observer.current_values()
 
     def timeline_model(
         self,
@@ -282,6 +276,7 @@ class MonitorComponent:
             metric=self._metric(),
             observed_scope=self._scope(),
             y_axis_max=self.observer.y_axis_max,
+            observed_current=self._current_entries(),
         )
 
     def ranking_model(
@@ -291,7 +286,7 @@ class MonitorComponent:
         count: int = 32,
         wall: datetime | None = None,
     ) -> RankingModel:
-        values = self._latest_bucket_values(now, count, wall)
+        values = self.current_values(now, wall=wall)
         entries = tuple(
             ScalarRankingEntry(name, name, value, name == "Other")
             for name, value in sorted(
@@ -348,31 +343,11 @@ class MonitorComponent:
     def _buckets(self, now: float, count: int, wall: datetime | None):
         return self.buckets(count, now=now, wall=wall)
 
-    def _latest_bucket_values(
-        self, now: float, count: int, wall: datetime | None
-    ) -> dict[str, float]:
-        return self._latest_values(self._buckets(now, count, wall))
-
-    def _latest_bucket_values_at(
-        self, now: float, count: int, wall: datetime | None
-    ) -> dict[str, float]:
-        buckets = self.observer.buckets(self.observer.display_now(now), count, wall)
-        return self._latest_values(buckets)
-
-    @staticmethod
-    def _latest_values(buckets) -> dict[str, float]:
-        names = dict.fromkeys(key for bucket in buckets for key in bucket.values)
-        return {
-            name: value
-            for name in names
-            if (
-                value := next(
-                    (bucket.values[name] for bucket in reversed(buckets) if name in bucket.values),
-                    None,
-                )
-            )
-            is not None
-        }
+    def _current_entries(self) -> tuple[ScalarRankingEntry, ...]:
+        return tuple(
+            ScalarRankingEntry(name, name, value, name == "Other")
+            for name, value in self.observer.current_values().items()
+        )
 
     def _scope(self) -> ObservedScope:
         chart = self._monitor_config(self._active_options())
@@ -380,7 +355,7 @@ class MonitorComponent:
             "baseline"
             if self.observer.previous is None
             else "ready"
-            if self.observer.sample_generation > 0
+            if self.observer.current_interval is not None
             else "sampling"
         )
         return ObservedScope(
