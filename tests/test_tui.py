@@ -29,9 +29,7 @@ from ccusage_viz.tui import (
     _adjustment_key_supported,
     _adjustment_target,
     _choose_pane_type,
-    _dashboard_adjustment_status,
     _dashboard_title_line,
-    _finish_clicked,
     _grid_shape,
     _header_lines,
     _header_options,
@@ -181,34 +179,6 @@ def test_tui_adjustment_target_exists_only_during_adjustment() -> None:
     assert _adjustment_target(2, "q", 4) == 2
     assert _adjustment_target(2, "Q", 4) == 2
     assert _adjustment_target(2, "\x1b", 4) is None
-
-
-def test_dashboard_adjustment_status_only_advertises_navigation_when_available() -> None:
-    english = load_translator("en")
-    chinese = load_translator("zh")
-
-    assert (
-        _dashboard_adjustment_status(
-            adjusting=False, focused=None, pane_count=4, translator=english
-        )
-        is None
-    )
-    assert (
-        _dashboard_adjustment_status(adjusting=True, focused=0, pane_count=1, translator=english)
-        == "Adjustment mode · Esc finish"
-    )
-    assert (
-        _dashboard_adjustment_status(adjusting=True, focused=0, pane_count=2, translator=english)
-        == "Adjustment mode · Tab next pane · Esc finish"
-    )
-    assert (
-        _dashboard_adjustment_status(adjusting=True, focused=0, pane_count=1, translator=chinese)
-        == "调整模式 · Esc 完成"
-    )
-    assert (
-        _dashboard_adjustment_status(adjusting=True, focused=0, pane_count=2, translator=chinese)
-        == "调整模式 · Tab 下一子图 · Esc 完成"
-    )
 
 
 def test_dashboard_panes_have_no_details_state() -> None:
@@ -608,7 +578,7 @@ def test_dashboard_pane_filter_editor_commits_once_or_discards_without_refresh(
         def finish(self) -> None:
             events.append(("finish",))
 
-    keys = iter((KeyEvent("s"), KeyEvent("f"), KeyEvent("\x03")))
+    keys = iter((KeyEvent("s"), KeyEvent("a"), KeyEvent("f"), KeyEvent("\x03")))
     runtime = Runtime()
     monkeypatch.setattr(tui_module, "build_query_runtime", lambda: runtime)
     monkeypatch.setattr(tui_module, "build_chart_registry", lambda: object())
@@ -784,24 +754,24 @@ def test_query_affecting_adjustments_are_explicit() -> None:
     assert not _query_affecting_adjustment("monitor", "d")
     assert not _query_affecting_adjustment("timeline", "g")
     assert _query_affecting_adjustment("ranking", "b")
-    assert _query_affecting_adjustment("monitor", "B")
+    assert not _query_affecting_adjustment("monitor", "B")
     assert not _query_affecting_adjustment("stack", "c")
     assert not _query_affecting_adjustment("monitor", "+")
     assert not _query_affecting_adjustment("timeline", "t")
 
 
-def test_tui_adjustment_footer_has_quick_advanced_and_three_rows() -> None:
+def test_tui_adjustment_footer_has_two_rows_and_no_finish_target() -> None:
     translator = load_translator("en")
     timeline_quick = _adjustment_controls("timeline", "quick", translator)
     timeline_advanced = _adjustment_controls("timeline", "advanced", translator)
     stack_advanced = _adjustment_controls("stack", "advanced", translator)
 
-    assert "p period" in timeline_quick
+    assert "p/P period" in timeline_quick
     assert "g granularity" in timeline_quick
-    assert "a Advanced" in timeline_quick
+    assert "v view" in timeline_quick
     assert "k weekdays" in timeline_advanced
     assert "l legend" in timeline_advanced
-    assert "a Quick" in timeline_advanced
+    assert "f filters" in timeline_advanced
     assert "c cache mode" in stack_advanced
     assert not _adjustment_key_supported("timeline", "quick", "k")
     assert _adjustment_key_supported("timeline", "advanced", "k")
@@ -810,25 +780,13 @@ def test_tui_adjustment_footer_has_quick_advanced_and_three_rows() -> None:
     assert _adjustment_key_supported("monitor", "quick", "d")
     assert not _adjustment_key_supported("timeline", "advanced", "b")
     assert not _adjustment_key_supported("monitor", "quick", "i")
+    assert not _adjustment_key_supported("monitor", "quick", "B")
 
-    rows, target = _adjustment_footer("timeline", "quick", translator, 80)
-    assert len(rows) == 3
-    assert all(len(row) == 80 for row in rows)
-    assert rows[-1].rstrip().endswith("[Finish]")
-    assert _finish_clicked(
-        MouseEvent(0, target[0], 24, True, 0),
-        adjusting=True,
-        width=80,
-        height=24,
-        hit_target=target,
-    )
-    assert not _finish_clicked(
-        MouseEvent(0, target[0] - 1, 24, True, 0),
-        adjusting=True,
-        width=80,
-        height=24,
-        hit_target=target,
-    )
+    rows = _adjustment_footer("Current status: running", "timeline", "quick", translator, 80)
+    assert len(rows) == 2
+    assert "a Advanced" in rows[1]
+    assert "Enter/Esc finish" in rows[1]
+    assert "[Finish]" not in "\n".join(rows)
 
 
 def test_dashboard_title_centers_and_right_aligns_freshness() -> None:
