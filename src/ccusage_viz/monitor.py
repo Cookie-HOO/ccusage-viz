@@ -68,6 +68,7 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
     demo_ordinal = 0
     status = translator.text("status.loading")
     last_size: tuple[int, int] | None = None
+    manual_refresh_operations: set[OperationToken] = set()
 
     def monitor_chart(config: StandaloneLaunch) -> MonitorConfig:
         if not isinstance(config.chart, MonitorConfig):
@@ -117,6 +118,7 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                 target.last_elapsed,
                 config.host.interval,
                 "sample",
+                refreshing=lifecycle.submission is not None,
             ),
         )
         return target.render(
@@ -125,6 +127,11 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
             count=max(8, min(32, terminal.width // 4)),
             wall=datetime.now().astimezone(),
         )
+
+    def notices() -> tuple[str, ...]:
+        active = lifecycle.active
+        manual_refresh_operations.intersection_update({active} if active is not None else ())
+        return (translator.text("status.tui_refreshing"),) if manual_refresh_operations else ()
 
     def paint(*, force: bool = False) -> None:
         nonlocal last_size
@@ -180,7 +187,10 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                     terminal=terminal,
                     view=body_view,
                 )
-            screen.paint(compose_frame(body, status, controls, height=terminal.height), force=force)
+            screen.paint(
+                compose_frame(body, status, controls, notices(), height=terminal.height),
+                force=force,
+            )
         except UsageError as exc:
             screen.paint(
                 compose_frame(
@@ -192,6 +202,7 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                     ),
                     status,
                     controls,
+                    notices(),
                     height=terminal.height,
                 ),
                 force=force,
@@ -421,16 +432,6 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                 now = time.monotonic()
                 if scheduler.due(now=now):
                     started = request(LifecycleTrigger.PERIODIC, now=now)
-                    if started:
-                        status = translator.text(
-                            "status.monitor_sampling",
-                            seconds=(
-                                f"{component.last_elapsed:.2f}"
-                                if component.last_elapsed is not None
-                                else "…"
-                            ),
-                            interval=f"{component.candidate.host.interval:g}",
-                        )
                     if started or component.error is not None:
                         paint()
                 completed = lifecycle.take_completed(lambda submission: submission.handle.done())
@@ -484,18 +485,23 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                                     else ""
                                 ),
                             ).rstrip(" ·")
+                    manual_refresh_operations.discard(operation)
                     paint()
                     start_ready(time.monotonic())
                 key = read_key(0.05)
                 if key == "\x03":
                     raise KeyboardInterrupt
                 if key == "r":
-                    if not request(
+                    manual_refresh_operations.clear()
+                    if request(
                         LifecycleTrigger.MANUAL,
                         now=time.monotonic(),
                         replace_active=True,
                     ):
-                        paint()
+                        operation = lifecycle.active
+                        if operation is not None:
+                            manual_refresh_operations.add(operation)
+                    paint(force=True)
                 elif key in {"h", "H"}:
                     controls_hidden = not controls_hidden
                     paint(force=True)

@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import ceil, gcd
+from math import ceil
 from typing import Literal
 
-NAMED_LAYOUTS = frozenset(("auto", "spotlight-wide", "spotlight-wide2", "spotlight-tall"))
-MIN_PANE_WIDTH = 4
+NAMED_LAYOUTS = frozenset(("auto", "spotlight-wide", "spotlight-wide2"))
+MIN_WEIGHT_SHARES = 24
 MIN_PANE_HEIGHT = 3
 
-RenderedLayout = Literal["grid", "spotlight-wide", "spotlight-wide2", "spotlight-tall"]
+RenderedLayout = Literal["grid", "spotlight-wide", "spotlight-wide2"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,21 +67,28 @@ class LayoutBands:
     columns: int
 
 
+def parse_grid(value: str, pane_count: int) -> str | None:
+    """Normalize a rectangular grid only when it can display every Pane."""
+    if pane_count < 1:
+        return None
+    try:
+        rows_text, columns_text = value.casefold().split("x")
+        rows, columns = int(rows_text), int(columns_text)
+    except (AttributeError, TypeError, ValueError):
+        return None
+    if rows < 1 or columns < 1 or rows * columns < pane_count:
+        return None
+    return f"{rows}x{columns}"
+
+
 def parse_layout(value: str, pane_count: int) -> str | None:
-    """Normalize a layout only when it can display every Pane."""
+    """Normalize a named topology or rectangular grid when it fits every Pane."""
     if pane_count < 1:
         return None
     normalized = value.casefold()
     if normalized in NAMED_LAYOUTS:
         return normalized
-    try:
-        rows_text, columns_text = normalized.split("x")
-        rows, columns = int(rows_text), int(columns_text)
-    except (TypeError, ValueError):
-        return None
-    if rows < 1 or columns < 1 or rows * columns < pane_count:
-        return None
-    return f"{rows}x{columns}"
+    return parse_grid(normalized, pane_count)
 
 
 def fixed_shape(layout: str) -> tuple[int, int]:
@@ -108,40 +115,45 @@ def layout_for_pane_count(layout: str, pane_count: int) -> str:
 
 
 def normalize_weights(weights: tuple[int, ...]) -> tuple[int, ...]:
-    """Validate and reduce positive integer weights to their canonical ratio."""
+    """Validate positive integer shares without discarding their resolution."""
     if not weights or any(weight < 1 for weight in weights):
         raise ValueError("layout weights must be positive integers")
-    divisor = weights[0]
-    for weight in weights[1:]:
-        divisor = gcd(divisor, weight)
-    return tuple(weight // divisor for weight in weights)
+    return weights
 
 
 def reconcile_weights(weights: tuple[int, ...] | None, count: int) -> tuple[int, ...]:
-    """Preserve existing bands, add equal bands, and discard removed trailing bands."""
+    """Preserve bands while maintaining the minimum logical share pool."""
     if count < 1:
         raise ValueError("a layout requires at least one band")
     current = normalize_weights(weights) if weights else ()
-    return normalize_weights((*current[:count], *(1 for _ in range(count - len(current)))))
+    reconciled = normalize_weights((*current[:count], *(1 for _ in range(count - len(current)))))
+    return _expand_weight_pool(reconciled)
+
+
+def _expand_weight_pool(weights: tuple[int, ...]) -> tuple[int, ...]:
+    multiplier = ceil(MIN_WEIGHT_SHARES / sum(weights))
+    if multiplier == 1:
+        return weights
+    return tuple(weight * multiplier for weight in weights)
 
 
 def adjust_weight(weights: tuple[int, ...], index: int, delta: int) -> tuple[int, ...]:
     """Transfer shares between a selected band and its deterministic neighbor."""
-    normalized = normalize_weights(weights)
-    if not 0 <= index < len(normalized):
+    current = normalize_weights(weights)
+    if not 0 <= index < len(current):
         raise IndexError(index)
-    if len(normalized) == 1 or delta == 0:
-        return normalized
-    neighbor = index + 1 if index + 1 < len(normalized) else index - 1
-    adjusted = normalized
+    if len(current) == 1 or delta == 0:
+        return current
+    neighbor = index + 1 if index + 1 < len(current) else index - 1
+    adjusted = _expand_weight_pool(current)
     for _ in range(abs(delta)):
         source, target = (neighbor, index) if delta > 0 else (index, neighbor)
+        if adjusted[source] == 1:
+            break
         working = list(adjusted)
-        if working[source] == 1:
-            working = [weight * 2 for weight in working]
         working[source] -= 1
         working[target] += 1
-        adjusted = normalize_weights(tuple(working))
+        adjusted = tuple(working)
     return adjusted
 
 
@@ -150,7 +162,7 @@ def layout_bands(layout: str, pane_count: int) -> LayoutBands:
     normalized = parse_layout(layout, pane_count)
     if normalized is None:
         raise ValueError(f"invalid Dashboard layout: {layout!r}")
-    topology, _ = _build_topology(normalized, pane_count, tall_fallback=False)
+    topology, _ = _build_topology(normalized, pane_count)
     return LayoutBands(topology.rows, topology.columns)
 
 
@@ -179,17 +191,9 @@ def resolve_pane_layout(
         raise ValueError("layout dimensions must be positive")
 
     gutter = 0 if divider_style == "none" else 1
-    tall_fallback = configured == "spotlight-tall" and not _tall_is_feasible(
-        pane_count, width, gutter
-    )
-    topology, rendered = _build_topology(configured, pane_count, tall_fallback=tall_fallback)
-
-    if tall_fallback:
-        resolved_columns = (1,) * topology.columns
-        resolved_rows = (1,) * topology.rows
-    else:
-        resolved_columns = _resolve_weights(column_weights, topology.columns)
-        resolved_rows = _resolve_weights(row_weights, topology.rows)
+    topology, rendered = _build_topology(configured, pane_count)
+    resolved_columns = _resolve_weights(column_weights, topology.columns)
+    resolved_rows = _resolve_weights(row_weights, topology.rows)
     column_sizes = _allocate_axis(width, resolved_columns, gutter)
     row_sizes = _allocate_axis(height, resolved_rows, gutter)
     panes = _pane_rectangles(topology, column_sizes, row_sizes, gutter)
@@ -220,14 +224,10 @@ def _auto_shape(count: int) -> tuple[int, int]:
     return ceil(count / columns), columns
 
 
-def _build_topology(
-    configured: str, pane_count: int, *, tall_fallback: bool
-) -> tuple[PaneTopology, RenderedLayout]:
+def _build_topology(configured: str, pane_count: int) -> tuple[PaneTopology, RenderedLayout]:
     if pane_count == 1:
-        return PaneTopology(1, 1, (PaneSlot(0, 0, 0),)), (
-            "spotlight-wide" if tall_fallback else _rendered_name(configured)
-        )
-    if configured == "spotlight-wide" or tall_fallback:
+        return PaneTopology(1, 1, (PaneSlot(0, 0, 0),)), _rendered_name(configured)
+    if configured == "spotlight-wide":
         aux_rows, columns = _auto_shape(pane_count - 1)
         slots = [PaneSlot(0, 0, 0, column_span=columns)]
         slots.extend(
@@ -246,14 +246,6 @@ def _build_topology(
             PaneSlot(index, 2 + (index - 2) // 2, (index - 2) % 2) for index in range(2, pane_count)
         )
         return PaneTopology(2 + ceil((pane_count - 2) / 2), 2, tuple(slots)), "spotlight-wide2"
-    if configured == "spotlight-tall":
-        rows, aux_columns = _auto_shape(pane_count - 1)
-        slots = [PaneSlot(0, 0, 0, row_span=rows)]
-        slots.extend(
-            PaneSlot(index, (index - 1) // aux_columns, 1 + (index - 1) % aux_columns)
-            for index in range(1, pane_count)
-        )
-        return PaneTopology(rows, 1 + aux_columns, tuple(slots)), "spotlight-tall"
     if configured == "auto":
         rows, columns = _auto_shape(pane_count)
     else:
@@ -267,17 +259,7 @@ def _rendered_name(configured: str) -> RenderedLayout:
         return "spotlight-wide"
     if configured == "spotlight-wide2":
         return "spotlight-wide2"
-    if configured == "spotlight-tall":
-        return "spotlight-tall"
     return "grid"
-
-
-def _tall_is_feasible(pane_count: int, width: int, gutter: int) -> bool:
-    if pane_count == 1:
-        return True
-    _, aux_columns = _auto_shape(pane_count - 1)
-    columns = 1 + aux_columns
-    return width >= columns * MIN_PANE_WIDTH + (columns - 1) * gutter
 
 
 def _allocate_axis(total: int, weights: tuple[int, ...], gutter: int) -> tuple[int, ...]:

@@ -9,12 +9,18 @@ import ccusage_viz.tui as tui_module
 from ccusage_viz.bootstrap import build_query_runtime
 from ccusage_viz.cli import _to_options, build_parser
 from ccusage_viz.cli import parse_pane_fragment as parse_dashboard_pane
-from ccusage_viz.command_copy import format_dashboard_pane_command, format_full_dashboard_command
+from ccusage_viz.command_copy import (
+    format_command,
+    format_dashboard_pane_command,
+    format_full_command,
+    format_full_dashboard_command,
+)
 from ccusage_viz.configuration import standalone_from_pane
 from ccusage_viz.coverage import DateCoverage, DateInterval
 from ccusage_viz.deltas import RefreshRanks
 from ccusage_viz.domain import Notice, SourceKind, TokenUsage, UsageRecord
 from ccusage_viz.errors import UsageError
+from ccusage_viz.formatting import display_width
 from ccusage_viz.historical_component import HistoricalChartComponent, UsageSnapshot
 from ccusage_viz.historical_render import RenderedChart
 from ccusage_viz.i18n import load_translator
@@ -42,7 +48,10 @@ from ccusage_viz.tui import (
     _new_pane_options,
     _next_header_summary,
     _pane_adjustment_state,
+    _pane_content_actions,
+    _pane_copy_payload,
     _pane_render,
+    _practical_grid,
     _query_affecting_adjustment,
     _replace_header_interval,
     _replace_pane,
@@ -119,11 +128,24 @@ def test_dashboard_layout_weights_round_trip_through_full_command() -> None:
     full = format_full_dashboard_command(dashboard)
     reparsed = _to_options(parser.parse_args(shlex.split(full)[1:]))
 
-    assert "--column-weight 2 --column-weight 1" in full
-    assert "--row-weight 3" in full
+    assert "--column-weight 16 --column-weight 8" in full
+    assert "--row-weight 24" in full
     assert reparsed.host.grid == "1x2"
-    assert reparsed.host.column_weights == (2, 1)
-    assert reparsed.host.row_weights == (3,)
+    assert reparsed.host.column_weights == (16, 8)
+    assert reparsed.host.row_weights == (24,)
+
+
+def test_full_dashboard_command_explicit_grid_overrides_source_named_layout() -> None:
+    parser = build_parser(load_translator("en"))
+    dashboard = _to_options(parser.parse_args(["dashboard", "spotlight-wide"]))
+
+    full = format_full_dashboard_command(dashboard, grid="2x2")
+    reparsed = _to_options(parser.parse_args(shlex.split(full)[1:]))
+
+    assert "--grid 2x2" in full
+    assert "--layout" not in full
+    assert reparsed.host.grid == "2x2"
+    assert reparsed.host.layout is None
 
 
 def test_full_dashboard_command_serializes_runtime_layout_weight_overrides() -> None:
@@ -137,8 +159,8 @@ def test_full_dashboard_command_serializes_runtime_layout_weight_overrides() -> 
     )
     reparsed = _to_options(parser.parse_args(shlex.split(full)[1:]))
 
-    assert reparsed.host.column_weights == (2, 1)
-    assert reparsed.host.row_weights == (3, 1)
+    assert reparsed.host.column_weights == (16, 8)
+    assert reparsed.host.row_weights == (18, 6)
 
 
 def test_full_dashboard_command_includes_private_and_runtime_configuration() -> None:
@@ -159,7 +181,7 @@ def test_full_dashboard_command_includes_private_and_runtime_configuration() -> 
     full = format_full_dashboard_command(
         dashboard,
         dashboard.panes,
-        grid="auto",
+        layout="auto",
         header_style="compact",
         header_summary="month",
         dashboard_style="split",
@@ -189,10 +211,59 @@ def test_dashboard_pane_copy_materializes_canonical_standalone_interval() -> Non
     ) == ("ccuv timeline --period 7d --interval 30 --density compact")
     assert format_dashboard_pane_command(
         standalone_from_pane(base, stack), refresh_interval=30
-    ) == ("ccuv stack --period 14d --interval 30 --density compact")
+    ) == ("ccuv stack --interval 30 --density compact")
     assert format_dashboard_pane_command(
         standalone_from_pane(base, monitor), refresh_interval=30, sampling_interval=15
-    ) == ("ccuv monitor --window 1h --by model --top 3 --style line --density compact")
+    ) == ("ccuv monitor --by model --density compact")
+
+
+def test_dashboard_pane_command_views_wrap_without_affecting_copy_payload() -> None:
+    parser = build_parser(load_translator("en"))
+    dashboard = _to_options(
+        parser.parse_args(
+            [
+                "dashboard",
+                "--ccusage-bin",
+                "/private/bin/ccusage",
+                "--pane",
+                "timeline --period 7d --by model --top 4 --agent claude --model sonnet --project project --density minimal",
+            ]
+        )
+    )
+    pane = _new_pane(standalone_from_pane(dashboard, dashboard.panes[0]), "pane:command")
+    terminal = Terminal(24, 16, False, True)
+    active = pane.component.candidate
+
+    pane.body_view = "command"
+    concise = _pane_render(pane, load_translator("en"), terminal).chart
+    assert "\n" in concise
+    assert all(display_width(line) <= terminal.width for line in concise.splitlines())
+    assert " ".join(concise.splitlines()) == format_command(active)
+
+    pane.body_view = "full-command"
+    full = _pane_render(pane, load_translator("en"), terminal).chart
+    assert "\n" in full
+    assert all(display_width(line) <= terminal.width for line in full.splitlines())
+    assert "--ccusage-bin" in full
+    assert format_full_command(active).count("\n") == 0
+    assert _pane_copy_payload(pane, load_translator("en"), terminal) == format_full_command(active)
+
+
+def test_dashboard_pane_copy_actions_follow_body_view() -> None:
+    assert (
+        "y copy"
+        not in _adjustment_footer(
+            "Current status: running", "timeline", "quick", "chart", load_translator("en"), 120
+        )[3]
+    )
+    for view in ("command", "full-command", "data-table", "data-json"):
+        assert ("y", "copy") in _pane_content_actions(view)
+        assert (
+            "y copy"
+            in _adjustment_footer(
+                "Current status: running", "timeline", "quick", view, load_translator("en"), 120
+            )[3]
+        )
 
 
 def test_dashboard_pane_density_defaults_to_compact_and_preserves_explicit_values() -> None:
@@ -383,6 +454,135 @@ def test_dashboard_pause_cancels_automatic_panes_and_manual_refresh_remains_allo
     ]
 
 
+def test_dashboard_manual_refresh_notice_clears_after_its_final_completion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parser = build_parser(load_translator("en"))
+    options = _to_options(
+        parser.parse_args(
+            [
+                "dashboard",
+                "--demo",
+                "--header-style",
+                "hidden",
+                "--header-summary",
+                "none",
+                "--pane",
+                "timeline",
+            ]
+        )
+    )
+    frames: list[object] = []
+    release_manual = threading.Event()
+
+    class Runtime:
+        def cancel(self) -> None:
+            pass
+
+    class Submission:
+        def __init__(self, generation: int, *, manual: bool) -> None:
+            self.generation = generation
+            self.purpose = tui_module.HistoricalPurpose.PRIMARY
+            self.handle = self
+            self.manual = manual
+            self.cancelled = threading.Event()
+
+        def cancel(self) -> None:
+            self.cancelled.set()
+
+        def result(self) -> object:
+            if self.manual:
+                assert release_manual.wait(1)
+                return object()
+            assert self.cancelled.wait(1)
+            raise RuntimeError("cancelled startup query")
+
+    class Component:
+        def __init__(self, selected: object, **_kwargs: object) -> None:
+            self.candidate = selected
+            self.accepted_generation = None
+            self.accepted_options = None
+            self.accepted_at = None
+            self.error = None
+            self.generation = 0
+            self.snapshot = None
+
+        def configure(self, selected: object, *, data_affecting: bool) -> None:
+            if selected != self.candidate:
+                self.candidate = selected
+                if data_affecting:
+                    self.generation += 1
+
+        def missing_comparison_coverage(self) -> DateCoverage:
+            return DateCoverage()
+
+        def submit(self, trigger: QueryTrigger, **_kwargs: object) -> Submission:
+            return Submission(self.generation, manual=trigger is QueryTrigger.REFRESH)
+
+        def accept(self, _completion: object) -> bool:
+            chart = self.candidate.chart
+            self.snapshot = UsageSnapshot(
+                (),
+                (),
+                0.1,
+                coverage=DateCoverage.from_interval(chart.date_range.since, chart.date_range.until),
+            )
+            self.accepted_generation = self.generation
+            self.accepted_options = self.candidate
+            self.accepted_at = tui_module.datetime.now().astimezone()
+            return True
+
+        def fail(self, *_args: object, **_kwargs: object) -> bool:
+            return True
+
+    class Screen:
+        def __init__(self, _stream: object) -> None:
+            pass
+
+        def paint(self, frame: object, **_kwargs: object) -> None:
+            frames.append(frame)
+
+        def finish(self) -> None:
+            pass
+
+    keys = iter((KeyEvent(" "), KeyEvent("r")))
+    saw_notice = False
+
+    def read_events(_decoder: object, _timeout: float) -> KeyEvent | None:
+        nonlocal saw_notice
+        try:
+            return next(keys)
+        except StopIteration:
+            pass
+        rendered = [frame.rows for frame in frames]
+        if any("refresh requested · in progress" in rows for rows in rendered):
+            saw_notice = True
+            release_manual.set()
+        if saw_notice and rendered and "refresh requested · in progress" not in rendered[-1]:
+            return KeyEvent("\x03")
+        threading.Event().wait(0.01)
+        return None
+
+    monkeypatch.setattr(tui_module, "build_query_runtime", Runtime)
+    monkeypatch.setattr(tui_module, "build_chart_registry", lambda: object())
+    monkeypatch.setattr(tui_module, "HistoricalChartComponent", Component)
+    monkeypatch.setattr(tui_module, "FramePainter", Screen)
+    monkeypatch.setattr(tui_module, "tui_input_mode", nullcontext)
+    monkeypatch.setattr(tui_module, "read_event", read_events)
+    monkeypatch.setattr(
+        tui_module, "get_terminal_size", lambda: __import__("os").terminal_size((100, 30))
+    )
+    monkeypatch.setattr(tui_module, "_pane_render", lambda *_args: tui_module.PaneRender("chart"))
+
+    assert tui_module.run_tui(options, load_translator("en")) == 0
+
+    refreshing = [frame.rows for frame in frames if "refresh requested · in progress" in frame.rows]
+    assert refreshing
+    notice_row = refreshing[-1].index("refresh requested · in progress")
+    assert "r refresh all" in refreshing[-1][notice_row + 1]
+    assert "refresh requested · in progress" not in frames[-1].rows
+
+
 def test_dashboard_layout_editor_is_visible_transactional_and_returns_to_global(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -450,14 +650,14 @@ def test_dashboard_layout_editor_is_visible_transactional_and_returns_to_global(
     keys = iter(
         (
             KeyEvent("g"),
-            KeyEvent("z"),
+            KeyEvent("Z"),
             *(KeyEvent("\x7f") for _ in range(3)),
             *(KeyEvent(char) for char in "1x1"),
             KeyEvent("\r"),
             *(KeyEvent("\x7f") for _ in range(3)),
             *(KeyEvent(char) for char in "3x2"),
             KeyEvent("\r"),
-            KeyEvent("z"),
+            KeyEvent("Z"),
             KeyEvent("\x1b"),
             KeyEvent("z"),
             KeyEvent("\x1b"),
@@ -479,25 +679,13 @@ def test_dashboard_layout_editor_is_visible_transactional_and_returns_to_global(
 
     assert tui_module.run_tui(options, load_translator("en")) == 0
     painted = ["\n".join(frame.rows) for frame in frames]
+    assert any("Set grid (ROWSxCOLUMNS): 2x2" in frame for frame in painted)
     assert any(
-        "Set layout (auto, ROWSxCOLUMNS, spotlight-wide, spotlight-wide2, or spotlight-tall): 2x2"
-        in frame
+        "Set grid (ROWSxCOLUMNS): 1x1" in frame
+        and "Grid '1x1' cannot display all 4 panes." in frame
         for frame in painted
     )
-    assert any(
-        "Set layout (auto, ROWSxCOLUMNS, spotlight-wide, spotlight-wide2, or spotlight-tall): 1x1"
-        in frame
-        and "Layout '1x1' cannot display all 4 panes." in frame
-        for frame in painted
-    )
-    assert (
-        sum(
-            "Set layout (auto, ROWSxCOLUMNS, spotlight-wide, spotlight-wide2, or spotlight-tall): 3x2"
-            in frame
-            for frame in painted
-        )
-        >= 2
-    )
+    assert sum("Set grid (ROWSxCOLUMNS): 3x2" in frame for frame in painted) >= 2
     assert any("Current status: running · 3x2" in frame for frame in painted)
 
 
@@ -894,8 +1082,7 @@ def test_dashboard_pane_render_retains_notices_for_each_source_pane() -> None:
     ]
 
     assert rendered[0].notices == (
-        "Ranking includes Codex project-session usage; daily Summary excludes it because ccusage "
-        "has no per-day values",
+        "Ranking includes Codex session usage; daily Summary excludes it",
     )
     assert rendered[0].notices[0] not in rendered[0].chart
     assert rendered[1].notices == rendered[0].notices
@@ -1039,6 +1226,16 @@ def test_dashboard_pane_adjustment_state_changes_with_page() -> None:
     assert quick != advanced
 
 
+def test_calendar_advanced_adjustment_uses_the_shared_filter_control() -> None:
+    parser = build_parser(load_translator("en"))
+    options = _to_options(parser.parse_args(["dashboard", "--pane", "calendar"]))
+    pane = _new_pane(standalone_from_pane(options, options.panes[0]), "pane:calendar")
+    translator = load_translator("en")
+
+    assert _pane_adjustment_state(pane, "advanced", translator) == "running"
+    assert _adjustment_controls("calendar", "advanced", translator) == "f filters"
+
+
 def test_tui_adjustment_footer_separates_dashboard_management() -> None:
     translator = load_translator("en")
     timeline_quick = _adjustment_controls("timeline", "quick", translator)
@@ -1061,9 +1258,11 @@ def test_tui_adjustment_footer_separates_dashboard_management() -> None:
     assert not _adjustment_key_supported("monitor", "quick", "i")
     assert not _adjustment_key_supported("monitor", "quick", "B")
 
-    quick_rows = _adjustment_footer("Current status: running", "timeline", "quick", translator, 80)
+    quick_rows = _adjustment_footer(
+        "Current status: running", "timeline", "quick", "chart", translator, 80
+    )
     advanced_rows = _adjustment_footer(
-        "Current status: running", "timeline", "advanced", translator, 80
+        "Current status: running", "timeline", "advanced", "chart", translator, 80
     )
     assert len(quick_rows) == 5
     assert "a Advanced" in quick_rows[1]
@@ -1422,17 +1621,33 @@ def test_tui_input_decodes_keys_and_fragmented_mouse_press() -> None:
     assert decoder.next() == MouseEvent(0, 20, 5, True, 0)
 
 
-def test_tui_parses_runtime_grid_with_capacity() -> None:
-    assert parse_grid("AUTO", 3) == "auto"
+def test_tui_parses_runtime_numeric_grid_with_capacity() -> None:
     assert parse_grid("2X2", 3) == "2x2"
-    assert parse_grid("spotlight-wide2", 3) == "spotlight-wide2"
+    assert parse_grid("auto", 3) is None
+    assert parse_grid("spotlight-wide2", 3) is None
     assert parse_grid("wide", 3) is None
     assert parse_grid("1x2", 3) is None
 
 
 @pytest.mark.parametrize(
+    ("pane_count", "expected"),
+    ((1, "1x1"), (2, "1x2"), (3, "2x2"), (4, "2x2"), (5, "3x2")),
+)
+def test_runtime_numeric_grid_draft_uses_practical_two_column_shape(
+    pane_count: int, expected: str
+) -> None:
+    assert _practical_grid(pane_count) == expected
+
+
+@pytest.mark.parametrize(
     ("grid", "pane_count", "expected"),
-    (("auto", 5, "auto"), ("2x2", 4, "2x2"), ("2x2", 5, "3x2"), ("3x1", 4, "4x1")),
+    (
+        ("auto", 5, "auto"),
+        ("spotlight-wide2", 5, "spotlight-wide2"),
+        ("2x2", 4, "2x2"),
+        ("2x2", 5, "3x2"),
+        ("3x1", 4, "4x1"),
+    ),
 )
 def test_pane_insertion_expands_rows_while_preserving_columns(
     grid: str, pane_count: int, expected: str
@@ -1479,6 +1694,128 @@ def test_insert_pane_uses_list_index_and_starts_only_new_pane() -> None:
 
     assert panes == [before, inserted, focused, after]
     assert started == [1]
+
+
+@pytest.mark.parametrize(
+    ("key", "expected"),
+    (("J", (11, 13)), ("K", (13, 11))),
+)
+def test_dashboard_pane_height_keys_adjust_only_shared_row_weights(
+    monkeypatch: pytest.MonkeyPatch,
+    key: str,
+    expected: tuple[int, int],
+) -> None:
+    parser = build_parser(load_translator("en"))
+    options = _to_options(
+        parser.parse_args(
+            [
+                "dashboard",
+                "--demo",
+                "--grid",
+                "2x1",
+                "--header-style",
+                "hidden",
+                "--header-summary",
+                "none",
+                "--pane",
+                "ranking",
+                "--pane",
+                "timeline",
+            ]
+        )
+    )
+    copied: list[str] = []
+
+    class Runtime:
+        def cancel(self) -> None:
+            pass
+
+    class Submission:
+        def __init__(self, generation: int) -> None:
+            self.generation = generation
+            self.purpose = tui_module.HistoricalPurpose.PRIMARY
+            self.handle = self
+            self.cancelled = threading.Event()
+
+        def cancel(self) -> None:
+            self.cancelled.set()
+
+        def result(self) -> object:
+            self.cancelled.wait(1)
+            raise RuntimeError("cancelled startup query")
+
+    class Component:
+        def __init__(self, selected: object, **_kwargs: object) -> None:
+            self.candidate = selected
+            self.accepted_options = None
+            self.error = None
+            self.generation = 0
+            self.snapshot = None
+
+        def configure(self, selected: object, *, data_affecting: bool) -> None:
+            if selected != self.candidate:
+                self.candidate = selected
+                if data_affecting:
+                    self.generation += 1
+
+        def missing_comparison_coverage(self) -> DateCoverage:
+            return DateCoverage()
+
+        def submit(self, _trigger: QueryTrigger, **_kwargs: object) -> Submission:
+            return Submission(self.generation)
+
+        def fail(self, *_args: object, **_kwargs: object) -> bool:
+            return True
+
+    class Screen:
+        def __init__(self, _stream: object) -> None:
+            pass
+
+        def paint(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def finish(self) -> None:
+            pass
+
+    keys = iter(
+        (
+            KeyEvent("s"),
+            KeyEvent(key),
+            KeyEvent("\x1b"),
+            KeyEvent("v"),
+            KeyEvent("y"),
+            KeyEvent("\x03"),
+        )
+    )
+    monkeypatch.setattr(tui_module, "build_query_runtime", Runtime)
+    monkeypatch.setattr(tui_module, "build_chart_registry", lambda: object())
+    monkeypatch.setattr(tui_module, "HistoricalChartComponent", Component)
+    monkeypatch.setattr(tui_module, "FramePainter", Screen)
+    monkeypatch.setattr(tui_module, "tui_input_mode", nullcontext)
+    monkeypatch.setattr(tui_module, "read_event", lambda _decoder, _timeout: next(keys))
+    monkeypatch.setattr(tui_module, "copy_command", lambda command: copied.append(command) or True)
+    monkeypatch.setattr(
+        tui_module, "get_terminal_size", lambda: __import__("os").terminal_size((100, 30))
+    )
+    monkeypatch.setattr(tui_module, "_pane_render", lambda *_args: tui_module.PaneRender("chart"))
+
+    assert tui_module.run_tui(options, load_translator("en")) == 0
+
+    assert copied
+    assert f"--row-weight {expected[0]} --row-weight {expected[1]}" in copied[-1]
+    assert "--top 10" in copied[-1]
+
+
+def test_dashboard_pane_adjustment_preserves_chart_top_shortcuts() -> None:
+    parser = build_parser(load_translator("en"))
+    base = _to_options(parser.parse_args(["ranking"]))
+
+    assert tui_module.adjust_standalone(base, "+").chart.top == base.chart.top + 1
+    assert tui_module.adjust_standalone(base, "-").chart.top == base.chart.top - 1
+    assert tui_module._adjustment_key_supported("ranking", "quick", "+")
+    assert tui_module._adjustment_key_supported("ranking", "quick", "-")
+    assert not tui_module._adjustment_key_supported("ranking", "quick", "J")
+    assert not tui_module._adjustment_key_supported("ranking", "quick", "K")
 
 
 def test_pane_advanced_actions_exclude_dashboard_management() -> None:

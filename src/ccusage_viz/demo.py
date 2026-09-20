@@ -41,7 +41,7 @@ def generate_demo(
                 input=base * 3 // 10,
                 output=base * 2 // 10,
                 cache_read=base * 3 // 10,
-                cache_creation=base // 10,
+                cache_creation=base - (base * 3 // 10 + base * 2 // 10 + base * 3 // 10),
             )
             records.append(
                 UsageRecord(

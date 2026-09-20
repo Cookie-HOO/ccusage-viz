@@ -8,8 +8,12 @@ from ccusage_viz.options import CalendarConfig, RankingConfig, StackConfig, Time
 from ccusage_viz.processing.historical import HistoricalModel, process_historical
 from ccusage_viz.render.base import RenderContext
 
-HistoricalConfigType = type[TimelineConfig] | type[CalendarConfig] | type[StackConfig] | type[RankingConfig]
-HistoricalModelType = type[TimelineModel] | type[CalendarModel] | type[StackModel] | type[RankingModel]
+HistoricalConfigType = (
+    type[TimelineConfig] | type[CalendarConfig] | type[StackConfig] | type[RankingConfig]
+)
+HistoricalModelType = (
+    type[TimelineModel] | type[CalendarModel] | type[StackModel] | type[RankingModel]
+)
 HistoricalRenderer = Callable[[HistoricalModel, RenderContext], str]
 
 

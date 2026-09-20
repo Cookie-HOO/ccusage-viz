@@ -23,7 +23,6 @@ from ccusage_viz.dashboard_layout import (
         ("AUTO", 3, "auto"),
         ("SPOTLIGHT-WIDE", 3, "spotlight-wide"),
         ("Spotlight-Wide2", 3, "spotlight-wide2"),
-        ("spotlight-TALL", 3, "spotlight-tall"),
         ("2X2", 4, "2x2"),
     ],
 )
@@ -46,6 +45,8 @@ def test_parse_layout_normalizes_valid_values(value: str, count: int, expected: 
         ("wide", 4),
         ("narrow", 4),
         ("all", 4),
+        ("spotlight-monitor", 4),
+        ("spotlight-" + "tall", 4),
     ],
 )
 def test_parse_layout_rejects_invalid_or_insufficient_values(value: str, count: int) -> None:
@@ -63,7 +64,6 @@ def test_parse_layout_rejects_invalid_or_insufficient_values(value: str, count: 
         ("auto", 5, "auto"),
         ("spotlight-wide", 5, "spotlight-wide"),
         ("spotlight-wide2", 5, "spotlight-wide2"),
-        ("spotlight-tall", 5, "spotlight-tall"),
     ],
 )
 def test_layout_for_pane_count_reconciles_only_fixed_rows(
@@ -72,20 +72,17 @@ def test_layout_for_pane_count_reconciles_only_fixed_rows(
     assert layout_for_pane_count(layout, count) == expected
 
 
-def test_weights_are_positive_canonical_and_reconciled_by_trailing_band() -> None:
-    assert normalize_weights((2, 4, 6)) == (1, 2, 3)
-    assert reconcile_weights((2, 4), 3) == (1, 2, 1)
-    assert reconcile_weights((2, 4, 6), 2) == (1, 2)
-    assert adjust_weight((1, 1), 0, 1) == (3, 1)
-    assert adjust_weight((1, 1), 0, -1) == (1, 3)
-    assert adjust_weight((1, 1, 1), 1, 1) == (2, 3, 1)
-    assert adjust_weight((1, 1, 1), 2, -1) == (2, 3, 1)
-    assert adjust_weight((2, 3), 0, 1) == (3, 2)
-    assert adjust_weight((2, 3), 1, 1) == (1, 4)
-    assert adjust_weight((2, 3), 0, -1) == (1, 4)
-    assert adjust_weight((2, 3), 1, -1) == (3, 2)
-    assert adjust_weight((1, 2, 3), 1, 2) == (1, 4, 1)
-    assert adjust_weight((1, 2, 3), 0, 2) == (5, 1, 6)
+def test_weights_preserve_explicit_resolution_and_use_a_fine_resize_pool() -> None:
+    assert normalize_weights((12, 24, 36)) == (12, 24, 36)
+    assert reconcile_weights((2, 4), 3) == (8, 16, 4)
+    assert reconcile_weights((2, 4, 6), 2) == (8, 16)
+    assert adjust_weight((1, 1), 0, 1) == (13, 11)
+    assert adjust_weight((1, 1), 0, -1) == (11, 13)
+    assert adjust_weight((12, 12), 0, 1) == (13, 11)
+    assert adjust_weight((12, 12), 1, 1) == (11, 13)
+    assert adjust_weight((1, 1, 1), 1, 1) == (8, 9, 7)
+    assert adjust_weight((1, 1, 1), 2, -1) == (8, 9, 7)
+    assert adjust_weight((12, 24, 36), 1, 2) == (12, 26, 34)
     assert adjust_weight((2, 3, 4), 1, 0) == (2, 3, 4)
     assert adjust_weight((1,), 0, 1) == (1,)
     with pytest.raises(ValueError):
@@ -191,49 +188,8 @@ def test_spotlight_wide2_spans_two_leading_rows_and_preserves_auxiliary_hit_test
     assert pane_at(layout, 12, 6) == 1
 
 
-def test_spotlight_tall_features_first_pane_beside_auxiliary_grid() -> None:
-    layout = resolve_pane_layout(layout="spotlight-tall", pane_count=5, width=81, height=31)
-
-    featured = layout.pane(0)
-    assert layout.rendered == "spotlight-tall"
-    assert featured.top == 0
-    assert featured.height == 31
-    assert all(rect.left > featured.left for rect in layout.panes[1:])
-    assert layout.topology.slot(0).row_span == 2
-
-
-def test_spotlight_tall_spans_dividers_and_preserves_auxiliary_hit_testing() -> None:
-    layout = resolve_pane_layout(
-        layout="spotlight-tall", pane_count=5, width=17, height=9, divider_style="line"
-    )
-
-    assert layout.column_sizes == (5, 5, 5)
-    assert layout.row_sizes == (4, 4)
-    assert layout.panes == (
-        PaneRect(0, 0, 0, 5, 9),
-        PaneRect(1, 6, 0, 5, 4),
-        PaneRect(2, 12, 0, 5, 4),
-        PaneRect(3, 6, 5, 5, 4),
-        PaneRect(4, 12, 5, 5, 4),
-    )
-    assert pane_at(layout, 6, 3) == 1
-    assert pane_at(layout, 5, 0) is None
-    assert pane_at(layout, 6, 4) is None
-    assert pane_at(layout, 11, 8) is None
-
-
-def test_narrow_tall_falls_back_without_mutating_configured_layout() -> None:
-    narrow = resolve_pane_layout(layout="spotlight-tall", pane_count=5, width=12, height=31)
-    wide = resolve_pane_layout(layout="spotlight-tall", pane_count=5, width=81, height=31)
-
-    assert narrow.configured == wide.configured == "spotlight-tall"
-    assert narrow.rendered == "spotlight-wide"
-    assert wide.rendered == "spotlight-tall"
-    assert tuple(rect.index for rect in narrow.panes) == tuple(rect.index for rect in wide.panes)
-
-
 def test_one_spotlight_pane_occupies_entire_body() -> None:
-    for configured in ("spotlight-wide", "spotlight-tall"):
+    for configured in ("spotlight-wide", "spotlight-wide2"):
         layout = resolve_pane_layout(layout=configured, pane_count=1, width=79, height=23)
         assert layout.pane(0) == type(layout.pane(0))(0, 0, 0, 79, 23)
 
@@ -256,7 +212,7 @@ def test_weighted_geometry_allocates_shared_logical_bands() -> None:
 
 def test_layout_bands_describe_configured_spotlight_topology() -> None:
     assert layout_bands("spotlight-wide", 5) == type(layout_bands("auto", 1))(3, 2)
-    assert layout_bands("spotlight-tall", 5) == type(layout_bands("auto", 1))(2, 3)
+    assert layout_bands("spotlight-wide2", 5) == type(layout_bands("auto", 1))(4, 2)
 
 
 def test_resolver_has_no_focus_input() -> None:
@@ -269,8 +225,7 @@ def test_resolver_has_no_focus_input() -> None:
         ("auto", 5, 81, 31),
         ("3x2", 5, 80, 30),
         ("spotlight-wide", 6, 79, 29),
-        ("spotlight-tall", 6, 79, 29),
-        ("spotlight-tall", 6, 12, 29),
+        ("spotlight-wide2", 6, 79, 29),
     ],
 )
 def test_resolved_rectangles_are_complete_bounded_and_non_overlapping(

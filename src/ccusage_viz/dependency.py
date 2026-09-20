@@ -44,7 +44,7 @@ def ensure_ccusage(options: LaunchConfig, translator: Translator) -> None:
         response = input(translator.text("prompt.ccusage_install_confirm"))
     except (EOFError, KeyboardInterrupt):
         raise QueryError("error.ccusage_missing", binary=_DEFAULT_CCUSAGE) from None
-    if response:
+    if response not in ("", "y", "Y"):
         raise QueryError("error.ccusage_missing", binary=_DEFAULT_CCUSAGE)
 
     npm = shutil.which("npm")

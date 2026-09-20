@@ -16,6 +16,7 @@ from ccusage_viz.command_copy import (
     format_full_command,
     format_full_command_display,
     format_full_dashboard_command,
+    wrap_command,
 )
 from ccusage_viz.core.time import DateRange, refresh_date_range, today_for_timezone
 from ccusage_viz.coverage import DateCoverage, DateInterval
@@ -25,17 +26,21 @@ from ccusage_viz.dashboard_layout import (
 from ccusage_viz.dashboard_layout import (
     PaneRect,
     adjust_weight,
+    layout_bands,
     layout_for_pane_count,
-    parse_layout,
     reconcile_weights,
     resolve_pane_layout,
 )
 from ccusage_viz.dashboard_layout import (
     pane_at as layout_pane_at,
 )
+from ccusage_viz.dashboard_layout import (
+    parse_grid as parse_numeric_grid,
+)
 from ccusage_viz.data_view import (
     BodyView,
     DashboardBodyView,
+    body_view_copy_kind,
     next_body_view,
     next_dashboard_body_view,
     render_monitor_data,
@@ -78,7 +83,6 @@ from ccusage_viz.monitor_component import (
 from ccusage_viz.options import (
     DASHBOARD_STYLES,
     HEADER_SUMMARIES,
-    CalendarConfig,
     ChartPresentation,
     DashboardLaunch,
     MonitorConfig,
@@ -369,6 +373,15 @@ def _grid_for_pane_count(grid: str, pane_count: int) -> str:
     return layout_for_pane_count(grid, pane_count)
 
 
+def _practical_grid(pane_count: int) -> str:
+    """Return the smallest two-column grid suitable for numeric layout editing."""
+    if pane_count == 1:
+        return "1x1"
+    columns = 2
+    rows = (pane_count + columns - 1) // columns
+    return f"{rows}x{columns}"
+
+
 def _replace_pane(
     panes: list[TuiPane],
     index: int,
@@ -395,8 +408,8 @@ def _insert_pane(
 
 
 def parse_grid(value: str, pane_count: int) -> str | None:
-    """Normalize a session layout only when it can display every pane."""
-    return parse_layout(value, pane_count)
+    """Normalize a runtime numeric grid only when it can display every pane."""
+    return parse_numeric_grid(value, pane_count)
 
 
 @dataclass(frozen=True, slots=True)
@@ -753,13 +766,50 @@ class PaneRender:
     notices: tuple[str, ...] = ()
 
 
+def _pane_copy_payload(pane: TuiPane, translator: Translator, terminal: Terminal) -> str:
+    """Return the focused non-chart pane view's complete clipboard payload."""
+    active = _pane_options(pane)
+    view = body_view_copy_kind(pane.body_view)
+    if view is None:
+        raise ValueError("chart panes do not have a copy payload")
+    if view == "command":
+        return format_command(active)
+    if view == "full-command":
+        return format_full_command(active)
+    component = pane.component
+    if isinstance(component, MonitorComponent):
+        if not isinstance(active.chart, MonitorConfig):
+            raise TypeError("monitor pane component has historical configuration")
+        buckets = component.buckets(
+            max(8, min(32, terminal.width // 4)),
+            now=time.monotonic(),
+            wall=datetime.now().astimezone(),
+        )
+        return render_monitor_data(
+            buckets,
+            by=active.chart.by,
+            translator=translator,
+            terminal=terminal,
+            view=view,
+            complete=True,
+        )
+    return render_snapshot_data(
+        active,
+        component.snapshot,
+        translator,
+        terminal,
+        view=view,
+        complete=True,
+    )
+
+
 def _pane_render(pane: TuiPane, translator: Translator, terminal: Terminal) -> PaneRender:
     active = _pane_options(pane)
     component = pane.component
     if pane.body_view == "command":
-        return PaneRender(format_command(active))
+        return PaneRender(wrap_command(format_command(active), terminal.width))
     if pane.body_view == "full-command":
-        return PaneRender(format_full_command(active))
+        return PaneRender(format_full_command_display(format_full_command(active), terminal.width))
     if pane.body_view in {"data-table", "data-json"}:
         if isinstance(component, MonitorComponent):
             if not isinstance(active.chart, MonitorConfig):
@@ -822,6 +872,7 @@ def _pane_render(pane: TuiPane, translator: Translator, terminal: Terminal) -> P
                     component.last_elapsed,
                     pane.scheduler.interval,
                     "sample",
+                    refreshing=pane.lifecycle.submission is not None,
                 ),
             )
             candidate = PaneRender(
@@ -846,6 +897,7 @@ def _pane_render(pane: TuiPane, translator: Translator, terminal: Terminal) -> P
                 ranking_rank_deltas=pane.rank_deltas if active.chart.kind == "ranking" else None,
                 normalize_titles=True,
                 interval=pane.scheduler.interval,
+                refreshing=pane.lifecycle.submission is not None,
             )
             candidate = PaneRender(rendered.chart, rendered.notices)
     except UsageError as exc:
@@ -920,7 +972,7 @@ _PANE_POSITION_ACTIONS = (
     ("]", "next"),
     ("Tab", "next_pane"),
     ("{ / }", "width"),
-    ("_ / =", "height"),
+    ("J / K", "height"),
 )
 _GLOBAL_ACTIONS = (
     ("t/T", "theme"),
@@ -928,7 +980,24 @@ _GLOBAL_ACTIONS = (
     ("h", "header"),
     ("u", "summary"),
     ("z", "layout"),
+    ("Z", "grid"),
 )
+_LAYOUT_SHORTCUTS = (
+    "wide",
+    "narrow",
+    "all",
+    "auto",
+    "spotlight-wide",
+    "spotlight-wide2",
+)
+_LAYOUT_SHORTCUT_VALUES = {
+    "wide": "2x2",
+    "narrow": "3x1",
+    "all": "5x2",
+    "auto": "auto",
+    "spotlight-wide": "spotlight-wide",
+    "spotlight-wide2": "spotlight-wide2",
+}
 
 
 def _localized_actions(
@@ -971,6 +1040,12 @@ def _query_affecting_adjustment(command: str, key: str) -> bool:
     )
 
 
+def _pane_content_actions(body_view: BodyView) -> tuple[tuple[str, str], ...]:
+    if body_view_copy_kind(body_view) is None:
+        return _PANE_CONTENT_ACTIONS
+    return (*_PANE_CONTENT_ACTIONS, ("y", "copy"))
+
+
 def _management_row(
     label: str,
     actions: tuple[tuple[str, str], ...],
@@ -997,6 +1072,7 @@ def _adjustment_footer(
     state: str,
     command: str,
     page: str,
+    body_view: BodyView,
     translator: Translator,
     width: int,
 ) -> tuple[str, ...]:
@@ -1016,7 +1092,7 @@ def _adjustment_footer(
         clip_width(translator.text("status.tui_pane_management_divider"), width),
         _management_row(
             translator.text("status.tui_pane_content"),
-            _PANE_CONTENT_ACTIONS,
+            _pane_content_actions(body_view),
             translator,
             width,
         ),
@@ -1046,9 +1122,9 @@ def _pane_adjustment_state(pane: TuiPane, page: str, translator: Translator) -> 
             advanced.insert(0, f"Cache {chart.cache}")
         if isinstance(chart, MonitorConfig):
             advanced.append(f"Legend {chart.presentation.legend}")
-        if isinstance(chart, CalendarConfig):
-            advanced.append(translator.text("status.runtime_adjustment_calendar_advanced"))
         settings = " · ".join(advanced)
+    if not settings:
+        return translator.text("status.tui_running")
     return translator.text(
         "status.tui_current_state",
         runtime=translator.text("status.tui_running"),
@@ -1079,6 +1155,42 @@ def _adjustment_target(focused: int | None, key: str, pane_count: int) -> int | 
     if key == "\t":
         return (focused + 1) % pane_count
     return focused
+
+
+def _choose_layout_shortcut(
+    screen: FramePainter,
+    translator: Translator,
+    decoder: InputDecoder,
+    *,
+    height: int,
+    current: str,
+) -> str | None:
+    index = _LAYOUT_SHORTCUTS.index(current) if current in _LAYOUT_SHORTCUTS else 0
+    while True:
+        choices = "\n".join(
+            f"{'›' if item == _LAYOUT_SHORTCUTS[index] else ' '} {item}"
+            for item in _LAYOUT_SHORTCUTS
+        )
+        screen.paint(
+            compose_frame(
+                choices,
+                translator.text("label.adjust_layout"),
+                translator.text("status.tui_layout_shortcuts_controls"),
+                height=height,
+            )
+        )
+        event = read_event(decoder, 0.1)
+        if not isinstance(event, KeyEvent):
+            continue
+        key = event.value
+        if key in {"j", "\x1b[B"}:
+            index = (index + 1) % len(_LAYOUT_SHORTCUTS)
+        elif key in {"k", "\x1b[A"}:
+            index = (index - 1) % len(_LAYOUT_SHORTCUTS)
+        elif key in {"\r", "\n"}:
+            return _LAYOUT_SHORTCUTS[index]
+        elif key == "\x1b":
+            return None
 
 
 def _choose_pane_type(
@@ -1133,8 +1245,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
     executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix="ccusage-viz-tui")
     focused: int | None = None
     active_grid = options.host.grid
-    column_weights: tuple[int, ...] | None = None
-    row_weights: tuple[int, ...] | None = None
+    active_layout = options.host.layout
+    column_weights = options.host.column_weights
+    row_weights = options.host.row_weights
     header_style = options.host.header_style
     dashboard_style = options.host.style
     dashboard_theme = options.host.theme
@@ -1147,6 +1260,8 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
     body_view: DashboardBodyView = "chart"
     chooser_overlay: tuple[int, str] | None = None
     copied_status: str | None = None
+    pane_copy_status: str | None = None
+    manual_refresh_operations: set[OperationToken] = set()
     last_successful_update: datetime | None = None
     last_size: tuple[int, int] | None = None
     screen = FramePainter(sys.stdout)
@@ -1326,6 +1441,24 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
     def collect() -> bool:
         nonlocal last_successful_update
         changed = False
+
+        def retire_manual_refresh(operation: OperationToken) -> None:
+            nonlocal changed
+            if operation not in manual_refresh_operations:
+                return
+            manual_refresh_operations.remove(operation)
+            if not manual_refresh_operations:
+                changed = True
+
+        active_operations = {
+            lifecycle.active
+            for lifecycle in (header.lifecycle, *(pane.lifecycle for pane in panes))
+            if lifecycle.active is not None
+        }
+        if manual_refresh_operations - active_operations:
+            manual_refresh_operations.intersection_update(active_operations)
+            changed = True
+
         completed_header = header.lifecycle.take_completed(lambda future: future.done())
         if completed_header is not None:
             operation, future = completed_header
@@ -1346,6 +1479,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     header.lifecycle.complete(operation, generation=header.generation)
                     header.error = str(exc)
                     changed = True
+            retire_manual_refresh(operation)
             start_header(now=observed_at)
         for index, pane in enumerate(panes):
             completed_pane = pane.lifecycle.take_completed(lambda future: future.done())
@@ -1362,6 +1496,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 active = pane.lifecycle.accepts(operation, generation=loaded.generation)
                 if not active:
                     pane.lifecycle.abandon(operation)
+                    retire_manual_refresh(operation)
                     continue
                 if loaded.error is not None:
                     failed = (
@@ -1433,6 +1568,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     )
                     if failed:
                         changed = True
+            retire_manual_refresh(operation)
             start_pane(index, now=observed_at)
         return changed
 
@@ -1441,6 +1577,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             replace(options, host=replace(options.host, theme=dashboard_theme)),
             tuple(PaneConfig(_pane_options(pane).chart) for pane in panes),
             grid=active_grid,
+            layout=active_layout,
             column_weights=column_weights,
             row_weights=row_weights,
             header_style=header_style,
@@ -1460,10 +1597,14 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             return tuple(rows)
         if adjustment_mode == "pane" and focused is not None:
             pane = panes[focused]
+            state = grid_error or _pane_adjustment_state(pane, adjustment_page, translator)
+            if pane_copy_status is not None and grid_error is None:
+                state = f"{pane_copy_status} · {state}"
             return _adjustment_footer(
-                grid_error or _pane_adjustment_state(pane, adjustment_page, translator),
+                state,
                 _pane_options(pane).chart.kind,
                 adjustment_page,
+                pane.body_view,
                 translator,
                 width,
             )
@@ -1471,7 +1612,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             state = translator.text(
                 "status.tui_current_state",
                 runtime=translator.text("status.tui_running"),
-                settings=f"{active_grid} · {dashboard_theme} · {dashboard_style} · "
+                settings=f"{active_layout or active_grid} · {dashboard_theme} · {dashboard_style} · "
                 f"{header_style} · {header.summary_period}",
             )
             return _global_adjustment_footer(
@@ -1488,6 +1629,11 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             context = f"{copied_status} · {context}"
         return (clip_width(context, width),)
 
+    def notices() -> tuple[str, ...]:
+        if manual_refresh_operations:
+            return (translator.text("status.tui_refreshing"),)
+        return ()
+
     def grid_geometry(
         size_columns: int,
         size_lines: int,
@@ -1495,24 +1641,42 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         status_rows: int,
     ) -> ResolvedPaneLayout:
         nonlocal column_weights, row_weights
-        grid_height = max(3, size_lines - len(controls()) - header_rows - status_rows)
-        equal = resolve_pane_layout(
-            layout=active_grid,
-            pane_count=len(panes),
-            width=size_columns,
-            height=grid_height,
-            divider_style=divider_style,
+        grid_height = max(
+            3, size_lines - len(controls()) - len(notices()) - header_rows - status_rows
         )
-        column_weights = reconcile_weights(column_weights, equal.topology.columns)
-        row_weights = reconcile_weights(row_weights, equal.topology.rows)
+        bands = layout_bands(active_layout or active_grid, len(panes))
+        column_weights = reconcile_weights(column_weights, bands.columns)
+        row_weights = reconcile_weights(row_weights, bands.rows)
         return resolve_pane_layout(
-            layout=active_grid,
+            layout=active_layout or active_grid,
             pane_count=len(panes),
             width=size_columns,
             height=grid_height,
             divider_style=divider_style,
             column_weights=column_weights,
             row_weights=row_weights,
+        )
+
+    def pane_terminal(index: int) -> Terminal:
+        size = get_terminal_size()
+        header_rows = len(
+            _header_lines(
+                header,
+                header_style,
+                translator,
+                Terminal(size.columns, 4, dashboard_theme != "no-color", options.host.ascii),
+                last_successful_update,
+            )
+        )
+        layout = grid_geometry(size.columns, size.lines, header_rows, 0)
+        rect = layout.pane(index)
+        framed = frame_style != "none" or index == focused
+        pane_options = _pane_options(panes[index])
+        return Terminal(
+            max(1, rect.width - 2 if framed else rect.width),
+            max(1, rect.height - 2 if framed else rect.height),
+            pane_options.chart.presentation.theme != "no-color",
+            pane_options.host.ascii,
         )
 
     def paint(*, force: bool = False) -> None:
@@ -1528,7 +1692,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         status = None
         if body_view != "chart":
             body = format_full_command_display(full_dashboard_command(), size.columns)
-            screen.paint(compose_frame(body, status, controls(), height=size.lines), force=force)
+            screen.paint(
+                compose_frame(body, status, controls(), notices(), height=size.lines), force=force
+            )
             return
         initial_pending = all(
             pane.component.accepted_options is None and pane.component.error is None
@@ -1541,7 +1707,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 size.columns,
             )
             body = "\n".join((*header_lines, loading))
-            screen.paint(compose_frame(body, status, controls(), height=size.lines), force=force)
+            screen.paint(
+                compose_frame(body, status, controls(), notices(), height=size.lines), force=force
+            )
             return
 
         def render_panes(layout: ResolvedPaneLayout) -> list[str]:
@@ -1603,7 +1771,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         )
         body = "\n".join((*header_lines, grid))
         screen.paint(
-            compose_frame(body, status, controls(), height=size.lines),
+            compose_frame(body, status, controls(), notices(), height=size.lines),
             force=force,
         )
 
@@ -1725,6 +1893,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                             )
                         else:
                             active_grid = parsed
+                            active_layout = None
                             column_weights = None
                             row_weights = None
                             grid_draft = None
@@ -1741,10 +1910,12 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     if key in {"\r", "\n", "\x1b"}:
                         focused = None
                         adjustment_mode = None
+                        pane_copy_status = None
                     else:
                         next_focused = _adjustment_target(focused, key, len(panes))
                         if next_focused != focused:
                             focused = next_focused
+                            pane_copy_status = None
                         else:
                             assert focused is not None
                             pane = panes[focused]
@@ -1807,6 +1978,23 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                     )
                             elif key == "v":
                                 pane.body_view = next_body_view(pane.body_view)
+                                pane_copy_status = None
+                            elif (
+                                key in {"y", "Y"}
+                                and body_view_copy_kind(pane.body_view) is not None
+                            ):
+                                copy_kind = body_view_copy_kind(pane.body_view)
+                                assert copy_kind is not None
+                                copied = copy_command(
+                                    _pane_copy_payload(pane, translator, pane_terminal(focused))
+                                )
+                                pane_copy_status = translator.text(
+                                    "status.command_copied"
+                                    if copied and copy_kind in {"command", "full-command"}
+                                    else "status.data_copied"
+                                    if copied
+                                    else "status.command_copy_failed"
+                                )
                             elif key == "r":
                                 choice = choose_pane_type("replace", focused)
                                 if choice is not None:
@@ -1831,7 +2019,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                         start=start_new_pane,
                                     )
                                     focused = insert_at
-                            elif key in {"{", "}", "_", "="}:
+                            elif key in {"{", "}", "J", "K"}:
                                 size = get_terminal_size()
                                 header_rows = len(
                                     _header_lines(
@@ -1861,7 +2049,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                     row_weights = adjust_weight(
                                         row_weights,
                                         slot.row,
-                                        1 if key == "=" else -1,
+                                        1 if key == "K" else -1,
                                     )
                             elif key == "[" and focused > 0:
                                 panes[focused - 1], panes[focused] = (
@@ -1879,7 +2067,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                 removed = panes.pop(focused)
                                 removed.scheduler.shutdown()
                                 removed.lifecycle.shutdown()
-                                active_grid = layout_for_pane_count(active_grid, len(panes))
+                                active_grid = _grid_for_pane_count(active_grid, len(panes))
                                 focused = min(focused, len(panes) - 1)
                             elif _adjustment_key_supported(
                                 _pane_options(pane).chart.kind, adjustment_page, key
@@ -1949,7 +2137,29 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                             if any(not header.coverage.covers(item) for item in required.intervals):
                                 refresh_header(trigger=LifecycleTrigger.CONFIGURATION)
                     elif key == "z":
-                        grid_draft = active_grid
+                        shortcut = _choose_layout_shortcut(
+                            screen,
+                            translator,
+                            decoder,
+                            height=get_terminal_size().lines,
+                            current=active_layout or active_grid,
+                        )
+                        if shortcut is not None:
+                            resolved = _LAYOUT_SHORTCUT_VALUES[shortcut]
+                            if shortcut in {"wide", "narrow", "all"}:
+                                active_grid = resolved
+                                active_layout = None
+                            else:
+                                active_layout = resolved
+                            column_weights = None
+                            row_weights = None
+                            grid_error = None
+                    elif key == "Z":
+                        grid_draft = (
+                            _practical_grid(len(panes))
+                            if active_layout is not None
+                            else active_grid
+                        )
                         grid_error = None
                     else:
                         continue
@@ -1960,18 +2170,24 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     paint(force=True)
                     continue
                 if key == "r":
-                    copied_status = translator.text("status.tui_refresh_requested")
-                    paint(force=True)
+                    manual_refresh_operations.clear()
                     for index in range(len(panes)):
-                        refresh(
+                        if refresh(
                             index,
                             trigger=LifecycleTrigger.MANUAL,
                             replace_active=True,
-                        )
-                    refresh_header(
+                        ):
+                            operation = panes[index].lifecycle.active
+                            if operation is not None:
+                                manual_refresh_operations.add(operation)
+                    if refresh_header(
                         trigger=LifecycleTrigger.MANUAL,
                         replace_active=True,
-                    )
+                    ):
+                        operation = header.lifecycle.active
+                        if operation is not None:
+                            manual_refresh_operations.add(operation)
+                    paint(force=True)
                 elif key in {"v", "V"}:
                     body_view = next_dashboard_body_view(body_view)
                     copied_status = None

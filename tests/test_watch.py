@@ -46,7 +46,6 @@ from ccusage_viz.watch import (
     RefreshResult,
     RuntimeAdjustmentResult,
     _paint,
-    _refreshing_status,
     _require_complete_coverage,
     _watch_status,
     render_component,
@@ -548,28 +547,15 @@ def test_watch_paint_keeps_footer_visible_if_body_is_too_tall(
     assert capsys.readouterr().out == "\x1b[H\x1b[2Jstatus\none\ntwo\nwarning\ncontrols"
 
 
-def test_refreshing_hint_is_dimmed_only_when_color_is_enabled() -> None:
-    translator = load_translator("en")
-    status = "ccusage 1.96s · refresh every 5s"
-
-    assert _refreshing_status(status, translator, color=False) == f"{status} · refreshing"
-    assert _refreshing_status(status, translator, color=True) == (
-        f"{status} · \x1b[2mrefreshing\x1b[0m"
-    )
-
-
 @pytest.mark.parametrize(
-    ("paused", "running", "expected"),
+    ("paused", "expected"),
     [
-        (False, False, "ccusage 1.83s · refresh every 5s"),
-        (True, False, "ccusage 1.83s · paused"),
-        (True, True, "ccusage 1.83s · paused · refreshing"),
-        (False, True, "ccusage 1.83s · refresh every 5s · refreshing"),
+        (False, "ccusage 1.83s · refresh every 5s"),
+        (True, "ccusage 1.83s · paused"),
     ],
 )
-def test_watch_status_is_derived_from_pause_and_refresh_state(
+def test_watch_status_is_derived_from_pause_state(
     paused: bool,
-    running: bool,
     expected: str,
 ) -> None:
     assert (
@@ -578,8 +564,6 @@ def test_watch_status_is_derived_from_pause_and_refresh_state(
             load_translator("en"),
             interval=5,
             paused=paused,
-            running=running,
-            color=False,
         )
         == expected
     )
@@ -592,10 +576,8 @@ def test_loading_status_can_show_pause_before_first_result() -> None:
             load_translator("en"),
             interval=5,
             paused=True,
-            running=True,
-            color=False,
         )
-        == "Loading… · paused · refreshing"
+        == "Loading… · paused"
     )
 
 
@@ -653,10 +635,7 @@ def test_ranking_render_shows_daily_summary_and_separate_scope_warning() -> None
     assert rendered.chart.splitlines()[0] == (
         "Today’s tokens 0; vs yesterday = unchanged; vs last We = unchanged"
     )
-    assert rendered.notices == (
-        "Ranking includes Codex project-session usage; daily Summary excludes it because ccusage "
-        "has no per-day values",
-    )
+    assert rendered.notices == ("Ranking includes Codex session usage; daily Summary excludes it",)
     assert rendered.notices[0] not in rendered.chart
 
 

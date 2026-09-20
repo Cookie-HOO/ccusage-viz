@@ -35,6 +35,7 @@ def render_historical_component(
     ranking_rank_deltas: Mapping[Hashable, int] | None = None,
     normalize_titles: bool = False,
     interval: float | None = None,
+    refreshing: bool = False,
 ) -> RenderedChart:
     options = component.accepted_options
     model = component.model
@@ -79,6 +80,7 @@ def render_historical_component(
             component.accepted_at,
             component.snapshot.elapsed if component.snapshot is not None else None,
             interval,
+            refreshing=refreshing,
         ),
     )
     rendered = component.render(context)

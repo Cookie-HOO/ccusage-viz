@@ -29,3 +29,4 @@ def test_demo_sizes_only_change_magnitude() -> None:
     assert since is not None
     assert until is not None
     assert all(since <= record_identity(record)[0] <= until for record in small)
+    assert all(record.usage.other == 0 for record in (*small, *medium, *large))

@@ -85,15 +85,16 @@ def test_dependency_preflight_noninteractive_never_installs(
     assert caught.value.key == "error.ccusage_missing"
 
 
-def test_dependency_preflight_enter_installs_and_verifies_path(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize("response", ["", "y", "Y"])
+def test_dependency_preflight_affirmative_input_installs_and_verifies_path(
+    monkeypatch: pytest.MonkeyPatch, response: str
 ) -> None:
     lookups = iter((None, "/usr/local/bin/npm", "/usr/local/bin/ccusage"))
     calls: list[tuple[list[str], bool, bool]] = []
     monkeypatch.setattr("ccusage_viz.dependency.shutil.which", lambda name: next(lookups))
     monkeypatch.setattr("ccusage_viz.dependency.sys.stdin.isatty", lambda: True)
     monkeypatch.setattr("ccusage_viz.dependency.sys.stdout.isatty", lambda: True)
-    monkeypatch.setattr("builtins.input", lambda prompt: "")
+    monkeypatch.setattr("builtins.input", lambda prompt: response)
 
     def run(command: list[str], *, shell: bool, check: bool) -> CompletedProcess[str]:
         calls.append((command, shell, check))
@@ -106,14 +107,18 @@ def test_dependency_preflight_enter_installs_and_verifies_path(
     assert calls == [(["/usr/local/bin/npm", "install", "-g", "ccusage"], False, False)]
 
 
-@pytest.mark.parametrize("response", ["no", " "])
-def test_dependency_preflight_only_empty_input_confirms(
+@pytest.mark.parametrize("response", ["n", "N", "no", " ", "anything"])
+def test_dependency_preflight_nonaffirmative_input_cancels(
     monkeypatch: pytest.MonkeyPatch, response: str
 ) -> None:
     monkeypatch.setattr("ccusage_viz.dependency.shutil.which", lambda name: None)
     monkeypatch.setattr("ccusage_viz.dependency.sys.stdin.isatty", lambda: True)
     monkeypatch.setattr("ccusage_viz.dependency.sys.stdout.isatty", lambda: True)
     monkeypatch.setattr("builtins.input", lambda prompt: response)
+    monkeypatch.setattr(
+        "ccusage_viz.dependency.subprocess.run",
+        lambda *args, **kwargs: pytest.fail("must not install"),
+    )
 
     with pytest.raises(QueryError) as caught:
         ensure_ccusage(options(), load_translator("en"))

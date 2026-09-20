@@ -12,7 +12,14 @@ from typing import Any, Never, cast
 from ccusage_viz import __version__
 from ccusage_viz.application import run
 from ccusage_viz.dashboard import DASHBOARD_PRESETS
-from ccusage_viz.dashboard_layout import layout_bands, layout_for_pane_count, parse_layout
+from ccusage_viz.dashboard_layout import (
+    NAMED_LAYOUTS,
+    layout_bands,
+    layout_for_pane_count,
+    parse_grid,
+    parse_layout,
+    reconcile_weights,
+)
 from ccusage_viz.diagnostics import color_enabled, format_error
 from ccusage_viz.errors import UsageError, VizError
 from ccusage_viz.i18n import Translator, detect_language, load_translator
@@ -212,7 +219,10 @@ def _add_tui(parser: argparse.ArgumentParser, tr: Translator) -> None:
     parser.add_argument(
         "--pane", dest="panes", action="append", default=[], help=tr.text("help.pane")
     )
-    parser.add_argument("--grid", default="2x2", help=tr.text("help.grid"))
+    parser.add_argument("--grid", help=tr.text("help.grid"))
+    parser.add_argument(
+        "--layout", choices=tuple(sorted(NAMED_LAYOUTS)), help=tr.text("help.layout")
+    )
     parser.add_argument(
         "--column-weight",
         dest="column_weights",
@@ -545,17 +555,34 @@ def _to_options(
                     detail="dashboard options require a preset or at least one --pane",
                 )
             preset_name = "wide"
+        if preset_name is not None and namespace.grid is not None:
+            raise UsageError(
+                "error.arguments",
+                detail="a dashboard preset cannot be combined with --grid",
+            )
+        if namespace.layout is not None and (preset_name is not None or namespace.grid is not None):
+            raise UsageError(
+                "error.arguments",
+                detail="--layout cannot be combined with a dashboard preset or --grid",
+            )
         preset = DASHBOARD_PRESETS.get(preset_name)
         fragments = [*(preset.panels if preset is not None else ()), *namespace.panes]
-        grid = namespace.grid
-        if preset is not None and "grid" not in explicit:
-            grid = preset.grid
-            if namespace.panes:
-                grid = layout_for_pane_count(grid, len(fragments))
-        grid = parse_layout(grid, len(fragments))
-        if grid is None:
-            raise UsageError("error.tui_grid", value=namespace.grid)
-        bands = layout_bands(grid, len(fragments))
+        layout = namespace.layout or (preset.layout if preset is not None else None)
+        configured_layout = layout or (
+            preset.grid if preset is not None else namespace.grid or "2x2"
+        )
+        if preset is not None and namespace.panes:
+            configured_layout = layout_for_pane_count(configured_layout, len(fragments))
+        if layout is not None:
+            layout = parse_layout(configured_layout, len(fragments))
+            if layout is None:
+                raise UsageError("error.tui_grid", value=configured_layout)
+            grid = preset.grid if preset is not None else "2x2"
+        else:
+            grid = parse_grid(configured_layout, len(fragments))
+            if grid is None:
+                raise UsageError("error.tui_grid", value=configured_layout)
+        bands = layout_bands(layout or grid, len(fragments))
         column_weights = tuple(namespace.column_weights) or None
         row_weights = tuple(namespace.row_weights) or None
         for axis, weights, expected in (
@@ -572,6 +599,10 @@ def _to_options(
                     actual=len(weights),
                     layout=grid,
                 )
+        if column_weights is not None:
+            column_weights = reconcile_weights(column_weights, bands.columns)
+        if row_weights is not None:
+            row_weights = reconcile_weights(row_weights, bands.rows)
         for cadence in (
             namespace.refresh_interval,
             namespace.sampling_interval,
@@ -584,6 +615,7 @@ def _to_options(
             ascii=namespace.ascii,
             demo_size=namespace.demo,
             grid=grid,
+            layout=layout,
             column_weights=column_weights,
             row_weights=row_weights,
             refresh_interval=(

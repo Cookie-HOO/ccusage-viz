@@ -160,9 +160,7 @@ class QueryCoordinator:
         fragments = tuple(provider.normalize(result) for result in ordered)
         return provider.assemble(plan, fragments)
 
-    def _run_one(
-        self, run: _PlanRun, provider: Provider, query: PhysicalQuery
-    ) -> PhysicalResult:
+    def _run_one(self, run: _PlanRun, provider: Provider, query: PhysicalQuery) -> PhysicalResult:
         if run.cancelled.is_set() or self._shutdown.is_set():
             raise _cancelled(query)
         key = (provider.provider.provider_id, provider.fingerprint(query))
@@ -284,9 +282,7 @@ class QueryCoordinator:
                 assert result is not None
                 entry.future.set_result(result)
 
-    def _await(
-        self, run: _PlanRun, entry: _InFlightQuery, query: PhysicalQuery
-    ) -> PhysicalResult:
+    def _await(self, run: _PlanRun, entry: _InFlightQuery, query: PhysicalQuery) -> PhysicalResult:
         while True:
             if run.cancelled.is_set() or self._shutdown.is_set():
                 raise _cancelled(query)

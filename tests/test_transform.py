@@ -5,6 +5,7 @@ import pytest
 from ccusage_viz.chart_models import ChangeDirection
 from ccusage_viz.core.time import DateRange
 from ccusage_viz.coverage import DateCoverage
+from ccusage_viz.demo import generate_demo
 from ccusage_viz.domain import ModelBreakdown, Notice, SourceKind, TokenUsage, UsageRecord
 from ccusage_viz.options import Filters, TimelineConfig
 from ccusage_viz.processing import (
@@ -33,6 +34,21 @@ def record(day: int, agent: str, project: str, model: str, total: int) -> UsageR
         make_project_ref(agent, project),
         (ModelBreakdown(model, value),),
     )
+
+
+def test_demo_stack_has_no_other_component() -> None:
+    period = DateRange(date(2026, 1, 1), date(2026, 1, 8), None)
+
+    combined = build_stack(generate_demo("small", period), period, split_cache=False)
+    split = build_stack(generate_demo("small", period), period, split_cache=True)
+
+    assert [component.label for component in combined.components] == ["input", "output", "cache"]
+    assert [component.label for component in split.components] == [
+        "input",
+        "output",
+        "cache_read",
+        "cache_creation",
+    ]
 
 
 def test_filters_or_within_dimension_and_and_across_dimensions() -> None:

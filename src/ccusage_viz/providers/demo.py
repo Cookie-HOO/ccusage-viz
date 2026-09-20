@@ -82,7 +82,9 @@ class DemoProvider:
         )
         sample_ordinal = int(raw_ordinal)
         if sample_ordinal:
-            records = tuple(_scale_record(record, _sample_factor(sample_ordinal)) for record in records)
+            records = tuple(
+                _scale_record(record, _sample_factor(sample_ordinal)) for record in records
+            )
         if cancelled.is_set():
             raise QueryError("error.ccusage_cancelled", query=query.operation)
         return PhysicalResult(query, pickle.dumps(records, protocol=5))
@@ -148,7 +150,10 @@ def _scale_record(record: UsageRecord, factor: int) -> UsageRecord:
         _scale_usage(record.usage, factor),
         record.source,
         record.project,
-        tuple(ModelBreakdown(model.model, _scale_usage(model.usage, factor)) for model in record.models),
+        tuple(
+            ModelBreakdown(model.model, _scale_usage(model.usage, factor))
+            for model in record.models
+        ),
     )
 
 

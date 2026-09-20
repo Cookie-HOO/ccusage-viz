@@ -11,6 +11,7 @@ import plotext as plt
 
 from ccusage_viz.formatting import format_tokens, strip_ansi
 from ccusage_viz.i18n import Translator
+from ccusage_viz.render.palette import get_color_scheme
 
 
 @dataclass(frozen=True, slots=True)
@@ -19,6 +20,7 @@ class RenderAudit:
     query_elapsed: float | None = None
     interval: float | None = None
     cadence: Literal["refresh", "sample"] = "refresh"
+    refreshing: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,6 +108,15 @@ def render_audit(context: RenderContext) -> str:
             context.translator.text(
                 "status.sample_every" if audit.cadence == "sample" else "status.refresh_every",
                 seconds=f"{audit.interval:g}",
+            )
+        )
+    if audit.refreshing:
+        parts.append(
+            styled_text(
+                context.translator.text("status.refreshing"),
+                get_color_scheme(context.color_scheme).muted,
+                context,
+                dim=True,
             )
         )
     return " · ".join(parts)
@@ -210,11 +221,12 @@ def styled_text(
     context: RenderContext,
     *,
     bold: bool = False,
+    dim: bool = False,
 ) -> str:
     """Style text with foreground only, preserving the terminal background."""
     if not context.color:
         return text
-    style = "bold" if bold else None
+    style = "bold" if bold else "dim" if dim else None
     return plt.colorize(text, plt.pixel(foreground=color, style=style)).string()
 
 

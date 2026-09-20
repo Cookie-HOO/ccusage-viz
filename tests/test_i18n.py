@@ -8,8 +8,16 @@ def test_catalogs_have_the_same_keys_and_placeholders() -> None:
     assert EN_MESSAGES.keys() == ZH_MESSAGES.keys()
     assert EN_MESSAGES["label.monitor_sampling"] == "sampling"
     assert ZH_MESSAGES["label.monitor_sampling"] == "采样中"
-    assert "spotlight-wide2" in EN_MESSAGES["help.grid"]
-    assert "spotlight-wide2" in ZH_MESSAGES["help.grid"]
+    assert EN_MESSAGES["help.grid"] == "Pane grid: ROWSxCOLUMNS"
+    assert ZH_MESSAGES["help.grid"] == "Pane 网格：ROWSxCOLUMNS"
+    assert "spotlight-wide2" in EN_MESSAGES["help.dashboard_preset"]
+    assert "spotlight-wide2" in ZH_MESSAGES["help.dashboard_preset"]
+    assert "spotlight-" + "tall" not in EN_MESSAGES["help.dashboard_preset"]
+    assert "spotlight-" + "tall" not in ZH_MESSAGES["help.dashboard_preset"]
+    assert "spotlight-monitor" not in EN_MESSAGES["help.dashboard_preset"]
+    assert "spotlight-monitor" not in ZH_MESSAGES["help.dashboard_preset"]
+    assert EN_MESSAGES["help.layout"] == "Named Pane topology: auto or a spotlight layout"
+    assert ZH_MESSAGES["help.layout"] == "具名 Pane 拓扑：auto 或 Spotlight 布局"
     assert "Advanced" not in EN_MESSAGES["status.tui_global_quick_controls"]
     assert "高级" not in ZH_MESSAGES["status.tui_global_quick_controls"]
     assert "status.tui_global_advanced_controls" not in EN_MESSAGES

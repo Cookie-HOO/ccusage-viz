@@ -53,7 +53,6 @@ from ccusage_viz.terminal_ui import (
     AdjustmentAction,
     adjustment_rows,
     controls_line,
-    dimmed,
     input_mode,
     notice_lines,
     read_key,
@@ -159,6 +158,7 @@ def render_component(
     ranking_deltas: Mapping[Hashable, float] | None = None,
     ranking_rank_deltas: Mapping[Hashable, int] | None = None,
     normalize_titles: bool = False,
+    refreshing: bool = False,
 ) -> RefreshResult:
     snapshot = component.snapshot
     options = component.accepted_options
@@ -175,6 +175,7 @@ def render_component(
         ranking_rank_deltas=ranking_rank_deltas,
         normalize_titles=normalize_titles,
         interval=options.host.interval,
+        refreshing=refreshing,
     )
     return RefreshResult(
         rendered.chart,
@@ -196,29 +197,19 @@ def _paint(
     FramePainter(sys.stdout).paint(compose_frame(body, status, controls, notices, height=height))
 
 
-def _refreshing_status(status: str, translator: Translator, *, color: bool) -> str:
-    refreshing = dimmed(translator.text("status.refreshing"), color=color)
-    return f"{status} · {refreshing}"
-
-
 def _watch_status(
     base: str,
     translator: Translator,
     *,
     interval: float,
     paused: bool,
-    running: bool,
-    color: bool,
 ) -> str:
     suffix = (
         translator.text("status.paused")
         if paused
         else translator.text("status.refresh_every", seconds=f"{interval:g}")
     )
-    parts = [base, suffix]
-    if running:
-        parts.append(dimmed(translator.text("status.refreshing"), color=color))
-    return " · ".join(parts)
+    return f"{base} · {suffix}"
 
 
 def run_runtime_adjustment(
@@ -467,6 +458,7 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
     render_warning: str | None = None
     last_size: tuple[int, int] | None = None
     base_status = translator.text("status.loading")
+    manual_refresh_operations: set[OperationToken] = set()
 
     def historical_chart(config: StandaloneLaunch) -> HistoricalChartConfig:
         if isinstance(config.chart, MonitorConfig):
@@ -492,9 +484,12 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
             translator,
             interval=interval,
             paused=lifecycle.paused,
-            running=lifecycle.submission is not None,
-            color=style_enabled(),
         )
+
+    def notices() -> tuple[str, ...]:
+        active = lifecycle.active
+        manual_refresh_operations.intersection_update({active} if active is not None else ())
+        return (translator.text("status.tui_refreshing"),) if manual_refresh_operations else ()
 
     def controls() -> str:
         if controls_hidden:
@@ -537,7 +532,7 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
                     if controls_hidden
                     else controls_line(controls(), width=size.columns, color=False),
                     notice_lines(
-                        (*last_notices, warning) if last_chart else (),
+                        (*notices(), *last_notices, warning) if last_chart else notices(),
                         width=size.columns,
                         color=False,
                         ascii=current.host.ascii,
@@ -564,6 +559,7 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
                         ranking_ranks.current if current.chart.kind == "ranking" else None
                     ),
                     normalize_titles=True,
+                    refreshing=lifecycle.submission is not None,
                 )
             except UsageError as exc:
                 render_warning = format_error(
@@ -595,7 +591,11 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
                 status(),
                 () if not footer else controls_line(footer, width=size.columns, color=color),
                 notice_lines(
-                    (*last_notices, render_warning) if render_warning is not None else last_notices,
+                    (
+                        (*notices(), *last_notices, render_warning)
+                        if render_warning is not None
+                        else (*notices(), *last_notices)
+                    ),
                     width=size.columns,
                     color=color,
                     ascii=current.host.ascii,
@@ -842,6 +842,7 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
                             )
                             if isinstance(exc, UsageError):
                                 terminal_error = exc
+                    manual_refresh_operations.discard(operation)
                     paint()
                     start_ready(time.monotonic())
 
@@ -849,12 +850,16 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
                 if key == "\x03":
                     raise KeyboardInterrupt
                 if key == "r":
-                    if not request(
+                    manual_refresh_operations.clear()
+                    if request(
                         LifecycleTrigger.MANUAL,
                         now=time.monotonic(),
                         replace_active=True,
                     ):
-                        paint()
+                        operation = lifecycle.active
+                        if operation is not None:
+                            manual_refresh_operations.add(operation)
+                    paint(force=True)
                 elif key in {"h", "H"}:
                     controls_hidden = not controls_hidden
                     paint(force=True)

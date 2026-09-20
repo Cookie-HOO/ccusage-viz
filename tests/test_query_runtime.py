@@ -59,9 +59,7 @@ def test_runtime_delegates_execution_and_cancellation() -> None:
             self.provider: Provider | None = None
             self.cancelled = False
 
-        def submit(
-            self, plan: PhysicalPlan, provider: Provider
-        ) -> QueryHandle[ProviderResult]:
+        def submit(self, plan: PhysicalPlan, provider: Provider) -> QueryHandle[ProviderResult]:
             self.plan = plan
             self.provider = provider
             future: Future[ProviderResult] = Future()

@@ -20,9 +20,7 @@ from ccusage_viz.core.time import (
         ("5y", (5, "y")),
     ],
 )
-def test_parse_period_accepts_supported_units(
-    period: str, expected: tuple[int, str]
-) -> None:
+def test_parse_period_accepts_supported_units(period: str, expected: tuple[int, str]) -> None:
     assert parse_period(period) == expected
 
 

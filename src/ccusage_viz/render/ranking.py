@@ -214,7 +214,10 @@ def render_ranking(model: RankingModel, context: RenderContext) -> str:
         prefix = f"{rank:>2} {rank_marker} {activity} "
         label_text = pad_width(truncate_width(label, label_width), label_width)
         if model.is_observed and context.style == "list":
-            row = f"{prefix}{label_text} {pad_width(formatted, value_width, align='right')} {value_marker}"
+            row = (
+                f"{rank_marker} {activity} {label_text} "
+                f"{pad_width(formatted, value_width, align='right')} {value_marker}"
+            )
             lines.append(center_text(row, context.width))
         else:
             lines.append(

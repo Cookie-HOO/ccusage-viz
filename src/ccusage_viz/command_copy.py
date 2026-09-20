@@ -1,15 +1,13 @@
 from __future__ import annotations
 
-import re
 import shlex
 import subprocess
 from dataclasses import replace
-from pathlib import PurePath
 from shutil import which
 
 from ccusage_viz.formatting import char_width, display_width
 from ccusage_viz.options import (
-    DEFAULT_STYLES,
+    COMMAND_DEFAULT_PERIODS,
     DashboardLaunch,
     MonitorConfig,
     PaneConfig,
@@ -17,17 +15,8 @@ from ccusage_viz.options import (
     StackConfig,
     StandaloneLaunch,
     TimelineConfig,
+    compatible_styles,
 )
-
-_WINDOWS_PATH = re.compile(r"^[A-Za-z]:[\\/]")
-
-
-def _is_private_path(value: str) -> bool:
-    return (
-        value.startswith(("/", "~"))
-        or bool(_WINDOWS_PATH.match(value))
-        or PurePath(value).is_absolute()
-    )
 
 
 def _window_duration(seconds: int) -> str:
@@ -35,17 +24,31 @@ def _window_duration(seconds: int) -> str:
     return f"{seconds // (3600 if unit == 'h' else 60)}{unit}"
 
 
+def _default_interval(config: StandaloneLaunch) -> float:
+    if isinstance(config.chart, MonitorConfig):
+        return 1.0 if config.host.demo_size is not None else 15.0
+    return 10.0
+
+
+def _is_default_top(chart: object, by: str | None, top: int | None) -> bool:
+    if isinstance(chart, RankingConfig):
+        return top == 10
+    return by is not None and top == 3
+
+
 def _chart_args(config: StandaloneLaunch, *, full: bool, pane: bool = False) -> list[str]:
     chart = config.chart
     args = [chart.kind]
     if isinstance(chart, MonitorConfig):
-        args.extend(("--window", _window_duration(chart.window_seconds)))
-        if not pane and (full or config.host.interval != 15.0):
+        if full or chart.window_seconds != 3600:
+            args.extend(("--window", _window_duration(chart.window_seconds)))
+        if not pane and (full or config.host.interval != _default_interval(config)):
             args.extend(("--interval", f"{config.host.interval:g}"))
     else:
         date_range = chart.date_range
         if date_range.relative_until and date_range.period is not None:
-            args.extend(("--period", date_range.period))
+            if full or date_range.period != COMMAND_DEFAULT_PERIODS[chart.kind]:
+                args.extend(("--period", date_range.period))
         else:
             args.extend(("--since", date_range.since.isoformat()))
             if not date_range.implicit_until:
@@ -58,9 +61,9 @@ def _chart_args(config: StandaloneLaunch, *, full: bool, pane: bool = False) -> 
             if full or chart.weekdays != "show":
                 args.extend(("--weekdays", chart.weekdays))
     by, top = getattr(chart, "by", None), getattr(chart, "top", None)
-    if by is not None:
+    if by is not None and (full or not isinstance(chart, RankingConfig) or by != "project"):
         args.extend(("--by", by))
-    if top is not None:
+    if top is not None and (full or not _is_default_top(chart, by, top)):
         args.extend(("--top", str(top)))
     if isinstance(chart, (TimelineConfig, RankingConfig)) and (full or chart.other != "show"):
         args.extend(("--other", chart.other))
@@ -71,12 +74,11 @@ def _chart_args(config: StandaloneLaunch, *, full: bool, pane: bool = False) -> 
     for value in chart.filters.models:
         args.extend(("--model", value))
     for value in chart.filters.projects:
-        if full or not _is_private_path(value):
-            args.extend(("--project", value))
+        args.extend(("--project", value))
     if not pane and not isinstance(chart, MonitorConfig):
         if not config.host.watch:
             args.append("--no-watch")
-        elif full or config.host.interval != 10.0:
+        elif full or config.host.interval != _default_interval(config):
             args.extend(("--interval", f"{config.host.interval:g}"))
     if not pane and config.host.demo_size is not None:
         args.extend(("--demo", config.host.demo_size))
@@ -92,7 +94,8 @@ def _chart_args(config: StandaloneLaunch, *, full: bool, pane: bool = False) -> 
     theme = chart.presentation.theme
     if not config.host.ascii and (full or theme != "classic"):
         args.extend(("--theme", theme))
-    if full or chart.presentation.style != DEFAULT_STYLES[chart.kind]:
+    default_style = compatible_styles(chart.kind, by)[0]
+    if full or chart.presentation.style != default_style:
         args.extend(("--style", chart.presentation.style))
     if full or chart.presentation.density != "full":
         args.extend(("--density", chart.presentation.density))
@@ -131,6 +134,7 @@ def format_full_dashboard_command(
     panes: tuple[PaneConfig, ...] | None = None,
     *,
     grid: str | None = None,
+    layout: str | None = None,
     column_weights: tuple[int, ...] | None = None,
     row_weights: tuple[int, ...] | None = None,
     header_style: str | None = None,
@@ -150,10 +154,16 @@ def format_full_dashboard_command(
                 ),
             )
         )
+    if layout is not None:
+        args.extend(("--layout", layout))
+    elif grid is not None:
+        args.extend(("--grid", grid))
+    elif host.layout is not None:
+        args.extend(("--layout", host.layout))
+    else:
+        args.extend(("--grid", host.grid))
     args.extend(
         (
-            "--grid",
-            grid or host.grid,
             "--refresh-interval",
             f"{host.refresh_interval:g}",
             "--sampling-interval",

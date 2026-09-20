@@ -17,7 +17,7 @@ def render_observation(
     model: TimelineModel | RankingModel,
     context: RenderContext,
 ) -> str:
-    if context.density == "minimal" or not model.is_observed:
+    if context.density != "full" or not model.is_observed:
         return ""
     values = (
         _timeline_values(model)

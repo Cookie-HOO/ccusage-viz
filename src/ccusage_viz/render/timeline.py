@@ -126,7 +126,7 @@ def render_timeline(model: TimelineModel, context: RenderContext) -> str:
                 context,
                 text_rows=1
                 + int(model.summary is not None and context.density != "minimal")
-                + int(observed and context.density != "minimal")
+                + int(observed and context.density == "full")
                 + int(show_legend and context.legend_position == "below-title"),
             ),
         )

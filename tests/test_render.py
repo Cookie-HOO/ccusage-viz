@@ -414,7 +414,7 @@ def test_observed_timeline_renders_sampling_state_with_real_translator() -> None
 
 @pytest.mark.parametrize(
     ("density", "current"),
-    [("minimal", False), ("compact", True), ("full", True)],
+    [("minimal", False), ("compact", False), ("full", True)],
 )
 def test_monitor_density_controls_current_observation(
     density: str,
@@ -461,6 +461,41 @@ def test_full_audit_uses_host_supplied_sample_cadence() -> None:
     )
 
     assert output == "updated 10:05:00 · ccusage 0.25s · sample every 15s"
+
+
+def test_full_audit_appends_localized_muted_refreshing_suffix() -> None:
+    audit = RenderAudit(datetime(2026, 1, 1, 10, 5), 0.25, 15, "sample", refreshing=True)
+    plain = render_audit(
+        RenderContext(80, 24, load_translator("en"), color=False, density="full", audit=audit)
+    )
+    colored = render_audit(
+        RenderContext(80, 24, load_translator("en"), density="full", audit=audit)
+    )
+    chinese = render_audit(
+        RenderContext(80, 24, load_translator("zh"), color=False, density="full", audit=audit)
+    )
+
+    assert plain == "updated 10:05:00 · ccusage 0.25s · sample every 15s · refreshing"
+    assert strip_ansi(colored) == plain
+    assert "\x1b[2m" in colored
+    assert "\n" not in colored
+    assert chinese.endswith(" · 刷新中")
+
+
+@pytest.mark.parametrize("density", ("minimal", "compact"))
+def test_non_full_audit_hides_refreshing_suffix(density: str) -> None:
+    output = render_audit(
+        RenderContext(
+            80,
+            24,
+            load_translator("en"),
+            color=False,
+            density=density,
+            audit=RenderAudit(refreshing=True),
+        )
+    )
+
+    assert output == ""
 
 
 def test_monitor_titles_use_recent_range_and_current_tpm_wording() -> None:

@@ -410,7 +410,7 @@ def test_bare_dashboard_is_equivalent_to_wide_preset() -> None:
     ("preset", "kinds"),
     [
         ("spotlight-wide", ("timeline", "stack", "ranking")),
-        ("spotlight-tall", ("ranking", "timeline", "stack")),
+        ("spotlight-wide2", ("timeline", "stack", "ranking", "monitor")),
     ],
 )
 def test_dashboard_spotlight_presets_feature_the_first_pane(
@@ -420,45 +420,61 @@ def test_dashboard_spotlight_presets_feature_the_first_pane(
 
     options = _to_options(parser.parse_args(["dashboard", preset]))
 
-    assert options.host.grid == preset
+    assert options.host.layout == preset
     assert options.host.style == "framed"
     assert tuple(pane.chart.kind for pane in options.panes) == kinds
     assert {pane.chart.presentation.density for pane in options.panes} == {"compact"}
 
 
-def test_dashboard_spotlight_preset_keeps_named_layout_when_extended() -> None:
+@pytest.mark.parametrize(
+    "arguments",
+    (
+        ["dashboard", "spotlight-" + "tall"],
+        ["dashboard", "--pane", "timeline", "--layout", "spotlight-" + "tall"],
+    ),
+)
+def test_dashboard_rejects_removed_spotlight_tall(arguments: list[str]) -> None:
     parser = build_parser(load_translator("en"))
 
-    options = _to_options(parser.parse_args(["dashboard", "spotlight-tall", "--pane", "calendar"]))
-
-    assert options.host.grid == "spotlight-tall"
-    assert tuple(pane.chart.kind for pane in options.panes) == (
-        "ranking",
-        "timeline",
-        "stack",
-        "calendar",
-    )
+    with pytest.raises(UsageError) as caught:
+        parser.parse_args(arguments)
+    assert caught.value.key == "error.arguments"
 
 
-def test_dashboard_accepts_named_layout_for_arbitrary_panes() -> None:
+def test_dashboard_rejects_named_grid_for_arbitrary_panes() -> None:
     parser = build_parser(load_translator("en"))
 
-    options = _to_options(
-        parser.parse_args(
-            [
-                "dashboard",
-                "--pane",
-                "monitor --by model",
-                "--pane",
-                "calendar",
-                "--grid",
-                "spotlight-tall",
-            ]
+    with pytest.raises(UsageError) as caught:
+        _to_options(
+            parser.parse_args(
+                [
+                    "dashboard",
+                    "--pane",
+                    "monitor --by model",
+                    "--pane",
+                    "calendar",
+                    "--grid",
+                    "not-a-grid",
+                ]
+            )
         )
-    )
 
-    assert options.host.grid == "spotlight-tall"
-    assert tuple(pane.chart.kind for pane in options.panes) == ("monitor", "calendar")
+    assert caught.value.key == "error.tui_grid"
+
+
+def test_dashboard_help_exposes_public_named_layouts(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    parser = build_parser(load_translator("en"))
+
+    with pytest.raises(SystemExit) as caught:
+        parser.parse_args(["dashboard", "--help"])
+
+    assert caught.value.code == 0
+    output = capsys.readouterr().out
+    assert "--layout" in output
+    assert "spotlight-wide2" in output
+    assert "spotlight-monitor" not in output
 
 
 def test_dashboard_accepts_spotlight_wide2_as_a_layout_only() -> None:
@@ -471,7 +487,7 @@ def test_dashboard_accepts_spotlight_wide2_as_a_layout_only() -> None:
         "ranking",
         "--pane",
         "monitor --style list",
-        "--grid",
+        "--layout",
         "spotlight-wide2",
         "--column-weight",
         "2",
@@ -487,12 +503,16 @@ def test_dashboard_accepts_spotlight_wide2_as_a_layout_only() -> None:
 
     options = _to_options(parser.parse_args(arguments))
 
-    assert options.host.grid == "spotlight-wide2"
-    assert options.host.column_weights == (2, 1)
-    assert options.host.row_weights == (1, 1, 1)
-    for preset in ("wide", "narrow", "all"):
+    assert options.host.layout == "spotlight-wide2"
+    assert options.host.column_weights == (16, 8)
+    assert options.host.row_weights == (8, 8, 8)
+    for layout in (
+        "auto",
+        "spotlight-wide",
+        "spotlight-wide2",
+    ):
         with pytest.raises(UsageError) as caught:
-            _to_options(parser.parse_args(["dashboard", "--pane", "timeline", "--grid", preset]))
+            _to_options(parser.parse_args(["dashboard", "--pane", "timeline", "--grid", layout]))
         assert caught.value.key == "error.tui_grid"
 
 
@@ -515,8 +535,8 @@ def test_dashboard_accepts_layout_weights_and_tracks_explicit_aliases() -> None:
 
     options = _to_options(parser.parse_args(arguments), explicit=_explicit_fields(arguments))
 
-    assert options.host.column_weights == (2, 1)
-    assert options.host.row_weights == (3,)
+    assert options.host.column_weights == (16, 8)
+    assert options.host.row_weights == (24,)
     assert options.was_explicit("column_weights")
     assert options.was_explicit("row_weights")
 
@@ -560,15 +580,23 @@ def test_dashboard_rejects_invalid_layout_weights(
     assert caught.value.values == values
 
 
-def test_dashboard_spotlight_accepts_explicit_layout_override() -> None:
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["dashboard", "spotlight-wide", "--grid", "2x2"],
+        ["dashboard", "spotlight-wide2", "--layout", "auto"],
+        ["dashboard", "--pane", "timeline", "--grid", "1x1", "--layout", "auto"],
+    ],
+)
+def test_dashboard_rejects_conflicting_preset_grid_and_layout(
+    arguments: list[str],
+) -> None:
     parser = build_parser(load_translator("en"))
 
-    options = _to_options(
-        parser.parse_args(["dashboard", "spotlight-wide", "--grid", "2x2"]),
-        explicit=frozenset({"grid"}),
-    )
+    with pytest.raises(UsageError) as caught:
+        _to_options(parser.parse_args(arguments))
 
-    assert options.host.grid == "2x2"
+    assert caught.value.key == "error.arguments"
 
 
 def test_dashboard_narrow_and_all_presets_expand_to_concrete_state() -> None:
@@ -584,7 +612,7 @@ def test_dashboard_narrow_and_all_presets_expand_to_concrete_state() -> None:
         "monitor",
     )
     assert narrow.host.style == "framed"
-    assert narrow.panes[0].chart.presentation.style == "points"
+    assert narrow.panes[0].chart.presentation.style == "line-points"
     assert narrow.panes[1].chart.by == "project"
     assert narrow.panes[1].chart.top == 10
     assert narrow.panes[2].chart.window_seconds == 3600
@@ -594,9 +622,11 @@ def test_dashboard_narrow_and_all_presets_expand_to_concrete_state() -> None:
 
     assert len(all_panes.panes) == 10
     assert all_panes.host.grid == "5x2"
-    assert all_panes.host.style == "framed"
+    assert all_panes.host.style == "split"
     assert all("--top" not in panel for panel in DASHBOARD_PRESETS["all"].panels)
-    assert {pane.chart.presentation.density for pane in all_panes.panes} == {"compact"}
+    assert {pane.chart.presentation.density for pane in all_panes.panes} == {"minimal"}
+    assert all_panes.panes[5].chart.kind == "stack"
+    assert all_panes.panes[5].chart.presentation.style == "grouped-thin"
     assert len({pane.chart.presentation.theme for pane in all_panes.panes}) > 3
 
 

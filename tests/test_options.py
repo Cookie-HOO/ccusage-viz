@@ -59,6 +59,59 @@ def test_wrap_command_breaks_at_tokens_within_display_width() -> None:
     assert all(display_width(line) <= 20 for line in wrapped.splitlines())
 
 
+def test_concise_commands_omit_effective_defaults() -> None:
+    parser = build_parser(load_translator("en"))
+
+    assert format_command(_to_options(parser.parse_args(["timeline"]))) == "ccuv timeline"
+    assert format_command(_to_options(parser.parse_args(["ranking"]))) == "ccuv ranking"
+    assert format_command(_to_options(parser.parse_args(["monitor"]))) == "ccuv monitor"
+
+    explicit = _to_options(
+        parser.parse_args(
+            [
+                "timeline",
+                "--period",
+                "14d",
+                "--granularity",
+                "day",
+                "--weekdays",
+                "show",
+                "--other",
+                "show",
+                "--style",
+                "linear",
+                "--density",
+                "full",
+                "--legend",
+                "below-title",
+            ]
+        )
+    )
+    assert format_command(explicit) == "ccuv timeline"
+
+
+def test_concise_monitor_command_uses_grouped_effective_defaults() -> None:
+    parser = build_parser(load_translator("en"))
+    grouped = _to_options(parser.parse_args(["monitor", "--by", "model"]))
+
+    assert format_command(grouped) == "ccuv monitor --by model"
+    non_default = _to_options(
+        parser.parse_args(["monitor", "--by", "model", "--top", "4", "--style", "points"])
+    )
+    assert format_command(non_default).endswith("--by model --top 4 --style points")
+
+
+def test_concise_command_keeps_effect_bearing_private_project_filter() -> None:
+    parser = build_parser(load_translator("en"))
+    launch = _to_options(parser.parse_args(["timeline", "--project", "/private/project"]))
+
+    command = format_command(launch)
+    reparsed = _to_options(parser.parse_args(shlex.split(command)[1:]))
+
+    assert command == "ccuv timeline --project /private/project"
+    assert reparsed.chart.filters == launch.chart.filters
+
+
 def test_default_timeline_range_is_fourteen_inclusive_days() -> None:
     result = resolve_date_range(
         "timeline", period=None, since=None, until=None, timezone=None, today=date(2026, 9, 12)
@@ -204,10 +257,7 @@ def test_monitor_copy_keeps_startup_selection() -> None:
             by="model",
         ),
     )
-    assert (
-        format_command(launch)
-        == "ccuv monitor --window 1h --by model --agent claude --model sonnet --style line"
-    )
+    assert format_command(launch) == "ccuv monitor --by model --agent claude --model sonnet"
 
 
 def test_full_command_preserves_implicit_until_semantics() -> None:
@@ -239,7 +289,7 @@ def test_command_serializers_round_trip_typed_launch() -> None:
         ),
     )
     safe, full = format_command(launch), format_full_command(launch)
-    assert "/private" not in safe
+    assert "--project /private/project" in safe
     assert "--project /private/project" in full
     assert "--ccusage-bin /private/bin/ccusage" in full
     assert "--density compact" in safe
