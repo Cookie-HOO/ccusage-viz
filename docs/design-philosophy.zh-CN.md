@@ -75,7 +75,7 @@
 
 5. **历史 Ranking 与观测型 Monitor Ranking 只共享视觉语法。**
 
-   历史 Ranking 对日期范围内累计的 Token 消耗排序。Monitor Ranking 只对最新有效累计采样对排序：Total 与 Model 使用单调时钟实际经过时间计算 TPM，Agent 与 Project 使用该采样对的 Token 增量。仅 Monitor 可用的 `list` 将同一观测条目呈现为居中的紧凑表格，不含条形轨道，但保留序号、变化、活动、数值与趋势标记。保留的 Timeline 历史不会重新定义或回填当前 Ranking 值。两者不共享时间或指标契约。
+   历史 Ranking 对日期范围内累计的 Token 消耗排序。Monitor Ranking 只对最新有效累计采样对排序：Total 与 Model 使用单调时钟实际经过时间计算 TPM，Agent 与 Project 使用该采样对的 Token 增量。仅 Monitor 可用的 `list` 以居中的紧凑名称/数值行呈现相同条目和排序，不使用序号或条形编码，同时保留适用的变化与数值趋势标记。保留的 Timeline 历史不会重新定义或回填当前 Ranking 值。两者不共享时间或指标契约。
 
 ## 数据一致性与异步结果
 
@@ -147,7 +147,7 @@
 
    大部分设置在每次调整时立即提交；可见配置立即更新，能够从已接受事实推导的数据也立即重新计算。因此，普通设置界面中的 Enter 与 Escape 含义相同：都保留当前有效状态并离开界面。两者都不保存、放弃或回滚已经生效的修改。Layout 和 Weights 遵循同一规则。
 
-   **例外：**只有完成输入或选择后才能形成有效取值的操作使用隔离草稿，包括 Filter、Layout、Pane Replace 与 Pane Add。Enter 提交完整且合法的草稿；Escape 只放弃当前子操作并返回父级调整。Layout Editor 显示当前 `auto`、`行x列`、`spotlight-wide`、`spotlight-wide2` 或 `spotlight-tall` 输入，非法输入会保留并显示错误；Dashboard 内容 Preset 不是 Layout 取值。Pane Replace 在原列表索引原子安装全新默认 Pane，并终止被替换 Pane 的生命周期。Pane Add 使用 `N` 在焦点 Pane 列表索引之前插入，使用 `n` 在其后插入。固定布局保留列数；插入需要更多容量时扩展行数，删除后只回收完全为空的末尾行。只有操作具有破坏性、难以恢复或后果不够清晰时才增加二次确认，普通可逆配置不需要确认。
+   **例外：**只有完成输入或选择后才能形成有效取值的操作使用隔离草稿，包括 Filter、数值 Grid、Pane Replace 与 Pane Add。Enter 提交完整且合法的草稿；Escape 只放弃当前子操作并返回父级调整。Dashboard 的 `z` 是即时生效的布局快捷方式选择：`wide`、`narrow`、`all` 和 `auto` 选择矩形快捷布局，三种 Spotlight 则选择非矩形拓扑。它只改变几何，保留现有 Pane 对象、顺序、焦点、已接受数据、配置、Monitor 历史和生命周期。`Z` 打开数值 Grid 草稿，只接受 `行x列`；从 `auto` 或 Spotlight 进入时，以可容纳现有 Pane 数量的最小实用双列网格开始。应用任一操作后，都为结果拓扑重建等权 Weights。Pane Replace 在原列表索引原子安装全新默认 Pane，并终止被替换 Pane 的生命周期。Pane Add 使用 `N` 在焦点 Pane 列表索引之前插入，使用 `n` 在其后插入。固定布局保留列数；插入需要更多容量时扩展行数，删除后只回收完全为空的末尾行。只有操作具有破坏性、难以恢复或后果不够清晰时才增加二次确认，普通可逆配置不需要确认。
 
 6. **已提交配置与展示数据必须描述同一状态。**
 
@@ -183,11 +183,15 @@
 
 1. **Layout 决定拓扑，Weights 只描述当前拓扑内的相对尺寸。**
 
-   `auto` 根据 Pane 数量推导稳定网格；正整数 `行x列` 固定列数并允许末行留空；`spotlight-wide` 让 Pane 0 占据顶部通栏；`spotlight-wide2` 让 Pane 0 和 Pane 1 连续占据各自的顶部通栏，剩余 Pane 在下方按两列排列；`spotlight-tall` 让 Pane 0 占据左侧通栏。这些是拓扑取值，与启动时的内容 Preset 不同。窄终端下，`spotlight-tall` 可以使用 wide 降级拓扑渲染，但不会改变配置身份或 Weights。切换已配置 Layout 会为新拓扑重建等权 Weights，不保留其他 Layout 的隐藏比例，也不从终端像素反推。命令只记录当前 Layout 适用且经最大公约数规范化的正整数 Weights，不记录终端绝对尺寸。
+   `auto` 根据 Pane 数量推导稳定网格；正整数 `行x列` 固定列数并允许末行留空；`spotlight-wide` 让 Pane 0 占据顶部通栏；`spotlight-wide2` 让 Pane 0 和 Pane 1 连续占据各自的顶部通栏，剩余 Pane 在下方按两列排列。后续 Pane 追加到普通两列行中时，这些索引语义保持稳定。
+
+   位置 Preset 是启动模板：它提供初始且有序的 Pane 列表、Dashboard 默认值和布局关联；重复的 `--pane` 片段追加到该列表。`--grid ROWSxCOLUMNS` 为显式 Pane 列表定义数值矩形布局。`--layout auto|spotlight-*` 为显式 Pane 列表定义仅影响几何的具名布局。位置 Preset、`--grid` 和 `--layout` 两两互斥，因此初始内容与几何的来源始终明确。`wide`、`narrow`、`all` 是矩形快捷方式，`auto` 是动态矩形快捷方式，Spotlight 布局是具名的非矩形拓扑。运行时 `z` 选择同一组几何而不替换存活的 Pane 对象，运行时 `Z` 创建显式数值网格草稿。两者都保留 Pane 身份、已接受状态、焦点、配置、Monitor 历史和生命周期状态；改变几何只会重置逻辑 Weights。
+
+   完整命令复制会展开当前 Pane 列表，并输出 `--grid` 或公开的 `--layout`，永不输出其来源 Preset；因此它复现实际会话，而不是重新插入一个模板。切换已配置 Layout 会为新拓扑重建等权 Weights，不保留其他 Layout 的隐藏比例，也不从终端像素反推。命令只记录配置 Layout 适用的精确正整数 Weights，不记录终端绝对尺寸。
 
 2. **Pane 共享列比例与各行高度。**
 
-   调整宽度会改变选中 Pane 所在的共享逻辑列或 Spotlight 分区；调整高度会改变其逻辑行或分区。每次调整与下一条逻辑带转移一个份额；在边界处使用前一条带。若提供份额的带只剩一个份额，则先等比放大全部 Weights 再转移，既保持正整数比例，也让两个调整方向都能继续响应。正整数 Weights 通过最大公约数规范化，复制命令可以复现。跨越多个带的 Spotlight Pane 通过首个带调整，仍覆盖全部跨越带，并不拥有私有尺寸。Pane 重排只交换内容，不改变几何或 Weights；Spotlight 身份只由 Pane 列表索引 0 决定，与交互焦点无关。固定网格插入 Pane 时保留列数，只追加容纳所需的行数；删除只移除完全为空的末尾行。不支持任意坐标、重叠、每格独立拓扑、分页或 Pane 滚动。
+   调整宽度会改变选中 Pane 所在的共享逻辑列或 Spotlight 分区；调整高度会改变其逻辑行或分区。`{`/`}` 调整宽度，`J`/`K` 调整高度，`+`/`-` 保持为图表 Top 控制。合计较低的 Weight 向量会在调整前确定性扩展到至少 24 个份额；更高精度的显式向量保持精确。每次调整随后与下一条逻辑带转移恰好一个份额；在边界处使用前一条带，并且不再约分活动整数。复制命令可复现这些精确的正整数 Weights。跨越多个带的 Spotlight Pane 通过首个带调整，仍覆盖全部跨越带，并不拥有私有尺寸。Pane 重排只交换内容，不改变几何或 Weights；Spotlight 身份只由 Pane 列表索引 0 决定，与交互焦点无关。固定网格插入 Pane 时保留列数，只追加容纳所需的行数；删除只移除完全为空的末尾行。不支持任意坐标、重叠、每格独立拓扑、分页或 Pane 滚动。
 
 3. **Safety Minimum 只保障正确性，不强制舒适可读。**
 
@@ -243,9 +247,9 @@
 
    复制 Dashboard 时展开实际 Layout、Weights、Panes 和全局设置；复制 Pane 时生成可执行的 Standalone 命令并物化 Dashboard Timezone 与适用的 Interval。紧凑命令省略默认值，完整命令显式列出有效配置。
 
-2. **Preset 是完整启动模板，不是运行时模式。**
+2. **Preset 是完整启动模板；运行时布局选择只改变几何。**
 
-   Preset 提供完整的 Dashboard 基础状态，并可在启动命令中接受显式覆盖或追加 Pane；没有 Preset 时，除无参数 `dashboard` 外，必须显式提供 Pane。任一运行时可序列化配置被编辑后，来源标记永久消失；启动时的组合以及刷新、暂停、Controls 可见性、检查视图、查询结果和 Resize 等会话行为不影响标记。复制命令始终展开实际状态，而不是保留 Preset 名称。
+   Preset 提供完整的 Dashboard 基础状态，并可在启动命令中接受显式覆盖或追加 Pane；没有 Preset 时，除无参数 `dashboard` 外，必须显式提供 Pane。运行时 `z` 有意不应用 Preset 的内容模板：它保留当前 Pane 列表，只选择对应几何。复制命令展开实际 Pane 状态并保留当前布局，而不依赖来源 Preset 名称。
 
 3. **会话状态不进入可复现配置。**
 

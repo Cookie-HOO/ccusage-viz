@@ -9,9 +9,11 @@
 - Revisit animation only after a public design pass establishes its purpose, interaction model, terminal constraints, and maintenance boundary. It is not part of the current release contract.
 - Evaluate interval-aware completed-result caches and bounded recent/history refreshes for long-range Watch and Dashboard historical panes. Current polling intentionally remains unchanged until correctness, invalidation, and source-specific semantics are validated.
 
-## 0.2.0
+## 0.2.x
 
-A substantial release for incompatible contract changes, such as breaking CLI semantics, data-source assumptions, output guarantees, or other behavior that cannot be introduced compatibly in 0.1.x.
+Implement usable source-plugin functionality using the planned public contract in the [Source plugin guide](docs/source-plugin-guide.md). Plugins are not implemented in 0.1.x; the exact CLI, data-source, and output contracts may include incompatible changes before 1.0.
+
+This release series also provides room for other incompatible contract changes, such as breaking CLI semantics, data-source assumptions, or output guarantees that cannot be introduced compatibly in 0.1.x.
 
 ## 1.0
 
