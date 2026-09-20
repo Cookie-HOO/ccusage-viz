@@ -216,6 +216,8 @@ MESSAGES = {
     "status.tui_inline_adjust": "t/T theme · s/S style · i refresh interval · Enter apply · Esc cancel",
     "error.tui_grid": "Invalid Dashboard layout '{value}'; use auto, ROWSxCOLUMNS with enough cells, spotlight-wide, or spotlight-tall.",
     "error.tui_grid_runtime": "Layout '{value}' cannot display all {count} panes.",
+    "error.tui_layout_weight_positive": "Dashboard {axis} weights must be positive integers.",
+    "error.tui_layout_weight_count": "Dashboard {axis} weight count must match {layout}: expected {expected}, got {actual}.",
     "error.tui_panel": "Invalid Dashboard Pane fragment: {value}",
     "status.monitor_sampling": "ccusage {seconds}s · every {interval}s sample · sampling",
     "status.monitor_sampling_prefix": "ccusage {seconds}s · every {interval}s sample · ",

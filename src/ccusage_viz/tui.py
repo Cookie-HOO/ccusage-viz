@@ -1441,6 +1441,8 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             replace(options, host=replace(options.host, theme=dashboard_theme)),
             tuple(PaneConfig(_pane_options(pane).chart) for pane in panes),
             grid=active_grid,
+            column_weights=column_weights,
+            row_weights=row_weights,
             header_style=header_style,
             header_summary=header.summary_period,
             dashboard_style=dashboard_style,
@@ -1449,13 +1451,13 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
     def controls() -> tuple[str, ...]:
         width = get_terminal_size().columns
         if grid_draft is not None:
-            prompt = translator.text("status.tui_layout_prompt", value=grid_draft)
+            rows = [
+                clip_width(translator.text("status.tui_layout_prompt", value=grid_draft), width)
+            ]
             if grid_error is not None:
-                prompt = f"{prompt} · {grid_error}"
-            return (
-                clip_width(prompt, width),
-                clip_width(translator.text("status.tui_layout_controls"), width),
-            )
+                rows.append(clip_width(grid_error, width))
+            rows.append(clip_width(translator.text("status.tui_layout_controls"), width))
+            return tuple(rows)
         if adjustment_mode == "pane" and focused is not None:
             pane = panes[focused]
             return _adjustment_footer(

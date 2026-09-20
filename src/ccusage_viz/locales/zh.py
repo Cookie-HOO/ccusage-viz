@@ -216,6 +216,8 @@ MESSAGES = {
     "status.tui_inline_adjust": "t/T 主题 · s/S 样式 · i 刷新频率 · Enter 应用 · Esc 取消",
     "error.tui_grid": "Dashboard 布局“{value}”无效；请使用 auto、容量足够的 ROWSxCOLUMNS、spotlight-wide 或 spotlight-tall。",
     "error.tui_grid_runtime": "布局“{value}”无法容纳全部 {count} 个面板。",
+    "error.tui_layout_weight_positive": "Dashboard {axis} 权重必须是正整数。",
+    "error.tui_layout_weight_count": "Dashboard {axis} 权重数量必须与 {layout} 匹配：应为 {expected}，实际为 {actual}。",
     "error.tui_panel": "Dashboard Pane 片段无效：{value}",
     "status.monitor_sampling": "ccusage {seconds}秒 · 每 {interval} 秒采样 · 采样中",
     "status.monitor_sampling_prefix": "ccusage {seconds}秒 · 每 {interval} 秒采样 · ",

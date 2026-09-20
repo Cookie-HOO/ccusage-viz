@@ -479,13 +479,22 @@ def test_dashboard_layout_editor_is_visible_transactional_and_returns_to_global(
 
     assert tui_module.run_tui(options, load_translator("en")) == 0
     painted = ["\n".join(frame.rows) for frame in frames]
-    assert any("Set layout (auto or ROWSxCOLUMNS): 2x2" in frame for frame in painted)
     assert any(
-        "Set layout (auto or ROWSxCOLUMNS): 1x1" in frame
+        "Set layout (auto, ROWSxCOLUMNS, spotlight-wide, or spotlight-tall): 2x2" in frame
+        for frame in painted
+    )
+    assert any(
+        "Set layout (auto, ROWSxCOLUMNS, spotlight-wide, or spotlight-tall): 1x1" in frame
         and "Layout '1x1' cannot display all 4 panes." in frame
         for frame in painted
     )
-    assert sum("Set layout (auto or ROWSxCOLUMNS): 3x2" in frame for frame in painted) >= 2
+    assert (
+        sum(
+            "Set layout (auto, ROWSxCOLUMNS, spotlight-wide, or spotlight-tall): 3x2" in frame
+            for frame in painted
+        )
+        >= 2
+    )
     assert any("Current status: running · 3x2" in frame for frame in painted)
 
 
