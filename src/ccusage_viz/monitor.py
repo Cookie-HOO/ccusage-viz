@@ -35,8 +35,13 @@ from ccusage_viz.options import (
 )
 from ccusage_viz.render.base import RenderAudit, RenderContext
 from ccusage_viz.terminal import FramePainter, Terminal, compose_frame, inspect_terminal
-from ccusage_viz.terminal_ui import controls_line, input_mode, read_key
-from ccusage_viz.tui_input import InputDecoder, KeyEvent, read_event
+from ccusage_viz.terminal_ui import (
+    AdjustmentAction,
+    adjustment_rows,
+    controls_line,
+    input_mode,
+    read_key,
+)
 
 
 def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
@@ -193,12 +198,30 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
             )
 
     def pick_appearance() -> bool:
-        current = component.candidate
-        candidate = current
         adjustment_page = "quick"
-        copied_status: str | None = None
+        data_affecting = False
+
+        def actions() -> tuple[AdjustmentAction, ...]:
+            definitions = (
+                (
+                    ("w", "window"),
+                    ("i", "interval"),
+                    ("b", "grouping"),
+                    ("+/-", "top"),
+                    ("d", "density"),
+                    ("t/T", "theme"),
+                    ("s", "style"),
+                )
+                if adjustment_page == "quick"
+                else (("f", "filter"), ("l", "legend"))
+            )
+            return tuple(
+                AdjustmentAction(key, translator.text(f"adjustment.{label}"), priority)
+                for priority, (key, label) in enumerate(definitions)
+            )
 
         def paint_picker() -> None:
+            candidate = component.candidate
             preview = component.preview(candidate)
             terminal = terminal_for(candidate)
             chart = monitor_chart(candidate)
@@ -233,28 +256,24 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                     )
                 }
             )
-            adjustment_state = controls_line(
-                " · ".join(
-                    part
-                    for part in (
-                        translator.text(f"status.monitor_adjust_{adjustment_page}", **values),
-                        copied_status,
-                    )
-                    if part is not None
+            adjustment_controls = adjustment_rows(
+                translator.text(f"status.monitor_adjust_{adjustment_page}", **values),
+                translator.text(f"adjustment.page_{adjustment_page}"),
+                actions(),
+                width=terminal.width,
+                color=terminal.color,
+                switch_action=translator.text(
+                    "adjustment.switch_advanced"
+                    if adjustment_page == "quick"
+                    else "adjustment.switch_quick"
                 ),
-                width=terminal.width,
-                color=terminal.color,
-            )
-            key_help = controls_line(
-                translator.text(f"status.monitor_adjust_{adjustment_page}_keys"),
-                width=terminal.width,
-                color=terminal.color,
+                finish_action=translator.text("adjustment.finish"),
             )
             screen.paint(
                 compose_frame(
                     render_component(preview, candidate, terminal, control_rows=2),
                     translator.text("status.tui_adjust_monitor"),
-                    (adjustment_state, key_help),
+                    adjustment_controls,
                     height=terminal.height,
                 )
             )
@@ -264,56 +283,69 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
             key = read_key(0.1)
             if key == "\x03":
                 raise KeyboardInterrupt
-            if key == "\x1b":
-                return False
-            if key in {"y", "Y"}:
-                copied_status = (
-                    translator.text("status.command_copied")
-                    if copy_command(format_command(candidate))
-                    else translator.text("status.command_copy_failed")
-                )
-            elif key in {"\r", "\n"}:
-                current_chart = monitor_chart(current)
-                candidate_chart = monitor_chart(candidate)
-                data_affecting = (
-                    current_chart.by,
-                    current_chart.filters,
-                    current_chart.window_seconds,
-                    current.host.interval,
-                ) != (
-                    candidate_chart.by,
-                    candidate_chart.filters,
-                    candidate_chart.window_seconds,
-                    candidate.host.interval,
-                )
-                component.configure(candidate, data_affecting=data_affecting)
+            if key in {"\x1b", "\r", "\n"}:
                 return data_affecting
-            elif key in {"a", "A"}:
+            if key == "a":
                 adjustment_page = "advanced" if adjustment_page == "quick" else "quick"
+            elif key == "f" and adjustment_page == "advanced":
+                config = component.candidate
+                chart = monitor_chart(config)
+                terminal = terminal_for(config)
+
+                def paint_filter_editor(
+                    body: str,
+                    editor_controls: str,
+                    *,
+                    width: int = terminal.width,
+                    height: int = terminal.height,
+                    color: bool = terminal.color,
+                ) -> None:
+                    screen.paint(
+                        compose_frame(
+                            body,
+                            translator.text("status.tui_adjust_monitor"),
+                            controls_line(
+                                editor_controls,
+                                width=width,
+                                color=color,
+                            ),
+                            height=height,
+                        )
+                    )
+
+                edited = run_filter_editor(
+                    chart.filters,
+                    discover_filter_choices(component.accepted_records, chart.filters),
+                    translator,
+                    width=terminal.width,
+                    paint=paint_filter_editor,
+                    read_key=lambda: read_key(0.1),
+                )
+                if edited is not None and edited != chart.filters:
+                    component.configure(replace_chart_filters(config, edited), data_affecting=True)
+                    data_affecting = True
             elif (
                 adjustment_page == "quick"
-                and key
-                in {
-                    "d",
-                    "s",
-                    "S",
-                    "t",
-                    "T",
-                    "b",
-                    "B",
-                    "w",
-                    "W",
-                    "i",
-                    "I",
-                    "+",
-                    "=",
-                    "-",
-                    "_",
-                }
+                and key in {"d", "s", "t", "T", "b", "w", "i", "+", "=", "-", "_"}
                 or adjustment_page == "advanced"
-                and key in {"l", "L"}
+                and key == "l"
             ):
-                candidate = adjust_standalone(candidate, key)
+                config = component.candidate
+                updated = adjust_standalone(config, key)
+                if updated != config:
+                    old_chart = monitor_chart(config)
+                    new_chart = monitor_chart(updated)
+                    key_affects_data = (
+                        old_chart.by,
+                        old_chart.window_seconds,
+                        config.host.interval,
+                    ) != (
+                        new_chart.by,
+                        new_chart.window_seconds,
+                        updated.host.interval,
+                    )
+                    component.configure(updated, data_affecting=key_affects_data)
+                    data_affecting = data_affecting or key_affects_data
             else:
                 continue
             paint_picker()
@@ -496,65 +528,6 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                         else "status.command_copy_failed"
                     )
                     paint()
-                elif (
-                    key in {"f", "F"}
-                    and body_view == "chart"
-                    and component.accepted_options is not None
-                ):
-                    config = component.candidate
-                    chart = monitor_chart(config)
-                    terminal = terminal_for(config)
-                    editor_width = terminal.width
-                    editor_height = terminal.height
-                    editor_color = terminal.color
-
-                    def paint_filter_editor(
-                        body: str,
-                        editor_controls: str,
-                        *,
-                        width: int = editor_width,
-                        height: int = editor_height,
-                        color: bool = editor_color,
-                    ) -> None:
-                        screen.paint(
-                            compose_frame(
-                                body,
-                                translator.text("status.tui_adjust_monitor"),
-                                controls_line(
-                                    editor_controls,
-                                    width=width,
-                                    color=color,
-                                ),
-                                height=height,
-                            )
-                        )
-
-                    decoder = InputDecoder()
-
-                    def read_filter_key(
-                        input_decoder: InputDecoder = decoder,
-                    ) -> str | None:
-                        event = read_event(input_decoder, 0.1)
-                        return event.value if isinstance(event, KeyEvent) else None
-
-                    edited = run_filter_editor(
-                        chart.filters,
-                        discover_filter_choices(component.accepted_records, chart.filters),
-                        translator,
-                        width=terminal.width,
-                        paint=paint_filter_editor,
-                        read_key=read_filter_key,
-                    )
-                    if edited is not None and edited != chart.filters:
-                        component.configure(
-                            replace_chart_filters(config, edited),
-                            data_affecting=True,
-                        )
-                        request(
-                            LifecycleTrigger.CONFIGURATION,
-                            now=time.monotonic(),
-                        )
-                    paint(force=True)
                 elif key in {"m", "M"} and body_view == "chart":
                     previous_interval = component.candidate.host.interval
                     data_affecting = pick_appearance()

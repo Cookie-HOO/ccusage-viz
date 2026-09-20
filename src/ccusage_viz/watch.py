@@ -49,8 +49,15 @@ from ccusage_viz.options import (
 )
 from ccusage_viz.render.palette import COLOR_SCHEMES
 from ccusage_viz.terminal import FramePainter, Terminal, compose_frame, inspect_terminal
-from ccusage_viz.terminal_ui import controls_line, dimmed, input_mode, notice_lines, read_key
-from ccusage_viz.tui_input import InputDecoder, KeyEvent, read_event
+from ccusage_viz.terminal_ui import (
+    AdjustmentAction,
+    adjustment_rows,
+    controls_line,
+    dimmed,
+    input_mode,
+    notice_lines,
+    read_key,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,22 +76,71 @@ class RuntimeAdjustmentResult:
 
 
 _ADJUSTMENT_QUICK_KEYS = {
-    "timeline": frozenset("dpPgbB+-=tTsS"),
-    "calendar": frozenset("dpPtTsS"),
-    "stack": frozenset("dpPgtTsS"),
-    "ranking": frozenset("dpPbB+-=tTsS"),
+    "timeline": frozenset("dpPgb+-=tTs"),
+    "calendar": frozenset("dpPtTs"),
+    "stack": frozenset("dpPgtTs"),
+    "ranking": frozenset("dpPb+-=tTs"),
 }
 _ADJUSTMENT_ADVANCED_KEYS = {
-    "timeline": frozenset("olkOLK"),
-    "calendar": frozenset(),
-    "stack": frozenset("clkCLK"),
-    "ranking": frozenset("oO"),
+    "timeline": frozenset("folk"),
+    "calendar": frozenset("f"),
+    "stack": frozenset("fclk"),
+    "ranking": frozenset("fo"),
+}
+
+_ADJUSTMENT_ACTIONS = {
+    "timeline": {
+        "quick": (
+            ("p/P", "period"),
+            ("g", "granularity"),
+            ("b", "grouping"),
+            ("+/-", "top"),
+            ("d", "density"),
+            ("t/T", "theme"),
+            ("s", "style"),
+        ),
+        "advanced": (("f", "filter"), ("o", "other"), ("l", "legend"), ("k", "weekdays")),
+    },
+    "calendar": {
+        "quick": (("p/P", "period"), ("d", "density"), ("t/T", "theme"), ("s", "style")),
+        "advanced": (("f", "filter"),),
+    },
+    "stack": {
+        "quick": (
+            ("p/P", "period"),
+            ("g", "granularity"),
+            ("d", "density"),
+            ("t/T", "theme"),
+            ("s", "style"),
+        ),
+        "advanced": (("f", "filter"), ("c", "cache"), ("l", "legend"), ("k", "weekdays")),
+    },
+    "ranking": {
+        "quick": (
+            ("p/P", "period"),
+            ("b", "grouping"),
+            ("+/-", "top"),
+            ("d", "density"),
+            ("t/T", "theme"),
+            ("s", "style"),
+        ),
+        "advanced": (("f", "filter"), ("o", "other")),
+    },
 }
 
 
 def _adjustment_key_supported(command: str, page: str, key: str) -> bool:
     keys = _ADJUSTMENT_QUICK_KEYS if page == "quick" else _ADJUSTMENT_ADVANCED_KEYS
     return key in keys[command]
+
+
+def _adjustment_actions(
+    command: str, page: str, translator: Translator
+) -> tuple[AdjustmentAction, ...]:
+    return tuple(
+        AdjustmentAction(key, translator.text(f"adjustment.{label}"), priority)
+        for priority, (key, label) in enumerate(_ADJUSTMENT_ACTIONS[command][page])
+    )
 
 
 def _require_complete_coverage(submission: HistoricalSubmission, snapshot: UsageSnapshot) -> None:
@@ -184,7 +240,6 @@ def run_runtime_adjustment(
     rendered: RefreshResult | None = None
     rendered_options: StandaloneLaunch | None = None
     render_warning: str | None = None
-    copied_status: str | None = None
     adjustment_page = "quick"
 
     def grouping_choices() -> tuple[str, ...]:
@@ -258,7 +313,6 @@ def run_runtime_adjustment(
             "style": style,
         }
         status_key = f"status.runtime_adjustment_{current.chart.kind}_{adjustment_page}"
-        key_key = f"status.tui_adjust_{current.chart.kind}_{adjustment_page}_controls"
         state_values = dict(common)
         if isinstance(current.chart, (TimelineConfig, RankingConfig)):
             state_values.update(
@@ -286,18 +340,18 @@ def run_runtime_adjustment(
         preview_notice = (
             translator.text("status.project_preview_missing") if project_preview_missing else None
         )
-        controls: str | tuple[str, ...] = (
-            controls_line(
-                " · ".join(part for part in (state, copied_status) if part is not None),
-                width=terminal.width,
-                color=terminal.color,
+        controls = adjustment_rows(
+            state,
+            translator.text(f"adjustment.page_{adjustment_page}"),
+            _adjustment_actions(current.chart.kind, adjustment_page, translator),
+            width=terminal.width,
+            color=terminal.color,
+            switch_action=translator.text(
+                "adjustment.switch_advanced"
+                if adjustment_page == "quick"
+                else "adjustment.switch_quick"
             ),
-            controls_line(
-                f"{translator.text(f'status.tui_adjust_{adjustment_page}')} · "
-                f"{translator.messages[key_key]}",
-                width=terminal.width,
-                color=terminal.color,
-            ),
+            finish_action=translator.text("adjustment.finish"),
         )
         status = " · ".join(
             part for part in (translator.text("status.tui_adjust_history"), preview_notice) if part
@@ -328,20 +382,54 @@ def run_runtime_adjustment(
                     paint()
                 if key == "\x03":
                     raise KeyboardInterrupt
-                if key == "\x1b":
-                    return None
-                if key in {"\r", "\n"} and rendered is not None and rendered_options == current:
-                    return RuntimeAdjustmentResult(current, rendered)
-                if key in {"y", "Y"}:
-                    copied_status = (
-                        translator.text("status.command_copied")
-                        if copy_command(format_command(current))
-                        else translator.text("status.command_copy_failed")
-                    )
-                    paint()
-                elif key in {"a", "A"}:
+                if key in {"\x1b", "\r", "\n"}:
+                    if rendered is not None:
+                        return RuntimeAdjustmentResult(current, rendered)
+                    continue
+                if key == "a":
                     adjustment_page = "advanced" if adjustment_page == "quick" else "quick"
                     paint()
+                elif key == "f" and adjustment_page == "advanced":
+                    editor_size = get_terminal_size()
+
+                    def paint_filter_editor(
+                        body: str,
+                        editor_controls: str,
+                        *,
+                        width: int = editor_size.columns,
+                        height: int = editor_size.lines,
+                        color: bool = current.chart.presentation.theme != "no-color",
+                    ) -> None:
+                        screen.paint(
+                            compose_frame(
+                                body,
+                                translator.text("status.tui_adjust_history"),
+                                controls_line(
+                                    editor_controls,
+                                    width=width,
+                                    color=color,
+                                ),
+                                height=height,
+                            )
+                        )
+
+                    edited = run_filter_editor(
+                        current.chart.filters,
+                        discover_filter_choices(
+                            snapshot.records,
+                            current.chart.filters,
+                            include_projects=snapshot.includes_project_attribution,
+                        ),
+                        translator,
+                        width=editor_size.columns,
+                        paint=paint_filter_editor,
+                        read_key=lambda: read_key(0.1),
+                    )
+                    if edited is not None and edited != current.chart.filters:
+                        current = replace_chart_filters(current, edited)
+                        paint()
+                    else:
+                        paint()
                 elif key is not None and _adjustment_key_supported(
                     current.chart.kind, adjustment_page, key
                 ):
@@ -803,61 +891,6 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
                         else "status.command_copy_failed"
                     )
                     paint()
-                elif key in {"f", "F"} and body_view == "chart" and last_snapshot is not None:
-                    editor_size = terminal_size()
-
-                    editor_width = editor_size.columns
-                    editor_height = editor_size.lines
-
-                    def paint_filter_editor(
-                        body: str,
-                        editor_controls: str,
-                        *,
-                        width: int = editor_width,
-                        height: int = editor_height,
-                    ) -> None:
-                        active_screen.paint(
-                            compose_frame(
-                                body,
-                                translator.text("status.tui_adjust_history"),
-                                controls_line(
-                                    editor_controls,
-                                    width=width,
-                                    color=style_enabled(),
-                                ),
-                                height=height,
-                            )
-                        )
-
-                    decoder = InputDecoder()
-
-                    def read_filter_key(
-                        input_decoder: InputDecoder = decoder,
-                    ) -> str | None:
-                        event = read_event(input_decoder, 0.1)
-                        return event.value if isinstance(event, KeyEvent) else None
-
-                    edited = run_filter_editor(
-                        historical_chart(current).filters,
-                        discover_filter_choices(
-                            last_snapshot.records,
-                            historical_chart(current).filters,
-                            include_projects=last_snapshot.includes_project_attribution,
-                        ),
-                        translator,
-                        width=editor_size.columns,
-                        paint=paint_filter_editor,
-                        read_key=read_filter_key,
-                    )
-                    if edited is not None and edited != historical_chart(current).filters:
-                        current = replace_chart_filters(current, edited)
-                        component.configure(current, data_affecting=True)
-                        request(
-                            LifecycleTrigger.CONFIGURATION,
-                            now=time.monotonic(),
-                            data_affecting=False,
-                        )
-                    paint(force=True)
                 elif key in {"m", "M"} and body_view == "chart" and last_snapshot is not None:
                     picked = run_runtime_adjustment(
                         current, translator, last_snapshot, active_screen

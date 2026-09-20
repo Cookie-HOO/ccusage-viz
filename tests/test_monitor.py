@@ -549,6 +549,10 @@ def test_monitor_filter_editor_commits_once_or_discards_without_refresh(
             self.accepted_records = ()
             return True
 
+        def preview(self, selected: StandaloneLaunch):
+            self.candidate = selected
+            return self
+
         def render(self, *_args: object, **_kwargs: object) -> str:
             return "monitor chart"
 
@@ -562,7 +566,7 @@ def test_monitor_filter_editor_commits_once_or_discards_without_refresh(
         def finish(self) -> None:
             events.append(("finish",))
 
-    keys = iter(("f", "\x03"))
+    keys = iter(("m", "a", "f", "\x1b", "\x03"))
     monkeypatch.setattr(monitor_host, "build_query_runtime", Runtime)
     monkeypatch.setattr(monitor_host, "build_chart_registry", lambda: object())
     monkeypatch.setattr(monitor_host, "MonitorComponent", Component)

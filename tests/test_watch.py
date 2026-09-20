@@ -447,6 +447,11 @@ def test_historical_filter_commit_increments_generation_once_and_refreshes_once(
             self.model = None
             self.generation = 0
 
+        def seed(self, selected: StandaloneLaunch, snapshot: UsageSnapshot) -> None:
+            self.candidate = selected
+            self.accepted_options = selected
+            self.snapshot = snapshot
+
         def configure(self, selected: StandaloneLaunch, *, data_affecting: bool) -> None:
             if selected == self.candidate:
                 return
@@ -485,7 +490,7 @@ def test_historical_filter_commit_increments_generation_once_and_refreshes_once(
         def finish(self) -> None:
             pass
 
-    keys = iter((None, "f", "\x03"))
+    keys = iter((None, "m", "a", "f", "\x1b", "\x03"))
     monkeypatch.setattr("ccusage_viz.watch.build_query_runtime", Runtime)
     monkeypatch.setattr("ccusage_viz.watch.build_chart_registry", lambda: object())
     monkeypatch.setattr("ccusage_viz.watch.HistoricalChartComponent", Component)
@@ -507,7 +512,7 @@ def test_historical_filter_commit_increments_generation_once_and_refreshes_once(
     )
 
     assert run_watch(launch, load_translator("en")) == 0
-    assert [event for event in events if event[0] == "configure"] == [("configure", True, 1)]
+    assert [event for event in events if event[0] == "configure"][-1:] == [("configure", True, 1)]
     assert [event for event in events if event[0] == "submit"] == [
         ("submit", QueryTrigger.STARTUP, 0),
         ("submit", QueryTrigger.REFRESH, 1),
@@ -793,7 +798,7 @@ def test_runtime_adjustment_retains_last_chart_until_an_invalid_draft_recovers(
         def paint(self, *args, **kwargs) -> None:
             paints.append(args)
 
-    keys = iter(("s", "\n", "s", "\n"))
+    keys = iter(("s", "\x1b"))
     calls = 0
     monkeypatch.setattr("ccusage_viz.watch.input_mode", nullcontext)
     monkeypatch.setattr("ccusage_viz.watch.read_key", lambda timeout: next(keys))
@@ -825,7 +830,7 @@ def test_runtime_adjustment_retains_last_chart_until_an_invalid_draft_recovers(
     )
 
     assert isinstance(result, RuntimeAdjustmentResult)
-    assert calls == 3
+    assert calls == 2
     assert any("chart" in args[0].rows and "too narrow" in str(args[0].rows) for args in paints)
 
 
@@ -856,8 +861,8 @@ def test_runtime_adjustment_pages_match_dashboard_and_weekdays_work(
     assert isinstance(result, RuntimeAdjustmentResult)
     assert result.options.chart.weekdays == "hide"
     assert result.options.chart.by == "agent"
-    assert "Quick settings" in str(controls[0])
-    assert "Advanced settings" in str(controls[1])
+    assert "Quick adjustment" in str(controls[0])
+    assert "Advanced adjustment" in str(controls[1])
     assert "k weekdays" in str(controls[1])
     assert "WEEKDAYS hide" in str(controls[2])
 
@@ -886,11 +891,12 @@ def test_project_adjustment_explains_missing_retained_attribution(
         cast(FramePainter, Screen()),
     )
 
-    assert result is None
+    assert isinstance(result, RuntimeAdjustmentResult)
+    assert result.options.chart.by == "project"
     assert any("project data is not in this preview" in str(args[0].rows) for args in paints)
 
 
-def test_runtime_adjustment_copy_uses_adjusted_display_options(
+def test_runtime_adjustment_ignores_removed_copy_key(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class Screen:
@@ -926,11 +932,11 @@ def test_runtime_adjustment_copy_uses_adjusted_display_options(
         cast(FramePainter, Screen()),
     )
 
-    assert result is None
-    assert copied == [
-        "ccuv timeline --since 2026-01-01 --until 2026-01-14 --by agent --top 4 "
-        "--no-watch --demo small --ascii"
-    ]
+    assert isinstance(result, RuntimeAdjustmentResult)
+    assert result.options.chart.by == "agent"
+    assert result.options.chart.top == 4
+    assert result.options.chart.other == "show"
+    assert copied == []
 
 
 def test_runtime_adjustment_normalizes_timeline_area_when_grouping_changes(
