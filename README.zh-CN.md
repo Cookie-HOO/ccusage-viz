@@ -177,7 +177,7 @@ ccuv monitor --demo small
 
 省略 `--by` 时显示权威的**总 TPM**；`--by model` 显示各模型 TPM；`--by agent` 和 `--by project` 显示最新有效采样对的 Token 增长。分组视图可用 `--legend values` 显示无标记的紧凑列表，列出各可见项及其最新显示值。紧凑 Monitor 排名只用排名旁的箭头表示真实名次变化，并用数值旁的 `↑`、`↓` 和 `—` 表示增长、下降和持平（`--ascii` 下为 `^`、`v` 和 `=`）；由于 Monitor 中每个序列都持续活跃，因此不显示活动点。初始基线不显示标记，之后首次出现的序列只显示数值上升，不伪造排名箭头。分组 Monitor 默认保留 Top 3，其余合并到 `Other`。`--agent`、`--model` 与 `--project` 都是仅启动时生效的数据源筛选。按 `Ctrl-C` 退出；`r` 立即采样，Space 暂停/恢复，`v` 按图表 → 精简命令 → 完整命令 → Markdown 数据表 → JSON 数据 → 图表循环。精简命令省略默认参数，完整命令显式列出所有生效设置。图表视图可用 `m` 调整但不可复制；其余视图可用 `y` 复制但不可调整。数据表和 JSON 会序列化保留的显示桶及与其分离的当前观测（包括分组、Top N 与 `Other`），不暴露原始计数器。`h` 隐藏或恢复仅当前会话的控制栏以归还图表行数，`m` 仅可从图表打开固定两行的运行时调整面板。快捷页可调整窗口、间隔、分组、Top、主题和样式，不会重新查询或丢失已保留历史；按 `a` 切换到高级页调整图例，`y` 会复制候选命令。启动时的 `--model` 筛选会保持不变，不作为运行时控制。调整引导始终可见，关闭面板后会恢复此前的控制栏偏好。Monitor 横轴使用 `HH:MM` 标签。可用 `--theme` 和 `--style` 指定初始外观；真实观测历史在启动时尚不存在；要立即比较样式请使用 `monitor --demo`。Demo Monitor 数据是确定性的，启动即有波动的内存历史，绝不调用 `ccusage`。
 
-观测 TPM 不等同于 QPM，也不等同于 API 速率限制 TPM；当前没有 QPM 指标。未来若加入外部 QPM，将统计逻辑请求，绝不会从 Token 或重试次数推断请求数。Monitor 的 `style=ranking` 是最新采样对的紧凑视图，不是累计历史数据的 `ranking` 子命令。建立基线、检测到休眠或采样间隙、暂停或恢复、修改影响数据的配置、检测到计数器回退时，都会清空当前值，直到形成下一组有效采样对；已保留的 Timeline 历史继续存在，并用空缺表示不连续。Monitor 不宣称提供历史逐分钟数据、任意日期范围的小时分布或启动前的滚动窗口。采样间隙、查询错误和计数器回退不会被伪装成零流量。
+观测 TPM 不等同于 QPM，也不等同于 API 速率限制 TPM；当前没有 QPM 指标。未来若加入外部 QPM，将统计逻辑请求，绝不会从 Token 或重试次数推断请求数。Monitor 的 `style=ranking` 是最新采样对的紧凑视图，不是累计历史数据的 `ranking` 子命令。仅 Monitor 可用的 `style=list` 复用同一观测 Ranking 模型，但省略条形轨道：它居中显示紧凑表格，同时保留序号、名次变化、活动、数值和数值趋势标记。历史 `ranking` 不提供 `list`。建立基线、检测到休眠或采样间隙、暂停或恢复、修改影响数据的配置、检测到计数器回退时，都会清空当前值，直到形成下一组有效采样对；已保留的 Timeline 历史继续存在，并用空缺表示不连续。Monitor 不宣称提供历史逐分钟数据、任意日期范围的小时分布或启动前的滚动窗口。采样间隙、查询错误和计数器回退不会被伪装成零流量。
 
 ## Dashboard
 
@@ -203,9 +203,9 @@ ccuv dashboard wide --refresh-interval 30 --sampling-interval 5
 ccuv dashboard wide --header-style panel --header-summary quarter --header-interval 90
 ```
 
-`dashboard` 使用一个终端输入循环和合成器；每个 Pane 保留最近结果、失败状态，Monitor Pane 还保留自己的内存观测历史。默认 `wide` 预设是填满的 2×2 总览，包含 Timeline、Stack、Ranking，以及按模型分组的 Monitor。裸 `ccuv dashboard` 等价于 `ccuv dashboard wide`；`narrow` 提供三个 Pane 的纵向视图，`all` 将十个代表性视图展开为 framed 5×2 网格，`spotlight-wide` 在顶部突出 Timeline，`spotlight-tall` 在左侧突出 Ranking。Preset 提供基础 Pane 与设置，显式 Dashboard 参数会覆盖对应设置，重复的 `--pane` 会继续追加；不使用 Preset 时，`--pane` 定义完整列表。Wide 自动生成的 Monitor 等同于 `monitor --by model`；独立运行 `monitor` 或显式指定 `--pane "monitor"` 时仍显示权威的总体 TPM。`--pane` 的值是以 `timeline`、`calendar`、`stack`、`ranking` 或 `monitor` 开头的图表片段；片段内禁止 Host、进程和生命周期选项。Dashboard 拥有调度：`--refresh-interval` 控制 Historical Pane 刷新，`--sampling-interval` 控制 Monitor Pane 采样。`--grid` 接受 `auto`、`ROWSxCOLUMNS`、`spotlight-wide` 或 `spotlight-tall`，并可搭配任意 Pane 片段。
+`dashboard` 使用一个终端输入循环和合成器；每个 Pane 保留最近结果、失败状态，Monitor Pane 还保留自己的内存观测历史。默认 `wide` 预设是填满的 2×2 总览，包含 Timeline、Stack、Ranking，以及按模型分组的 Monitor。裸 `ccuv dashboard` 等价于 `ccuv dashboard wide`；`narrow` 提供三个 Pane 的纵向视图，`all` 将十个代表性视图展开为 framed 5×2 网格，`spotlight-wide` 在顶部突出 Timeline，`spotlight-tall` 在左侧突出 Ranking。Preset 提供基础 Pane 与设置，显式 Dashboard 参数会覆盖对应设置，重复的 `--pane` 会继续追加；不使用 Preset 时，`--pane` 定义完整列表。Wide 自动生成的 Monitor 等同于 `monitor --by model`；独立运行 `monitor` 或显式指定 `--pane "monitor"` 时仍显示权威的总体 TPM。`--pane` 的值是以 `timeline`、`calendar`、`stack`、`ranking` 或 `monitor` 开头的图表片段；片段内禁止 Host、进程和生命周期选项。Dashboard 拥有调度：`--refresh-interval` 控制 Historical Pane 刷新，`--sampling-interval` 控制 Monitor Pane 采样。`--grid` 只接受拓扑：`auto`、`ROWSxCOLUMNS`、`spotlight-wide`、`spotlight-wide2` 或 `spotlight-tall`。内容预设 `wide`、`narrow`、`all` 只用于启动模板，不是 `--grid` 取值。
 
-两种 Spotlight 布局都只按 Pane 列表索引 0 确定重点 Pane：点击和 `Tab` 只改变交互焦点，重新排序、在索引 0 之前插入，或删除索引 0 才会改变重点 Pane。窄终端下，`spotlight-tall` 会使用纵向的 wide 降级形态渲染，但不会改变配置名称或已保存比例。
+每种 Spotlight 布局都只按 Pane 列表索引 0 确定重点 Pane：点击和 `Tab` 只改变交互焦点，重新排序、在索引 0 之前插入，或删除索引 0 才会改变重点 Pane。`spotlight-wide2` 让 Pane 0 与 Pane 1 分别占据各自的通栏首行，剩余 Pane 在下方按两列排列。窄终端下，`spotlight-tall` 会使用纵向的 wide 降级形态渲染，但不会改变配置名称或已保存比例。
 
 Dashboard 页眉与子图摘要彼此独立。`--header-style` 支持 `hidden`、`compact`、`banner` 和默认的 `panel`。`--header-summary` 独立选择 `day`、`month`、`quarter`、`year` 或 `none`（默认 `day`）；`none` 保留标题与更新时间但省略详情，`hidden` 隐藏整个页眉。冷切换粒度时会立即显示完整的本地化结构和 `??` 占位，只有已接受的数据才会替换它。页眉使用未筛选的全部 Agent 总量，默认每 60 秒独立刷新；失败或过期结果不会推进成功更新时间。Dashboard 的 `--theme` 只控制外壳、大标题、页眉摘要、占位和分隔，子图保留各自独立的 `--theme`。Dashboard 的 `--style` 将外壳结构统一为 `minimal`、默认的 `split`、`framed` 或 `accent`，不会改变子图图表样式或 Header Style。按 `s` 从第一个子图开始调整，或点击任意子图直接调整；浏览时 `Tab` 不执行操作，子图调整时循环切换子图。
 
@@ -214,6 +214,8 @@ Dashboard 页眉与子图摘要彼此独立。`--header-style` 支持 `hidden`�
 Monitor 在独立命令和 Dashboard 中共用带留白且稳定的 y 轴。数据越界时上界立即扩大，持续处于低区间后才缩小，因此小幅变化会表现为折线移动，而不是坐标轴不断移动。指标语义不变：总量与模型是最新采样对的 TPM，Agent 与项目是最新采样对的 Token 增长。
 
 Dashboard 子图之间不共享已经完成的数据。可执行命令字符串、参数元组和超时完全相同且执行时间重叠的调用会共用一个运行中的子进程，随后每个子图获得独立解码副本；其他调用不会合并。只有独立页眉保留当前进程内、未筛选的每日覆盖缓存：覆盖充分时切换粒度立即渲染；切换到更宽但未覆盖的粒度时只查询页眉数据，并在结果接收前以 `??` 表示未知详情；成功接收的区间会权威替换缓存中的对应记录。失败、取消或过期结果不会改变已接收的页眉数据和更新时间。
+
+Pane 的宽高控制调整的是共享逻辑列、行的比例，而非单个 Pane 的像素尺寸。选中逻辑带与下一条带交换一个份额；边界处则与前一条带交换。若供给方仅有一个份额，会先等比放大全部权重再交换，从而两个方向都能继续响应。命令保存结果对应的正整数、最大公约数规范化比例。跨越多个带的 Spotlight Pane 使用首个带作为调整锚点，仍覆盖全部跨越带；共享的辅助 Pane 会体现比例变化。
 
 ## 历史图表生命周期
 
