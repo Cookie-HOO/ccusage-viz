@@ -41,7 +41,9 @@ def _observed_heading(model: TimelineModel, context: RenderContext) -> str:
     )
     agents = f" · Agent {', '.join(scope.agents)}" if scope.agents else ""
     return context.translator.text(
-        "label.monitor_growth_title" if model.metric.unit == "tokens" else "label.monitor_title",
+        "label.monitor_timeline_tokens"
+        if model.metric.unit == "tokens"
+        else "label.monitor_timeline_tpm",
         window=window,
         state=state,
         agents=agents,

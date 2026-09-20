@@ -389,7 +389,7 @@ def test_observed_timeline_uses_wall_clock_axis_and_metric_heading() -> None:
 
     output = render_timeline(model, context(True))
 
-    assert "Total TPM · window 15m" in output
+    assert "Total TPM · recent 15m" in output
     assert "10:00" in output and "10:05" in output
     assert "2026-01-01" not in output
 
@@ -462,7 +462,30 @@ def test_full_audit_uses_host_supplied_sample_cadence() -> None:
     assert output == "updated 10:05:00 · ccusage 0.25s · sample every 15s"
 
 
-def test_observed_ranking_uses_window_unit_without_historical_percentage() -> None:
+def test_monitor_titles_use_recent_range_and_current_tpm_wording() -> None:
+    model_ranking = RankingModel(
+        (),
+        None,
+        observed_entries=(ScalarRankingEntry("opus", "Opus", 1200.0),),
+        metric=MetricDescriptor("tpm"),
+        observed_scope=ObservedScope(3600, "model"),
+    )
+    project_timeline = TimelineModel(
+        (),
+        (),
+        observed_at=(datetime(2026, 1, 1, 10, 0),),
+        observed_series=(ScalarSeries("app", "App", (1000.0,)),),
+        metric=MetricDescriptor("tokens"),
+        observed_scope=ObservedScope(3600, "project"),
+    )
+
+    assert "Model · current TPM" in render_ranking(model_ranking, context(True))
+    assert "Project cumulative Token · recent 1h" in render_timeline(
+        project_timeline, context(True)
+    )
+
+
+def test_observed_ranking_uses_recent_range_without_historical_percentage() -> None:
     model = RankingModel(
         (),
         None,
@@ -476,7 +499,7 @@ def test_observed_ranking_uses_window_unit_without_historical_percentage() -> No
 
     output = render_ranking(model, context(True))
 
-    assert "Agent · tokens · 15m" in output
+    assert "Agent · recent 15m Token" in output
     assert "1.2K" in output and "800" in output
     assert "%" not in output
     assert "2026-01-01" not in output

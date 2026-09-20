@@ -32,13 +32,20 @@ def _observed_heading(model: RankingModel, context: RenderContext) -> str:
         else f"{scope.window_seconds // 60}m"
     )
     mode = context.translator.text(f"label.monitor_{scope.mode}_mode")
-    unit = "TPM" if model.metric.unit == "tpm" else context.translator.text("label.tokens")
     state = (
         f" · {context.translator.text(f'label.monitor_{scope.state}')}"
         if scope.state != "ready"
         else ""
     )
-    return center_text(f"{mode} · {unit} · {window}{state}", context.width)
+    heading = context.translator.text(
+        "label.monitor_ranking_tokens"
+        if model.metric.unit == "tokens"
+        else "label.monitor_ranking_tpm",
+        mode=mode,
+        window=window,
+        state=state,
+    )
+    return center_text(heading, context.width)
 
 
 def _entry_value(entry: RankingEntry | ScalarRankingEntry) -> int | float:
