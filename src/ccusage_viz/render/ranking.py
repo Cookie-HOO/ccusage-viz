@@ -144,10 +144,11 @@ def render_ranking(model: RankingModel, context: RenderContext) -> str:
         for entry in entries
     ]
     regular_indexes = [index for index, entry in enumerate(entries) if not entry.is_other]
-    compact = _compact_labels([raw_labels[index] for index in regular_indexes], label_width)
     labels = list(raw_labels)
-    for index, label in zip(regular_indexes, compact, strict=True):
-        labels[index] = label
+    if not model.is_observed:
+        compact = _compact_labels([raw_labels[index] for index in regular_indexes], label_width)
+        for index, label in zip(regular_indexes, compact, strict=True):
+            labels[index] = label
 
     lines = [line for line in (summary, heading) if line]
     for rank, (entry, label) in enumerate(zip(entries, labels, strict=True), start=1):

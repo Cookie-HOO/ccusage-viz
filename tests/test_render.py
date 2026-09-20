@@ -527,6 +527,27 @@ def test_observed_ranking_reclaims_percentage_space_for_labels() -> None:
     assert all(display_width(line) <= 40 for line in narrow.splitlines())
 
 
+def test_observed_ranking_does_not_compact_shared_model_prefixes() -> None:
+    model = RankingModel(
+        (),
+        None,
+        observed_entries=(
+            ScalarRankingEntry("terna", "gpt-5.6-terna", 1_000_000.0),
+            ScalarRankingEntry("luna", "gpt-5.6-luna", 510_000.0),
+            ScalarRankingEntry("sol", "gpt-5.6-sol", 0.0),
+        ),
+        metric=MetricDescriptor("tpm"),
+        observed_scope=ObservedScope(900, "model"),
+    )
+
+    output = render_ranking(model, context(True))
+
+    assert "gpt-5.6-terna" in output
+    assert "gpt-5.6-luna" in output
+    assert "gpt-5.6-sol" in output
+    assert "…5.6-" not in output
+
+
 @pytest.mark.parametrize(
     ("ascii", "zero_mark", "levels"),
     [
