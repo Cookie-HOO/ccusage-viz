@@ -20,6 +20,7 @@ from ccusage_viz.options import (
     StandaloneLaunch,
     TimelineConfig,
     adjust_standalone,
+    compatible_styles,
     replace_chart_filters,
     resolve_date_range,
 )
@@ -151,6 +152,21 @@ def test_replace_chart_filters_preserves_every_other_setting() -> None:
     assert replace(updated.chart, filters=source.chart.filters) == source.chart
     assert updated.host == source.host
     assert updated.process == source.process
+
+
+def test_monitor_list_is_available_for_total_and_grouped_views() -> None:
+    assert "list" in compatible_styles("monitor", None)
+    assert "list" in compatible_styles("monitor", "model")
+    assert "bars" not in compatible_styles("monitor", "model")
+    assert "list" not in compatible_styles("ranking", "model")
+
+    monitor = StandaloneLaunch(
+        ProcessConfig(),
+        StandaloneHostConfig(),
+        MonitorConfig("monitor", 3600, presentation=ChartPresentation(style="ranking")),
+    )
+    assert adjust_standalone(monitor, "s").chart.presentation.style == "list"
+    assert adjust_standalone(monitor, "b").chart.presentation.style == "ranking"
 
 
 def test_monitor_copy_keeps_startup_selection() -> None:

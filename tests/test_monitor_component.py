@@ -108,6 +108,23 @@ def test_monitor_component_accepts_cumulative_samples_and_projects_timeline() ->
     assert component.error is None
 
 
+def test_monitor_list_uses_the_same_observed_ranking_model() -> None:
+    ranking = MonitorComponent(
+        options(by="model", style="ranking"), registry=build_chart_registry()
+    )
+    listing = MonitorComponent(options(by="model", style="list"), registry=build_chart_registry())
+    wall = datetime(2026, 9, 19, 12, 0, tzinfo=UTC)
+    samples = (
+        (record(100, models={"a": 60, "b": 40}),),
+        (record(160, models={"a": 100, "b": 60}),),
+    )
+    for component in (ranking, listing):
+        for now, records in zip((0, 10), samples, strict=True):
+            assert component.accept(completion(component, records), now=now, wall=wall)
+
+    assert ranking.model(now=10, count=4, wall=wall) == listing.model(now=10, count=4, wall=wall)
+
+
 def test_monitor_component_total_and_model_presentation_stays_at_accepted_sample() -> None:
     wall = datetime(2026, 9, 19, 12, 0, tzinfo=UTC)
     later_wall = datetime(2026, 9, 19, 12, 30, tzinfo=UTC)
@@ -130,12 +147,14 @@ def test_monitor_component_total_and_model_presentation_stays_at_accepted_sample
 
     assert total.timeline_model(now=1800, count=4, wall=later_wall) == total_accepted
     assert model.ranking_model(now=1800, count=4, wall=later_wall) == model_accepted
-    assert total.preview(total.candidate).timeline_model(
-        now=1800, count=4, wall=later_wall
-    ) == total_accepted
-    assert model.preview(model.candidate).ranking_model(
-        now=1800, count=4, wall=later_wall
-    ) == model_accepted
+    assert (
+        total.preview(total.candidate).timeline_model(now=1800, count=4, wall=later_wall)
+        == total_accepted
+    )
+    assert (
+        model.preview(model.candidate).ranking_model(now=1800, count=4, wall=later_wall)
+        == model_accepted
+    )
 
 
 def test_monitor_component_agent_and_project_values_stay_at_accepted_sample() -> None:
@@ -173,11 +192,14 @@ def test_monitor_component_next_accept_advances_projection_but_stale_does_not() 
     component.accept(completion(component, (record(220),)), now=20, wall=wall)
     advanced = component.timeline_model(now=20, count=4, wall=wall)
     assert advanced != accepted
-    assert component.timeline_model(
-        now=1800,
-        count=4,
-        wall=datetime(2026, 9, 19, 12, 30, tzinfo=UTC),
-    ) == advanced
+    assert (
+        component.timeline_model(
+            now=1800,
+            count=4,
+            wall=datetime(2026, 9, 19, 12, 30, tzinfo=UTC),
+        )
+        == advanced
+    )
 
 
 def test_monitor_component_uses_bucket_token_growth_for_agent_ranking() -> None:
@@ -283,15 +305,11 @@ def test_monitor_component_clears_current_across_pause_resume_and_restores_next_
         options(by="model", style="ranking"), registry=build_chart_registry()
     )
     wall = datetime(2026, 9, 19, 12, 0, tzinfo=UTC)
-    component.accept(
-        completion(component, (record(100, models={"a": 100}),)), now=0, wall=wall
-    )
-    component.accept(
-        completion(component, (record(160, models={"a": 160}),)), now=10, wall=wall
-    )
-    assert [(entry.key, entry.value) for entry in component.ranking_model(now=10).observed_entries] == [
-        ("a", 360.0)
-    ]
+    component.accept(completion(component, (record(100, models={"a": 100}),)), now=0, wall=wall)
+    component.accept(completion(component, (record(160, models={"a": 160}),)), now=10, wall=wall)
+    assert [
+        (entry.key, entry.value) for entry in component.ranking_model(now=10).observed_entries
+    ] == [("a", 360.0)]
 
     intervals = tuple(component.observer.intervals)
     component.pause()
@@ -299,12 +317,10 @@ def test_monitor_component_clears_current_across_pause_resume_and_restores_next_
     assert tuple(component.observer.intervals) == intervals
 
     component.resume(now=20, wall=wall)
-    component.accept(
-        completion(component, (record(190, models={"a": 190}),)), now=30, wall=wall
-    )
-    assert [(entry.key, entry.value) for entry in component.ranking_model(now=30).observed_entries] == [
-        ("a", 180.0)
-    ]
+    component.accept(completion(component, (record(190, models={"a": 190}),)), now=30, wall=wall)
+    assert [
+        (entry.key, entry.value) for entry in component.ranking_model(now=30).observed_entries
+    ] == [("a", 180.0)]
     assert tuple(component.observer.intervals)[:1] == intervals
 
 

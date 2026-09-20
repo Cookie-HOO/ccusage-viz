@@ -309,7 +309,7 @@ class MonitorComponent:
         wall: datetime | None = None,
     ) -> TimelineModel | RankingModel:
         chart = self._monitor_config(self._active_options())
-        if chart.presentation.style == "ranking":
+        if chart.presentation.style in {"ranking", "list"}:
             return self.ranking_model(now=now, count=count, wall=wall)
         return self.timeline_model(now=now, count=count, wall=wall)
 
@@ -328,9 +328,7 @@ class MonitorComponent:
         audit = render_audit(context)
         return "\n".join(line for line in (observation, chart, audit) if line)
 
-    def buckets(
-        self, count: int, *, now: float | None = None, wall: datetime | None = None
-    ):
+    def buckets(self, count: int, *, now: float | None = None, wall: datetime | None = None):
         """Project buckets at the last accepted sample, ignoring repaint-time clocks."""
         projection_now = self.refreshed_at if self.refreshed_at is not None else now
         if projection_now is None:
