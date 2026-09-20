@@ -135,6 +135,8 @@ This document records the stable product concepts and design constraints of `ccu
 
    Quick and Advanced are divided by usage frequency rather than an internal distinction between data and appearance. Quick covers Data Scope, analysis, and primary presentation in common analytical workflows. Advanced contains infrequent, precise, or conditional controls. Both operate on the same immediate configuration, and contextually meaningless options are omitted rather than shown disabled.
 
+   Standalone, Pane, and Dashboard-global adjustment use exactly two rows: current runtime status plus effective settings, then the active Quick or Advanced actions. `a` switches pages; Enter or Escape finishes ordinary adjustment without rolling back changes. There is no clickable Finish target. On narrow terminals, complete low-priority action units are omitted and `…(+N)` reports the exact number still available by keyboard, while page identity, the `a` switch, and Enter/Escape guidance remain visible.
+
 4. **Finite choices preserve and truthfully display any valid startup value.**
 
    The CLI may accept a wider range of valid values than the TUI's common choices. The TUI must preserve and display the current concrete value without labeling its origin, and opening, browsing, or leaving settings must not snap it to a choice. If the value is in the common sequence, adjustment continues from it. Otherwise, the first explicit adjustment enters the sequence at its first value, after which adjustment cycles through common choices only. Copied commands always reflect the current effective value. Equivalent settings follow this rule in Standalone, Dashboard, and Pane contexts.
@@ -145,7 +147,7 @@ This document records the stable product concepts and design constraints of `ccu
 
    Most settings commit on each adjustment. The visible configuration updates at once, and any data already derivable from accepted facts is recomputed immediately. Enter and Escape therefore have the same meaning in an ordinary settings surface: both leave the surface while preserving the effective state. They do not save, discard, or roll back changes that have already taken effect. Layout and Weights follow the same rule.
 
-   **Exception:** An operation that cannot produce a valid value until the user completes input or selection uses an isolated draft, as in the Filter Editor or pending Pane creation. For a multi-select draft, Space toggles a choice, Enter confirms the complete draft, and Escape discards it without changing effective configuration, generation, or active work. A second confirmation is reserved for consequences that are destructive, difficult to reverse, or otherwise unclear; ordinary reversible configuration does not require one.
+   **Exception:** An operation that cannot produce a valid value until the user completes input or selection uses an isolated draft: Filter, Layout, Pane Replace, and Pane Add. Enter commits a valid complete draft and Escape discards only that child operation, returning to its parent adjustment. The Layout Editor displays its current `auto` or `ROWSxCOLUMNS` input and keeps invalid input visible with an error. Pane Replace atomically installs a fresh default Pane at the same list index and retires the displaced lifecycle. Pane Add uses `N` for before and `n` for after in list order; fixed layouts reject insertion when capacity is full rather than rewriting Layout. A second confirmation is reserved for consequences that are destructive, difficult to reverse, or otherwise unclear; ordinary reversible configuration does not require one.
 
 6. **Committed configuration and displayed data must describe the same state.**
 
@@ -157,7 +159,7 @@ This document records the stable product concepts and design constraints of `ccu
 
    `m` always means modify the current chart: it modifies the current view in Standalone and the current Pane in Dashboard browse mode; clicking a Pane selects it and performs the equivalent action. Uppercase `G` opens Dashboard-global settings, and clicking the Header is equivalent. Uppercase letters do not generally reverse their lowercase options. Related keys may instead represent distinct, stable families of the same concept: `p` cycles common trailing periods, while `P` cycles common natural periods to date. The interface names the active family so a calendar-aligned period is not mistaken for a trailing duration.
 
-   **Exception:** Theme has a large, growing choice set, so `t` advances and `T` reverses.
+   **Exception:** Theme has a large, growing choice set, so `t` advances and `T` reverses. `N` and `n` are the deliberate semantic pair for inserting a Pane before or after the focused Pane's list index. Other ordinary letter actions are lowercase-only.
 
 8. **Directional operations support both arrow keys and `hjkl`.**
 
@@ -175,7 +177,7 @@ This document records the stable product concepts and design constraints of `ccu
 
    Chart mode does not expose copy. Non-Chart views such as Command, Markdown Table, and JSON identify both the current content and the next view, and copy always captures the complete current content.
 
-   **Exception:** Dashboard-global inspection offers compact and full commands only, not cross-Pane Markdown or JSON. A full-screen Pane Inspector exposes the corresponding Standalone content.
+   **Exception:** Dashboard-global inspection offers compact and full commands only, not cross-Pane Markdown or JSON. Each Pane owns its own `v` view cycle across Chart, Command, Full Command, data table, and data JSON. Dashboard `c` temporarily preserves the current frame and disables mouse reporting so the terminal can own drag selection and copy; Escape or any keyboard input leaves selection mode, and mouse reporting is restored even on interruption. Standalone does not need this mode because it does not enable Dashboard mouse reporting.
 
 ## Dashboard layout and sizing
 
