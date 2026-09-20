@@ -75,7 +75,7 @@ This document records the stable product concepts and design constraints of `ccu
 
 5. **Historical Ranking and Monitor Ranking share visual grammar only.**
 
-   Historical Ranking orders accumulated token consumption over a date range. Monitor Ranking orders values in a live observation window: Model may express TPM, while Agent and Project express token growth within the window. They do not share a time or metric contract.
+   Historical Ranking orders accumulated token consumption over a date range. Monitor Ranking orders only the newest valid cumulative sample pair: Total and Model express TPM calculated from actual monotonic elapsed time, while Agent and Project express that pair's Token delta. Retained Timeline history does not redefine or repopulate the current Ranking value. The two Ranking forms do not share a time or metric contract.
 
 ## Data consistency and asynchronous results
 
@@ -135,7 +135,7 @@ This document records the stable product concepts and design constraints of `ccu
 
    Quick and Advanced are divided by usage frequency rather than an internal distinction between data and appearance. Quick covers Data Scope, analysis, and primary presentation in common analytical workflows. Advanced contains infrequent, precise, or conditional controls. Both operate on the same immediate configuration, and contextually meaningless options are omitted rather than shown disabled.
 
-   Standalone, Pane, and Dashboard-global adjustment use exactly two rows: current runtime status plus effective settings, then the active Quick or Advanced actions. `a` switches pages; Enter or Escape finishes ordinary adjustment without rolling back changes. There is no clickable Finish target. On narrow terminals, complete low-priority action units are omitted and `…(+N)` reports the exact number still available by keyboard, while page identity, the `a` switch, and Enter/Escape guidance remain visible.
+   Standalone and Dashboard-global adjustment use exactly two rows: current runtime status plus effective settings, then the active Quick or Advanced actions. Dashboard Pane adjustment begins with those same two chart rows, followed by a divider and two Dashboard-management rows for content/lifecycle and position/focus. `a` switches only the chart action row; Dashboard management remains available on either page. Enter or Escape finishes ordinary adjustment without rolling back changes. There is no clickable Finish target. On narrow terminals, complete low-priority action units are omitted and `…(+N)` reports the exact number still available by keyboard, while page identity, the `a` switch, and Enter/Escape guidance remain visible.
 
 4. **Finite choices preserve and truthfully display any valid startup value.**
 
@@ -147,7 +147,7 @@ This document records the stable product concepts and design constraints of `ccu
 
    Most settings commit on each adjustment. The visible configuration updates at once, and any data already derivable from accepted facts is recomputed immediately. Enter and Escape therefore have the same meaning in an ordinary settings surface: both leave the surface while preserving the effective state. They do not save, discard, or roll back changes that have already taken effect. Layout and Weights follow the same rule.
 
-   **Exception:** An operation that cannot produce a valid value until the user completes input or selection uses an isolated draft: Filter, Layout, Pane Replace, and Pane Add. Enter commits a valid complete draft and Escape discards only that child operation, returning to its parent adjustment. The Layout Editor displays its current `auto` or `ROWSxCOLUMNS` input and keeps invalid input visible with an error. Pane Replace atomically installs a fresh default Pane at the same list index and retires the displaced lifecycle. Pane Add uses `N` for before and `n` for after in list order; fixed layouts reject insertion when capacity is full rather than rewriting Layout. A second confirmation is reserved for consequences that are destructive, difficult to reverse, or otherwise unclear; ordinary reversible configuration does not require one.
+   **Exception:** An operation that cannot produce a valid value until the user completes input or selection uses an isolated draft: Filter, Layout, Pane Replace, and Pane Add. Enter commits a valid complete draft and Escape discards only that child operation, returning to its parent adjustment. The Layout Editor displays its current `auto` or `ROWSxCOLUMNS` input and keeps invalid input visible with an error. Pane Replace atomically installs a fresh default Pane at the same list index and retires the displaced lifecycle. Pane Add uses `N` for before and `n` for after the focused Pane's list index. Fixed layouts preserve their column count and expand their row count when insertion or addition requires capacity; deletion does not shrink them automatically. A second confirmation is reserved for consequences that are destructive, difficult to reverse, or otherwise unclear; ordinary reversible configuration does not require one.
 
 6. **Committed configuration and displayed data must describe the same state.**
 
@@ -177,7 +177,7 @@ This document records the stable product concepts and design constraints of `ccu
 
    Chart mode does not expose copy. Non-Chart views such as Command, Markdown Table, and JSON identify both the current content and the next view, and copy always captures the complete current content.
 
-   **Exception:** Dashboard-global inspection offers compact and full commands only, not cross-Pane Markdown or JSON. Each Pane owns its own `v` view cycle across Chart, Command, Full Command, data table, and data JSON. Dashboard `c` temporarily preserves the current frame and disables mouse reporting so the terminal can own drag selection and copy; Escape or any keyboard input leaves selection mode, and mouse reporting is restored even on interruption. Standalone does not need this mode because it does not enable Dashboard mouse reporting.
+   **Exception:** Dashboard-global inspection offers compact and full commands only, not cross-Pane Markdown or JSON. Each Pane owns its own `v` view cycle across Chart, Command, Full Command, data table, and data JSON. Dashboard does not provide a temporary terminal text-selection `c` mode; ordinary xterm mouse reporting remains enabled for Pane selection and is restored during terminal cleanup.
 
 ## Dashboard layout and sizing
 
@@ -187,7 +187,7 @@ This document records the stable product concepts and design constraints of `ccu
 
 2. **Panes share column proportions and per-row heights.**
 
-   A column adjustment affects the shared column, while a row adjustment affects that row. Reordering swaps content without changing geometry. Arbitrary coordinates, overlap, per-cell topology, pagination, and Pane scrolling are not supported.
+   A column adjustment affects the shared column, while a row adjustment affects that row. Reordering swaps content without changing geometry. In a fixed grid, Pane insertion or addition preserves the existing column count and appends only as many rows as required; deletion never shrinks that topology implicitly. Arbitrary coordinates, overlap, per-cell topology, pagination, and Pane scrolling are not supported.
 
 3. **The Safety Minimum protects correctness, not comfortable readability.**
 
@@ -235,7 +235,7 @@ This document records the stable product concepts and design constraints of `ccu
 
    `r` always refreshes the current context. Sorting, derived computation, and full repaint caused by refreshed data are consequences of that same operation, not separate re-sort or repaint commands. A Dashboard manual refresh gives every component an immediate refresh opportunity, invalidates the paint cache, and covers the full Dashboard. Resume performs the same refresh and repaint before fixed Ticks continue. Resize automatically recomputes all geometry and clears obsolete regions without requiring a data query. Full repaint does not imply an unconditional terminal clear.
 
-   **Exception:** Pause stops periodic Ticks only. Paused time creates no periodic work or backlog, while manual refresh and a one-shot completion debounced from an explicit configuration change may still run. Such completion does not resume periodic scheduling, and a paused Monitor interval remains a Gap. Standalone Watch and Monitor retain their own refresh, pause, and Interval behavior.
+   **Exception:** Pause stops periodic Ticks only. Paused time creates no periodic work or backlog, while manual refresh and a one-shot completion debounced from an explicit configuration change may still run. Such completion does not resume periodic scheduling. A Monitor baseline, sampling gap, pause/resume, data-affecting reconfiguration, or counter reset clears the separate current observation until the next valid sample pair; retained Timeline history remains available and discontinuities remain Gaps. Standalone Watch and Monitor retain their own refresh, pause, and Interval behavior.
 
 ## Reproducibility and documentation boundaries
 
