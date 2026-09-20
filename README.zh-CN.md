@@ -186,6 +186,8 @@ ccuv monitor --demo small
 ccuv dashboard
 ccuv dashboard narrow
 ccuv dashboard all
+ccuv dashboard spotlight-wide
+ccuv dashboard spotlight-tall
 
 # 可覆盖预设设置并追加 Pane
 ccuv dashboard wide --refresh-interval 30 --pane "calendar"
@@ -201,11 +203,13 @@ ccuv dashboard wide --refresh-interval 30 --sampling-interval 5
 ccuv dashboard wide --header-style panel --header-summary quarter --header-interval 90
 ```
 
-`dashboard` 使用一个终端输入循环和合成器；每个 Pane 保留最近结果、失败状态，Monitor Pane 还保留自己的内存观测历史。默认 `wide` 预设是填满的 2×2 总览，包含 Timeline、Stack、Ranking，以及按模型分组的 Monitor。裸 `ccuv dashboard` 等价于 `ccuv dashboard wide`；`narrow` 提供三个 Pane 的纵向视图，`all` 将十个代表性视图展开为 framed 5×2 网格。Preset 提供基础 Pane 与设置，显式 Dashboard 参数会覆盖对应设置，重复的 `--pane` 会继续追加；不使用 Preset 时，`--pane` 定义完整列表。Wide 自动生成的 Monitor 等同于 `monitor --by model`；独立运行 `monitor` 或显式指定 `--pane "monitor"` 时仍显示权威的总体 TPM。`--pane` 的值是以 `timeline`、`calendar`、`stack`、`ranking` 或 `monitor` 开头的图表片段；片段内禁止 Host、进程和生命周期选项。Dashboard 拥有调度：`--refresh-interval` 控制 Historical Pane 刷新，`--sampling-interval` 控制 Monitor Pane 采样。`--grid ROWSxCOLUMNS` 设置启动网格，`auto` 最多使用两列。
+`dashboard` 使用一个终端输入循环和合成器；每个 Pane 保留最近结果、失败状态，Monitor Pane 还保留自己的内存观测历史。默认 `wide` 预设是填满的 2×2 总览，包含 Timeline、Stack、Ranking，以及按模型分组的 Monitor。裸 `ccuv dashboard` 等价于 `ccuv dashboard wide`；`narrow` 提供三个 Pane 的纵向视图，`all` 将十个代表性视图展开为 framed 5×2 网格，`spotlight-wide` 在顶部突出 Timeline，`spotlight-tall` 在左侧突出 Ranking。Preset 提供基础 Pane 与设置，显式 Dashboard 参数会覆盖对应设置，重复的 `--pane` 会继续追加；不使用 Preset 时，`--pane` 定义完整列表。Wide 自动生成的 Monitor 等同于 `monitor --by model`；独立运行 `monitor` 或显式指定 `--pane "monitor"` 时仍显示权威的总体 TPM。`--pane` 的值是以 `timeline`、`calendar`、`stack`、`ranking` 或 `monitor` 开头的图表片段；片段内禁止 Host、进程和生命周期选项。Dashboard 拥有调度：`--refresh-interval` 控制 Historical Pane 刷新，`--sampling-interval` 控制 Monitor Pane 采样。`--grid` 接受 `auto`、`ROWSxCOLUMNS`、`spotlight-wide` 或 `spotlight-tall`，并可搭配任意 Pane 片段。
+
+两种 Spotlight 布局都只按 Pane 列表索引 0 确定重点 Pane：点击和 `Tab` 只改变交互焦点，重新排序、在索引 0 之前插入，或删除索引 0 才会改变重点 Pane。窄终端下，`spotlight-tall` 会使用纵向的 wide 降级形态渲染，但不会改变配置名称或已保存比例。
 
 Dashboard 页眉与子图摘要彼此独立。`--header-style` 支持 `hidden`、`compact`、`banner` 和默认的 `panel`。`--header-summary` 独立选择 `day`、`month`、`quarter`、`year` 或 `none`（默认 `day`）；`none` 保留标题与更新时间但省略详情，`hidden` 隐藏整个页眉。冷切换粒度时会立即显示完整的本地化结构和 `??` 占位，只有已接受的数据才会替换它。页眉使用未筛选的全部 Agent 总量，默认每 60 秒独立刷新；失败或过期结果不会推进成功更新时间。Dashboard 的 `--theme` 只控制外壳、大标题、页眉摘要、占位和分隔，子图保留各自独立的 `--theme`。Dashboard 的 `--style` 将外壳结构统一为 `minimal`、默认的 `split`、`framed` 或 `accent`，不会改变子图图表样式或 Header Style。按 `s` 从第一个子图开始调整，或点击任意子图直接调整；浏览时 `Tab` 不执行操作，子图调整时循环切换子图。
 
-浏览模式只保留一行简洁页脚：`r` 刷新全部、`s`/点击调整 Pane、`g` 打开全局调整、`h` 隐藏/显示控制栏、`v` 查看完整命令、Space 暂停/恢复调度。Controls 属于会话外壳，不受图表 Density 影响。数据、能力、渲染器和补充比较 Notice 都保留在来源 Pane 内的有界区域；它们不会移入或经由全局警告区去重，一个 Pane 的 Notice 也不会改变另一个 Pane 的几何。Pane 调整的前两行与 Standalone 一致：第一行展示当前有效状态，第二行展示快捷或高级图表操作。其后以分隔线隔开两行 Dashboard 专属管理操作，分别负责内容/生命周期与位置/焦点。`a` 只切换图表操作行；Dashboard 管理操作在快捷和高级页都保持可见且可用，包括查看、替换、`N` 前插、`n` 后插、删除、前移/后移和 Pane 导航。固定布局在 Pane 插入或全局 `+` 添加时保留列数，只扩展容纳所需的行数；删除不会自动缩减布局。全局快捷设置包含 Theme、Style、Header、Summary 与 Layout；全局高级设置包含 Pane 添加、删除、排序和选择。Dashboard 全局设置不会改写 Pane 自有的 Density、Theme、Style、Filters 或分析设置。复制 Dashboard 会保留外壳 Theme/Style 与每个 Pane 各自独立的呈现。`Ctrl-C` 会还原终端并取消活动查询。
+浏览模式只保留一行简洁页脚：`r` 刷新全部、`s`/点击调整 Pane、`g` 打开全局调整、`h` 隐藏/显示控制栏、`v` 查看完整命令、Space 暂停/恢复调度。Controls 属于会话外壳，不受图表 Density 影响。数据、能力、渲染器和补充比较 Notice 都保留在来源 Pane 内的有界区域；它们不会移入或经由全局警告区去重，一个 Pane 的 Notice 也不会改变另一个 Pane 的几何。Pane 调整的前两行与 Standalone 一致：第一行展示当前有效状态，第二行展示快捷或高级图表操作。其后以分隔线隔开两行 Dashboard 专属管理操作，分别负责内容/生命周期与位置/焦点。`a` 只切换图表操作行；Dashboard 管理操作在快捷和高级页都保持可见且可用，包括查看、替换、`N` 前插、`n` 后插、删除、前移/后移和 Pane 导航。固定布局在 Pane 插入时保留列数，只扩展容纳所需的行数；删除只回收完全为空的末尾行。全局调整不再区分快捷与高级，而是统一提供 Theme、Style、Header、Summary 与 Layout。Pane 的新增、删除、排序、选择，以及逻辑宽高比例调整只属于选中 Pane 的管理区；复制 Dashboard 命令会保留规范化后的行列权重。Dashboard 全局设置不会改写 Pane 自有的 Density、Theme、Style、Filters 或分析设置。复制 Dashboard 会保留外壳 Theme/Style 与每个 Pane 各自独立的呈现。`Ctrl-C` 会还原终端并取消活动查询。
 
 Monitor 在独立命令和 Dashboard 中共用带留白且稳定的 y 轴。数据越界时上界立即扩大，持续处于低区间后才缩小，因此小幅变化会表现为折线移动，而不是坐标轴不断移动。指标语义不变：总量与模型是最新采样对的 TPM，Agent 与项目是最新采样对的 Token 增长。
 
@@ -255,7 +259,7 @@ ccuv timeline --demo large
 
 Theme 负责语义前景色，Style 负责图表形态。使用 `--theme` 和 `--style` 指定初始外观；TUI 运行期间可按 `m` 基于已保留快照调整受支持的设置，不会因此发起新查询。
 
-Dashboard 浏览模式有意只保留一行控制栏：`r` 刷新全部、`s`/点击调整 Pane、`g` 全局调整、`h` 隐藏/显示控制栏、`v` 查看完整命令、Space 暂停/继续调度。Controls 属于会话外壳，不受图表 Density 影响。数据、能力、渲染器和补充比较 Notice 都保留在来源 Pane 内的有界区域；它们不会移入或经由全局警告区去重，一个 Pane 的 Notice 也不会改变另一个 Pane 的几何。Pane 调整先显示与 Standalone 一致的当前状态和快捷/高级图表操作，再通过分隔线增加两行 Dashboard 管理操作。`a` 只切换图表操作行；管理操作在任一页面都保持可见且可用。固定布局在 `N`、`n` 或全局 `+` 需要容量时保留列数并增加行数。全局快捷设置包含 Theme、Style、Header、Summary 和 Layout；全局高级设置使用 `+` 添加 Pane，并提供 `x` 删除、`[`/`]` 排序和 `Tab` 选择 Pane。Dashboard 全局 Theme、Style、Header、Summary 和 Layout 不会改写 Pane 拥有的 Density、Theme、Style、Filters 或分析设置。复制 Dashboard 会保留外壳 Theme/Style 与每个 Pane 各自独立的呈现。`Ctrl-C` 会还原终端并取消活动查询。
+Dashboard 浏览模式有意只保留一行控制栏：`r` 刷新全部、`s`/点击调整 Pane、`g` 全局调整、`h` 隐藏/显示控制栏、`v` 查看完整命令、Space 暂停/继续调度。Controls 属于会话外壳，不受图表 Density 影响。数据、能力、渲染器和补充比较 Notice 都保留在来源 Pane 内的有界区域；它们不会移入或经由全局警告区去重，一个 Pane 的 Notice 也不会改变另一个 Pane 的几何。Pane 调整先显示与 Standalone 一致的当前状态和快捷/高级图表操作，再提供 Pane 生命周期、排序、导航和逻辑宽高比例管理。`a` 只切换图表操作行；管理操作在任一页面都保持可见且可用。全局调整只有一个 Dashboard 级页面，包含 Theme、Style、Header、Summary 和 Layout。固定布局保留列数，插入时增加行，删除后只回收完全为空的末尾行。Dashboard 全局设置不会改写 Pane 自有的 Density、Theme、Style、Filters 或分析设置。复制 Dashboard 会保留外壳 Theme/Style、规范化行列权重与每个 Pane 各自独立的呈现。`Ctrl-C` 会还原终端并取消活动查询。
 
 样式按子命令定义：Timeline 支持 `linear`、`step`、`no-line`、`points`、`line-points`、`stem`、`area`。`no-line` 不连线但保留各系列不同的标记；`points` 使用统一实心点且不连线；`line-points` 使用统一实心点和线性连线。Monitor 支持 `bars`、`line`、`step`、`points`、`line-points`、`ranking`；两个统一点样式与 Timeline 的无线和线性连线语义相同。Calendar 支持 `relative`、`absolute`；Stack 支持 `stacked`、`stacked-pattern`、`grouped`、`grouped-thin`、`normalized`；Ranking 支持 `bar`、`dot`、`dots`。`--ascii` 独立于 Theme 和 Style，只改变字符。
 
