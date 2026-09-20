@@ -439,6 +439,99 @@ def test_dashboard_layout_editor_is_visible_transactional_and_returns_to_global(
     assert any("Current status: running · 3x2" in frame for frame in painted)
 
 
+def test_dashboard_pane_insert_chooser_renders_inside_focused_pane(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parser = build_parser(load_translator("en"))
+    options = _to_options(
+        parser.parse_args(
+            [
+                "dashboard",
+                "--demo",
+                "--header-style",
+                "hidden",
+                "--header-summary",
+                "none",
+            ]
+        )
+    )
+    frames: list[object] = []
+
+    class Runtime:
+        def cancel(self) -> None:
+            pass
+
+    class Submission:
+        def __init__(self, generation: int) -> None:
+            self.generation = generation
+            self.purpose = tui_module.HistoricalPurpose.PRIMARY
+            self.handle = self
+            self.cancelled = threading.Event()
+
+        def cancel(self) -> None:
+            self.cancelled.set()
+
+        def result(self) -> object:
+            self.cancelled.wait(10)
+            raise RuntimeError("cancelled query must stay hidden")
+
+    class Component:
+        def __init__(self, selected: object, **_kwargs: object) -> None:
+            self.candidate = selected
+            self.accepted_options = selected
+            self.error = None
+            self.generation = 0
+            self.snapshot = None
+            self.accepted_generation = None
+
+        def missing_comparison_coverage(self) -> DateCoverage:
+            return DateCoverage()
+
+        def submit(self, _trigger: QueryTrigger, **_kwargs: object) -> Submission:
+            return Submission(self.generation)
+
+        def fail(self, *_args: object, **_kwargs: object) -> bool:
+            return True
+
+    class Screen:
+        def __init__(self, _stream: object) -> None:
+            pass
+
+        def paint(self, frame: object, **_kwargs: object) -> None:
+            frames.append(frame)
+
+        def finish(self) -> None:
+            pass
+
+    keys = iter(
+        (
+            KeyEvent("s"),
+            KeyEvent("n"),
+            KeyEvent("\x1b"),
+            KeyEvent("N"),
+            KeyEvent("\x1b"),
+            KeyEvent("\x03"),
+        )
+    )
+    runtime = Runtime()
+    monkeypatch.setattr(tui_module, "build_query_runtime", lambda: runtime)
+    monkeypatch.setattr(tui_module, "build_chart_registry", lambda: object())
+    monkeypatch.setattr(tui_module, "HistoricalChartComponent", Component)
+    monkeypatch.setattr(tui_module, "MonitorComponent", Component)
+    monkeypatch.setattr(tui_module, "FramePainter", Screen)
+    monkeypatch.setattr(tui_module, "tui_input_mode", nullcontext)
+    monkeypatch.setattr(tui_module, "read_event", lambda _decoder, _timeout: next(keys))
+    monkeypatch.setattr(
+        tui_module, "get_terminal_size", lambda: __import__("os").terminal_size((100, 30))
+    )
+    monkeypatch.setattr(tui_module, "_pane_render", lambda *_args: tui_module.PaneRender("chart"))
+
+    assert tui_module.run_tui(options, load_translator("en")) == 0
+    painted = ["\n".join(frame.rows) for frame in frames]
+    assert any("Insert pane after" in frame for frame in painted), painted
+    assert any("Insert pane before" in frame for frame in painted), painted
+
+
 def test_dashboard_primary_completion_queues_pane_supplement(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

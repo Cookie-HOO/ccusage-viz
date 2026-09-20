@@ -1534,15 +1534,13 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             cell_height = layout.heights[pane_index // columns]
             framed = frame_style != "none" or pane_index == focused
             interior_height = max(1, cell_height - 2 if framed else cell_height)
-            chooser_overlay = (
-                pane_index,
-                compose_frame(
-                    choices,
-                    title,
-                    chooser_controls,
-                    height=interior_height,
-                ),
+            chooser_frame = compose_frame(
+                choices,
+                title,
+                chooser_controls,
+                height=interior_height,
             )
+            chooser_overlay = (pane_index, "\n".join(chooser_frame.rows))
             paint(force=True)
 
         try:
