@@ -344,6 +344,38 @@ def _grid_shape(grid: str, count: int) -> tuple[int, int]:
     return rows, columns
 
 
+def _grid_has_capacity(grid: str, pane_count: int) -> bool:
+    if grid == "auto":
+        return True
+    rows, columns = _grid_shape(grid, pane_count)
+    return pane_count < rows * columns
+
+
+def _replace_pane(
+    panes: list[TuiPane],
+    index: int,
+    replacement: TuiPane,
+    *,
+    start: Callable[[int], None],
+) -> None:
+    displaced = panes[index]
+    panes[index] = replacement
+    start(index)
+    displaced.scheduler.shutdown()
+    displaced.lifecycle.shutdown()
+
+
+def _insert_pane(
+    panes: list[TuiPane],
+    index: int,
+    inserted: TuiPane,
+    *,
+    start: Callable[[int], None],
+) -> None:
+    panes.insert(index, inserted)
+    start(index)
+
+
 def parse_grid(value: str, pane_count: int) -> str | None:
     """Normalize a session layout only when it can display every pane."""
     if value.casefold() == "auto":
@@ -789,6 +821,9 @@ _PANE_ADVANCED_ACTIONS = {
 _COMMON_PANE_QUICK_ACTIONS = (("d", "density"), ("t/T", "theme"), ("s", "style"), ("v", "view"))
 _COMMON_PANE_ADVANCED_ACTIONS = (
     ("f", "filters"),
+    ("r", "replace"),
+    ("N", "insert_before"),
+    ("n", "insert_after"),
     ("[", "previous"),
     ("]", "next"),
     ("x", "delete"),
@@ -907,6 +942,8 @@ def _choose_pane_type(
     decoder: InputDecoder,
     *,
     height: int,
+    action: str = "add",
+    paint_choices: Callable[[str, str, str], None] | None = None,
 ) -> str | None:
     index = 0
     while True:
@@ -914,14 +951,12 @@ def _choose_pane_type(
             f"{'›' if item == _PANE_COMMANDS[index] else ' '} {item.title()}"
             for item in _PANE_COMMANDS
         )
-        screen.paint(
-            compose_frame(
-                choices,
-                translator.text("status.tui_add_title"),
-                translator.text("status.tui_add_controls"),
-                height=height,
-            )
-        )
+        title = translator.text(f"status.tui_{action}_title")
+        controls = translator.text(f"status.tui_{action}_controls")
+        if paint_choices is None:
+            screen.paint(compose_frame(choices, title, controls, height=height))
+        else:
+            paint_choices(choices, title, controls)
         event = read_event(decoder, 0.1)
         if not isinstance(event, KeyEvent):
             continue
@@ -963,6 +998,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
     adjustment_page = "quick"
     browse_controls_hidden = False
     body_view: DashboardBodyView = "chart"
+    chooser_overlay: tuple[int, str] | None = None
     copied_status: str | None = None
     last_successful_update: datetime | None = None
     last_size: tuple[int, int] | None = None
@@ -1265,7 +1301,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         if adjustment_mode == "pane" and focused is not None:
             pane = panes[focused]
             return _adjustment_footer(
-                _pane_adjustment_state(pane, translator),
+                grid_error or _pane_adjustment_state(pane, translator),
                 _pane_options(pane).chart.kind,
                 adjustment_page,
                 translator,
@@ -1362,6 +1398,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     pane_options.chart.presentation.theme != "no-color",
                     pane_options.host.ascii,
                 )
+                if chooser_overlay is not None and chooser_overlay[0] == index:
+                    rendered_panes.append(chooser_overlay[1])
+                    continue
                 rendered = _pane_render(pane, translator, terminal)
                 local_notices = format_notice_lines(
                     rendered.notices,
@@ -1407,6 +1446,55 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         screen.paint(
             compose_frame(body, status, controls(), height=size.lines),
             force=force,
+        )
+
+    def choose_pane_type(action: str, pane_index: int) -> str | None:
+        nonlocal chooser_overlay
+
+        def paint_choices(choices: str, title: str, chooser_controls: str) -> None:
+            nonlocal chooser_overlay
+            size = get_terminal_size()
+            header_rows = len(
+                _header_lines(
+                    header,
+                    header_style,
+                    translator,
+                    Terminal(size.columns, 4, dashboard_theme != "no-color", options.host.ascii),
+                    last_successful_update,
+                )
+            )
+            rows, columns, layout = grid_geometry(size.columns, size.lines, header_rows, 0)
+            cell_height = layout.heights[pane_index // columns]
+            framed = frame_style != "none" or pane_index == focused
+            interior_height = max(1, cell_height - 2 if framed else cell_height)
+            chooser_overlay = (
+                pane_index,
+                compose_frame(
+                    choices,
+                    title,
+                    chooser_controls,
+                    height=interior_height,
+                ),
+            )
+            paint(force=True)
+
+        try:
+            return _choose_pane_type(
+                screen,
+                translator,
+                decoder,
+                height=get_terminal_size().lines,
+                action=action,
+                paint_choices=paint_choices,
+            )
+        finally:
+            chooser_overlay = None
+
+    def create_pane(command: str) -> TuiPane:
+        return _new_pane(
+            _new_pane_options(command, options),
+            allocate_pane_owner_id(),
+            runtime,
         )
 
     try:
@@ -1568,6 +1656,37 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                     )
                             elif adjustment_page == "quick" and key == "v":
                                 pane.body_view = next_body_view(pane.body_view)
+                            elif adjustment_page == "advanced" and key == "r":
+                                choice = choose_pane_type("replace", focused)
+                                if choice is not None:
+                                    replacement = create_pane(choice)
+                                    _replace_pane(
+                                        panes,
+                                        focused,
+                                        replacement,
+                                        start=lambda index: refresh(
+                                            index, trigger=LifecycleTrigger.STARTUP
+                                        ),
+                                    )
+                            elif adjustment_page == "advanced" and key in {"N", "n"}:
+                                if not _grid_has_capacity(active_grid, len(panes)):
+                                    grid_error = translator.text(
+                                        "error.tui_grid_full", layout=active_grid
+                                    )
+                                else:
+                                    action = "insert_before" if key == "N" else "insert_after"
+                                    choice = choose_pane_type(action, focused)
+                                    if choice is not None:
+                                        insert_at = focused if key == "N" else focused + 1
+                                        _insert_pane(
+                                            panes,
+                                            insert_at,
+                                            create_pane(choice),
+                                            start=lambda index: refresh(
+                                                index, trigger=LifecycleTrigger.STARTUP
+                                            ),
+                                        )
+                                        focused = insert_at
                             elif adjustment_page == "advanced" and key == "[" and focused > 0:
                                 panes[focused - 1], panes[focused] = (
                                     panes[focused],

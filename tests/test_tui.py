@@ -30,10 +30,12 @@ from ccusage_viz.tui import (
     _adjustment_target,
     _choose_pane_type,
     _dashboard_title_line,
+    _grid_has_capacity,
     _grid_shape,
     _header_lines,
     _header_options,
     _header_refresh_interval,
+    _insert_pane,
     _local_pane_content,
     _new_header,
     _new_pane,
@@ -42,6 +44,7 @@ from ccusage_viz.tui import (
     _pane_render,
     _query_affecting_adjustment,
     _replace_header_interval,
+    _replace_pane,
     _set_header_theme,
     compose_panes,
     pane_at,
@@ -1093,6 +1096,38 @@ def test_pane_chooser_wraps_backward_and_escape_cancels(
     assert _choose_pane_type(Screen(), load_translator("en"), cancelled, height=20) is None
 
 
+def test_pane_chooser_uses_operation_specific_copy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    painted: list[tuple[str, str, str]] = []
+    decoder = InputDecoder()
+    decoder.feed("\x1b")
+    moments = iter((1.0, 1.04))
+    monkeypatch.setattr(
+        tui_module,
+        "read_event",
+        lambda active, timeout: active.next(now=next(moments)),
+    )
+
+    assert (
+        _choose_pane_type(
+            object(),
+            load_translator("en"),
+            decoder,
+            height=20,
+            action="replace",
+            paint_choices=lambda choices, title, controls: painted.append(
+                (choices, title, controls)
+            ),
+        )
+        is None
+    )
+    assert painted[0][1:] == (
+        "Replace pane",
+        "j/k select · Enter replace · Esc cancel",
+    )
+
+
 def test_tui_input_decodes_keys_and_fragmented_mouse_press() -> None:
     decoder = InputDecoder()
     decoder.feed("r")
@@ -1107,6 +1142,61 @@ def test_tui_parses_runtime_grid_with_capacity() -> None:
     assert parse_grid("AUTO", 3) == "auto"
     assert parse_grid("2X2", 3) == "2x2"
     assert parse_grid("1x2", 3) is None
+
+
+def test_pane_insertion_capacity_never_rewrites_fixed_layout() -> None:
+    assert _grid_has_capacity("auto", 4)
+    assert _grid_has_capacity("2x2", 3)
+    assert not _grid_has_capacity("2x2", 4)
+
+
+def test_replace_pane_is_atomic_and_shuts_down_displaced_lifecycle() -> None:
+    events: list[tuple[str, int | str]] = []
+
+    class Scheduler:
+        def shutdown(self) -> None:
+            events.append(("scheduler", "old"))
+
+    class Lifecycle:
+        def shutdown(self) -> None:
+            events.append(("lifecycle", "old"))
+
+    displaced = type("Pane", (), {"scheduler": Scheduler(), "lifecycle": Lifecycle()})()
+    replacement = object()
+    other = object()
+    panes = [other, displaced]
+
+    _replace_pane(
+        panes,
+        1,
+        replacement,
+        start=lambda index: events.append(("start", index)),
+    )
+
+    assert panes == [other, replacement]
+    assert events == [("start", 1), ("scheduler", "old"), ("lifecycle", "old")]
+
+
+def test_insert_pane_uses_list_index_and_starts_only_new_pane() -> None:
+    before = object()
+    focused = object()
+    after = object()
+    inserted = object()
+    panes = [before, focused, after]
+    started: list[int] = []
+
+    _insert_pane(panes, 1, inserted, start=started.append)
+
+    assert panes == [before, inserted, focused, after]
+    assert started == [1]
+
+
+def test_pane_advanced_actions_expose_replace_and_list_insertion() -> None:
+    controls = _adjustment_controls("timeline", "advanced", load_translator("en"))
+
+    assert "r replace" in controls
+    assert "N insert before" in controls
+    assert "n insert after" in controls
     assert parse_grid("zero", 1) is None
 
 
