@@ -274,6 +274,8 @@ MESSAGES = {
     "calendar.month.10": "Oc",
     "calendar.month.11": "No",
     "calendar.month.12": "De",
+    "calendar.legend.less": "Less",
+    "calendar.legend.more": "More",
     "calendar.weekday.0": "Mo",
     "calendar.weekday.1": "Tu",
     "calendar.weekday.2": "We",

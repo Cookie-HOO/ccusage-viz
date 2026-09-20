@@ -24,24 +24,6 @@ def _positive_levels(values: list[int]) -> dict[int, int]:
     }
 
 
-_ABSOLUTE_THRESHOLDS = (1_000, 10_000, 100_000, 1_000_000)
-
-
-def _absolute_levels(values: list[int]) -> dict[int, int]:
-    return {
-        value: next(
-            (
-                level
-                for level, threshold in enumerate(_ABSOLUTE_THRESHOLDS, start=1)
-                if value <= threshold
-            ),
-            4,
-        )
-        for value in set(values)
-        if value > 0
-    }
-
-
 def _month_header(months: list[tuple[int, str]], *, week_count: int, stride: int) -> str:
     grid_width = week_count * stride - (stride - 1)
     last_week, last_label = months[-1]
@@ -75,12 +57,9 @@ def render_calendar(model: CalendarModel, context: RenderContext) -> str:
     # by falling back to one terminal cell per week.
     stride = 2 if 3 + week_count * 2 - 1 <= context.width else 1
     cells: dict[int, list[str]] = defaultdict(list)
-    marks = (" ", "░", "▒", "▓", "█") if not context.ascii else (" ", ".", "o", "O", "#")
-    levels = (
-        _absolute_levels(list(usage.values()))
-        if context.style == "absolute"
-        else _positive_levels(list(usage.values()))
-    )
+    empty_mark = ("-" if context.ascii else "·") if context.style == "grid" else " "
+    marks = (empty_mark, ".", "o", "O", "#") if context.ascii else (empty_mark, "░", "▒", "▓", "█")
+    levels = _positive_levels(list(usage.values()))
     colors = get_color_scheme(context.color_scheme).calendar
     months: list[tuple[int, str]] = []
     previous_month = None
@@ -134,12 +113,12 @@ def render_calendar(model: CalendarModel, context: RenderContext) -> str:
                 "label.peak", date=peak.day.isoformat(), value=format_tokens(peak.usage.total)
             )
         )
-    legend_labels = (
-        ("≤1K", "≤10K", "≤100K", ">100K") if context.style == "absolute" else ("1", "2", "3", "4")
-    )
     legend = " ".join(
-        f"{colored_mark(marks[level], colors[level - 1], context)}{legend_labels[level - 1]}"
-        for level in range(1, 5)
+        (
+            context.translator.text("calendar.legend.less"),
+            *(colored_mark(marks[level], colors[level - 1], context) for level in range(1, 5)),
+            context.translator.text("calendar.legend.more"),
+        )
     )
     lines.extend((activity, " · ".join(usage_stats), legend))
     return "\n".join(

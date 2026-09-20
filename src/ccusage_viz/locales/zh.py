@@ -274,6 +274,8 @@ MESSAGES = {
     "calendar.month.10": "10月",
     "calendar.month.11": "11月",
     "calendar.month.12": "12月",
+    "calendar.legend.less": "较少",
+    "calendar.legend.more": "较多",
     "calendar.weekday.0": "一",
     "calendar.weekday.1": "二",
     "calendar.weekday.2": "三",

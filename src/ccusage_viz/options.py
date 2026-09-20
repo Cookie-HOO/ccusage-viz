@@ -21,7 +21,7 @@ OTHER_MODES = ("show", "hide")
 CACHE_MODES = ("combined", "split")
 COMMAND_STYLES = {
     "timeline": ("linear", "step", "no-line", "points", "line-points", "stem", "area"),
-    "calendar": ("relative", "absolute"),
+    "calendar": ("relative", "grid"),
     "stack": ("stacked", "stacked-pattern", "grouped", "grouped-thin", "normalized"),
     "ranking": ("bar", "dot", "dots"),
     "monitor": ("bars", "line", "step", "points", "line-points", "ranking"),

@@ -294,7 +294,7 @@ def test_ranking_and_custom_calendar_render_without_json_or_table() -> None:
     calendar = render_calendar(
         CalendarModel((CalendarDay(date(2026, 1, 1), usage(4)),)), context(True)
     )
-    assert "Calendar" in calendar and "#4" in calendar
+    assert "Calendar" in calendar and "Less" in calendar and "#" in calendar
 
 
 def test_ranking_change_markers_separate_rank_activity_and_value() -> None:
@@ -482,13 +482,62 @@ def test_observed_ranking_uses_window_unit_without_historical_percentage() -> No
     assert "2026-01-01" not in output
 
 
-def test_calendar_absolute_style_has_stable_token_band_legend() -> None:
+@pytest.mark.parametrize(
+    ("ascii", "zero_mark", "levels"),
+    [
+        (True, "-", (".", "o", "O", "#")),
+        (False, "·", ("░", "▒", "▓", "█")),
+    ],
+)
+def test_calendar_grid_separates_valid_zero_days_and_keeps_padding_blank(
+    ascii: bool, zero_mark: str, levels: tuple[str, ...]
+) -> None:
     calendar = render_calendar(
-        CalendarModel((CalendarDay(date(2026, 1, 1), usage(20_000)),)),
-        RenderContext(80, 24, load_translator("en"), color=False, ascii=True, style="absolute"),
+        CalendarModel(
+            tuple(
+                CalendarDay(date(2026, 1, day), usage(value))
+                for day, value in enumerate((0, 10, 20, 30, 40), start=1)
+            )
+        ),
+        RenderContext(
+            80,
+            24,
+            load_translator("en"),
+            color=False,
+            ascii=ascii,
+            style="grid",
+        ),
     )
-    assert ".≤1K" in calendar
-    assert "#>100K" in calendar
+    day_rows = calendar.splitlines()[2:9]
+
+    assert zero_mark in day_rows[3]
+    assert all(level in calendar for level in levels)
+    assert day_rows[0][3] == " "
+    assert "Less" in calendar and "More" in calendar
+
+
+def test_calendar_relative_and_grid_share_relative_intensity_legend() -> None:
+    model = CalendarModel(
+        tuple(
+            CalendarDay(date(2026, 1, day), usage(value))
+            for day, value in enumerate((1, 10, 100, 1_000), start=1)
+        )
+    )
+
+    relative = render_calendar(
+        model,
+        RenderContext(80, 24, load_translator("en"), color=False, ascii=True),
+    )
+    grid = render_calendar(
+        model,
+        RenderContext(80, 24, load_translator("en"), color=False, ascii=True, style="grid"),
+    )
+
+    for mark in (".", "o", "O", "#"):
+        assert mark in relative
+        assert mark in grid
+    assert "Less . o O # More" in relative
+    assert "Less . o O # More" in grid
 
 
 def test_calendar_footer_separates_activity_usage_and_legend() -> None:
@@ -504,7 +553,7 @@ def test_calendar_footer_separates_activity_usage_and_legend() -> None:
     lines = calendar.splitlines()
     activity = next(line for line in lines if "Active days" in line)
     usage_line = next(line for line in lines if "Daily average" in line)
-    legend = next(line for line in lines if ".1" in line and "#4" in line)
+    legend = next(line for line in lines if "Less . o O # More" in line)
 
     assert "Current streak" in activity and "Longest streak" in activity
     assert "Peak" not in activity
@@ -532,6 +581,7 @@ def test_calendar_labels_follow_selected_language() -> None:
     )
     assert "1月" in calendar
     assert "四" in calendar
+    assert "较少 . o O # 较多" in calendar
     assert "Jan" not in calendar
 
 
