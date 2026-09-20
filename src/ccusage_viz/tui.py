@@ -687,6 +687,8 @@ def _pane_render(pane: TuiPane, translator: Translator, terminal: Terminal) -> P
         return PaneRender(format_full_command(active))
     if pane.body_view in {"data-table", "data-json"}:
         if isinstance(component, MonitorComponent):
+            if not isinstance(active.chart, MonitorConfig):
+                raise TypeError("monitor pane component has historical configuration")
             buckets = component.buckets(
                 max(8, min(32, terminal.width // 4)),
                 now=time.monotonic(),
@@ -1096,6 +1098,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         if isinstance(component, MonitorComponent):
             return component.accepted_records
         return component.snapshot.records if component.snapshot is not None else ()
+
+    def start_new_pane(index: int) -> None:
+        refresh(index, trigger=LifecycleTrigger.STARTUP)
 
     def pane_includes_projects(pane: TuiPane) -> bool:
         component = pane.component
@@ -1707,9 +1712,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                         panes,
                                         focused,
                                         replacement,
-                                        start=lambda index: refresh(
-                                            index, trigger=LifecycleTrigger.STARTUP
-                                        ),
+                                        start=start_new_pane,
                                     )
                             elif adjustment_page == "advanced" and key in {"N", "n"}:
                                 if not _grid_has_capacity(active_grid, len(panes)):
@@ -1725,9 +1728,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                             panes,
                                             insert_at,
                                             create_pane(choice),
-                                            start=lambda index: refresh(
-                                                index, trigger=LifecycleTrigger.STARTUP
-                                            ),
+                                            start=start_new_pane,
                                         )
                                         focused = insert_at
                             elif adjustment_page == "advanced" and key == "[" and focused > 0:
