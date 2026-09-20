@@ -214,6 +214,7 @@ class RankingModel:
     observed_entries: tuple[ScalarRankingEntry, ...] = field(default_factory=tuple)
     metric: MetricDescriptor = field(default_factory=MetricDescriptor)
     observed_scope: ObservedScope | None = None
+    summary_notices: tuple[Notice, ...] = field(default_factory=tuple)
 
     def __post_init__(self) -> None:
         if not self.observed_entries and self.observed_scope is None:

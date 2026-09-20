@@ -660,6 +660,36 @@ def test_ranking_render_shows_daily_summary_and_separate_scope_warning() -> None
     assert rendered.notices[0] not in rendered.chart
 
 
+def test_minimal_ranking_hides_summary_notice_but_keeps_correctness_notice() -> None:
+    summary_notice = Notice("notice.summary_excludes_session_agent", {"agent": "Codex"})
+    correctness_notice = Notice("notice.project_agent_omitted", {"agent": "Codex"})
+    selected = options()
+    selected = replace(
+        selected,
+        chart=replace(
+            selected.chart,
+            presentation=replace(selected.chart.presentation, density="minimal"),
+        ),
+    )
+    rendered = render_component(
+        component(
+            selected,
+            snapshot=UsageSnapshot(
+                (),
+                (correctness_notice,),
+                0.0,
+                coverage=DateCoverage.from_interval(date(2025, 12, 25), date(2026, 1, 14)),
+                summary_notices=(summary_notice,),
+            ),
+        ),
+        load_translator("en"),
+        Terminal(100, 30, False, True),
+    )
+
+    assert "Today’s tokens" not in rendered.chart
+    assert rendered.notices == ("Codex omitted: ccusage does not expose project data",)
+
+
 def test_render_normalizes_standalone_ranking_title() -> None:
     rendered = render_component(
         component(),

@@ -41,6 +41,9 @@ def render_historical_component(
     if options is None or model is None:
         raise RuntimeError("historical component has no accepted model")
     chart = historical_chart_config(options)
+    visible_notices = model.notices
+    if chart.presentation.density != "minimal" and model.summary is not None:
+        visible_notices += getattr(model, "summary_notices", ())
     title_content = (
         translator.text(f"label.{options.chart.by or 'total'}")
         if normalize_titles and options.chart.kind == "timeline"
@@ -54,7 +57,7 @@ def render_historical_component(
             1,
             terminal.height
             - 1
-            - len(model.notices)
+            - len(visible_notices)
             - int(reserve_prompt)
             - control_rows
             - int(chart.presentation.density == "full"),
@@ -82,5 +85,5 @@ def render_historical_component(
     audit = render_audit(context)
     if audit:
         rendered = f"{rendered}\n{audit}"
-    notices = tuple(translator.text(notice.key, **notice.values) for notice in model.notices)
+    notices = tuple(translator.text(notice.key, **notice.values) for notice in visible_notices)
     return RenderedChart(rendered, notices)

@@ -325,8 +325,6 @@ def build_ranking(
         enabled=include_summary,
         filter_count=filter_count,
     )
-    if summary is not None:
-        model_notices += tuple(summary_notices)
     visible_regular_total = sum(
         (entry.usage.total for entry in entries if not entry.is_other), start=0
     )
@@ -343,4 +341,5 @@ def build_ranking(
         summary,
         top if top_share is not None else None,
         top_share,
+        summary_notices=tuple(summary_notices) if summary is not None else (),
     )

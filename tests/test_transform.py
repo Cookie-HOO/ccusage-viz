@@ -403,7 +403,8 @@ def test_ranking_summary_uses_only_daily_records_and_marks_session_omission() ->
     assert ranking.summary.total == 10
     assert ranking.percentage_total.total == 100
     assert sum(entry.usage.total for entry in ranking.entries) == 100
-    assert ranking.notices[-1] == scope_notice
+    assert ranking.summary_notices == (scope_notice,)
+    assert scope_notice not in ranking.notices
 
 
 def test_ranking_summary_warning_is_hidden_with_the_summary() -> None:
@@ -420,6 +421,7 @@ def test_ranking_summary_warning_is_hidden_with_the_summary() -> None:
     )
 
     assert ranking.summary is None
+    assert ranking.summary_notices == ()
     assert scope_notice not in ranking.notices
 
 
