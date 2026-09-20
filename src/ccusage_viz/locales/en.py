@@ -193,6 +193,8 @@ MESSAGES = {
     "label.adjust_add": "add pane",
     "label.adjust_reorder": "reorder",
     "label.adjust_select_pane": "select pane",
+    "label.adjust_select_text": "select text",
+    "status.tui_select_text": "Text selection · drag to select, use the terminal copy shortcut · Esc/any key returns",
     "status.tui_adjust_monitor": "Adjusting preview · background sampling continues · current chart is the entry snapshot",
     "status.tui_adjust_monitor_pending": "Adjusting preview · background sampling continues · new data waiting to apply",
     "status.tui_layout_prompt": "Set layout (auto or ROWSxCOLUMNS): {value}",

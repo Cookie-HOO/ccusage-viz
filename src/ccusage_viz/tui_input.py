@@ -25,6 +25,27 @@ class MouseEvent:
 
 InputEvent = KeyEvent | MouseEvent
 
+_MOUSE_ENABLE = "\x1b[?1000h\x1b[?1006h"
+_MOUSE_DISABLE = "\x1b[?1000l\x1b[?1006l"
+
+
+def set_mouse_reporting(enabled: bool) -> None:
+    """Enable or disable Dashboard mouse reports for the current terminal."""
+    if os.name != "posix":
+        return
+    sys.stdout.write(_MOUSE_ENABLE if enabled else _MOUSE_DISABLE)
+    sys.stdout.flush()
+
+
+@contextmanager
+def suspended_mouse_reporting() -> Iterator[None]:
+    """Temporarily give pointer input back to the terminal."""
+    set_mouse_reporting(False)
+    try:
+        yield
+    finally:
+        set_mouse_reporting(True)
+
 
 class InputDecoder:
     """Decode ordinary keys and xterm SGR mouse reports from a byte buffer."""
@@ -92,12 +113,10 @@ def tui_input_mode() -> Iterator[InputDecoder]:
         attributes = termios.tcgetattr(descriptor)
         attributes[3] &= ~termios.ISIG
         termios.tcsetattr(descriptor, termios.TCSADRAIN, attributes)
-        sys.stdout.write("\x1b[?1000h\x1b[?1006h")
-        sys.stdout.flush()
+        set_mouse_reporting(True)
         yield decoder
     finally:
-        sys.stdout.write("\x1b[?1000l\x1b[?1006l")
-        sys.stdout.flush()
+        set_mouse_reporting(False)
         termios.tcsetattr(descriptor, termios.TCSADRAIN, previous)
 
 

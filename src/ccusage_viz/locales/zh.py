@@ -193,6 +193,8 @@ MESSAGES = {
     "label.adjust_add": "添加子图",
     "label.adjust_reorder": "排序",
     "label.adjust_select_pane": "选择子图",
+    "label.adjust_select_text": "选择文本",
+    "status.tui_select_text": "文本选择 · 拖动选择后使用终端复制快捷键 · Esc/任意键返回",
     "status.tui_adjust_monitor": "调整预览中 · 后台采样继续 · 当前图为进入调整时快照",
     "status.tui_adjust_monitor_pending": "调整预览中 · 后台采样继续 · 有新数据待应用",
     "status.tui_layout_prompt": "设置布局（auto 或 行x列）：{value}",

@@ -84,7 +84,14 @@ from ccusage_viz.render.summary import render_summary, render_summary_placeholde
 from ccusage_viz.terminal import FramePainter, Terminal, compose_frame
 from ccusage_viz.terminal_ui import AdjustmentAction, adjustment_rows
 from ccusage_viz.terminal_ui import notice_lines as format_notice_lines
-from ccusage_viz.tui_input import InputDecoder, KeyEvent, MouseEvent, read_event, tui_input_mode
+from ccusage_viz.tui_input import (
+    InputDecoder,
+    KeyEvent,
+    MouseEvent,
+    read_event,
+    suspended_mouse_reporting,
+    tui_input_mode,
+)
 
 _PANE_COMMANDS = ("timeline", "calendar", "stack", "ranking", "monitor")
 
@@ -818,20 +825,40 @@ _PANE_ADVANCED_ACTIONS = {
     "ranking": (("o", "other"),),
     "monitor": (("l", "legend"),),
 }
-_COMMON_PANE_QUICK_ACTIONS = (("d", "density"), ("t/T", "theme"), ("s", "style"), ("v", "view"))
+_COMMON_PANE_QUICK_ACTIONS = (
+    ("d", "density"),
+    ("t/T", "theme"),
+    ("s", "style"),
+    ("v", "view"),
+    ("c", "select_text"),
+)
 _COMMON_PANE_ADVANCED_ACTIONS = (
     ("f", "filters"),
     ("r", "replace"),
     ("N", "insert_before"),
     ("n", "insert_after"),
+    ("c", "select_text"),
     ("[", "previous"),
     ("]", "next"),
     ("x", "delete"),
     ("Tab", "next_pane"),
 )
 _GLOBAL_ACTIONS = {
-    "quick": (("t/T", "theme"), ("s", "style"), ("h", "header"), ("u", "summary"), ("z", "layout")),
-    "advanced": (("+", "add"), ("x", "delete"), ("[/]", "reorder"), ("Tab", "select_pane")),
+    "quick": (
+        ("t/T", "theme"),
+        ("s", "style"),
+        ("h", "header"),
+        ("u", "summary"),
+        ("z", "layout"),
+        ("c", "select_text"),
+    ),
+    "advanced": (
+        ("+", "add"),
+        ("x", "delete"),
+        ("[/]", "reorder"),
+        ("Tab", "select_pane"),
+        ("c", "select_text"),
+    ),
 }
 
 
@@ -1320,17 +1347,31 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 translator=translator,
                 width=width,
             )
-        if browse_controls_hidden and grid_draft is None:
-            return ()
         if grid_draft is not None:
-            context = translator.text("status.tui_layout_prompt", value=grid_draft)
-        else:
-            context = grid_error or translator.text(
-                f"status.tui_{body_view.replace('-', '_')}_controls"
+            prompt = translator.text("status.tui_layout_prompt", value=grid_draft)
+            if grid_error is not None:
+                prompt = f"{prompt} · {grid_error}"
+            return (
+                clip_width(prompt, width),
+                clip_width(translator.text("status.tui_layout_controls"), width),
             )
-            if copied_status is not None:
-                context = f"{context} · {copied_status}"
+        if browse_controls_hidden:
+            return ()
+        context = grid_error or translator.text(
+            f"status.tui_{body_view.replace('-', '_')}_controls"
+        )
+        if copied_status is not None:
+            context = f"{context} · {copied_status}"
         return (clip_width(context, width),)
+
+    def select_terminal_text() -> None:
+        """Preserve the frame while the terminal owns drag selection."""
+        event = None
+        with suspended_mouse_reporting():
+            while event is None:
+                event = read_event(decoder, 0.1)
+        if isinstance(event, KeyEvent) and event.value == "\x03":
+            raise KeyboardInterrupt
 
     def grid_geometry(
         size_columns: int,
@@ -1601,6 +1642,8 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                 adjustment_page = (
                                     "advanced" if adjustment_page == "quick" else "quick"
                                 )
+                            elif key == "c":
+                                select_terminal_text()
                             elif adjustment_page == "advanced" and key == "f":
                                 component = pane.component
                                 base = component.candidate
@@ -1654,6 +1697,8 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                         trigger=LifecycleTrigger.CONFIGURATION,
                                         data_affecting=False,
                                     )
+                            elif key == "c":
+                                select_terminal_text()
                             elif adjustment_page == "quick" and key == "v":
                                 pane.body_view = next_body_view(pane.body_view)
                             elif adjustment_page == "advanced" and key == "r":
@@ -1747,6 +1792,8 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         focused = None
                     elif key == "a":
                         adjustment_page = "advanced" if adjustment_page == "quick" else "quick"
+                    elif key == "c":
+                        select_terminal_text()
                     elif adjustment_page == "quick" and key in {"t", "T"}:
                         dashboard_theme = _cycle(
                             COLOR_SCHEMES, dashboard_theme, 1 if key == "t" else -1
@@ -1778,7 +1825,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                             if any(not header.coverage.covers(item) for item in required.intervals):
                                 refresh_header(trigger=LifecycleTrigger.CONFIGURATION)
                     elif adjustment_page == "quick" and key == "z":
-                        grid_draft = ""
+                        grid_draft = active_grid
                         grid_error = None
                     elif adjustment_page == "advanced" and key == "\t":
                         focused = 0 if focused is None else (focused + 1) % len(panes)
@@ -1834,9 +1881,15 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         continue
                     paint()
                     continue
+                if key == "c":
+                    select_terminal_text()
+                    continue
                 if key in {"h", "H"}:
                     browse_controls_hidden = not browse_controls_hidden
                     paint(force=True)
+                    continue
+                if key == "c":
+                    select_terminal_text()
                     continue
                 if key == "r":
                     for index in range(len(panes)):
