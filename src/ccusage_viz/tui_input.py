@@ -37,16 +37,6 @@ def set_mouse_reporting(enabled: bool) -> None:
     sys.stdout.flush()
 
 
-@contextmanager
-def suspended_mouse_reporting() -> Iterator[None]:
-    """Temporarily give pointer input back to the terminal."""
-    set_mouse_reporting(False)
-    try:
-        yield
-    finally:
-        set_mouse_reporting(True)
-
-
 class InputDecoder:
     """Decode ordinary keys and xterm SGR mouse reports from a byte buffer."""
 

@@ -30,7 +30,7 @@ from ccusage_viz.tui import (
     _adjustment_target,
     _choose_pane_type,
     _dashboard_title_line,
-    _grid_has_capacity,
+    _grid_for_pane_count,
     _grid_shape,
     _header_lines,
     _header_options,
@@ -763,7 +763,7 @@ def test_query_affecting_adjustments_are_explicit() -> None:
     assert not _query_affecting_adjustment("timeline", "t")
 
 
-def test_tui_adjustment_footer_has_two_rows_and_no_finish_target() -> None:
+def test_tui_adjustment_footer_separates_dashboard_management() -> None:
     translator = load_translator("en")
     timeline_quick = _adjustment_controls("timeline", "quick", translator)
     timeline_advanced = _adjustment_controls("timeline", "advanced", translator)
@@ -771,7 +771,7 @@ def test_tui_adjustment_footer_has_two_rows_and_no_finish_target() -> None:
 
     assert "p/P period" in timeline_quick
     assert "g granularity" in timeline_quick
-    assert "v view" in timeline_quick
+    assert "v view" not in timeline_quick
     assert "k weekdays" in timeline_advanced
     assert "l legend" in timeline_advanced
     assert "f filters" in timeline_advanced
@@ -785,11 +785,19 @@ def test_tui_adjustment_footer_has_two_rows_and_no_finish_target() -> None:
     assert not _adjustment_key_supported("monitor", "quick", "i")
     assert not _adjustment_key_supported("monitor", "quick", "B")
 
-    rows = _adjustment_footer("Current status: running", "timeline", "quick", translator, 80)
-    assert len(rows) == 2
-    assert "a Advanced" in rows[1]
-    assert "Enter/Esc finish" in rows[1]
-    assert "[Finish]" not in "\n".join(rows)
+    quick_rows = _adjustment_footer("Current status: running", "timeline", "quick", translator, 80)
+    advanced_rows = _adjustment_footer(
+        "Current status: running", "timeline", "advanced", translator, 80
+    )
+    assert len(quick_rows) == 5
+    assert "a Advanced" in quick_rows[1]
+    assert "Enter/Esc finish" in quick_rows[1]
+    assert "Dashboard Pane" in quick_rows[2]
+    assert "v view" in quick_rows[3]
+    assert "N insert before" in quick_rows[3]
+    assert "Tab next pane" in quick_rows[4]
+    assert quick_rows[2:] == advanced_rows[2:]
+    assert "[Finish]" not in "\n".join(quick_rows)
 
 
 def test_dashboard_title_centers_and_right_aligns_freshness() -> None:
@@ -1144,10 +1152,14 @@ def test_tui_parses_runtime_grid_with_capacity() -> None:
     assert parse_grid("1x2", 3) is None
 
 
-def test_pane_insertion_capacity_never_rewrites_fixed_layout() -> None:
-    assert _grid_has_capacity("auto", 4)
-    assert _grid_has_capacity("2x2", 3)
-    assert not _grid_has_capacity("2x2", 4)
+@pytest.mark.parametrize(
+    ("grid", "pane_count", "expected"),
+    (("auto", 5, "auto"), ("2x2", 4, "2x2"), ("2x2", 5, "3x2"), ("3x1", 4, "4x1")),
+)
+def test_pane_insertion_expands_rows_while_preserving_columns(
+    grid: str, pane_count: int, expected: str
+) -> None:
+    assert _grid_for_pane_count(grid, pane_count) == expected
 
 
 def test_replace_pane_is_atomic_and_shuts_down_displaced_lifecycle() -> None:
@@ -1191,12 +1203,13 @@ def test_insert_pane_uses_list_index_and_starts_only_new_pane() -> None:
     assert started == [1]
 
 
-def test_pane_advanced_actions_expose_replace_and_list_insertion() -> None:
+def test_pane_advanced_actions_exclude_dashboard_management() -> None:
     controls = _adjustment_controls("timeline", "advanced", load_translator("en"))
 
-    assert "r replace" in controls
-    assert "N insert before" in controls
-    assert "n insert after" in controls
+    assert "f filters" in controls
+    assert "r replace" not in controls
+    assert "N insert before" not in controls
+    assert "n insert after" not in controls
     assert parse_grid("zero", 1) is None
 
 
