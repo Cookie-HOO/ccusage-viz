@@ -131,6 +131,8 @@ def format_full_dashboard_command(
     panes: tuple[PaneConfig, ...] | None = None,
     *,
     grid: str | None = None,
+    column_weights: tuple[int, ...] | None = None,
+    row_weights: tuple[int, ...] | None = None,
     header_style: str | None = None,
     dashboard_style: str | None = None,
     header_summary: str | None = None,
@@ -166,6 +168,10 @@ def format_full_dashboard_command(
             dashboard_style or host.style,
         )
     )
+    for weight in column_weights if column_weights is not None else host.column_weights or ():
+        args.extend(("--column-weight", str(weight)))
+    for weight in row_weights if row_weights is not None else host.row_weights or ():
+        args.extend(("--row-weight", str(weight)))
     if host.timezone is not None:
         args.extend(("--timezone", host.timezone))
     if host.demo_size is not None:

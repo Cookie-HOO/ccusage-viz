@@ -93,6 +93,53 @@ def test_dashboard_timezone_is_host_owned_and_round_trips() -> None:
     assert _header_options(reparsed).chart.date_range.timezone == "UTC"
 
 
+def test_dashboard_layout_weights_round_trip_through_full_command() -> None:
+    parser = build_parser(load_translator("en"))
+    dashboard = _to_options(
+        parser.parse_args(
+            [
+                "dashboard",
+                "--pane",
+                "timeline",
+                "--pane",
+                "ranking",
+                "--grid",
+                "1x2",
+                "--column-weight",
+                "2",
+                "--column-weight",
+                "1",
+                "--row-weight",
+                "3",
+            ]
+        )
+    )
+
+    full = format_full_dashboard_command(dashboard)
+    reparsed = _to_options(parser.parse_args(shlex.split(full)[1:]))
+
+    assert "--column-weight 2 --column-weight 1" in full
+    assert "--row-weight 3" in full
+    assert reparsed.host.grid == "1x2"
+    assert reparsed.host.column_weights == (2, 1)
+    assert reparsed.host.row_weights == (3,)
+
+
+def test_full_dashboard_command_serializes_runtime_layout_weight_overrides() -> None:
+    parser = build_parser(load_translator("en"))
+    dashboard = _to_options(parser.parse_args(["dashboard"]))
+
+    full = format_full_dashboard_command(
+        dashboard,
+        column_weights=(2, 1),
+        row_weights=(3, 1),
+    )
+    reparsed = _to_options(parser.parse_args(shlex.split(full)[1:]))
+
+    assert reparsed.host.column_weights == (2, 1)
+    assert reparsed.host.row_weights == (3, 1)
+
+
 def test_full_dashboard_command_includes_private_and_runtime_configuration() -> None:
     parser = build_parser(load_translator("en"))
     dashboard = _to_options(

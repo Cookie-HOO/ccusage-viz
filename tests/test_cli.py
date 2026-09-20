@@ -6,6 +6,7 @@ import pytest
 from ccusage_viz import __version__
 from ccusage_viz.cli import (
     ShortCircuitKind,
+    _explicit_fields,
     _inject_default_command,
     _to_options,
     build_parser,
@@ -420,9 +421,7 @@ def test_dashboard_spotlight_presets_feature_the_first_pane(
 def test_dashboard_spotlight_preset_keeps_named_layout_when_extended() -> None:
     parser = build_parser(load_translator("en"))
 
-    options = _to_options(
-        parser.parse_args(["dashboard", "spotlight-tall", "--pane", "calendar"])
-    )
+    options = _to_options(parser.parse_args(["dashboard", "spotlight-tall", "--pane", "calendar"]))
 
     assert options.host.grid == "spotlight-tall"
     assert tuple(pane.chart.kind for pane in options.panes) == (
@@ -452,6 +451,70 @@ def test_dashboard_accepts_named_layout_for_arbitrary_panes() -> None:
 
     assert options.host.grid == "spotlight-tall"
     assert tuple(pane.chart.kind for pane in options.panes) == ("monitor", "calendar")
+
+
+def test_dashboard_accepts_layout_weights_and_tracks_explicit_aliases() -> None:
+    parser = build_parser(load_translator("en"))
+    arguments = [
+        "dashboard",
+        "--pane",
+        "timeline",
+        "--pane",
+        "stack",
+        "--grid",
+        "1x2",
+        "--column-weight",
+        "2",
+        "--column-weight",
+        "1",
+        "--row-weight=3",
+    ]
+
+    options = _to_options(parser.parse_args(arguments), explicit=_explicit_fields(arguments))
+
+    assert options.host.column_weights == (2, 1)
+    assert options.host.row_weights == (3,)
+    assert options.was_explicit("column_weights")
+    assert options.was_explicit("row_weights")
+
+
+@pytest.mark.parametrize(
+    ("arguments", "key", "values"),
+    [
+        (
+            ["--column-weight", "0", "--column-weight", "1", "--row-weight", "1"],
+            "error.tui_layout_weight_positive",
+            {"axis": "column"},
+        ),
+        (
+            ["--column-weight", "1", "--row-weight", "1"],
+            "error.tui_layout_weight_count",
+            {"axis": "column", "expected": 2, "actual": 1, "layout": "1x2"},
+        ),
+    ],
+)
+def test_dashboard_rejects_invalid_layout_weights(
+    arguments: list[str], key: str, values: dict[str, object]
+) -> None:
+    parser = build_parser(load_translator("en"))
+    with pytest.raises(UsageError) as caught:
+        _to_options(
+            parser.parse_args(
+                [
+                    "dashboard",
+                    "--pane",
+                    "timeline",
+                    "--pane",
+                    "stack",
+                    "--grid",
+                    "1x2",
+                    *arguments,
+                ]
+            )
+        )
+
+    assert caught.value.key == key
+    assert caught.value.values == values
 
 
 def test_dashboard_spotlight_accepts_explicit_layout_override() -> None:

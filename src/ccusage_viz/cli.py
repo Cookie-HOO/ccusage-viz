@@ -12,7 +12,7 @@ from typing import Any, Never, cast
 from ccusage_viz import __version__
 from ccusage_viz.application import run
 from ccusage_viz.dashboard import DASHBOARD_PRESETS
-from ccusage_viz.dashboard_layout import layout_for_pane_count, parse_layout
+from ccusage_viz.dashboard_layout import layout_bands, layout_for_pane_count, parse_layout
 from ccusage_viz.diagnostics import color_enabled, format_error
 from ccusage_viz.errors import UsageError, VizError
 from ccusage_viz.i18n import Translator, detect_language, load_translator
@@ -213,6 +213,24 @@ def _add_tui(parser: argparse.ArgumentParser, tr: Translator) -> None:
         "--pane", dest="panes", action="append", default=[], help=tr.text("help.pane")
     )
     parser.add_argument("--grid", default="2x2", help=tr.text("help.grid"))
+    parser.add_argument(
+        "--column-weight",
+        dest="column_weights",
+        action="append",
+        type=int,
+        default=[],
+        metavar="WEIGHT",
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--row-weight",
+        dest="row_weights",
+        action="append",
+        type=int,
+        default=[],
+        metavar="WEIGHT",
+        help=argparse.SUPPRESS,
+    )
     parser.add_argument(
         "--refresh-interval",
         type=float,
@@ -537,6 +555,23 @@ def _to_options(
         grid = parse_layout(grid, len(fragments))
         if grid is None:
             raise UsageError("error.tui_grid", value=namespace.grid)
+        bands = layout_bands(grid, len(fragments))
+        column_weights = tuple(namespace.column_weights) or None
+        row_weights = tuple(namespace.row_weights) or None
+        for axis, weights, expected in (
+            ("column", column_weights, bands.columns),
+            ("row", row_weights, bands.rows),
+        ):
+            if weights is not None and any(weight < 1 for weight in weights):
+                raise UsageError("error.tui_layout_weight_positive", axis=axis)
+            if weights is not None and len(weights) != expected:
+                raise UsageError(
+                    "error.tui_layout_weight_count",
+                    axis=axis,
+                    expected=expected,
+                    actual=len(weights),
+                    layout=grid,
+                )
         for cadence in (
             namespace.refresh_interval,
             namespace.sampling_interval,
@@ -549,6 +584,8 @@ def _to_options(
             ascii=namespace.ascii,
             demo_size=namespace.demo,
             grid=grid,
+            column_weights=column_weights,
+            row_weights=row_weights,
             refresh_interval=(
                 preset.refresh_interval
                 if preset is not None and "refresh_interval" not in explicit
@@ -592,7 +629,12 @@ def _explicit_fields(argv: list[str]) -> frozenset[str]:
         if not argument.startswith("--"):
             continue
         name = argument[2:].split("=", 1)[0].replace("-", "_")
-        fields.add("color_scheme" if name == "theme" else name)
+        aliases = {
+            "theme": "color_scheme",
+            "column_weight": "column_weights",
+            "row_weight": "row_weights",
+        }
+        fields.add(aliases.get(name, name))
     return frozenset(fields)
 
 

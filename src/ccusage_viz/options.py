@@ -144,6 +144,8 @@ class DashboardHostConfig:
     ascii: bool = False
     demo_size: str | None = None
     grid: str = "2x2"
+    column_weights: tuple[int, ...] | None = None
+    row_weights: tuple[int, ...] | None = None
     refresh_interval: float = 15.0
     sampling_interval: float = 15.0
     header_style: str = "panel"
