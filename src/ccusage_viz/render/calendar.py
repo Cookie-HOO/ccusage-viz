@@ -48,14 +48,13 @@ def _month_header(
 
 
 def _cell_geometry(week_count: int, context: RenderContext) -> tuple[int, int]:
-    """Return a square-ish cell width and inter-week gutter width."""
+    """Return square-cell or vertical-bar geometry for the selected style."""
+    if context.style != "grid":
+        return 1, 0
     available_width = max(1, context.width - 3)
-    grid = context.style == "grid"
-    if grid and week_count * 3 - 1 <= available_width:
+    if week_count * 3 - 1 <= available_width:
         return 2, 1
-    if not grid and week_count * 2 <= available_width:
-        return 2, 0
-    if grid and week_count * 2 - 1 <= available_width:
+    if week_count * 2 - 1 <= available_width:
         return 1, 1
     return 1, 0
 
@@ -76,7 +75,6 @@ def render_calendar(model: CalendarModel, context: RenderContext) -> str:
     week_count = (end - start).days // 7 + 1
     cell_width, gap_width = _cell_geometry(week_count, context)
     stride = cell_width + gap_width
-    grid = context.style == "grid"
     cells: dict[int, list[str]] = defaultdict(list)
     fallback_marks = _fallback_marks(context)
     levels = _positive_levels(list(usage.values()))
@@ -91,14 +89,12 @@ def render_calendar(model: CalendarModel, context: RenderContext) -> str:
         if not valid:
             return " " * cell_width
         if context.color:
-            if level:
-                return background_mark(" " * cell_width, scheme.calendar[level - 1], context)
-            if grid:
-                return background_mark(" " * cell_width, scheme.other, context)
-            return " " * cell_width
-        if level:
-            return fill(fallback_marks[level])
-        return fill(fallback_marks[0]) if grid else " " * cell_width
+            return (
+                background_mark(" " * cell_width, scheme.calendar[level - 1], context)
+                if level
+                else " " * cell_width
+            )
+        return fill(fallback_marks[level]) if level else " " * cell_width
 
     for week in range(week_count):
         week_start = start + timedelta(days=week * 7)
@@ -159,16 +155,10 @@ def render_calendar(model: CalendarModel, context: RenderContext) -> str:
 
     def legend_cell(level: int) -> str:
         if context.color:
-            if level:
-                return background_mark(" " * cell_width, scheme.calendar[level - 1], context)
-            return (
-                background_mark(" " * cell_width, scheme.other, context)
-                if grid
-                else " " * cell_width
-            )
-        return fallback_marks[level] if level or grid else ""
+            return background_mark(" " * cell_width, scheme.calendar[level - 1], context)
+        return fallback_marks[level]
 
-    legend_cells = ((0,) if grid else ()) + (1, 2, 3, 4)
+    legend_cells = (1, 2, 3, 4)
     legend = " ".join(
         (
             context.translator.text("calendar.legend.less"),

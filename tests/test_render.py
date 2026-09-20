@@ -602,7 +602,7 @@ def test_observed_ranking_does_not_compact_shared_model_prefixes() -> None:
 
 
 @pytest.mark.parametrize("ascii", [True, False])
-def test_calendar_colorless_styles_keep_zero_and_padding_semantics(ascii: bool) -> None:
+def test_calendar_styles_use_geometry_not_zero_cell_outlines(ascii: bool) -> None:
     model = CalendarModel(
         tuple(
             CalendarDay(date(2026, 1, day), usage(value))
@@ -620,10 +620,11 @@ def test_calendar_colorless_styles_keep_zero_and_padding_semantics(ascii: bool) 
     marks = (".", "o", "O", "#") if ascii else ("░", "▒", "▓", "█")
 
     assert all(mark in relative and mark in grid for mark in marks)
-    assert relative.splitlines()[5][3:5] == "  "
-    assert grid.splitlines()[5][3:5] == ("- " if ascii else "· ")
-    assert relative.splitlines()[2][3:5] == "  "
-    assert grid.splitlines()[2][3:5] == "  "
+    assert relative.splitlines()[5][3:] == "  "
+    assert grid.splitlines()[5][3:] == "     "
+    full_mark = "#" if ascii else "█"
+    assert relative.splitlines()[2][3:] == f" {full_mark}"
+    assert grid.splitlines()[2][3:] == f"   {full_mark} "
     assert relative != grid
 
 
@@ -672,20 +673,19 @@ def test_calendar_color_styles_use_background_swatches_and_distinct_geometry() -
         ),
     )
 
-    assert "\x1b[48;5;151m" in relative
-    assert "\x1b[48;5;77m" in relative
-    assert "\x1b[48;5;71m" in relative
-    assert "\x1b[48;5;23m" in relative
-    assert "\x1b[48;5;245m" not in relative
-    assert "\x1b[48;5;245m" in grid
+    for color in (151, 77, 71, 23):
+        assert f"\x1b[48;5;{color}m" in relative
+        assert f"\x1b[48;5;{color}m" in grid
+    assert "\x1b[48;5;245m" not in relative + grid
     assert "\x1b[38;5;" not in relative + grid
     assert all(
         mark not in "\n".join((relative.splitlines()[-1], grid.splitlines()[-1]))
         for mark in ("·", "░", "▒", "▓", "█")
     )
-    assert strip_ansi(relative).splitlines()[5][3:5] == "  "
-    assert strip_ansi(grid).splitlines()[5][3:5] == "  "
-    assert strip_ansi(grid).splitlines()[2][3:6] == "   "
+    assert strip_ansi(relative).splitlines()[5][3:] == "  "
+    assert strip_ansi(grid).splitlines()[5][3:] == "     "
+    assert strip_ansi(relative).splitlines()[2][3:] == "  "
+    assert strip_ansi(grid).splitlines()[2][3:] == "     "
     assert relative != grid
 
 
@@ -711,7 +711,7 @@ def test_calendar_footer_separates_activity_usage_and_legend() -> None:
     assert lines.index(usage_line) + 1 == lines.index(legend)
 
 
-def test_calendar_colors_grid_zero_cells_and_positive_swatches() -> None:
+def test_calendar_grid_uses_only_positive_color_swatches() -> None:
     calendar = render_calendar(
         CalendarModel(
             tuple(
@@ -729,13 +729,13 @@ def test_calendar_colors_grid_zero_cells_and_positive_swatches() -> None:
         ),
     )
 
-    assert "\x1b[48;5;245m" in calendar
+    assert "\x1b[48;5;245m" not in calendar
     assert "\x1b[48;5;151m" in calendar
     assert "\x1b[48;5;77m" in calendar
     assert "\x1b[48;5;71m" in calendar
     assert "\x1b[48;5;23m" in calendar
     assert "\x1b[38;5;" not in calendar
-    assert strip_ansi(calendar).endswith("Less                More")
+    assert "Less" in calendar and "More" in calendar
 
 
 def test_calendar_uses_one_cell_per_week_when_width_requires_compact_stride() -> None:
