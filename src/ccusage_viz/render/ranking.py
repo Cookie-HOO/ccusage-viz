@@ -93,6 +93,19 @@ def _compact_labels(labels: list[str], width: int) -> list[str]:
     return output
 
 
+def _observed_dimensions(
+    labels: list[str], values: list[str], context: RenderContext
+) -> tuple[int, int, int]:
+    """Allocate observed ranking columns from content while retaining a useful bar."""
+    label_size = max(display_width(label) for label in labels)
+    value_size = max(6, *(display_width(value) for value in values))
+    available = max(1, context.width - value_size - 11)
+    if context.style == "list":
+        return min(label_size, available), 0, value_size
+    label_width = min(label_size, max(1, available - 8))
+    return label_width, available - label_width, value_size
+
+
 def render_ranking(model: RankingModel, context: RenderContext) -> str:
     title = context.translator.text("label.ranking")
     scope = model.observed_scope
@@ -125,13 +138,19 @@ def render_ranking(model: RankingModel, context: RenderContext) -> str:
             line for line in (summary, heading, context.translator.text(message)) if line
         )
     total = None if model.is_observed else model.percentage_total.total
-    label_width = max(12, min(28, context.width // 3))
-    bar_width = max(8, context.width - label_width - 25)
+    formatted_values = [format_tokens(round(_entry_value(entry))) for entry in entries]
     if model.is_observed:
-        label_width += min(
-            7,
-            max(0, context.width - label_width - bar_width - 18),
+        observed_labels = [
+            context.translator.text("label.other") if entry.is_other else entry.label
+            for entry in entries
+        ]
+        label_width, bar_width, value_width = _observed_dimensions(
+            observed_labels, formatted_values, context
         )
+    else:
+        label_width = max(12, min(28, context.width // 3))
+        bar_width = max(8, context.width - label_width - 25)
+        value_width = 6
     maximum = max(_entry_value(entry) for entry in entries) or 1
     full, empty = ("█", "░") if not context.ascii else ("#", ".")
     dot, track = ("●", "·") if not context.ascii else ("o", ".")
@@ -151,7 +170,9 @@ def render_ranking(model: RankingModel, context: RenderContext) -> str:
             labels[index] = label
 
     lines = [line for line in (summary, heading) if line]
-    for rank, (entry, label) in enumerate(zip(entries, labels, strict=True), start=1):
+    for rank, (entry, label, formatted) in enumerate(
+        zip(entries, labels, formatted_values, strict=True), start=1
+    ):
         value = _entry_value(entry)
         length = round(value / maximum * bar_width)
         if context.style == "dot":
@@ -189,11 +210,15 @@ def render_ranking(model: RankingModel, context: RenderContext) -> str:
                 activity = styled_text(
                     "*" if context.ascii else "●", scheme.highlight, context, bold=True
                 )
-        formatted = format_tokens(round(value))
         percentage = f" {format_percent(round(value), total):>6}" if total is not None else ""
-        lines.append(
-            f"{rank:>2} {rank_marker} {activity} "
-            f"{pad_width(truncate_width(label, label_width), label_width)} {mark} "
-            f"{formatted:>6} {value_marker}{percentage}"
-        )
+        prefix = f"{rank:>2} {rank_marker} {activity} "
+        label_text = pad_width(truncate_width(label, label_width), label_width)
+        if model.is_observed and context.style == "list":
+            row = f"{prefix}{label_text} {pad_width(formatted, value_width, align='right')} {value_marker}"
+            lines.append(center_text(row, context.width))
+        else:
+            lines.append(
+                f"{prefix}{label_text} {mark} {pad_width(formatted, value_width, align='right')} "
+                f"{value_marker}{percentage}"
+            )
     return "\n".join(lines)

@@ -523,8 +523,61 @@ def test_observed_ranking_reclaims_percentage_space_for_labels() -> None:
     )
 
     assert "gpt-5.6-very-long-model-name" in wide
-    assert display_width(wide) == 79
+    assert display_width(wide) <= 80
     assert all(display_width(line) <= 40 for line in narrow.splitlines())
+
+
+def test_observed_ranking_uses_content_driven_label_width() -> None:
+    model = RankingModel(
+        (),
+        None,
+        observed_entries=(
+            ScalarRankingEntry("a", "A", 1200.0),
+            ScalarRankingEntry("b", "B", 800.0),
+        ),
+        metric=MetricDescriptor("tpm"),
+        observed_scope=ObservedScope(900, "model"),
+    )
+
+    row = render_ranking(model, context(True)).splitlines()[-2]
+
+    assert "A #" in row
+    assert "A           " not in row
+
+
+def test_monitor_list_is_centered_and_omits_bar_tracks() -> None:
+    model = RankingModel(
+        (),
+        None,
+        observed_entries=(
+            ScalarRankingEntry("alpha", "Alpha", 1200.0),
+            ScalarRankingEntry("beta", "Beta", 800.0),
+        ),
+        metric=MetricDescriptor("tokens"),
+        observed_scope=ObservedScope(900, "model"),
+    )
+    render_context = RenderContext(
+        80,
+        24,
+        load_translator("en"),
+        color=False,
+        ascii=True,
+        style="list",
+        deltas={"alpha": 1.0, "beta": -1.0},
+        rank_deltas={"alpha": 1, "beta": -1},
+    )
+
+    output = render_ranking(model, render_context)
+    rows = output.splitlines()[-2:]
+
+    assert all("#" not in row for row in rows)
+    assert "1.2K" in rows[0] and "800" in rows[1]
+    assert "^" in rows[0] and "v" in rows[1]
+    assert all(
+        abs((80 - display_width(row.lstrip())) // 2 - (len(row) - len(row.lstrip()))) <= 1
+        for row in rows
+    )
+    assert all(display_width(line) <= 80 for line in output.splitlines())
 
 
 def test_observed_ranking_does_not_compact_shared_model_prefixes() -> None:
