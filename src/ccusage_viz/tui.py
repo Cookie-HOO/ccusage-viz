@@ -19,6 +19,20 @@ from ccusage_viz.command_copy import (
 )
 from ccusage_viz.core.time import DateRange, refresh_date_range, today_for_timezone
 from ccusage_viz.coverage import DateCoverage, DateInterval
+from ccusage_viz.dashboard_layout import (
+    PaneLayout as ResolvedPaneLayout,
+)
+from ccusage_viz.dashboard_layout import (
+    PaneRect,
+    adjust_weight,
+    layout_for_pane_count,
+    parse_layout,
+    reconcile_weights,
+    resolve_pane_layout,
+)
+from ccusage_viz.dashboard_layout import (
+    pane_at as layout_pane_at,
+)
 from ccusage_viz.data_view import (
     BodyView,
     DashboardBodyView,
@@ -64,10 +78,13 @@ from ccusage_viz.monitor_component import (
 from ccusage_viz.options import (
     DASHBOARD_STYLES,
     HEADER_SUMMARIES,
+    CalendarConfig,
     ChartPresentation,
     DashboardLaunch,
     MonitorConfig,
     PaneConfig,
+    RankingConfig,
+    StackConfig,
     StandaloneHostConfig,
     StandaloneLaunch,
     TimelineConfig,
@@ -337,19 +354,19 @@ def _header_lines(
 
 
 def _grid_shape(grid: str, count: int) -> tuple[int, int]:
-    if grid == "auto":
-        columns = 1 if count == 1 else 2
-        return (count + columns - 1) // columns, columns
-    rows, columns = (int(part) for part in grid.lower().split("x", 1))
-    return rows, columns
+    """Return logical bands for compatibility with rectangular-grid callers."""
+    layout = resolve_pane_layout(
+        layout=grid,
+        pane_count=count,
+        width=max(8, count * 8),
+        height=max(6, count * 6),
+        divider_style="none",
+    )
+    return layout.topology.rows, layout.topology.columns
 
 
 def _grid_for_pane_count(grid: str, pane_count: int) -> str:
-    if grid == "auto":
-        return grid
-    rows, columns = _grid_shape(grid, pane_count)
-    required_rows = (pane_count + columns - 1) // columns
-    return f"{max(rows, required_rows)}x{columns}"
+    return layout_for_pane_count(grid, pane_count)
 
 
 def _replace_pane(
@@ -379,24 +396,7 @@ def _insert_pane(
 
 def parse_grid(value: str, pane_count: int) -> str | None:
     """Normalize a session layout only when it can display every pane."""
-    if value.casefold() == "auto":
-        return "auto"
-    try:
-        rows, columns = (int(part) for part in value.lower().split("x", 1))
-    except ValueError:
-        return None
-    if rows < 1 or columns < 1 or rows * columns < pane_count:
-        return None
-    return f"{rows}x{columns}"
-
-
-@dataclass(frozen=True, slots=True)
-class PaneRect:
-    index: int
-    left: int
-    top: int
-    width: int
-    height: int
+    return parse_layout(value, pane_count)
 
 
 @dataclass(frozen=True, slots=True)
@@ -581,6 +581,87 @@ def compose_panes(
         output.extend(joiner.join(parts) for parts in zip(*row_cells, strict=True))
         if layout.gutter and row + 1 < rows:
             output.append(horizontal * layout.width)
+    return "\n".join(output)
+
+
+def _compose_resolved_panes(
+    charts: list[str],
+    layout: ResolvedPaneLayout,
+    *,
+    focused: int = -1,
+    ascii: bool = False,
+    divider_style: str = "line",
+    frame_style: str = "auto",
+    shell_context: RenderContext | None = None,
+) -> str:
+    """Compose exactly the rectangles produced by the shared layout resolver."""
+    rendered = {
+        rect.index: _frame(
+            charts[rect.index].splitlines() if rect.index < len(charts) else [],
+            rect.width,
+            rect.height,
+            selected=rect.index == focused,
+            ascii=ascii,
+            frame_style=frame_style,
+            shell_context=shell_context,
+        )
+        for rect in layout.panes
+    }
+    vertical = (
+        ":" if ascii and divider_style == "dashed" else "┊" if divider_style == "dashed" else "│"
+    )
+    horizontal = (
+        "." if ascii and divider_style == "dashed" else "┄" if divider_style == "dashed" else "─"
+    )
+    intersection = "+" if ascii else "┼"
+    if shell_context is not None:
+        border = get_color_scheme(shell_context.color_scheme).other
+        vertical, horizontal, intersection = (
+            styled_text(glyph, border, shell_context)
+            for glyph in (vertical, horizontal, intersection)
+        )
+
+    column_gutters: set[int] = set()
+    cursor = 0
+    for size in layout.column_sizes[:-1]:
+        cursor += size
+        column_gutters.update(range(cursor, cursor + layout.gutter))
+        cursor += layout.gutter
+    row_gutters: set[int] = set()
+    cursor = 0
+    for size in layout.row_sizes[:-1]:
+        cursor += size
+        row_gutters.update(range(cursor, cursor + layout.gutter))
+        cursor += layout.gutter
+
+    output: list[str] = []
+    for y in range(layout.height):
+        segments: list[str] = []
+        x = 0
+        while x < layout.width:
+            rect = next(
+                (
+                    item
+                    for item in layout.panes
+                    if item.left <= x < item.left + item.width
+                    and item.top <= y < item.top + item.height
+                ),
+                None,
+            )
+            if rect is not None:
+                segments.append(rendered[rect.index][y - rect.top])
+                x = rect.left + rect.width
+                continue
+            if x in column_gutters and y in row_gutters:
+                segments.append(intersection)
+            elif y in row_gutters:
+                segments.append(horizontal)
+            elif x in column_gutters:
+                segments.append(vertical)
+            else:
+                segments.append(" ")
+            x += 1
+        output.append("".join(segments))
     return "\n".join(output)
 
 
@@ -838,22 +919,16 @@ _PANE_POSITION_ACTIONS = (
     ("[", "previous"),
     ("]", "next"),
     ("Tab", "next_pane"),
+    ("{ / }", "width"),
+    ("_ / =", "height"),
 )
-_GLOBAL_ACTIONS = {
-    "quick": (
-        ("t/T", "theme"),
-        ("s", "style"),
-        ("h", "header"),
-        ("u", "summary"),
-        ("z", "layout"),
-    ),
-    "advanced": (
-        ("+", "add"),
-        ("x", "delete"),
-        ("[/]", "reorder"),
-        ("Tab", "select_pane"),
-    ),
-}
+_GLOBAL_ACTIONS = (
+    ("t/T", "theme"),
+    ("s", "style"),
+    ("h", "header"),
+    ("u", "summary"),
+    ("z", "layout"),
+)
 
 
 def _localized_actions(
@@ -954,35 +1029,46 @@ def _adjustment_footer(
     )
 
 
-def _pane_adjustment_state(pane: TuiPane, translator: Translator) -> str:
+def _pane_adjustment_state(pane: TuiPane, page: str, translator: Translator) -> str:
     chart = _pane_options(pane).chart
-    runtime = translator.text("status.tui_running")
+    if page == "quick":
+        settings = (
+            f"{chart.kind} · {chart.presentation.density} · {chart.presentation.theme} · "
+            f"{chart.presentation.style} · {pane.body_view}"
+        )
+    else:
+        advanced: list[str] = []
+        if isinstance(chart, (TimelineConfig, RankingConfig)):
+            advanced.append(f"Other {chart.other}")
+        if isinstance(chart, (TimelineConfig, StackConfig)):
+            advanced.extend((f"Legend {chart.presentation.legend}", f"Weekdays {chart.weekdays}"))
+        if isinstance(chart, StackConfig):
+            advanced.insert(0, f"Cache {chart.cache}")
+        if isinstance(chart, MonitorConfig):
+            advanced.append(f"Legend {chart.presentation.legend}")
+        if isinstance(chart, CalendarConfig):
+            advanced.append(translator.text("status.runtime_adjustment_calendar_advanced"))
+        settings = " · ".join(advanced)
     return translator.text(
         "status.tui_current_state",
-        runtime=runtime,
-        settings=f"{chart.kind} · {chart.presentation.density} · {chart.presentation.theme} · "
-        f"{chart.presentation.style} · {pane.body_view}",
+        runtime=translator.text("status.tui_running"),
+        settings=settings,
     )
 
 
 def _global_adjustment_footer(
     *,
     state: str,
-    page: str,
     translator: Translator,
     width: int,
 ) -> tuple[str, str]:
-    return adjustment_rows(
-        state,
-        translator.text(f"status.tui_adjust_{page}"),
-        _localized_actions(_GLOBAL_ACTIONS[page], translator),
-        width=width,
-        color=False,
-        switch_action=translator.text(
-            "status.tui_switch_advanced" if page == "quick" else "status.tui_switch_quick"
-        ),
-        finish_action=translator.text("status.tui_finish_keys"),
+    actions = _localized_actions(_GLOBAL_ACTIONS, translator)
+    label = translator.text("status.tui_adjust_quick")
+    prefix = f"{label}：" if any(ord(char) > 127 for char in label) else f"{label}: "
+    action_row = " · ".join(
+        (*(_action.text for _action in actions), translator.text("status.tui_finish_keys"))
     )
+    return clip_width(state, width), clip_width(prefix + action_row, width)
 
 
 def _adjustment_target(focused: int | None, key: str, pane_count: int) -> int | None:
@@ -1047,6 +1133,8 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
     executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix="ccusage-viz-tui")
     focused: int | None = None
     active_grid = options.host.grid
+    column_weights: tuple[int, ...] | None = None
+    row_weights: tuple[int, ...] | None = None
     header_style = options.host.header_style
     dashboard_style = options.host.style
     dashboard_theme = options.host.theme
@@ -1371,7 +1459,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         if adjustment_mode == "pane" and focused is not None:
             pane = panes[focused]
             return _adjustment_footer(
-                grid_error or _pane_adjustment_state(pane, translator),
+                grid_error or _pane_adjustment_state(pane, adjustment_page, translator),
                 _pane_options(pane).chart.kind,
                 adjustment_page,
                 translator,
@@ -1386,7 +1474,6 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             )
             return _global_adjustment_footer(
                 state=grid_error or state,
-                page=adjustment_page,
                 translator=translator,
                 width=width,
             )
@@ -1396,7 +1483,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             f"status.tui_{body_view.replace('-', '_')}_controls"
         )
         if copied_status is not None:
-            context = f"{context} · {copied_status}"
+            context = f"{copied_status} · {context}"
         return (clip_width(context, width),)
 
     def grid_geometry(
@@ -1404,19 +1491,26 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         size_lines: int,
         header_rows: int,
         status_rows: int,
-    ) -> tuple[int, int, PaneLayout]:
-        rows, columns = _grid_shape(active_grid, len(panes))
+    ) -> ResolvedPaneLayout:
+        nonlocal column_weights, row_weights
         grid_height = max(3, size_lines - len(controls()) - header_rows - status_rows)
-        return (
-            rows,
-            columns,
-            resolve_panel_layout(
-                width=size_columns,
-                height=grid_height,
-                rows=rows,
-                columns=columns,
-                divider_style=divider_style,
-            ),
+        equal = resolve_pane_layout(
+            layout=active_grid,
+            pane_count=len(panes),
+            width=size_columns,
+            height=grid_height,
+            divider_style=divider_style,
+        )
+        column_weights = reconcile_weights(column_weights, equal.topology.columns)
+        row_weights = reconcile_weights(row_weights, equal.topology.rows)
+        return resolve_pane_layout(
+            layout=active_grid,
+            pane_count=len(panes),
+            width=size_columns,
+            height=grid_height,
+            divider_style=divider_style,
+            column_weights=column_weights,
+            row_weights=row_weights,
         )
 
     def paint(*, force: bool = False) -> None:
@@ -1448,11 +1542,12 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             screen.paint(compose_frame(body, status, controls(), height=size.lines), force=force)
             return
 
-        def render_panes(layout: PaneLayout, columns: int) -> list[str]:
+        def render_panes(layout: ResolvedPaneLayout) -> list[str]:
             rendered_panes: list[str] = []
             for index, pane in enumerate(panes):
-                cell_width = layout.widths[index % columns]
-                cell_height = layout.heights[index // columns]
+                rect = layout.pane(index)
+                cell_width = rect.width
+                cell_height = rect.height
                 # The active frame-less pane gets a selection ring, so reserve its
                 # interior too; its content is never overwritten by the indicator.
                 framed = frame_style != "none" or index == focused
@@ -1486,16 +1581,11 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 )
             return rendered_panes
 
-        rows, columns, layout = grid_geometry(
-            size.columns, size.lines, len(header_lines), int(status is not None)
-        )
-        pane_renders = render_panes(layout, columns)
-        grid = compose_panes(
+        layout = grid_geometry(size.columns, size.lines, len(header_lines), int(status is not None))
+        pane_renders = render_panes(layout)
+        grid = _compose_resolved_panes(
             pane_renders,
-            size.columns,
-            layout.height,
-            rows,
-            columns,
+            layout,
             focused=focused if focused is not None else -1,
             ascii=options.host.ascii,
             divider_style=divider_style,
@@ -1530,8 +1620,8 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     last_successful_update,
                 )
             )
-            rows, columns, layout = grid_geometry(size.columns, size.lines, header_rows, 0)
-            cell_height = layout.heights[pane_index // columns]
+            layout = grid_geometry(size.columns, size.lines, header_rows, 0)
+            cell_height = layout.pane(pane_index).height
             framed = frame_style != "none" or pane_index == focused
             interior_height = max(1, cell_height - 2 if framed else cell_height)
             chooser_frame = compose_frame(
@@ -1601,24 +1691,16 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                             )
                         )
                         status = None
-                        rows, columns, layout = grid_geometry(
+                        layout = grid_geometry(
                             size.columns,
                             size.lines,
                             header_rows,
                             int(status is not None),
                         )
-                        selected = pane_at(
-                            pane_rects(
-                                pane_count=len(panes),
-                                width=size.columns,
-                                height=layout.height,
-                                rows=rows,
-                                columns=columns,
-                                divider_style=divider_style,
-                                top=header_rows + 1,
-                            ),
+                        selected = layout_pane_at(
+                            layout,
                             event.x,
-                            event.y,
+                            event.y - header_rows - 1,
                         )
                         if selected is not None:
                             focused = selected
@@ -1641,11 +1723,13 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                             )
                         else:
                             active_grid = parsed
+                            column_weights = None
+                            row_weights = None
                             grid_draft = None
                             grid_error = None
                     elif key in {"\x7f", "\b"}:
                         grid_draft = grid_draft[:-1]
-                    elif key and (key.isalnum() or key in {"x", "X"}):
+                    elif key and (key.isalnum() or key in {"x", "X", "-"}):
                         grid_draft += key
                     paint()
                     continue
@@ -1745,6 +1829,38 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                         start=start_new_pane,
                                     )
                                     focused = insert_at
+                            elif key in {"{", "}", "_", "="}:
+                                size = get_terminal_size()
+                                header_rows = len(
+                                    _header_lines(
+                                        header,
+                                        header_style,
+                                        translator,
+                                        Terminal(
+                                            size.columns,
+                                            4,
+                                            dashboard_theme != "no-color",
+                                            options.host.ascii,
+                                        ),
+                                        last_successful_update,
+                                    )
+                                )
+                                layout = grid_geometry(size.columns, size.lines, header_rows, 0)
+                                slot = layout.topology.slot(focused)
+                                if key in {"{", "}"}:
+                                    assert column_weights is not None
+                                    column_weights = adjust_weight(
+                                        column_weights,
+                                        slot.column,
+                                        1 if key == "}" else -1,
+                                    )
+                                else:
+                                    assert row_weights is not None
+                                    row_weights = adjust_weight(
+                                        row_weights,
+                                        slot.row,
+                                        1 if key == "=" else -1,
+                                    )
                             elif key == "[" and focused > 0:
                                 panes[focused - 1], panes[focused] = (
                                     panes[focused],
@@ -1761,6 +1877,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                 removed = panes.pop(focused)
                                 removed.scheduler.shutdown()
                                 removed.lifecycle.shutdown()
+                                active_grid = layout_for_pane_count(active_grid, len(panes))
                                 focused = min(focused, len(panes) - 1)
                             elif _adjustment_key_supported(
                                 _pane_options(pane).chart.kind, adjustment_page, key
@@ -1799,17 +1916,15 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     if key in {"\r", "\n", "\x1b"}:
                         adjustment_mode = None
                         focused = None
-                    elif key == "a":
-                        adjustment_page = "advanced" if adjustment_page == "quick" else "quick"
-                    elif adjustment_page == "quick" and key in {"t", "T"}:
+                    elif key in {"t", "T"}:
                         dashboard_theme = _cycle(
                             COLOR_SCHEMES, dashboard_theme, 1 if key == "t" else -1
                         )
                         _set_header_theme(header, dashboard_theme)
-                    elif adjustment_page == "quick" and key == "s":
+                    elif key == "s":
                         dashboard_style = _cycle(DASHBOARD_STYLES, dashboard_style, 1)
                         divider_style, frame_style = _dashboard_structure(dashboard_style)
-                    elif adjustment_page == "quick" and key == "h":
+                    elif key == "h":
                         header_style = _cycle(
                             ("hidden", "compact", "banner", "panel"), header_style, 1
                         )
@@ -1820,7 +1935,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                             )
                             if any(not header.coverage.covers(item) for item in required.intervals):
                                 refresh_header(trigger=LifecycleTrigger.CONFIGURATION)
-                    elif adjustment_page == "quick" and key == "u":
+                    elif key == "u":
                         next_summary = _next_header_summary(header.summary_period)
                         header.summary_period = next_summary
                         header.generation += 1
@@ -1831,55 +1946,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                             )
                             if any(not header.coverage.covers(item) for item in required.intervals):
                                 refresh_header(trigger=LifecycleTrigger.CONFIGURATION)
-                    elif adjustment_page == "quick" and key == "z":
+                    elif key == "z":
                         grid_draft = active_grid
                         grid_error = None
-                    elif adjustment_page == "advanced" and key == "\t":
-                        focused = 0 if focused is None else (focused + 1) % len(panes)
-                    elif (
-                        adjustment_page == "advanced"
-                        and key == "["
-                        and focused is not None
-                        and focused > 0
-                    ):
-                        panes[focused - 1], panes[focused] = panes[focused], panes[focused - 1]
-                        focused -= 1
-                    elif (
-                        adjustment_page == "advanced"
-                        and key == "]"
-                        and focused is not None
-                        and focused < len(panes) - 1
-                    ):
-                        panes[focused], panes[focused + 1] = panes[focused + 1], panes[focused]
-                        focused += 1
-                    elif (
-                        adjustment_page == "advanced"
-                        and key == "x"
-                        and focused is not None
-                        and len(panes) > 1
-                    ):
-                        removed = panes.pop(focused)
-                        removed.scheduler.shutdown()
-                        removed.lifecycle.shutdown()
-                        focused = min(focused, len(panes) - 1)
-                    elif adjustment_page == "advanced" and key == "+":
-                        grid_error = None
-                        choice = _choose_pane_type(
-                            screen,
-                            translator,
-                            decoder,
-                            height=get_terminal_size().lines,
-                        )
-                        if choice:
-                            pane = _new_pane(
-                                _new_pane_options(choice, options),
-                                allocate_pane_owner_id(),
-                                runtime,
-                            )
-                            active_grid = _grid_for_pane_count(active_grid, len(panes) + 1)
-                            panes.append(pane)
-                            focused = len(panes) - 1
-                            refresh(focused, trigger=LifecycleTrigger.STARTUP)
                     else:
                         continue
                     paint()
@@ -1889,6 +1958,8 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     paint(force=True)
                     continue
                 if key == "r":
+                    copied_status = translator.text("status.tui_refresh_requested")
+                    paint(force=True)
                     for index in range(len(panes)):
                         refresh(
                             index,

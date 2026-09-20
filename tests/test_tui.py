@@ -41,6 +41,7 @@ from ccusage_viz.tui import (
     _new_pane,
     _new_pane_options,
     _next_header_summary,
+    _pane_adjustment_state,
     _pane_render,
     _query_affecting_adjustment,
     _replace_header_interval,
@@ -369,6 +370,8 @@ def test_dashboard_pause_cancels_automatic_panes_and_manual_refresh_remains_allo
         (QueryTrigger.STARTUP, 0),
         (QueryTrigger.REFRESH, 0),
     ]
+    painted_text = "\n".join("\n".join(event[1].rows) for event in events if event[0] == "paint")
+    assert "refresh requested" in painted_text
     assert len(submissions) == 2
     assert submissions[0].cancelled.is_set()
     assert submissions[1].cancelled.is_set()
@@ -1007,6 +1010,21 @@ def test_query_affecting_adjustments_are_explicit() -> None:
     assert not _query_affecting_adjustment("stack", "c")
     assert not _query_affecting_adjustment("monitor", "+")
     assert not _query_affecting_adjustment("timeline", "t")
+
+
+def test_dashboard_pane_adjustment_state_changes_with_page() -> None:
+    parser = build_parser(load_translator("en"))
+    options = _to_options(parser.parse_args(["dashboard", "--demo"]))
+    pane = _new_pane(standalone_from_pane(options, options.panes[0]), "pane:test")
+    translator = load_translator("en")
+
+    quick = _pane_adjustment_state(pane, "quick", translator)
+    advanced = _pane_adjustment_state(pane, "advanced", translator)
+
+    assert "timeline · compact · nord · line-points" in quick
+    assert "Legend" in advanced
+    assert "Weekdays" in advanced
+    assert quick != advanced
 
 
 def test_tui_adjustment_footer_separates_dashboard_management() -> None:
