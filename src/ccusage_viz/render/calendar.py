@@ -4,7 +4,7 @@ from collections import defaultdict
 from datetime import timedelta
 
 from ccusage_viz.chart_models import CalendarModel
-from ccusage_viz.formatting import center_text, clip_width, display_width, format_tokens
+from ccusage_viz.formatting import center_text, clip_width, display_width, format_tokens, pad_width
 from ccusage_viz.render.base import RenderContext, colored_mark, date_range_heading
 from ccusage_viz.render.palette import get_color_scheme
 from ccusage_viz.render.summary import render_summary
@@ -57,21 +57,21 @@ def render_calendar(model: CalendarModel, context: RenderContext) -> str:
     # by falling back to one terminal cell per week.
     stride = 2 if 3 + week_count * 2 - 1 <= context.width else 1
     cells: dict[int, list[str]] = defaultdict(list)
-    empty_mark = ("-" if context.ascii else "·") if context.style == "grid" else " "
+    empty_mark = "-" if context.ascii else "·"
     marks = (empty_mark, ".", "o", "O", "#") if context.ascii else (empty_mark, "░", "▒", "▓", "█")
     levels = _positive_levels(list(usage.values()))
     colors = get_color_scheme(context.color_scheme).calendar
     months: list[tuple[int, str]] = []
-    previous_month = None
+    labeled_months: set[tuple[int, int]] = set()
     for week in range(week_count):
         week_start = start + timedelta(days=week * 7)
-        label_month = first.month if week == 0 else week_start.month
-        if label_month != previous_month:
-            months.append((week, context.translator.text(f"calendar.month.{label_month}")))
-            previous_month = label_month
         for weekday in range(7):
             day = week_start + timedelta(days=weekday)
             if first <= day <= last:
+                month = (day.year, day.month)
+                if month not in labeled_months:
+                    months.append((week, context.translator.text(f"calendar.month.{day.month}")))
+                    labeled_months.add(month)
                 level = levels.get(usage.get(day, 0), 0)
                 mark = marks[level]
                 if level:
@@ -91,10 +91,18 @@ def render_calendar(model: CalendarModel, context: RenderContext) -> str:
             context.width,
         )
     )
-    lines.append("   " + _month_header(months, week_count=week_count, stride=stride))
+    label_width = 2
+    prefix_width = label_width + 1
+    lines.append(" " * prefix_width + _month_header(months, week_count=week_count, stride=stride))
     for weekday in range(7):
-        weekday_name = context.translator.text(f"calendar.weekday.{weekday}")
-        lines.append(f"{weekday_name:>2} " + separator.join(cells[weekday]))
+        weekday_name = (
+            context.translator.text(f"calendar.weekday.{weekday}") if weekday in {0, 2, 4} else ""
+        )
+        lines.append(
+            pad_width(weekday_name, label_width, align="right")
+            + " "
+            + separator.join(cells[weekday])
+        )
 
     peak = model.peak
     activity = " · ".join(
@@ -116,6 +124,7 @@ def render_calendar(model: CalendarModel, context: RenderContext) -> str:
     legend = " ".join(
         (
             context.translator.text("calendar.legend.less"),
+            marks[0],
             *(colored_mark(marks[level], colors[level - 1], context) for level in range(1, 5)),
             context.translator.text("calendar.legend.more"),
         )

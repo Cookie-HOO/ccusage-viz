@@ -555,8 +555,9 @@ def test_observed_ranking_does_not_compact_shared_model_prefixes() -> None:
         (False, "·", ("░", "▒", "▓", "█")),
     ],
 )
-def test_calendar_grid_separates_valid_zero_days_and_keeps_padding_blank(
-    ascii: bool, zero_mark: str, levels: tuple[str, ...]
+@pytest.mark.parametrize("style", ["relative", "grid"])
+def test_calendar_shows_discrete_zero_cells_and_keeps_padding_blank(
+    ascii: bool, zero_mark: str, levels: tuple[str, ...], style: str
 ) -> None:
     calendar = render_calendar(
         CalendarModel(
@@ -571,7 +572,7 @@ def test_calendar_grid_separates_valid_zero_days_and_keeps_padding_blank(
             load_translator("en"),
             color=False,
             ascii=ascii,
-            style="grid",
+            style=style,
         ),
     )
     day_rows = calendar.splitlines()[2:9]
@@ -582,7 +583,41 @@ def test_calendar_grid_separates_valid_zero_days_and_keeps_padding_blank(
     assert "Less" in calendar and "More" in calendar
 
 
-def test_calendar_relative_and_grid_share_relative_intensity_legend() -> None:
+def test_calendar_keeps_seven_rows_with_sparse_aligned_weekday_labels() -> None:
+    calendar = render_calendar(
+        CalendarModel(tuple(CalendarDay(date(2026, 1, day), usage(day)) for day in range(1, 8))),
+        RenderContext(80, 24, load_translator("en"), color=False, ascii=True),
+    )
+    day_rows = calendar.splitlines()[2:9]
+
+    assert [row[:3] for row in day_rows] == ["Mo ", "   ", "We ", "   ", "Fr ", "   ", "   "]
+    assert all(display_width(row[:3]) == 3 for row in day_rows)
+
+
+def test_calendar_month_labels_align_to_the_first_week_containing_the_month() -> None:
+    calendar = render_calendar(
+        CalendarModel(
+            tuple(CalendarDay(date(2026, 1, day), usage(1)) for day in range(26, 32))
+            + tuple(CalendarDay(date(2026, 2, day), usage(1)) for day in range(1, 3))
+        ),
+        RenderContext(80, 24, load_translator("en"), color=False, ascii=True),
+    )
+    month_header, monday = calendar.splitlines()[1:3]
+
+    assert month_header.index("Fe") == 3
+    assert monday[3] == "."
+
+
+@pytest.mark.parametrize(
+    ("ascii", "legend"),
+    [
+        (True, "Less - . o O # More"),
+        (False, "Less · ░ ▒ ▓ █ More"),
+    ],
+)
+def test_calendar_relative_and_grid_share_discrete_intensity_legend(
+    ascii: bool, legend: str
+) -> None:
     model = CalendarModel(
         tuple(
             CalendarDay(date(2026, 1, day), usage(value))
@@ -592,18 +627,15 @@ def test_calendar_relative_and_grid_share_relative_intensity_legend() -> None:
 
     relative = render_calendar(
         model,
-        RenderContext(80, 24, load_translator("en"), color=False, ascii=True),
+        RenderContext(80, 24, load_translator("en"), color=False, ascii=ascii),
     )
     grid = render_calendar(
         model,
-        RenderContext(80, 24, load_translator("en"), color=False, ascii=True, style="grid"),
+        RenderContext(80, 24, load_translator("en"), color=False, ascii=ascii, style="grid"),
     )
 
-    for mark in (".", "o", "O", "#"):
-        assert mark in relative
-        assert mark in grid
-    assert "Less . o O # More" in relative
-    assert "Less . o O # More" in grid
+    assert legend in relative
+    assert legend in grid
 
 
 def test_calendar_footer_separates_activity_usage_and_legend() -> None:
@@ -619,13 +651,49 @@ def test_calendar_footer_separates_activity_usage_and_legend() -> None:
     lines = calendar.splitlines()
     activity = next(line for line in lines if "Active days" in line)
     usage_line = next(line for line in lines if "Daily average" in line)
-    legend = next(line for line in lines if "Less . o O # More" in line)
+    legend = next(line for line in lines if "Less - . o O # More" in line)
 
     assert "Current streak" in activity and "Longest streak" in activity
     assert "Peak" not in activity
     assert "Peak" in usage_line
     assert lines.index(activity) + 1 == lines.index(usage_line)
     assert lines.index(usage_line) + 1 == lines.index(legend)
+
+
+def test_calendar_colors_only_positive_cells_and_swatches() -> None:
+    calendar = render_calendar(
+        CalendarModel(
+            tuple(
+                CalendarDay(date(2026, 1, day), usage(value))
+                for day, value in enumerate((0, 10, 20, 30, 40), start=1)
+            )
+        ),
+        RenderContext(80, 24, load_translator("en"), ascii=True, color_scheme="github"),
+    )
+
+    assert strip_ansi(calendar).endswith("Less - . o O # More")
+    assert "\x1b[38;5;151m." in calendar
+    assert "\x1b[38;5;77mo" in calendar
+    assert "\x1b[38;5;71mO" in calendar
+    assert "\x1b[38;5;23m#" in calendar
+    assert "Less - \x1b[38;5;" in calendar
+
+
+def test_calendar_uses_one_cell_per_week_when_width_requires_compact_stride() -> None:
+    first = date(2025, 1, 1)
+    calendar = render_calendar(
+        CalendarModel(
+            tuple(
+                CalendarDay(first.fromordinal(first.toordinal() + offset), usage(offset + 1))
+                for offset in range(365)
+            )
+        ),
+        RenderContext(58, 24, load_translator("en"), color=False, ascii=True),
+    )
+    day_rows = calendar.splitlines()[2:9]
+
+    assert all(len(row[3:]) == 53 for row in day_rows)
+    assert all(display_width(line) <= 58 for line in calendar.splitlines())
 
 
 def test_calendar_footer_keeps_average_without_peak_and_clips_rows_independently() -> None:
@@ -646,8 +714,8 @@ def test_calendar_labels_follow_selected_language() -> None:
         RenderContext(80, 24, load_translator("zh"), color=False, ascii=True),
     )
     assert "1月" in calendar
-    assert "四" in calendar
-    assert "较少 . o O # 较多" in calendar
+    assert "一" in calendar and "三" in calendar and "五" in calendar
+    assert "较少 - . o O # 较多" in calendar
     assert "Jan" not in calendar
 
 
