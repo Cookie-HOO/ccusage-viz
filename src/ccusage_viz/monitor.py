@@ -83,10 +83,10 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
         )
 
     def buckets(now: float, terminal: Terminal):
-        return component.observer.buckets(
-            component.observer.display_now(now),
+        return component.buckets(
             max(8, min(32, terminal.width // 4)),
-            datetime.now().astimezone(),
+            now=now,
+            wall=datetime.now().astimezone(),
         )
 
     def render_component(

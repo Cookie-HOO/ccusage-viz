@@ -648,10 +648,10 @@ def _pane_render(pane: TuiPane, translator: Translator, terminal: Terminal) -> P
         return PaneRender(format_full_command(active))
     if pane.body_view in {"data-table", "data-json"}:
         if isinstance(component, MonitorComponent):
-            buckets = component.observer.buckets(
-                component.observer.display_now(time.monotonic()),
+            buckets = component.buckets(
                 max(8, min(32, terminal.width // 4)),
-                datetime.now().astimezone(),
+                now=time.monotonic(),
+                wall=datetime.now().astimezone(),
             )
             return PaneRender(
                 render_monitor_data(
@@ -1566,7 +1566,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                         trigger=LifecycleTrigger.CONFIGURATION,
                                         data_affecting=False,
                                     )
-                            elif key == "v":
+                            elif adjustment_page == "quick" and key == "v":
                                 pane.body_view = next_body_view(pane.body_view)
                             elif adjustment_page == "advanced" and key == "[" and focused > 0:
                                 panes[focused - 1], panes[focused] = (
