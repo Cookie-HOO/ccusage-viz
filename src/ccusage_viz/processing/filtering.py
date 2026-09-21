@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
 from ccusage_viz.core.time import DateRange
-from ccusage_viz.domain import Notice, TokenUsage, UsageRecord
+from ccusage_viz.domain import Notice, TokenUsage, UsageRecord, model_identity
 from ccusage_viz.errors import UsageError
 from ccusage_viz.project_identity import project_label, resolve_projects, unique_projects
 from ccusage_viz.selectors import SelectorCandidate, resolve_selectors
@@ -22,9 +22,13 @@ class FilteredScope:
 
 
 def _simple_selection(
-    selectors: Iterable[str], values: Iterable[str], dimension: str
+    selectors: Iterable[str],
+    values: Iterable[str],
+    dimension: str,
+    *,
+    identity: Callable[[str], str] = str,
 ) -> tuple[str, ...]:
-    unique = tuple(sorted(set(values), key=str.casefold))
+    unique = tuple(dict.fromkeys(identity(value) for value in values))
     return resolve_selectors(
         selectors,
         (SelectorCandidate(value, value, (value,)) for value in unique),
@@ -33,7 +37,11 @@ def _simple_selection(
 
 
 def _resolve_available(
-    selectors: tuple[str, ...], values: Iterable[str], dimension: str
+    selectors: tuple[str, ...],
+    values: Iterable[str],
+    dimension: str,
+    *,
+    identity: Callable[[str], str] = str,
 ) -> tuple[tuple[str, ...], tuple[str, ...]]:
     """Resolve known selectors and retain unmatched literals as no-data selections."""
     resolved: list[str] = []
@@ -41,7 +49,7 @@ def _resolve_available(
     pool = tuple(values)
     for selector in selectors:
         try:
-            matches = _simple_selection((selector,), pool, dimension)
+            matches = _simple_selection((identity(selector),), pool, dimension, identity=identity)
         except UsageError as exc:
             if exc.key != "error.selector_no_match":
                 raise
@@ -52,7 +60,7 @@ def _resolve_available(
 
 
 def _usage_for_models(record: UsageRecord, selected: set[str]) -> TokenUsage | None:
-    matches = (item.usage for item in record.models if item.model in selected)
+    matches = (item.usage for item in record.models if model_identity(item.model) in selected)
     usage = sum(matches, start=TokenUsage.zero())
     return usage if usage.total > 0 else None
 
@@ -99,7 +107,9 @@ def prepare_filtered_scope(
 
     all_models = tuple(item.model for record in ranged for item in record.models)
     model_selectors = tuple(models)
-    resolved_models, unmatched_models = _resolve_available(model_selectors, all_models, "model")
+    resolved_models, unmatched_models = _resolve_available(
+        model_selectors, all_models, "model", identity=model_identity
+    )
     selected_models = set(resolved_models)
 
     filtered: list[UsageRecord] = []
@@ -124,13 +134,13 @@ def prepare_filtered_scope(
                 missing_breakdown = True
                 continue
             selected_breakdowns = tuple(
-                item for item in breakdowns if item.model in selected_models
+                item for item in breakdowns if model_identity(item.model) in selected_models
             )
             usage = _usage_for_models(record, selected_models) or TokenUsage.zero()
             if usage.total == 0:
                 continue
             breakdowns = selected_breakdowns
-        available_models.update(item.model for item in breakdowns)
+        available_models.update(model_identity(item.model) for item in breakdowns)
         filtered.append(
             UsageRecord(record.day, record.agent, usage, record.source, record.project, breakdowns)
         )
@@ -157,7 +167,7 @@ def prepare_filtered_scope(
                     "dimension": "project",
                     "values": ", ".join(
                         (
-                            *(project_label(item, resolved_projects) for item in missing_projects),
+                            *(project_label(item, all_projects) for item in missing_projects),
                             *unmatched_projects,
                         )
                     ),

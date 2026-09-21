@@ -1,12 +1,14 @@
 from contextlib import nullcontext
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from os import terminal_size
 from typing import Literal
 
 import pytest
 
 import ccusage_viz.monitor as monitor_host
+from ccusage_viz.core.time import DateRange
 from ccusage_viz.domain import ProjectRef, SourceKind, TokenUsage, UsageRecord
+from ccusage_viz.errors import SchemaError
 from ccusage_viz.i18n import load_translator
 from ccusage_viz.lifecycle import QueryTrigger
 from ccusage_viz.options import (
@@ -26,6 +28,8 @@ from ccusage_viz.processing.monitor import (
     _nice_y_max,
     _stable_y_max,
 )
+from ccusage_viz.processing.projection import build_ranking
+from ccusage_viz.project_identity import _clear_short_opaque_labels, make_project_ref
 from ccusage_viz.terminal import Terminal
 
 
@@ -176,6 +180,14 @@ def test_agent_and_project_current_values_are_latest_pair_token_delta(
     assert observer.current_values() == {"claude": 0.0}
 
 
+def test_model_casing_is_one_continuous_monitor_counter() -> None:
+    observer = ObservedTPM(window_seconds=3600, by="model", top=None)
+    observer.add(snapshot(100, **{"GPT-5.6-Luna": 100}), 0.0)
+    observer.add(snapshot(150, **{"gpt-5.6-luna": 150}), 60.0)
+
+    assert observer.rates(60.0) == {"gpt-5.6-luna": 50.0}
+
+
 def test_model_projection_preserves_authoritative_total_with_residual_other() -> None:
     observer = ObservedTPM(window_seconds=3600, by="model", top=None)
     observer.add(snapshot(100, sonnet=60), 0.0)
@@ -197,7 +209,7 @@ def test_model_top_is_projection_only_and_history_remains_reversible() -> None:
 
 
 def test_model_selection_projects_selected_models_and_other_without_changing_total() -> None:
-    observer = ObservedTPM(window_seconds=3600, by="model", top=None, model_selectors=("son",))
+    observer = ObservedTPM(window_seconds=3600, by="model", top=None, model_selectors=("sonnet",))
     observer.add(snapshot(0, sonnet=0, opus=0), 0.0)
     observer.add(snapshot(100, sonnet=60, opus=40), 60.0)
 
@@ -267,7 +279,42 @@ def test_counters_keep_project_display_labels_safe_and_distinct() -> None:
         ),
     )
 
-    assert set(_counters(records).projects) == {"app (claude)", "app (codex)"}
+    projects = _counters(records).projects
+    assert {(key.agent, key.label) for key in projects} == {("claude", "app"), ("codex", "app")}
+    assert all("/safe" not in key.label for key in projects)
+
+
+def test_monitor_reuses_a_shortened_opaque_project_label_from_process_cache() -> None:
+    _clear_short_opaque_labels()
+    app = UsageRecord(
+        None,
+        "claude",
+        usage(10),
+        SourceKind.CLAUDE_DAILY_PROJECTS,
+        make_project_ref("claude", "-Users-me-Projects-app"),
+    )
+    tool = UsageRecord(
+        None,
+        "claude",
+        usage(20),
+        SourceKind.CLAUDE_DAILY_PROJECTS,
+        make_project_ref("claude", "-Users-me-Projects-tool"),
+    )
+
+    assert {key.label for key in _counters((app, tool)).projects} == {"app", "tool"}
+    assert [(key.agent, key.raw_id, key.label) for key in _counters((app,)).projects] == [
+        ("claude", "-Users-me-Projects-app", "-Users-me-Projects-app")
+    ]
+
+    build_ranking(
+        (app, tool),
+        DateRange(date(2026, 1, 1), date(2026, 1, 1), None),
+        by="project",
+    )
+    singleton = _counters((app,)).projects
+    assert [(key.agent, key.raw_id, key.label) for key in singleton] == [
+        ("claude", "-Users-me-Projects-app", "app")
+    ]
 
 
 def test_agent_selection_is_applied_before_counters() -> None:
@@ -276,7 +323,7 @@ def test_agent_selection_is_applied_before_counters() -> None:
         UsageRecord(None, "Codex", usage(40), SourceKind.UNIFIED_DAILY, None, ()),
     )
 
-    selected = _agent_records(records, ("claude",))
+    selected = _agent_records(records, ("claude code",))
     assert tuple(record.agent for record in selected) == ("Claude Code",)
     assert sum(record.usage.total for record in selected) == 60
 
@@ -425,6 +472,82 @@ def test_wall_clock_sleep_gap_rebaselines_on_logical_clock_and_leaves_empty_buck
     assert buckets[0].values == {"Total": 240.0}
     assert buckets[1].values == {}
     assert buckets[2].values == {}
+
+
+def test_standalone_monitor_localizes_schema_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    launch = monitor_options()
+    painted: list[str] = []
+
+    class Runtime:
+        def cancel(self) -> None:
+            pass
+
+    class Component:
+        def __init__(self, selected: StandaloneLaunch, **_kwargs: object) -> None:
+            self.candidate = selected
+            self.accepted_options = None
+            self.error = SchemaError("error.schema", path="$.projects", reason="expected object")
+            self.accepted_at = None
+            self.last_elapsed = None
+            self.deltas = {}
+            self.rank_deltas = {}
+            self.generation = 0
+
+        def submit(self, *_args: object, **_kwargs: object) -> object:
+            component = self
+
+            class Submission:
+                generation = component.generation
+                handle: "Submission"
+
+                def __init__(self) -> None:
+                    self.handle = self
+
+                def done(self) -> bool:
+                    return True
+
+                def cancel(self) -> None:
+                    pass
+
+                def result(self) -> object:
+                    raise component.error
+
+            return Submission()
+
+        def fail(self, error: BaseException, *, generation: int) -> bool:
+            self.error = error
+            return True
+
+        def pause(self) -> None:
+            pass
+
+    class Screen:
+        def paint(self, frame: object, **_kwargs: object) -> None:
+            painted.append(str(frame))
+
+        def finish(self) -> None:
+            pass
+
+    keys = iter(("\x03",))
+    monkeypatch.setattr(monitor_host, "build_query_runtime", Runtime)
+    monkeypatch.setattr(monitor_host, "build_chart_registry", lambda: object())
+    monkeypatch.setattr(monitor_host, "MonitorComponent", Component)
+    monkeypatch.setattr(monitor_host, "FramePainter", Screen)
+    monkeypatch.setattr(monitor_host, "input_mode", nullcontext)
+    monkeypatch.setattr(monitor_host, "read_key", lambda _timeout: next(keys))
+    monkeypatch.setattr(monitor_host, "get_terminal_size", lambda: terminal_size((100, 30)))
+    monkeypatch.setattr(
+        monitor_host,
+        "inspect_terminal",
+        lambda *_args, **_kwargs: Terminal(100, 30, False, True),
+    )
+
+    assert monitor_host.run_monitor(launch, load_translator("en")) == 0
+    assert any(
+        "Unsupported ccusage data at $.projects: expected object" in frame for frame in painted
+    )
 
 
 def test_standalone_pause_discards_active_sample_and_preserves_paused_status(

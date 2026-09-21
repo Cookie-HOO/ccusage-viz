@@ -1,11 +1,14 @@
 import shlex
 import threading
 from contextlib import nullcontext
+from dataclasses import replace
 from datetime import date
+from io import StringIO
 
 import pytest
 
 import ccusage_viz.tui as tui_module
+import ccusage_viz.tui_input as tui_input_module
 from ccusage_viz.bootstrap import build_query_runtime
 from ccusage_viz.cli import _to_options, build_parser
 from ccusage_viz.cli import parse_pane_fragment as parse_dashboard_pane
@@ -16,17 +19,18 @@ from ccusage_viz.command_copy import (
     format_full_dashboard_command,
 )
 from ccusage_viz.configuration import standalone_from_pane
+from ccusage_viz.core.time import DateRange
 from ccusage_viz.coverage import DateCoverage, DateInterval
 from ccusage_viz.deltas import RefreshRanks
 from ccusage_viz.domain import Notice, SourceKind, TokenUsage, UsageRecord
-from ccusage_viz.errors import UsageError
+from ccusage_viz.errors import QueryError, SchemaError, UsageError
 from ccusage_viz.formatting import display_width
 from ccusage_viz.historical_component import HistoricalChartComponent, UsageSnapshot
 from ccusage_viz.historical_render import RenderedChart
 from ccusage_viz.i18n import load_translator
 from ccusage_viz.lifecycle import FixedIntervalScheduler, LifecycleOperation
 from ccusage_viz.monitor_component import MonitorComponent
-from ccusage_viz.options import Filters
+from ccusage_viz.options import Filters, TimelineConfig
 from ccusage_viz.query.models import QueryTrigger
 from ccusage_viz.terminal import Terminal
 from ccusage_viz.tui import (
@@ -329,6 +333,7 @@ def test_dashboard_panes_host_chart_components_without_legacy_runners() -> None:
 
     assert isinstance(historical.component, HistoricalChartComponent)
     assert isinstance(monitor.component, MonitorComponent)
+    assert monitor.component.monitor_started_at is None
     assert isinstance(historical.scheduler, FixedIntervalScheduler)
     assert isinstance(monitor.scheduler, FixedIntervalScheduler)
     assert isinstance(historical.lifecycle, LifecycleOperation)
@@ -1088,6 +1093,52 @@ def test_dashboard_pane_render_retains_notices_for_each_source_pane() -> None:
     assert rendered[1].notices == rendered[0].notices
 
 
+@pytest.mark.parametrize(
+    ("change", "expected_querying"),
+    (("by", True), ("window", False)),
+)
+def test_dashboard_monitor_marks_only_data_candidate_panes(
+    change: str,
+    expected_querying: bool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parser = build_parser(load_translator("en"))
+    options = _to_options(parser.parse_args(["dashboard", "--demo"]))
+    monitor = _new_pane(
+        standalone_from_pane(
+            options,
+            parse_dashboard_pane("monitor --by model --style ranking", host=options),
+        ),
+        "pane:monitor",
+    )
+    assert isinstance(monitor.component, MonitorComponent)
+    component = monitor.component
+    component.accepted_options = component.candidate
+    chart = component.candidate.chart
+    updated = replace(
+        component.candidate,
+        chart=replace(
+            chart,
+            by="agent" if change == "by" else chart.by,
+            window_seconds=600 if change == "window" else chart.window_seconds,
+        ),
+    )
+    component.configure(updated, data_affecting=change == "by")
+    captured: dict[str, object] = {}
+
+    def fake_render(self: MonitorComponent, context, **_kwargs: object) -> str:
+        captured["pending"] = context.pending
+        captured["querying"] = context.audit.querying if context.audit is not None else None
+        return "monitor"
+
+    monkeypatch.setattr(MonitorComponent, "render", fake_render)
+
+    rendered = _pane_render(monitor, load_translator("en"), Terminal(58, 16, False, True))
+
+    assert rendered.chart == "monitor"
+    assert captured == {"pending": expected_querying, "querying": expected_querying}
+
+
 def test_dashboard_monitor_forwards_component_changes_to_chart_renderer(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1164,6 +1215,83 @@ def test_dashboard_monitor_and_error_panes_do_not_contribute_chart_notices() -> 
     assert rendered.notices == ()
 
 
+def test_dashboard_pane_preserves_accepted_chart_for_transient_unified_daily_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parser = build_parser(load_translator("en"))
+    options = _to_options(parser.parse_args(["dashboard", "--demo"]))
+    pane = _new_pane(
+        standalone_from_pane(options, parse_dashboard_pane("timeline", host=options)),
+        "pane:timeline",
+    )
+    assert isinstance(pane.component, HistoricalChartComponent)
+    pane.component.seed(pane.component.candidate, UsageSnapshot((), (), 0.1))
+    pane.component.fail(
+        QueryError(
+            "error.ccusage_failed",
+            query="unified_daily",
+            code=1,
+            stderr="SQLITE_BUSY: database is locked at /private/example.db",
+        ),
+        generation=pane.component.generation,
+    )
+    monkeypatch.setattr(
+        tui_module,
+        "render_historical_component",
+        lambda *_args, **_kwargs: RenderedChart("accepted chart", ()),
+    )
+
+    rendered = _pane_render(pane, load_translator("en"), Terminal(58, 16, False, True))
+
+    assert rendered.chart == "accepted chart"
+    assert rendered.notices == ("The next refresh may recover; press r to try now.",)
+
+
+def test_dashboard_pane_uses_safe_placeholder_for_initial_transient_error() -> None:
+    parser = build_parser(load_translator("en"))
+    options = _to_options(parser.parse_args(["dashboard", "--demo"]))
+    pane = _new_pane(
+        standalone_from_pane(options, parse_dashboard_pane("timeline", host=options)),
+        "pane:timeline",
+    )
+    assert isinstance(pane.component, HistoricalChartComponent)
+    pane.component.fail(
+        QueryError(
+            "error.ccusage_failed",
+            query="unified_daily",
+            code=1,
+            stderr="SQLITE_BUSY: database is locked at /private/example.db",
+        ),
+        generation=pane.component.generation,
+    )
+
+    rendered = _pane_render(pane, load_translator("en"), Terminal(58, 16, False, True))
+
+    assert rendered.chart == (
+        "Usage data is temporarily unavailable.\nThe next refresh may recover; press r to try now."
+    )
+    assert "/private/example.db" not in rendered.chart
+
+
+def test_dashboard_pane_localizes_schema_errors() -> None:
+    parser = build_parser(load_translator("en"))
+    options = _to_options(parser.parse_args(["dashboard", "--demo"]))
+    monitor = _new_pane(
+        standalone_from_pane(options, parse_dashboard_pane("monitor", host=options)),
+        "pane:monitor",
+    )
+    monitor.component.fail(
+        SchemaError("error.schema", path="$.projects", reason="expected object"),
+        generation=monitor.component.generation,
+    )
+
+    rendered = _pane_render(monitor, load_translator("en"), Terminal(58, 16, False, True))
+
+    assert rendered.chart != "error.schema"
+    assert "$.projects" in rendered.chart
+    assert "expected object" in rendered.chart
+
+
 def test_dashboard_pane_retains_last_render_for_localized_renderer_warnings(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1202,6 +1330,7 @@ def test_dashboard_pane_retains_last_render_for_localized_renderer_warnings(
 def test_query_affecting_adjustments_are_explicit() -> None:
     assert _query_affecting_adjustment("timeline", "p")
     assert not _query_affecting_adjustment("timeline", "d")
+    assert not _query_affecting_adjustment("timeline", "A")
     assert not _query_affecting_adjustment("monitor", "d")
     assert not _query_affecting_adjustment("timeline", "g")
     assert _query_affecting_adjustment("ranking", "b")
@@ -1226,6 +1355,31 @@ def test_dashboard_pane_adjustment_state_changes_with_page() -> None:
     assert quick != advanced
 
 
+@pytest.mark.parametrize("command", ("timeline", "ranking", "monitor"))
+def test_project_aggregation_is_advanced_only_for_project_panes(command: str) -> None:
+    parser = build_parser(load_translator("en"))
+    dashboard = _to_options(parser.parse_args(["dashboard", "--pane", f"{command} --by project"]))
+    project_pane = _new_pane(
+        standalone_from_pane(dashboard, dashboard.panes[0]), f"pane:{command}:project"
+    )
+    chart = project_pane.component.candidate.chart
+    translator = load_translator("en")
+
+    assert "A project aggregation" in _adjustment_controls(
+        command, "advanced", translator, chart=chart
+    )
+    assert _adjustment_key_supported(command, "advanced", "A", chart=chart)
+    assert "Project aggregation name" in _pane_adjustment_state(
+        project_pane, "advanced", translator
+    )
+
+    nonproject_chart = replace(chart, by="agent")
+    assert "project aggregation" not in _adjustment_controls(
+        command, "advanced", translator, chart=nonproject_chart
+    )
+    assert not _adjustment_key_supported(command, "advanced", "A", chart=nonproject_chart)
+
+
 def test_calendar_advanced_adjustment_uses_the_shared_filter_control() -> None:
     parser = build_parser(load_translator("en"))
     options = _to_options(parser.parse_args(["dashboard", "--pane", "calendar"]))
@@ -1238,8 +1392,13 @@ def test_calendar_advanced_adjustment_uses_the_shared_filter_control() -> None:
 
 def test_tui_adjustment_footer_separates_dashboard_management() -> None:
     translator = load_translator("en")
-    timeline_quick = _adjustment_controls("timeline", "quick", translator)
-    timeline_advanced = _adjustment_controls("timeline", "advanced", translator)
+    timeline_chart = TimelineConfig(
+        "timeline", DateRange(date(2026, 1, 1), date(2026, 1, 14), None), by="project"
+    )
+    timeline_quick = _adjustment_controls("timeline", "quick", translator, chart=timeline_chart)
+    timeline_advanced = _adjustment_controls(
+        "timeline", "advanced", translator, chart=timeline_chart
+    )
     stack_advanced = _adjustment_controls("stack", "advanced", translator)
 
     assert "p/P period" in timeline_quick
@@ -1248,15 +1407,19 @@ def test_tui_adjustment_footer_separates_dashboard_management() -> None:
     assert "k weekdays" in timeline_advanced
     assert "l legend" in timeline_advanced
     assert "f filters" in timeline_advanced
+    assert "A project aggregation" in timeline_advanced
     assert "c cache mode" in stack_advanced
     assert not _adjustment_key_supported("timeline", "quick", "k")
     assert _adjustment_key_supported("timeline", "advanced", "k")
+    assert not _adjustment_key_supported("timeline", "advanced", "A")
+    assert _adjustment_key_supported("timeline", "advanced", "A", chart=timeline_chart)
     assert _adjustment_key_supported("timeline", "quick", "b")
     assert _adjustment_key_supported("timeline", "quick", "d")
     assert _adjustment_key_supported("monitor", "quick", "d")
     assert not _adjustment_key_supported("timeline", "advanced", "b")
     assert not _adjustment_key_supported("monitor", "quick", "i")
     assert not _adjustment_key_supported("monitor", "quick", "B")
+    assert "project aggregation" not in _adjustment_controls("timeline", "advanced", translator)
 
     quick_rows = _adjustment_footer(
         "Current status: running", "timeline", "quick", "chart", translator, 80
@@ -1619,6 +1782,81 @@ def test_tui_input_decodes_keys_and_fragmented_mouse_press() -> None:
     assert decoder.next() is None
     decoder.feed(";5M")
     assert decoder.next() == MouseEvent(0, 20, 5, True, 0)
+
+
+def test_tui_input_times_out_incomplete_mouse_report_and_recovers() -> None:
+    decoder = InputDecoder()
+    decoder.feed("\x1b[<0;20")
+
+    assert decoder.next(now=1.0) is None
+    assert decoder.next(now=1.11) is None
+
+    decoder.feed("r")
+    assert decoder.next(now=1.11) == KeyEvent("r")
+
+
+@pytest.mark.parametrize("malformed", ("\x1b[<0;;3M", "\x1b[<0;7;3;M"))
+def test_tui_input_recovers_after_malformed_mouse_report(malformed: str) -> None:
+    decoder = InputDecoder()
+    decoder.feed(malformed + "\x1b[<0;7;3M")
+
+    assert decoder.next() is None
+    assert decoder.next() == MouseEvent(0, 7, 3, True, 0)
+    assert decoder.buffer == ""
+
+
+def test_tui_input_keeps_ordinary_key_after_malformed_mouse_report() -> None:
+    decoder = InputDecoder()
+    decoder.feed("\x1b[<0;;3Mq")
+
+    assert decoder.next() is None
+    assert decoder.next() == KeyEvent("q")
+
+
+def test_tui_input_mode_disables_mouse_and_restores_terminal_on_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import termios
+    import tty
+
+    class Stdin:
+        def isatty(self) -> bool:
+            return True
+
+        def fileno(self) -> int:
+            return 7
+
+    previous = [0, 0, 0, termios.ISIG, 0, 0, 0]
+    attributes = list(previous)
+    output = StringIO()
+    tcset_calls: list[tuple[object, ...]] = []
+    setcbreak_fds: list[int] = []
+    tcget_calls = 0
+
+    def tcgetattr(_descriptor: int) -> list[int]:
+        nonlocal tcget_calls
+        tcget_calls += 1
+        return previous if tcget_calls == 1 else attributes
+
+    monkeypatch.setattr(tui_input_module.sys, "stdin", Stdin())
+    monkeypatch.setattr(tui_input_module.sys, "stdout", output)
+    monkeypatch.setattr(tui_input_module.os, "name", "posix")
+    monkeypatch.setattr(termios, "tcgetattr", tcgetattr)
+    monkeypatch.setattr(termios, "tcsetattr", lambda *args: tcset_calls.append(args))
+    monkeypatch.setattr(tty, "setcbreak", lambda descriptor: setcbreak_fds.append(descriptor))
+
+    with (
+        pytest.raises(RuntimeError, match="body failure"),
+        tui_input_module.tui_input_mode() as decoder,
+    ):
+        assert isinstance(decoder, InputDecoder)
+        raise RuntimeError("body failure")
+
+    assert output.getvalue() == tui_input_module._MOUSE_ENABLE + tui_input_module._MOUSE_DISABLE
+    assert setcbreak_fds == [7]
+    assert tcset_calls[0][0:2] == (7, termios.TCSADRAIN)
+    assert tcset_calls[0][2][3] == previous[3] & ~termios.ISIG
+    assert tcset_calls[-1] == (7, termios.TCSADRAIN, previous)
 
 
 def test_tui_parses_runtime_numeric_grid_with_capacity() -> None:

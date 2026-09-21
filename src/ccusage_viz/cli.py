@@ -33,6 +33,7 @@ from ccusage_viz.options import (
     GRANULARITIES,
     HEADER_SUMMARIES,
     OTHER_MODES,
+    PROJECT_AGGREGATIONS,
     WEEKDAY_MODES,
     CalendarConfig,
     ChartPresentation,
@@ -306,6 +307,12 @@ def _add_monitor(parser: argparse.ArgumentParser, tr: Translator) -> None:
         "--by", choices=("agent", "model", "project"), help=tr.text("help.monitor_by")
     )
     parser.add_argument("--top", type=int, help=tr.text("help.monitor_top"))
+    parser.add_argument(
+        "--project-aggregation",
+        choices=PROJECT_AGGREGATIONS,
+        default="name",
+        help=tr.text("help.project_aggregation"),
+    )
     parser.add_argument("--agent", action="append", default=[], help=tr.text("help.agent"))
     parser.add_argument("--model", action="append", default=[], help=tr.text("help.model"))
     parser.add_argument("--project", action="append", default=[], help=tr.text("help.project"))
@@ -334,6 +341,12 @@ def build_parser(tr: Translator) -> argparse.ArgumentParser:
     )
     timeline.add_argument("--top", type=int, default=None, help=tr.text("help.top"))
     timeline.add_argument(
+        "--project-aggregation",
+        choices=PROJECT_AGGREGATIONS,
+        default="name",
+        help=tr.text("help.project_aggregation"),
+    )
+    timeline.add_argument(
         "--other", choices=OTHER_MODES, default="show", help=tr.text("help.other")
     )
 
@@ -358,6 +371,12 @@ def build_parser(tr: Translator) -> argparse.ArgumentParser:
         "--by", choices=("agent", "model", "project"), default="project", help=tr.text("help.by")
     )
     ranking.add_argument("--top", type=int, default=10, help=tr.text("help.top"))
+    ranking.add_argument(
+        "--project-aggregation",
+        choices=PROJECT_AGGREGATIONS,
+        default="name",
+        help=tr.text("help.project_aggregation"),
+    )
     ranking.add_argument("--other", choices=OTHER_MODES, default="show", help=tr.text("help.other"))
 
     monitor = subparsers.add_parser(
@@ -426,7 +445,13 @@ def _chart_from_namespace(namespace: argparse.Namespace, *, timezone: str | None
         top = 3
     if command == "monitor":
         return MonitorConfig(
-            "monitor", _parse_window(namespace.window), filters, presentation, namespace.by, top
+            kind="monitor",
+            window_seconds=_parse_window(namespace.window),
+            filters=filters,
+            presentation=presentation,
+            by=namespace.by,
+            top=top,
+            project_aggregation=getattr(namespace, "project_aggregation", "name"),
         )
     date_range = resolve_date_range(
         command,
@@ -446,6 +471,7 @@ def _chart_from_namespace(namespace: argparse.Namespace, *, timezone: str | None
             namespace.other,
             namespace.granularity,
             namespace.weekdays,
+            getattr(namespace, "project_aggregation", "name"),
         )
     if command == "calendar":
         return CalendarConfig("calendar", date_range, filters, presentation)
@@ -467,6 +493,7 @@ def _chart_from_namespace(namespace: argparse.Namespace, *, timezone: str | None
         namespace.by,
         top if top is not None else 10,
         namespace.other,
+        getattr(namespace, "project_aggregation", "name"),
     )
 
 
@@ -543,7 +570,10 @@ def _to_options(
     namespace: argparse.Namespace, *, explicit: frozenset[str] = frozenset()
 ) -> LaunchConfig:
     command = namespace.command or "timeline"
-    process = ProcessConfig(namespace.ccusage_bin, namespace.query_timeout)
+    process = ProcessConfig(
+        ccusage_bin=namespace.ccusage_bin,
+        query_timeout=namespace.query_timeout,
+    )
     if not math.isfinite(process.query_timeout) or process.query_timeout <= 0:
         raise UsageError("error.arguments", detail="--query-timeout must be positive and finite")
     if command == "dashboard":

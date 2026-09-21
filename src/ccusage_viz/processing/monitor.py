@@ -5,10 +5,31 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from math import floor, isfinite, log10
+from typing import Any, TypeAlias, cast
 
-from ccusage_viz.domain import TokenUsage, UsageRecord
+from ccusage_viz.domain import TokenUsage, UsageRecord, model_identity
 from ccusage_viz.options import StandaloneLaunch
-from ccusage_viz.project_identity import project_label, resolve_projects, unique_projects
+from ccusage_viz.project_identity import (
+    ExactProjectDisplayKey,
+    ProjectAggregation,
+    ProjectDisplayKey,
+    ProjectLabelContext,
+    exact_project_display_key,
+    project_display_keys,
+    resolve_projects,
+    unique_projects,
+)
+
+MonitorKey: TypeAlias = str | ExactProjectDisplayKey | ProjectDisplayKey
+
+
+def monitor_key_sort_key(key: MonitorKey) -> tuple[str, str, str]:
+    """Sort Monitor dimensions without treating display text as identity."""
+    if isinstance(key, ExactProjectDisplayKey):
+        return ("project", key.label.casefold(), key.agent.casefold())
+    if isinstance(key, ProjectDisplayKey):
+        return ("project", key.label.casefold(), (key.agent or "").casefold())
+    return ("scalar", key.casefold(), "")
 
 
 @dataclass(frozen=True, slots=True)
@@ -16,7 +37,7 @@ class CounterSnapshot:
     total: TokenUsage
     models: dict[str, TokenUsage] = field(default_factory=dict)
     agents: dict[str, TokenUsage] = field(default_factory=dict)
-    projects: dict[str, TokenUsage] = field(default_factory=dict)
+    projects: dict[ExactProjectDisplayKey, TokenUsage] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,7 +49,7 @@ class ObservedInterval:
     total: float
     models: dict[str, float]
     agents: dict[str, float]
-    projects: dict[str, float]
+    projects: dict[MonitorKey, float]
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,7 +62,7 @@ class MinuteRollup:
     total: float
     models: dict[str, float]
     agents: dict[str, float]
-    projects: dict[str, float]
+    projects: dict[MonitorKey, float]
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,7 +70,7 @@ class ObservedBucket:
     started_at: float
     ended_at: float
     ended_wall: datetime
-    values: dict[str, float]
+    values: dict[MonitorKey, float]
 
 
 class ObservedTPM:
@@ -66,11 +87,15 @@ class ObservedTPM:
         by: str | None,
         top: int | None,
         model_selectors: tuple[str, ...] = (),
+        project_aggregation: ProjectAggregation = "name",
+        project_label_context: ProjectLabelContext = 0,
     ) -> None:
         self.window_seconds = window_seconds
         self.by = by
         self.top = top
         self.model_selectors = model_selectors
+        self.project_aggregation = project_aggregation
+        self.project_label_context = project_label_context
         self.previous: CounterSnapshot | None = None
         self.previous_at: float | None = None
         self.previous_raw_at: float | None = None
@@ -88,12 +113,18 @@ class ObservedTPM:
         self.sample_generation = 0
         self.y_axis_generation = -1
 
-    def _scale_semantics(self) -> tuple[str | None, int, int | None, tuple[str, ...]]:
+    def _scale_semantics(
+        self,
+    ) -> tuple[str | None, int, int | None, tuple[str, ...] | tuple[ProjectAggregation]]:
         return (
             self.by,
             self.window_seconds,
             self.top,
-            self.model_selectors if self.by == "model" else (),
+            self.model_selectors
+            if self.by == "model"
+            else (self.project_aggregation,)
+            if self.by == "project"
+            else (),
         )
 
     def update_y_axis(self, maximum: float) -> float:
@@ -116,17 +147,21 @@ class ObservedTPM:
     def _normalize(self, snapshot: CounterSnapshot) -> CounterSnapshot:
         # A bounded identity set keeps monitor memory finite. Agent/project labels
         # remain independent projections; model tracking preserves existing behavior.
+        normalized_models: defaultdict[str, TokenUsage] = defaultdict(TokenUsage.zero)
+        for name, usage in snapshot.models.items():
+            normalized = model_identity(name)
+            normalized_models[normalized] = normalized_models[normalized] + usage
         available = self.model_limit - len(self.tracked_models)
         if available > 0:
             self.tracked_models.update(
-                sorted(set(snapshot.models) - self.tracked_models)[:available]
+                sorted(set(normalized_models) - self.tracked_models)[:available]
             )
-        overflowed = any(name not in self.tracked_models for name in snapshot.models)
+        overflowed = any(name not in self.tracked_models for name in normalized_models)
         self.overflowed_models = self.overflowed_models or overflowed
         models = {
-            name: snapshot.models[name]
+            name: normalized_models[name]
             for name in sorted(self.tracked_models)
-            if name in snapshot.models
+            if name in normalized_models
         }
         return CounterSnapshot(
             snapshot.total, models, dict(snapshot.agents), dict(snapshot.projects)
@@ -164,14 +199,15 @@ class ObservedTPM:
             return False
 
         def deltas(
-            current_values: dict[str, TokenUsage],
-            previous_values: dict[str, TokenUsage],
+            current_values: Mapping[Any, TokenUsage],
+            previous_values: Mapping[Any, TokenUsage],
             *,
             new_as_zero: bool = False,
-        ) -> dict[str, float]:
-            values: dict[str, float] = {}
-            for name, usage in current_values.items():
-                before = previous_values.get(name)
+        ) -> dict[MonitorKey, float]:
+            values: dict[MonitorKey, float] = {}
+            for raw_name, usage in current_values.items():
+                name = cast(MonitorKey, raw_name)
+                before = previous_values.get(raw_name)
                 if before is None:
                     if not new_as_zero:
                         continue
@@ -195,8 +231,8 @@ class ObservedTPM:
             wall,
             seconds,
             total_delta,
-            deltas(current.models, previous.models),
-            deltas(current.agents, previous.agents),
+            cast(dict[str, float], deltas(current.models, previous.models)),
+            cast(dict[str, float], deltas(current.agents, previous.agents)),
             deltas(current.projects, previous.projects, new_as_zero=True),
         )
         self.intervals.append(interval)
@@ -271,8 +307,8 @@ class ObservedTPM:
         if self.rollups and self.rollups[-1].minute == minute:
             previous = self.rollups.pop()
 
-            def merged(left: dict[str, float], right: dict[str, float]) -> dict[str, float]:
-                values: defaultdict[str, float] = defaultdict(float, left)
+            def merged(left: Mapping[Any, float], right: Mapping[Any, float]) -> dict[Any, float]:
+                values: defaultdict[Any, float] = defaultdict(float, left)
                 for name, value in right.items():
                     values[name] += value
                 return dict(values)
@@ -331,13 +367,31 @@ class ObservedTPM:
         self._maintain(now)
         return (*self.rollups, *self.intervals)
 
-    def _values(self, segment: MinuteRollup | ObservedInterval) -> dict[str, float]:
+    def _values(self, segment: MinuteRollup | ObservedInterval) -> dict[MonitorKey, float]:
         if self.by is None:
             return {"Total": float(segment.total)}
         values = getattr(segment, f"{self.by}s")
+        if self.by == "project":
+            exact = tuple(
+                name
+                for source in (*self.rollups, *self.intervals)
+                for name in source.projects
+                if isinstance(name, ExactProjectDisplayKey)
+            )
+            displays = project_display_keys(
+                exact,
+                self.project_aggregation,
+                context=self.project_label_context,
+            )
+            projected: defaultdict[MonitorKey, float] = defaultdict(float)
+            for name, value in values.items():
+                projected[displays[name] if isinstance(name, ExactProjectDisplayKey) else name] += (
+                    value
+                )
+            return dict(projected)
         if self.by != "model" or not self.model_selectors:
             return {name: float(value) for name, value in values.items()}
-        selected: defaultdict[str, float] = defaultdict(float)
+        selected: defaultdict[MonitorKey, float] = defaultdict(float)
         for name, value in values.items():
             key = name if _matches_selector(name, self.model_selectors) else "Other"
             selected[key] += value
@@ -358,7 +412,7 @@ class ObservedTPM:
         started_at = now - self.window_seconds
         width = self.window_seconds / count
         segments = self._segments(now)
-        token_totals: defaultdict[str, float] = defaultdict(float)
+        token_totals: defaultdict[MonitorKey, float] = defaultdict(float)
         for segment in segments:
             overlap = max(0.0, min(now, segment.ended_at) - max(started_at, segment.started_at))
             duration = segment.ended_at - segment.started_at
@@ -368,11 +422,11 @@ class ObservedTPM:
                 token_totals[key] += value * overlap / duration
         names = _top_names(dict(token_totals), self.top if self.by is not None else None)
         buckets: list[ObservedBucket] = []
-        cumulative: defaultdict[str, float] = defaultdict(float)
+        cumulative: defaultdict[MonitorKey, float] = defaultdict(float)
         for index in range(count):
             bucket_start = started_at + index * width
             bucket_end = bucket_start + width
-            values: defaultdict[str, float] = defaultdict(float)
+            values: defaultdict[MonitorKey, float] = defaultdict(float)
             covered = 0.0
             for segment in segments:
                 overlap = min(bucket_end, segment.ended_at) - max(bucket_start, segment.started_at)
@@ -397,7 +451,7 @@ class ObservedTPM:
             buckets.append(ObservedBucket(bucket_start, bucket_end, ended_wall, projected))
         return tuple(buckets)
 
-    def current_values(self) -> dict[str, float]:
+    def current_values(self) -> dict[MonitorKey, float]:
         """Project only the newest valid sample pair into the current display."""
         interval = self.current_interval
         if interval is None:
@@ -411,9 +465,9 @@ class ObservedTPM:
             totals=self._values(interval),
         )
 
-    def rates(self, now: float) -> dict[str, float]:
+    def rates(self, now: float) -> dict[MonitorKey, float]:
         cutoff = now - self.window_seconds
-        tokens: defaultdict[str, float] = defaultdict(float)
+        tokens: defaultdict[MonitorKey, float] = defaultdict(float)
         seconds = 0.0
         for segment in self._segments(now):
             overlap = max(0.0, min(now, segment.ended_at) - max(cutoff, segment.started_at))
@@ -460,6 +514,8 @@ def _copy_observer(observer: ObservedTPM) -> ObservedTPM:
         by=observer.by,
         top=observer.top,
         model_selectors=observer.model_selectors,
+        project_aggregation=observer.project_aggregation,
+        project_label_context=observer.project_label_context,
     )
     copy.previous = observer.previous
     copy.previous_at = observer.previous_at
@@ -480,16 +536,19 @@ def _copy_observer(observer: ObservedTPM) -> ObservedTPM:
     return copy
 
 
-def _top_names(totals: dict[str, float], top: int | None) -> set[str]:
+def _top_names(totals: Mapping[MonitorKey, float], top: int | None) -> set[MonitorKey]:
     if top is None or len(totals) <= top:
         return set(totals)
-    ordered = sorted(totals.items(), key=lambda item: (-item[1], item[0]))
+    ordered = sorted(totals.items(), key=lambda item: (-item[1], monitor_key_sort_key(item[0])))
     return {name for name, _ in ordered[:top]}
 
 
 def _top_other(
-    rates: dict[str, float], top: int | None, *, totals: dict[str, float]
-) -> dict[str, float]:
+    rates: dict[MonitorKey, float],
+    top: int | None,
+    *,
+    totals: Mapping[MonitorKey, float],
+) -> dict[MonitorKey, float]:
     names = _top_names(totals, top)
     if len(names) == len(rates):
         return rates
@@ -499,9 +558,9 @@ def _top_other(
 
 
 def _matches_selector(value: str, selectors: tuple[str, ...]) -> bool:
-    """Match monitor startup selectors without changing their stored spelling."""
+    """Match complete monitor selectors without changing their stored spelling."""
     normalized = value.casefold()
-    return any(selector.casefold() in normalized for selector in selectors)
+    return any(selector.casefold() == normalized for selector in selectors)
 
 
 def _agent_records(
@@ -517,7 +576,7 @@ def _counters(records: tuple[UsageRecord, ...]) -> CounterSnapshot:
     total = TokenUsage.zero()
     models: defaultdict[str, TokenUsage] = defaultdict(TokenUsage.zero)
     agents: defaultdict[str, TokenUsage] = defaultdict(TokenUsage.zero)
-    projects: defaultdict[str, TokenUsage] = defaultdict(TokenUsage.zero)
+    projects: defaultdict[ExactProjectDisplayKey, TokenUsage] = defaultdict(TokenUsage.zero)
     project_refs = unique_projects(
         record.project for record in records if record.project is not None
     )
@@ -525,9 +584,10 @@ def _counters(records: tuple[UsageRecord, ...]) -> CounterSnapshot:
         total += record.usage
         agents[record.agent] = agents[record.agent] + record.usage
         if record.project is not None:
-            projects[project_label(record.project, project_refs)] += record.usage
+            projects[exact_project_display_key(record.project, project_refs)] += record.usage
         for model in record.models:
-            models[model.model] = models[model.model] + model.usage
+            name = model_identity(model.model)
+            models[name] = models[name] + model.usage
     return CounterSnapshot(total, dict(models), dict(agents), dict(projects))
 
 
@@ -547,10 +607,12 @@ def _project_records(
     )
 
 
-def monitor_rank_keys(values: Mapping[str, float]) -> tuple[str, ...]:
+def monitor_rank_keys(values: Mapping[MonitorKey, float]) -> tuple[MonitorKey, ...]:
     return tuple(
         key
-        for key, _ in sorted(values.items(), key=lambda item: (-item[1], item[0].casefold()))
+        for key, _ in sorted(
+            values.items(), key=lambda item: (-item[1], monitor_key_sort_key(item[0]))
+        )
         if key != "Other"
     )
 

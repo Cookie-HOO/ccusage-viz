@@ -1,14 +1,20 @@
 # ccusage-viz
 
-[English](README.md) · [使用指南](docs/usage.zh-CN.md) · [设计哲学](docs/design-philosophy.zh-CN.md) · [架构](docs/architecture.zh-CN.md)
+[English](README.md) · [使用指南](docs/usage.zh-CN.md) · [设计哲学](docs/design-philosophy.zh-CN.md) · [架构](docs/architecture.zh-CN.md) · [版本管理](docs/versioning.zh-CN.md)
 
 [![PyPI](https://img.shields.io/pypi/v/ccusage-viz.svg)](https://pypi.org/project/ccusage-viz/) [![Python](https://img.shields.io/pypi/pyversions/ccusage-viz.svg)](https://pypi.org/project/ccusage-viz/) [![License: GPL v3](https://img.shields.io/badge/License-GPL%20v3-blue.svg)](LICENSE) [![CI](https://github.com/Cookie-HOO/ccusage-viz/actions/workflows/ci.yml/badge.svg)](https://github.com/Cookie-HOO/ccusage-viz/actions/workflows/ci.yml)
 
-> **Alpha · 0.1.0** — 在 1.0 前接口仍可能变化。规划请见[路线图](ROADMAP.md)。
+> **Alpha · 0.1.1** — 在 1.0 前接口仍可能变化。规划请见[路线图](ROADMAP.md)。
 
 `ccusage-viz` 是面向 [`ccusage`](https://github.com/ryoppippi/ccusage) Token
 数据的独立、非官方终端可视化工具。它把 `ccusage` 命令输出转换为交互式终端图表，
 不会额外创建用量数据库。真实数据需要 `ccusage`，本项目**不内置**它。
+
+## 产品边界
+
+ccusage-viz 只关注 **Token 消耗** 与由 Token 消耗直接推导的指标，例如观测到的
+每分钟 Token 数（TPM）。它不提供会话分析、调用次数、耗时指标、成本、定价、余额、
+额度、配额或其他非 Token 的账户分析。
 
 > 本项目与 `ccusage` 项目及其维护者没有隶属关系，也未获得其背书。
 
@@ -109,6 +115,31 @@ ccuv ranking --by project
 
 ![Ranking 视图：按总 Token 排列的项目](docs/assets/readme/standalone-ranking.png)
 
+> [!TIP]
+> 项目 Ranking 默认使用保守的 **Name** 聚合：无歧义的 Claude–Codex 配对会成为一个图表项目。按 `v`
+> 打开数据视图，可看到聚合前的安全来源行；相同且非空的 `merge_group` 表示这些行会相加为同一个图表项目。
+> 使用 `--project-aggregation exact` 可关闭跨 Agent 聚合。
+
+### 项目归因覆盖范围
+
+下方兼容性基线在 macOS 上使用 **ccusage 20.0.23** 完成验证。“Token 总量”指 ccusage
+在统一用量数据中报告该 Agent；“历史项目归因”要求每条记录具有稳定、真实的项目身份。
+
+| Agent | Token 总量 | 历史项目归因 | Agent 版本 | ccusage 版本 | 依据 |
+| --- | --- | --- | --- | --- | --- |
+| Claude Code | 已验证 | 已验证 | 2.1.278 | 20.0.23 | `claude daily --instances --json` 提供项目记录。 |
+| Codex | 已验证 | 已验证 | 0.139.0 | 20.0.23 | 优先使用 ccusage 的 `cwd`/项目字段；缺失时仅读取匹配本地 `session_meta.cwd` 元数据。 |
+| OpenCode | 已验证 | 不支持（已验证） | 1.17.20 | 20.0.23 | 真实 session 输出没有项目身份字段。 |
+| Antigravity | 已验证 | 不支持（已验证） | 2.0.10 | 20.0.23 | 真实 `projectPath` 都是通用常量 `Antigravity`，不是工作目录。 |
+
+历史项目视图若发现 OpenCode、Antigravity 或其他不支持的 Agent，会给出警告，且不会虚构项目记录；
+因此该 Agent 的项目用量可能缺失或不完整。默认的 **Name** 项目聚合只会合并无歧义的 Claude–Codex
+配对，绝不会合并同一 Agent 内的项目；共享末级名称有歧义时可仅用私有父级片段消歧。它不表示这些记录
+来自同一个工作目录。使用 **Exact** 项目聚合可保留每个来源身份。
+
+要将某个 Agent 标为**已验证**，同一改动必须包含脱敏的非空真实数据 fixture、parser/provider 覆盖、
+项目 Ranking 端到端验证、与统一 daily Token 总量的核对，以及精确的 Agent 与 ccusage 测试版本。
+
 ### Monitor
 
 用 Monitor 通过重复累计快照观察进程内吞吐量，而非重建历史小时活动：
@@ -117,7 +148,9 @@ ccuv ranking --by project
 ccuv monitor
 ```
 
-观测吞吐量窗口会在建立采样基线后开始。
+观测吞吐量窗口会在建立采样基线后开始。时间线视图会在启动时刻仍位于可见窗口内时，标记
+本次 Monitor 运行的启动时刻；标记之前表示未观测，而非零用量。所有密度都会显示边界线；
+空间允许时，full 和 compact 密度会显示文字标签。ranking 和 list 视图不显示该标记。
 
 ![Monitor 视图：观测到的 Token 吞吐量窗口](docs/assets/readme/standalone-monitor-throughput.png)
 
@@ -204,8 +237,9 @@ npm 不可用时，请手动安装 [`ccusage`](https://github.com/ryoppippi/ccus
 
 ## 延伸阅读
 
-`ccusage-viz` 只关注 Token 且无状态：不会读取原始 Agent 日志，不会保存用量数据库，
-也不会计算费用、额度、QPM 或速率限制指标。以下文档回答更深入的问题：
+`ccusage-viz` 只关注 Token 且无状态：不会分析 Agent 对话内容，不会保存用量数据库，
+也不会计算费用、额度、QPM 或速率限制指标。仅为 Codex 项目归因，它可能读取匹配本地 session 的
+`session_meta.cwd`；不会保存或显示 session 日志内容。以下文档回答更深入的问题：
 
 | 文档 | 可以回答什么问题 |
 | --- | --- |
@@ -213,6 +247,7 @@ npm 不可用时，请手动安装 [`ccusage`](https://github.com/ryoppippi/ccus
 | [设计哲学](docs/design-philosophy.zh-CN.md) | 哪些产品边界、配置归属和呈现原则是刻意的设计？ |
 | [架构](docs/architecture.zh-CN.md) | 为维护者说明 CLI 路由、Host、Pane、Provider、处理和渲染如何组织。 |
 | [路线图（英文）](ROADMAP.md) | 计划、延后事项和反馈方向是什么？ |
+| [已知问题](docs/known-issues.zh-CN.md) | 已识别哪些间歇性 `ccusage` 问题，以及如何安全恢复？ |
 
 可通过[Bug 报告表单](https://github.com/Cookie-HOO/ccusage-viz/issues/new?template=bug_report.yml)提交可复现问题，或通过[功能请求表单](https://github.com/Cookie-HOO/ccusage-viz/issues/new?template=feature_request.yml)提出改进建议。
 

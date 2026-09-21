@@ -28,31 +28,34 @@ def _record(day: int, agent: str, project: str, model: str, total: int) -> Usage
     )
 
 
-def test_ambiguous_project_diagnostic_uses_distinct_display_names() -> None:
-    projects = (
-        make_project_ref("claude", "/claude/app"),
-        make_project_ref("codex", "/codex/app"),
-    )
-
-    with pytest.raises(UsageError) as caught:
-        resolve_projects(("pp",), projects)
-
-    assert caught.value.key == "error.selector_ambiguous"
-    assert caught.value.values["candidates"] == "  - app (claude)\n  - app (codex)"
-
-
-def test_project_ambiguity_never_exposes_raw_ids() -> None:
+def test_project_selectors_require_complete_safe_disambiguated_labels() -> None:
     projects = (
         make_project_ref("claude", "/private/one/app", "app"),
         make_project_ref("claude", "/private/two/app", "app"),
     )
 
-    with pytest.raises(UsageError) as caught:
+    with pytest.raises(UsageError) as missing:
         resolve_projects(("pp",), projects)
+    assert missing.value.key == "error.selector_no_match"
 
-    candidates = str(caught.value.values["candidates"])
-    assert candidates == "  - app (claude 1)\n  - app (claude 2)"
-    assert "/private" not in candidates
+    assert resolve_projects(("APP (CLAUDE 1)",), projects) == (projects[0],)
+    assert resolve_projects(("app (claude 2)",), projects) == (projects[1],)
+
+
+def test_model_case_variants_filter_and_group_as_one_model() -> None:
+    records = (
+        _record(1, "claude", "/claude/app", "GPT-5.6-Luna", 10),
+        _record(1, "claude", "/claude/app", "gpt-5.6-luna", 20),
+    )
+    selected_range = DateRange(date(2026, 1, 1), date(2026, 1, 1), None)
+
+    filtered, notices = filter_records(records, selected_range, models=("GPT-5.6-Luna",))
+    model = build_timeline(filtered, selected_range, by="model", notices=notices)
+
+    assert sum(record.usage.total for record in filtered) == 30
+    assert [(series.label, series.values[0].total) for series in model.series] == [
+        ("gpt-5.6-luna", 30)
+    ]
 
 
 def test_selected_values_without_rows_emit_notices_and_keep_available_groups() -> None:

@@ -143,6 +143,8 @@ def parse_unified_daily(data: object) -> tuple[UsageRecord, ...]:
 
 def parse_claude_daily_projects(data: object) -> tuple[UsageRecord, ...]:
     root = _object(data, "$.")
+    if "projects" not in root and root.get("daily") == []:
+        return ()
     projects = _object(root.get("projects"), "$.projects")
     records: list[UsageRecord] = []
     for raw_id, rows_value in projects.items():
@@ -168,24 +170,33 @@ def _codex_rows(root: dict[str, Any]) -> list[object]:
     raise _error("$.sessions", "missing session array")
 
 
-def _project_identity(row: dict[str, Any], path: str) -> tuple[str, str]:
+def codex_project_identity(row: dict[str, Any], path: str) -> tuple[str, str | None] | None:
+    """Read project fields whose semantics are provided by ccusage itself.
+
+    ``directory`` deliberately is not considered: current ccusage uses it for
+    the date-based session storage prefix rather than a Codex workspace.
+    """
     metadata_value = row.get("metadata", {})
     metadata = _object(metadata_value, f"{path}.metadata")
-    identity = row.get(
-        "project",
-        row.get(
-            "projectPath",
-            row.get("directory", metadata.get("project", metadata.get("cwd"))),
+    identity = next(
+        (
+            value
+            for value in (
+                row.get("cwd"),
+                row.get("project"),
+                row.get("projectPath"),
+                metadata.get("cwd"),
+                metadata.get("project"),
+                row.get("_ccusage_viz_project_cwd"),
+            )
+            if isinstance(value, str) and value
         ),
+        None,
     )
-    raw_id = _string(identity, f"{path}.project")
+    if identity is None:
+        return None
     display = row.get("projectName", metadata.get("projectName"))
-    display_name = (
-        make_project_ref("codex", raw_id).display_name
-        if display is None
-        else _string(display, f"{path}.projectName")
-    )
-    return raw_id, display_name
+    return identity, None if display is None else _string(display, f"{path}.projectName")
 
 
 def parse_codex_sessions(data: object) -> tuple[UsageRecord, ...]:
@@ -194,14 +205,19 @@ def parse_codex_sessions(data: object) -> tuple[UsageRecord, ...]:
     for index, item in enumerate(_codex_rows(root)):
         path = f"$.sessions[{index}]"
         row = _object(item, path)
-        raw_id, display = _project_identity(row, path)
+        identity = codex_project_identity(row, path)
+        project = (
+            make_project_ref("codex", *identity)
+            if identity is not None
+            else make_project_ref("codex", "unassigned-codex", "Unassigned Codex")
+        )
         records.append(
             _record(
                 row,
                 path,
                 agent="codex",
                 source=SourceKind.CODEX_SESSIONS,
-                project=make_project_ref("codex", raw_id, display),
+                project=project,
                 day=None,
             )
         )

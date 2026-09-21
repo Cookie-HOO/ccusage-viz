@@ -167,28 +167,40 @@ def test_historical_intent_preserves_disjoint_required_coverage() -> None:
     assert len(CCUSAGE_DEFINITION.provider.compile(selected).queries) == 2
 
 
-def test_project_ranking_uses_fixed_parallel_pair() -> None:
+def test_project_ranking_uses_daily_codex_queries() -> None:
     plan = CCUSAGE_DEFINITION.provider.compile(intent(options("ranking", by="project")))
     assert [query.operation for query in plan.queries] == [
         "claude_daily_projects",
+        "unified_daily_agent_observation",
+        "codex_sessions",
         "codex_sessions",
     ]
     assert "--instances" in plan.queries[0].arguments
     assert plan.queries[0].arguments[5] == "20260102"
-    assert plan.queries[1].arguments[4] == "2026-01-02"
-    expected = (DateInterval(date(2026, 1, 2), date(2026, 1, 3)),)
-    assert plan.queries[0].coverage.intervals == expected
-    assert plan.queries[1].coverage.intervals == expected
-    assert plan.summary_notices == (
-        Notice("notice.summary_excludes_session_agent", {"agent": "Codex"}),
-    )
+    assert plan.queries[1].arguments[4:7] == ("2026-01-02", "--until", "2026-01-03")
+    assert [query.arguments[4:7] for query in plan.queries[2:]] == [
+        ("2026-01-02", "--until", "2026-01-02"),
+        ("2026-01-03", "--until", "2026-01-03"),
+    ]
+    assert plan.queries[0].coverage.intervals == (DateInterval(date(2026, 1, 2), date(2026, 1, 3)),)
+    assert plan.queries[1].coverage.intervals == (DateInterval(date(2026, 1, 2), date(2026, 1, 3)),)
+    assert [query.coverage.intervals for query in plan.queries[2:]] == [
+        (DateInterval(date(2026, 1, 2), date(2026, 1, 2)),),
+        (DateInterval(date(2026, 1, 3), date(2026, 1, 3)),),
+    ]
+    assert plan.summary_notices == ()
 
 
-def test_daily_project_view_omits_codex_with_notice() -> None:
+def test_historical_project_view_uses_daily_codex_queries() -> None:
     plan = CCUSAGE_DEFINITION.provider.compile(intent(options("stack", projects=("demo",))))
-    assert len(plan.queries) == 1
-    assert plan.queries[0].operation == "claude_daily_projects"
-    assert plan.notices[0].key == "notice.daily_project_omitted"
+
+    assert [query.operation for query in plan.queries] == [
+        "claude_daily_projects",
+        "unified_daily_agent_observation",
+        "codex_sessions",
+        "codex_sessions",
+    ]
+    assert plan.notices == ()
 
 
 def test_provider_neutral_planner_compiles_demo_acquisition() -> None:

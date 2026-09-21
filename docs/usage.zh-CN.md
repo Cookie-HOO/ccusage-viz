@@ -93,9 +93,10 @@ ccuv dashboard wide --demo
 | `--since YYYY-MM-DD` | ISO 日期 | 未设置 | 历史路由 | 固定或开放范围的起始日期。 |
 | `--until YYYY-MM-DD` | ISO 日期 | 未设置 | 历史路由 | 固定范围的结束日期；需要 `--since`。 |
 | `--timezone IANA_ZONE` | 有效 IANA 时区，如 `Asia/Shanghai` | 本地时区 | 历史路由 | 解析“今天”和相对边界。 |
-| `--agent VALUE` | 可重复文本 | 无 | 历史路由与 Monitor | 按 Agent 筛选。 |
-| `--model VALUE` | 可重复文本 | 无 | 历史路由与 Monitor | 按模型筛选。 |
-| `--project VALUE` | 可重复文本 | 无 | 历史路由与 Monitor | 按项目筛选。 |
+| `--agent VALUE` | 可重复文本 | 无 | 历史路由与 Monitor | 按完整 Agent 值筛选。 |
+| `--model VALUE` | 可重复文本 | 无 | 历史路由与 Monitor | 按完整模型值筛选。 |
+| `--project VALUE` | 可重复文本 | 无 | 历史路由与 Monitor | 按完整安全项目标签筛选。 |
+| `--project-aggregation MODE` | `name`、`exact`；默认 `name` | `name` | `--by project` 的 Timeline、Ranking、Monitor | 项目呈现模式；不会放宽精确项目筛选。 |
 | `--interval SECONDS` | 有限数字；历史图表至少 `2` | `10` | 历史路由 | 监听时的刷新节奏。 |
 | `--no-watch` | 标志 | 关闭 | 历史路由 | 仅查询一次后退出，不持续监听。 |
 
@@ -106,8 +107,17 @@ ccuv dashboard wide --demo
 ccuv timeline --agent A --agent B --model X --project one --project two
 ```
 
-匹配不区分大小写。精确匹配优先；唯一的包含匹配可接受；有歧义的包含匹配必须进一步缩小。
-项目身份以 Agent 为作用域，因此显示名相同的项目仍可能是不同项目。
+所有 Agent、模型和项目选择器都是**完整值、不区分大小写的精确匹配**。ccusage-viz
+不会回退为前缀、子串、包含匹配或其他隐式匹配：`--agent "CLAUDE CODE"` 可匹配
+`Claude Code`，但 `--agent claude` 不会匹配；`--model` 和 `--project` 同样遵循此规则。
+
+项目身份以 Agent 为作用域；不同 Agent 出现同名项目时，请使用 TUI 显示的安全消歧项目标签。
+Claude 的不透明上游标识绝不会被还原为文件系统路径。Timeline 和 Ranking 只将其视为连字符分隔的
+token，并在完整筛选后项目池的每个 token 前缀树分支中，消除可证明共享的最深前缀。任何 token 都
+没有特殊的路径语义；缩短只受非空且无歧义后缀约束。无法证明共享前缀的 ID 展示完整不透明标识符。
+不同的独立发现范围可能显示不同标签。Timeline 和 Ranking 会在 Top 或 Other 选择前记录已验证的
+最短后缀；后续范围过窄的 Monitor 采样可以复用该进程内标签，但绝不会更新它。
+整个产品中的模型名均不区分大小写：筛选、聚合、Monitor 和显示都会使用小写模型名。
 
 <!-- guide:historical-rules -->
 
@@ -148,6 +158,46 @@ ccuv timeline --agent A --agent B --model X --project one --project two
 没有显式 Top 时默认 `3`。Ranking 始终分组（默认 `--by project`），默认 `--top 10`。Top 必须是
 正整数。`--other show|hide` 控制 Timeline 和 Ranking 是否将 Top 以外的分组显示为 **Other**。
 
+### 项目聚合与项目归因覆盖范围
+
+Timeline、Ranking 和 Monitor 按项目分组时，`--project-aggregation name` 是默认值。它只会合并
+无歧义的 Claude–Codex 配对，绝不会合并同一 Agent 内的项目。先比较安全的末级名称；当 Codex
+存在重名末级目录时，可以仅用私有父级后缀选择保守的一对一配对。这些后缀只是分组键，不会显示为
+标签，也不代表重建出的路径。简洁的合并标签仅用于呈现，不代表这些记录来自同一个工作目录。筛选
+始终先针对精确来源项目身份执行，再应用这一呈现聚合。
+
+使用 `--project-aggregation exact` 可分别保留每个上游 `(agent, project)` 来源身份。Exact 模式图表
+始终在可见项目名称前加上 Agent，例如 `claude · app`；数据表和 JSON 将相同值作为
+`display_project`，并另外提供 `agent` 字段。跨 Agent 的 Name 分组不会人为生成一个单独的 Agent 值。
+
+所有项目数据视图都包含 `display_project` 和 `merge_group`。`display_project` 是图表当前实际显示的
+标签。相同且非空的 `merge_group` 表示来源项目会相加为同一个跨 Agent Name 分组；空值表示该行是
+Exact 或其他未合并项目。编号从 `0` 开始，只在当前输出内按确定性顺序有效，并非跨范围、筛选或 Top
+选择的持久项目标识。项目 Ranking 还会将一个 Name 分组展开为安全的来源行，这些行共享该图表项目的
+`rank`。Other 仍为聚合行，不会虚构来源明细。
+
+下方兼容性基线在 macOS 上使用 **ccusage 20.0.23** 完成验证。Token 总量指 ccusage 在统一
+用量数据中报告某个 Agent；历史项目归因还要求每条记录具有稳定、真实的项目身份。
+
+| Agent | Token 总量 | 历史项目归因 | Agent 版本 | ccusage 版本 | 依据 |
+| --- | --- | --- | --- | --- | --- |
+| Claude Code | 已验证 | 已验证 | 2.1.278 | 20.0.23 | `claude daily --instances --json` 提供项目记录。 |
+| Codex | 已验证 | 已验证 | 0.139.0 | 20.0.23 | 优先使用 ccusage 的 `cwd`/项目字段；缺失时仅读取匹配本地 `session_meta.cwd` 元数据。 |
+| OpenCode | 已验证 | 不支持（已验证） | 1.17.20 | 20.0.23 | 真实 session 输出没有项目身份字段。 |
+| Antigravity | 已验证 | 不支持（已验证） | 2.0.10 | 20.0.23 | 真实 `projectPath` 都是通用常量 `Antigravity`，不是工作目录。 |
+
+对于 Codex session，ccusage 的 `cwd`/项目字段具有最高优先级。当当前输出仅有 session ID 与存储
+`directory` 时，ccusage-viz 仅读取匹配本地 session 的 `session_meta.cwd`；`directory` 绝不作为项目
+身份。若两者都无法提供 cwd，用量仍会显示为**Unassigned Codex**，并以通用提示标记项目归因不完整。不会
+分析、存储或显示对话、工具或消息内容。
+
+历史项目请求若在所选范围内发现 OpenCode、Antigravity 或其他不支持的 Agent，会显示一条列出其名称的
+警告。由于 ccusage-viz 不会虚构项目记录，这些 Agent 的项目用量可能缺失或不完整。该警告不改变
+项目总量、覆盖范围或筛选行为，也不适用于 Monitor 独立的累计项目行为。
+
+只有在同一改动包含脱敏的非空真实数据 fixture、parser/provider 覆盖、项目 Ranking 端到端验证、
+与统一 daily Token 总量的核对，以及精确的 Agent 与 ccusage 测试版本时，才可将该 Agent 标为**已验证**。
+
 <!-- guide:standalone-charts -->
 
 ## 独立图表参考
@@ -166,6 +216,7 @@ ccuv timeline --period 30d --by model --top 5 --style line-points
 | `--granularity` | `day`（默认）、`month`、`quarter`、`year` | 历史范围的分桶粒度。 |
 | `--weekdays` | `show`（默认）、`hide` | 在适用位置显示/隐藏星期标签。 |
 | `--legend` | `below-title`（默认）、`inside`、`hidden` | 图例位置。 |
+| `--project-aggregation` | `name`（默认）、`exact`；仅用于 `--by project` | 使用安全的跨 Agent 同名呈现，或保留每个精确来源。 |
 | `--style` | Timeline 样式 | 分组时 `area` 不可用。 |
 
 ### Calendar
@@ -212,6 +263,7 @@ ccuv ranking --period 30d --by project --top 15 --other hide --style dots
 | `--by` | `project`（默认）、`agent`、`model` | 排名维度。 |
 | `--top` | 正整数；默认 `10` | 排名值数量。 |
 | `--other` | `show`（默认）、`hide` | 显示/隐藏 Top 以外的值。 |
+| `--project-aggregation` | `name`（默认）、`exact`；仅用于 `--by project` | 使用安全的跨 Agent 同名呈现，或保留每个精确来源。 |
 | `--style` | `bar`（默认）、`dot`、`dots` | 排名呈现方式。 |
 
 ### Monitor
@@ -221,7 +273,9 @@ ccuv monitor --window 30m --by model --top 5 --style ranking
 ```
 
 Monitor 在本次运行期间从重复累计快照观测吞吐量。第一个被接受的快照建立基线；观测历史仅属于
-当前进程，进程退出后即消失。
+当前进程，进程退出后即消失。时间线样式会在本次运行的启动时刻仍位于可见滚动窗口内时标记它，
+明确表示此前时间未被观测，而不是零用量。所有密度都会显示该线；空间允许时，full 和 compact
+密度会显示标签。ranking 和 list 样式不显示这个时间线标记。
 
 | 参数 | 值/默认值 | 含义 |
 | --- | --- | --- |
@@ -361,16 +415,36 @@ Timeline、Calendar、Stack 和 Ranking 在图表视图按 `m` 打开调整器�
 **Quick** 和 **Advanced** 页之间切换；`Enter`/换行提交当前候选配置；`Esc` 取消调整器。
 仅视觉修改会立即更新预览；影响数据的修改会在提交后的配置刷新中使用。
 
+调整模式在连续 **3 分钟**内没有键盘或鼠标交互时会自动结束：独立图表回到普通预览，Dashboard 回到浏览模式。已在调整器中生效的修改保留其正常关闭语义；打开的筛选草稿会像按 `Esc` 一样丢弃。Dashboard 的布局和 Pane 类型子选择器同样会取消并返回浏览模式。
+
 | 图表 | Quick 页 | Advanced 页 |
 | --- | --- | --- |
-| Timeline | `p/P` 范围；`g` 粒度；`b` 分组；`+/-` Top；`d` 密度；`t/T` 主题；`s` 样式 | `f` 筛选；`o` Other；`l` 图例；`k` 星期标签 |
+| Timeline | `p/P` 范围；`g` 粒度；`b` 分组；`+/-` Top；`d` 密度；`t/T` 主题；`s` 样式 | `f` 筛选；`o` Other；按项目分组时 `A` 项目聚合；`l` 图例；`k` 星期标签 |
 | Calendar | `p/P` 范围；`d` 密度；`t/T` 主题；`s` 样式 | `f` 筛选 |
 | Stack | `p/P` 范围；`g` 粒度；`d` 密度；`t/T` 主题；`s` 样式 | `f` 筛选；`c` 缓存模式；`l` 图例；`k` 星期标签 |
-| Ranking | `p/P` 范围；`b` 分组；`+/-` Top；`d` 密度；`t/T` 主题；`s` 样式 | `f` 筛选；`o` Other |
+| Ranking | `p/P` 范围；`b` 分组；`+/-` Top；`d` 密度；`t/T` 主题；`s` 样式 | `f` 筛选；`o` Other；按项目分组时 `A` 项目聚合 |
+| Monitor | `w` 窗口；`i` 采样间隔；`b` 分组；`+/-` Top；`d` 密度；`t/T` 主题；`s` 样式 | `f` 筛选；按项目分组时 `A` 项目聚合；`l` 图例 |
 
 `p` 循环尾随预设（`7d`、`14d`、`30d`、`365d`）；`P` 循环自然周期预设（`1mo`、`1q`、`1y`）。
 二者都不会修改固定的显式日期范围。分组/样式变化会维持兼容样式；例如 Timeline 改为分组时，
 `area` 会替换为兼容样式。
+
+### 候选数据查询期间的显示
+
+当控制项已切换到一个事实尚不可用的候选配置时，受影响图表的标题会立即附加低调的 `查询中`。
+控制状态会立即生效；该标记用于解释这一刻刻意不完整的渲染。标记只属于受影响的图表，不会出现在
+Dashboard 标题或其他 Pane。已接受配置的普通后台刷新可以显示 `刷新中`，但不会显示 `查询中`。
+
+| 控制项变化 | 过渡期间的图表显示 |
+| --- | --- |
+| 历史图表的范围、筛选或分组 | 立即显示候选标题与汇总。旧图会隐藏，因为其日期、范围或排名不是候选配置的事实；匹配查询完成前，不可用数值以 `??` 显示。 |
+| Timeline/Stack 粒度 | 立即重投影已接受的日记录。若只缺显示范围外的比较覆盖，图和当前值保持可见；仅比较值显示 `??`，并显示 `查询中`。 |
+| 历史图表视觉控制 | 立即重绘或重投影已接受事实；不显示 `查询中`。 |
+| Monitor 分组或筛选 | Pane 进入安全的空采样视图并显示 `查询中`；不会把此前观测值重新标记为候选分组/筛选的结果。 |
+| Monitor 窗口、Top、间隔或视觉控制 | 立即重投影或重绘保留的观测值；不显示 `查询中`。 |
+
+因此，`??` 表示该显示事实尚未针对当前候选配置验证。当匹配结果被接受后，标记和未知值会一起消失。
+若补充 comparison 查询失败，会保留已有失败提示和 `??`，但不再标记为 `查询中`。
 
 ### 筛选编辑器
 
@@ -393,10 +467,10 @@ Advanced 页的 `f` 编辑器会先起草筛选，再提交：
 | 页面 | 控制 |
 | --- | --- |
 | Quick | `w` 窗口；`i` 采样间隔；`b` 分组；`+/-` Top；`d` 密度；`t/T` 主题；`s` 样式 |
-| Advanced | `f` 筛选；`l` 图例 |
+| Advanced | `f` 筛选；按项目分组时 `A` 项目聚合；`l` 图例 |
 
-窗口、间隔、分组和筛选的修改影响观测/采样配置。间隔变化时，Monitor 会重建调度器。仅外观修改不会
-假装重建此前的观测历史。
+分组和筛选需要新的匹配观测基线；窗口变化会立即重投影保留的观测值。间隔变化时，Monitor 会重建
+调度器。仅外观修改不会假装重建此前的观测历史。
 
 ### Dashboard 控制
 
@@ -436,6 +510,8 @@ Dashboard Host。全局 Dashboard 调整中，`t/T` 调整外壳主题，`s` 调
 | Pane 片段被拒绝 | 将 Host/生命周期参数放在 Dashboard 层；片段只描述图表。 |
 | Monitor 没有显示旧吞吐历史 | 这是预期行为：它只观测当前进程采集到的快照。 |
 | 退出后运行时调整消失 | 这是预期行为：调整仅属于会话；如需复用，请自行保存复制出的命令。 |
+
+关于间歇性的 `unified_daily` 本地 Agent 数据库访问失败，请参阅[已知问题](known-issues.zh-CN.md)。
 
 使用 `ccuv --help` 查看路由列表，使用 `ccuv <command> --help` 查看本地化解析器帮助，例如
 `ccuv --lang zh dashboard --help`。常规帮助刻意省略高级 `--query-timeout`、Dashboard 权重参数和

@@ -59,6 +59,18 @@ def test_frame_painter_force_repaints_and_preserves_incremental_updates() -> Non
     assert stream.getvalue() == "\x1b[2;1H\x1b[2Kupdated"
 
 
+def test_frame_painter_updates_only_changed_animation_rows() -> None:
+    stream = Stream(True)
+    painter = FramePainter(stream)
+
+    painter.paint(compose_frame("idle\nscene", "status", "controls", height=5))
+    stream.seek(0)
+    stream.truncate(0)
+    painter.paint(compose_frame("active\nscene", "status", "controls", height=5))
+
+    assert stream.getvalue() == "\x1b[2;1H\x1b[2Kactive"
+
+
 def test_compose_frame_can_omit_status_row() -> None:
     frame = compose_frame("chart\nextra", None, ("one", "two", "three"), height=5)
 

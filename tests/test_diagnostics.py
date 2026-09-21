@@ -2,8 +2,13 @@ from io import StringIO
 
 import pytest
 
-from ccusage_viz.diagnostics import color_enabled, format_error, highlight_matches
-from ccusage_viz.errors import UsageError
+from ccusage_viz.diagnostics import (
+    color_enabled,
+    format_error,
+    is_transient_unified_daily_database_error,
+    transient_query_recovery_lines,
+)
+from ccusage_viz.errors import QueryError, SchemaError
 from ccusage_viz.i18n import load_translator
 
 
@@ -16,21 +21,56 @@ class Stream(StringIO):
         return self.tty
 
 
-def test_highlight_matches_is_case_insensitive_and_unicode_safe() -> None:
-    assert "\x1b[38;5;220m\x1b[1mAlPh\x1b[0m" in highlight_matches("  - AlPhabet", "alph", 220)
-    assert "\x1b[38;5;220m\x1b[1mß\x1b[0m" in highlight_matches("  - Straße", "ss", 220)
-
-
-def test_ambiguous_diagnostic_highlights_candidates_only() -> None:
-    error = UsageError(
-        "error.selector_ambiguous",
-        selector="alph",
-        dimension="model",
-        candidates="  - Alpha\n  - Alphabet",
+def test_schema_diagnostic_is_localized() -> None:
+    rendered = format_error(
+        SchemaError("error.schema", path="$.projects", reason="expected object"),
+        load_translator("en"),
     )
-    rendered = format_error(error, load_translator("en"), color=True)
-    assert rendered.count("\x1b[38;5;") == 2
-    assert "matches multiple" in rendered
+    assert rendered != "error.schema"
+    assert "$.projects" in rendered
+    assert "expected object" in rendered
+
+
+@pytest.mark.parametrize(
+    "stderr",
+    (
+        "SQLITE_BUSY: database is locked at /private/example.db",
+        'CliError("Failed to inspect Antigravity database")',
+    ),
+)
+def test_transient_unified_daily_database_errors_have_safe_recovery_copy(stderr: str) -> None:
+    error = QueryError("error.ccusage_failed", query="unified_daily", code=1, stderr=stderr)
+
+    assert is_transient_unified_daily_database_error(error)
+    assert transient_query_recovery_lines(error, load_translator("en"), initial=False) == (
+        "The next refresh may recover; press r to try now.",
+    )
+    assert transient_query_recovery_lines(error, load_translator("zh"), initial=True) == (
+        "用量数据暂时不可用。",
+        "下次刷新可能恢复；现在可按 r 重试。",
+    )
+
+
+@pytest.mark.parametrize(
+    "error",
+    (
+        QueryError(
+            "error.ccusage_failed",
+            query="unified_daily_agent_observation",
+            code=1,
+            stderr="SQLITE_BUSY",
+        ),
+        QueryError(
+            "error.ccusage_failed", query="unified_daily", code=1, stderr="invalid argument"
+        ),
+        QueryError("error.ccusage_timeout", query="unified_daily", seconds=10),
+        SchemaError("error.schema", path="$.projects", reason="expected object"),
+        RuntimeError("SQLITE_BUSY"),
+    ),
+)
+def test_only_known_unified_daily_database_errors_are_classified(error: BaseException) -> None:
+    assert not is_transient_unified_daily_database_error(error)
+    assert transient_query_recovery_lines(error, load_translator("en"), initial=False) is None
 
 
 def test_redirected_and_explicitly_disabled_diagnostics_are_plain(

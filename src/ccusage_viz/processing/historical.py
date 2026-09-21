@@ -13,6 +13,7 @@ from ccusage_viz.processing.projection import (
     build_stack,
     build_timeline,
 )
+from ccusage_viz.project_identity import ProjectLabelContext
 
 HistoricalModel: TypeAlias = TimelineModel | CalendarModel | StackModel | RankingModel
 _EMPTY_COVERAGE = DateCoverage()
@@ -26,6 +27,7 @@ def process_historical(
     summary_notices: tuple[Notice, ...] = (),
     coverage: DateCoverage = _EMPTY_COVERAGE,
     include_summary: bool = True,
+    project_label_context: ProjectLabelContext = 0,
 ) -> HistoricalModel:
     """Project accepted normalized records into one immutable chart model."""
     scope = prepare_filtered_scope(
@@ -48,6 +50,8 @@ def process_historical(
             aggregation=chart.granularity,
             coverage=coverage,
             filter_count=scope.filter_count,
+            project_aggregation=chart.project_aggregation,
+            project_label_context=project_label_context,
         )
     if chart.kind == "calendar":
         return build_calendar(
@@ -80,4 +84,6 @@ def process_historical(
         summary_notices=summary_notices,
         coverage=coverage,
         filter_count=scope.filter_count,
+        project_aggregation=chart.project_aggregation,
+        project_label_context=project_label_context,
     )

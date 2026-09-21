@@ -100,9 +100,10 @@ the conflict is caused by explicitly specifying a theme. `--ascii` without a
 | `--since YYYY-MM-DD` | ISO date | unset | Historical routes | First date in a fixed or open-ended range. |
 | `--until YYYY-MM-DD` | ISO date | unset | Historical routes | Final date in a fixed range. Requires `--since`. |
 | `--timezone IANA_ZONE` | Valid IANA timezone, for example `Asia/Shanghai` | Local timezone | Historical routes | Resolves “today” and relative boundaries. |
-| `--agent VALUE` | Repeatable text | none | Historical routes and Monitor | Filter by Agent. |
-| `--model VALUE` | Repeatable text | none | Historical routes and Monitor | Filter by model. |
-| `--project VALUE` | Repeatable text | none | Historical routes and Monitor | Filter by project. |
+| `--agent VALUE` | Repeatable text | none | Historical routes and Monitor | Filter by a complete Agent value. |
+| `--model VALUE` | Repeatable text | none | Historical routes and Monitor | Filter by a complete model value. |
+| `--project VALUE` | Repeatable text | none | Historical routes and Monitor | Filter by a complete safe project label. |
+| `--project-aggregation MODE` | `name`, `exact`; default `name` | `name` | Timeline, Ranking, Monitor with `--by project` | Project presentation mode; it never broadens exact project filters. |
 | `--interval SECONDS` | Finite number; at least `2` for historical charts | `10` | Historical routes | Refresh cadence while watching. |
 | `--no-watch` | Flag | off | Historical routes | Query once and exit instead of watching. |
 
@@ -114,10 +115,24 @@ dimensions together. For example, the following means **Agent A or B**, using
 ccuv timeline --agent A --agent B --model X --project one --project two
 ```
 
-Matching is case-insensitive. An exact match wins; a unique containment match
-is accepted; an ambiguous containment match must be narrowed. Project identity
-is Agent-scoped, so identical displayed project names can still identify
-different projects.
+All Agent, Model, and Project selectors are **complete, case-insensitive exact
+matches**. ccusage-viz never falls back to prefix, substring, containment, or
+other implicit matching: `--agent "CLAUDE CODE"` matches `Claude Code`, while
+`--agent claude` does not. The same rule applies to `--model` and `--project`.
+
+Project identity is Agent-scoped, so use the safe disambiguated project label
+shown by the TUI when same-named projects belong to different Agents. Claude's
+opaque upstream identifiers are never recovered as filesystem paths. Timeline
+and Ranking treat them only as hyphen-separated tokens, then independently
+remove the deepest prefix proven shared within each branch of the complete
+post-filter token tree. No token has special path-like meaning: shortening is
+constrained only by a non-empty, unambiguous suffix. An ID that has no proved
+shared prefix shows its complete opaque identifier. Labels can differ across
+intentionally independent discovery scopes. Timeline and Ranking record the
+shortest verified suffix before Top or Other selection; a later, too-narrow
+Monitor sample may reuse that process-local label but never updates it.
+Model names are case-insensitive throughout filtering, aggregation, Monitor,
+and display, and are shown in lowercase.
 
 <!-- guide:historical-rules -->
 
@@ -164,6 +179,64 @@ explicit Top count. Ranking always groups (default `--by project`) and defaults
 to `--top 10`. Top must be a positive integer. `--other show|hide` controls
 whether Timeline and Ranking display the remaining grouped values as **Other**.
 
+### Project aggregation and attribution coverage
+
+`--project-aggregation name` is the default for Timeline, Ranking, and Monitor
+views grouped by project. It combines only an unambiguous Claude–Codex pair and
+never merges projects within one Agent. It first compares safe final names; when
+Codex has colliding basenames, it may use private parent suffixes solely to
+select a conservative one-to-one pair. Those suffixes are grouping keys, not
+shown labels or reconstructed paths. The concise merged label is a presentation
+label, not evidence that the records came from one filesystem checkout. Filtering
+always remains against the exact source project identity before this presentation
+aggregation is applied.
+
+Use `--project-aggregation exact` to retain every upstream `(agent, project)`
+source identity separately. Exact-mode charts always prefix the visible project
+name with its Agent, for example `claude · app`; data tables and JSON provide the
+same value as `display_project` alongside a separate `agent` field. Name-mode
+groups that span agents intentionally have no manufactured single-agent value.
+
+Every project data view includes `display_project` and `merge_group`.
+`display_project` is the exact label currently rendered by the chart. Equal
+non-empty `merge_group` values identify source projects summed into one
+cross-Agent Name group; empty values mean the row is exact or otherwise unmerged.
+Groups are numbered from `0` deterministically within the current output only,
+not as durable project identifiers across ranges, filters, or Top choices.
+Project Ranking additionally expands a Name group into its safe source rows,
+which share the chart project's rank. Other remains an aggregate row without
+fabricated source detail.
+
+The following compatibility baseline was verified on macOS with **ccusage
+20.0.23**. Token totals mean that ccusage reports an agent in unified usage data;
+historical project attribution additionally requires a stable, real project
+identity for each record.
+
+| Agent | Token totals | Historical project attribution | Agent version | ccusage version | Evidence |
+| --- | --- | --- | --- | --- | --- |
+| Claude Code | Verified | Verified | 2.1.278 | 20.0.23 | `claude daily --instances --json` provides project records. |
+| Codex | Verified | Verified | 0.139.0 | 20.0.23 | Uses ccusage `cwd`/project fields when present; otherwise resolves only matching local `session_meta.cwd` metadata. |
+| OpenCode | Verified | Unsupported (verified) | 1.17.20 | 20.0.23 | Real session output has no project identity field. |
+| Antigravity | Verified | Unsupported (verified) | 2.0.10 | 20.0.23 | Real `projectPath` values were the generic constant `Antigravity`, not workspaces. |
+
+For Codex sessions, ccusage `cwd`/project fields are authoritative. When current output
+contains only a session ID and storage `directory`, ccusage-viz reads only the matching local
+session's `session_meta.cwd`; `directory` is never a project identity. If neither source
+provides a cwd, the usage remains visible as **Unassigned Codex** and a generic notice marks
+project attribution as incomplete. No transcript, tool, or message content is analyzed,
+stored, or displayed.
+
+A historical project request warns when OpenCode, Antigravity, or another
+unsupported agent occurs in the selected range. Its project usage can be absent
+or incomplete because ccusage-viz does not manufacture project rows. This warning
+does not change project totals, coverage, or filtering, and does not apply to
+Monitor's separate cumulative project behavior.
+
+Move an agent to **Verified** only in a change that includes a sanitized,
+non-empty real-data fixture, parser/provider coverage, project-ranking end-to-end
+validation, reconciliation with unified daily token totals, and the exact tested
+agent plus ccusage version.
+
 <!-- guide:standalone-charts -->
 
 ## Standalone chart reference
@@ -182,6 +255,7 @@ ccuv timeline --period 30d --by model --top 5 --style line-points
 | `--granularity` | `day` (default), `month`, `quarter`, `year` | Bucket the historical range. |
 | `--weekdays` | `show` (default), `hide` | Show/hide weekday labels where relevant. |
 | `--legend` | `below-title` (default), `inside`, `hidden` | Legend placement. |
+| `--project-aggregation` | `name` (default), `exact`; only with `--by project` | Use safe cross-agent same-name presentation or preserve each exact source. |
 | `--style` | Timeline styles | `area` is unavailable when grouped. |
 
 ### Calendar
@@ -229,6 +303,7 @@ ccuv ranking --period 30d --by project --top 15 --other hide --style dots
 | `--by` | `project` (default), `agent`, `model` | Ranking dimension. |
 | `--top` | Positive integer; default `10` | Number of ranked values. |
 | `--other` | `show` (default), `hide` | Show/hide values outside Top. |
+| `--project-aggregation` | `name` (default), `exact`; only with `--by project` | Use safe cross-agent same-name presentation or preserve each exact source. |
 | `--style` | `bar` (default), `dot`, `dots` | Ranking representation. |
 
 ### Monitor
@@ -239,7 +314,10 @@ ccuv monitor --window 30m --by model --top 5 --style ranking
 
 Monitor observes throughput from repeated cumulative snapshots during this
 invocation. The first accepted snapshot establishes its baseline; observed
-history is process-local and goes away when the process exits.
+history is process-local and goes away when the process exits. Timeline styles mark the
+invocation's start while it remains in the visible rolling window, making earlier time explicitly
+unobserved rather than zero usage. The line is shown at every density; its label appears at full
+and compact density when space permits. Ranking and list styles do not show this timeline marker.
 
 | Option | Values/default | Meaning |
 | --- | --- | --- |
@@ -394,17 +472,47 @@ picker previews changes, `a` switches **Quick** and **Advanced** pages, and
 Visual-only changes update the preview immediately; data-affecting changes are
 used by the subsequent configuration refresh after commit.
 
+Adjustment mode closes automatically after **three minutes** with no keyboard or
+mouse interaction: standalone charts return to normal preview and Dashboard
+returns to browse mode. Changes already applied in a picker keep their normal
+close semantics, while an open filter draft is discarded just as with `Esc`.
+Dashboard layout and Pane-type subpickers also cancel and return to browse mode.
+
 | Chart | Quick page | Advanced page |
 | --- | --- | --- |
-| Timeline | `p/P` period; `g` granularity; `b` grouping; `+/-` Top; `d` density; `t/T` theme; `s` style | `f` filters; `o` Other; `l` legend; `k` weekday labels |
+| Timeline | `p/P` period; `g` granularity; `b` grouping; `+/-` Top; `d` density; `t/T` theme; `s` style | `f` filters; `o` Other; `A` project aggregation when grouped by project; `l` legend; `k` weekday labels |
 | Calendar | `p/P` period; `d` density; `t/T` theme; `s` style | `f` filters |
 | Stack | `p/P` period; `g` granularity; `d` density; `t/T` theme; `s` style | `f` filters; `c` cache mode; `l` legend; `k` weekday labels |
-| Ranking | `p/P` period; `b` grouping; `+/-` Top; `d` density; `t/T` theme; `s` style | `f` filters; `o` Other |
+| Ranking | `p/P` period; `b` grouping; `+/-` Top; `d` density; `t/T` theme; `s` style | `f` filters; `o` Other; `A` project aggregation when grouped by project |
+| Monitor | `w` window; `i` sampling interval; `b` grouping; `+/-` Top; `d` density; `t/T` theme; `s` style | `f` filters; `A` project aggregation when grouped by project; `l` legend |
 
 `p` cycles trailing presets (`7d`, `14d`, `30d`, `365d`). `P` cycles natural
 presets (`1mo`, `1q`, `1y`). Neither changes a fixed explicit-date range.
 Grouping/style changes retain a compatible style; for example changing
 Timeline to grouped mode will replace `area` with a compatible style.
+
+### Candidate data while querying
+
+A chart title gains a muted `querying` marker as soon as its controls select a
+candidate whose facts are not yet available. The control state changes
+immediately; the marker explains the intentionally incomplete interim render.
+It belongs to the affected chart only, not to the Dashboard title or unrelated
+panes. A normal background refresh of an already accepted configuration can
+show `refreshing`, but does not show `querying`.
+
+| Control change | Interim chart render |
+| --- | --- |
+| Historical period, filter, or grouping | The candidate title and summary appear immediately. The old chart is hidden because its dates, scope, or ranking are not facts for the candidate; unavailable values use `??` until the matching query completes. |
+| Timeline/Stack granularity | Accepted daily records are reprojected immediately. If only out-of-range comparison coverage is missing, the chart and current values remain visible; only comparison values show `??` with `querying`. |
+| Historical visual controls | Existing accepted facts are immediately restyled or reprojected; no `querying` marker. |
+| Monitor grouping or filters | The pane enters an empty safe sampling view with `querying`; prior observations are not relabeled as the candidate grouping/filter. |
+| Monitor window, Top, interval, or visual controls | Retained observations are immediately reprojected or restyled; no `querying` marker. |
+
+`??` therefore means that the specific displayed fact is not yet verified for
+the active candidate. When the matching result is accepted, the marker and its
+unknown values disappear together. A failed supplemental comparison refresh
+keeps its existing failure notice and `??`; it is no longer labeled
+`querying`.
 
 ### Filter editor
 
@@ -428,12 +536,12 @@ Press `m` or `M` from Monitor's chart view. `a` switches pages;
 | Page | Controls |
 | --- | --- |
 | Quick | `w` window; `i` sampling interval; `b` grouping; `+/-` Top; `d` density; `t/T` theme; `s` style |
-| Advanced | `f` filters; `l` legend |
+| Advanced | `f` filters; `A` project aggregation when grouped by project; `l` legend |
 
-Changes to window, interval, grouping, and filters affect observation/sampling
-configuration. When the interval changes, Monitor rebuilds its scheduler.
-Appearance-only changes apply without pretending to recreate prior observation
-history.
+Grouping and filters require a fresh matching observation baseline; window
+changes reproject retained observations immediately. When the interval changes,
+Monitor rebuilds its scheduler. Appearance-only changes apply without
+pretending to recreate prior observation history.
 
 ### Dashboard controls
 
@@ -476,6 +584,8 @@ style, `u` for header summary, and `z` for layout.
 | Pane fragment is rejected | Keep host/lifecycle options at Dashboard level; the fragment should only describe a chart. |
 | Monitor does not show old historical throughput | This is expected: it observes only snapshots gathered by the current process. |
 | Runtime adjustment disappeared after exit | This is expected: adjustments are session-local. Reuse a copied command by saving it yourself. |
+
+For intermittent `unified_daily` local-Agent-database access failures, see [known issues](known-issues.md).
 
 Use `ccuv --help` for the route list and `ccuv <command> --help` for
 localized parser help, for example `ccuv --lang zh dashboard --help`. The

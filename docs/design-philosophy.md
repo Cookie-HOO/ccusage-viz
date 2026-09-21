@@ -77,6 +77,16 @@ This document records the stable product concepts and design constraints of `ccu
 
    Historical Ranking orders accumulated token consumption over a date range. Monitor Ranking orders only the newest valid cumulative sample pair: Total and Model express TPM calculated from actual monotonic elapsed time, while Agent and Project express that pair's Token delta. Monitor-only `list` presents the same entries and ordering as centered compact label/value rows without ordinal or bar encoding, while retaining applicable movement and value-trend markers. Retained Timeline history does not redefine or repopulate the current Ranking value. The two Ranking forms do not share a time or metric contract.
 
+6. **Project names are safe display projections, not identities.**
+
+   Timeline and Ranking treat opaque Claude IDs only as hyphen-separated tokens. Before Top or Other selects visible entries, they remove the deepest prefix proven shared within each branch of the complete post-filter token tree. Tokens have no path or quality semantics; a suffix must only be non-empty and unambiguous. An ID without a proved shared prefix displays its complete opaque identifier, never a decoded filesystem path. Timeline and Ranking may update the process-local cache, which retains the shortest safe suffix actually produced by a proven removal. Monitor may read that cache but never writes it. These rules never change raw project identity, token attribution, selector membership, aggregation keys, or Claude–Codex pairing.
+
+   Every project chart defaults to Name aggregation: it conservatively merges only a proven Claude–Codex pair and displays an agent-free label. Exact aggregation keeps source projects separate and always displays their Agent. Monitor preserves exact counters and deltas upstream, applying either display grouping only after sampling.
+
+7. **Inspection normally reflects the rendered chart model, with bounded provenance.**
+
+   Markdown and JSON data views serialize the displayed project name as `display_project` and expose `merge_group` for every project view. A non-empty `merge_group` is a deterministic, payload-local explanation of a real cross-Agent Name merge; exact or unmerged rows use no group. Project Ranking additionally expands a displayed cross-Agent aggregate into safe source contributor rows so users can audit its membership and arithmetic. This remains a narrowly bounded explanation of automatic aggregation: it must not expose raw records, paths, or become a general export surface.
+
 ## Data consistency and asynchronous results
 
 1. **`??` means only that required data has not arrived.**

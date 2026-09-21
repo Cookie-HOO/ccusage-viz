@@ -59,7 +59,11 @@ def test_filters_or_within_dimension_and_and_across_dimensions() -> None:
     )
     period = DateRange(date(2026, 1, 1), date(2026, 1, 2), None)
     filtered, _ = filter_records(
-        records, period, agents=("claude", "codex"), projects=("app",), models=("son", "cod")
+        records,
+        period,
+        agents=("claude", "codex"),
+        projects=("app (claude)", "app (codex)"),
+        models=("sonnet", "codex"),
     )
     assert [item.usage.total for item in filtered] == [10, 20]
 
@@ -71,11 +75,11 @@ def test_filter_candidates_are_independent_across_dimensions() -> None:
     )
     period = DateRange(date(2026, 1, 1), date(2026, 1, 2), None)
 
-    filtered, notices = filter_records(records, period, agents=("claude",), models=("cod",))
+    filtered, notices = filter_records(records, period, agents=("claude",), models=("codex",))
     assert filtered == ()
     assert notices[-1].values == {"dimension": "model", "values": "codex"}
 
-    filtered, notices = filter_records(records, period, agents=("claude",), projects=("ool",))
+    filtered, notices = filter_records(records, period, agents=("claude",), projects=("tool",))
     assert filtered == ()
     assert notices[-1].values == {"dimension": "project", "values": "tool"}
 
@@ -88,7 +92,7 @@ def test_filters_remain_and_across_independently_resolved_dimensions() -> None:
     period = DateRange(date(2026, 1, 1), date(2026, 1, 2), None)
 
     filtered, _ = filter_records(
-        records, period, agents=("claude",), projects=("app",), models=("son",)
+        records, period, agents=("claude",), projects=("app",), models=("sonnet",)
     )
     assert [item.usage.total for item in filtered] == [10]
 
@@ -115,6 +119,76 @@ def test_process_historical_carries_filter_dimension_count_into_summary() -> Non
     assert model.summary is not None
     assert model.summary.total == 10
     assert model.summary.filter_count == 3
+
+
+def test_project_aggregation_merges_only_unambiguous_cross_agent_names() -> None:
+    records = (
+        record(1, "claude", "-home-me-projects-app", "sonnet", 30),
+        record(1, "codex", "/work/app", "gpt", 20),
+        record(1, "codex", "/work/tool", "gpt", 10),
+    )
+    period = DateRange(date(2026, 1, 1), date(2026, 1, 1), None)
+
+    named = build_ranking(records, period, by="project", project_aggregation="name")
+    exact = build_ranking(records, period, by="project", project_aggregation="exact")
+
+    assert [(entry.label, entry.usage.total) for entry in named.entries] == [
+        ("app", 50),
+        ("tool", 10),
+    ]
+    assert [(entry.label, entry.usage.total) for entry in exact.entries] == [
+        ("claude · -home-me-projects-app", 30),
+        ("codex · app", 20),
+        ("codex · tool", 10),
+    ]
+    assert [entry.key for entry in exact.entries[:2]] == [
+        ("project", "exact", "claude", "-home-me-projects-app"),
+        ("project", "exact", "codex", "/work/app"),
+    ]
+
+
+def test_project_aggregation_uses_parent_aliases_without_merging_codex_projects() -> None:
+    records = (
+        record(1, "claude", "-a-b-c-e", "sonnet", 30),
+        record(1, "codex", "/a/b/c/e", "gpt", 20),
+        record(1, "codex", "/a/b/d/e", "gpt", 10),
+    )
+    period = DateRange(date(2026, 1, 1), date(2026, 1, 1), None)
+
+    named_ranking = build_ranking(records, period, by="project", project_aggregation="name")
+    named_timeline = build_timeline(records, period, by="project", project_aggregation="name")
+    exact = build_ranking(records, period, by="project", project_aggregation="exact")
+
+    assert [(entry.key, entry.usage.total) for entry in named_ranking.entries] == [
+        (("project", "name", "c-e"), 50),
+        (("project", "exact", "codex", "/a/b/d/e"), 10),
+    ]
+    assert [(series.key, series.total.total) for series in named_timeline.series] == [
+        (("project", "name", "c-e"), 50),
+        (("project", "exact", "codex", "/a/b/d/e"), 10),
+    ]
+    assert [(entry.key, entry.usage.total) for entry in exact.entries] == [
+        (("project", "exact", "claude", "-a-b-c-e"), 30),
+        (("project", "exact", "codex", "/a/b/c/e"), 20),
+        (("project", "exact", "codex", "/a/b/d/e"), 10),
+    ]
+
+
+def test_project_aggregation_does_not_merge_ambiguous_same_agent_names() -> None:
+    records = (
+        record(1, "claude", "-home-me-projects-app", "sonnet", 30),
+        record(1, "codex", "/work/app", "gpt", 20),
+        record(1, "codex", "/archive/app", "gpt", 10),
+    )
+    period = DateRange(date(2026, 1, 1), date(2026, 1, 1), None)
+
+    model = build_timeline(records, period, by="project", project_aggregation="name")
+
+    assert [(series.label, series.total.total) for series in model.series] == [
+        ("-home-me-projects-app", 30),
+        ("app 2", 20),
+        ("app 1", 10),
+    ]
 
 
 def test_timeline_zero_fills_and_other_is_final() -> None:
