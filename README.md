@@ -1,6 +1,6 @@
 # ccusage-viz
 
-[简体中文](README.zh-CN.md) · [Usage guide](docs/usage.md) · [Design philosophy](docs/design-philosophy.md) · [Architecture](docs/architecture.md)
+[简体中文](README.zh-CN.md) · [Usage guide](docs/usage.md) · [Design philosophy](docs/design-philosophy.md) · [Architecture](docs/architecture.md) · [Versioning](docs/versioning.md)
 
 [![PyPI](https://img.shields.io/pypi/v/ccusage-viz.svg)](https://pypi.org/project/ccusage-viz/) [![Python](https://img.shields.io/pypi/pyversions/ccusage-viz.svg)](https://pypi.org/project/ccusage-viz/) [![License: GPL v3](https://img.shields.io/badge/License-GPL%20v3-blue.svg)](LICENSE) [![CI](https://github.com/Cookie-HOO/ccusage-viz/actions/workflows/ci.yml/badge.svg)](https://github.com/Cookie-HOO/ccusage-viz/actions/workflows/ci.yml)
 
