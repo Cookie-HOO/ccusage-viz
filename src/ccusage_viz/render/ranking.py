@@ -175,9 +175,7 @@ def render_ranking(model: RankingModel, context: RenderContext) -> str:
         "??" if pending else format_tokens(round(_entry_value(entry))) for entry in entries
     ]
     agents = [_entry_agent(entry) for entry in entries]
-    separate_fields = (model.project_aggregation == "exact" and not model.is_observed) or (
-        model.is_observed and scope is not None and scope.mode == "project"
-    )
+    separate_fields = model.project_aggregation == "exact" and not model.is_observed
     projects = [
         context.translator.text("label.other") if entry.is_other else entry.label
         for entry in entries

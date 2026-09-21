@@ -930,16 +930,17 @@ def test_monitor_list_is_centered_and_omits_bar_tracks() -> None:
     assert all(display_width(line) <= 80 for line in output.splitlines())
 
 
-def test_monitor_project_ranking_and_list_use_separated_agent_labels() -> None:
+def test_monitor_project_ranking_and_list_preserve_exact_agent_labels() -> None:
     model = RankingModel(
         (),
         None,
         observed_entries=(
-            ScalarRankingEntry("claude-app", "app", 1_200.0, agent="claude"),
-            ScalarRankingEntry("codex-app", "app", 800.0, agent="codex"),
+            ScalarRankingEntry("claude-app", "claude · app", 1_200.0, agent="claude"),
+            ScalarRankingEntry("codex-app", "codex · app", 800.0, agent="codex"),
         ),
         metric=MetricDescriptor("tokens"),
         observed_scope=ObservedScope(900, "project"),
+        project_aggregation="exact",
     )
 
     ranking = render_ranking(model, context(True))
@@ -949,10 +950,8 @@ def test_monitor_project_ranking_and_list_use_separated_agent_labels() -> None:
     )
 
     assert "Project · current Token" in ranking
-    assert "claude · app" not in ranking and "codex · app" not in ranking
-    assert "claude" in ranking and "codex" in ranking and ranking.count("app") >= 2
-    assert "claude · app" not in listing and "codex · app" not in listing
-    assert "claude" in listing and "codex" in listing and listing.count("app") >= 2
+    assert "claude · app" in ranking and "codex · app" in ranking
+    assert "claude · app" in listing and "codex · app" in listing
 
 
 def test_observed_ranking_does_not_compact_shared_model_prefixes() -> None:

@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 
-from ccusage_viz.domain import UsageRecord
+from ccusage_viz.domain import UsageRecord, model_identity
 from ccusage_viz.formatting import clip_width
 from ccusage_viz.i18n import Translator
 from ccusage_viz.options import Dimension, Filters
@@ -57,10 +57,15 @@ class FilterDraft:
         values = choices.for_dimension(self.dimension)
         return values[self.choice_index % len(values)] if values else None
 
+    def contains(self, dimension: Dimension, value: str) -> bool:
+        identity = model_identity if dimension == "model" else str.casefold
+        return any(identity(item) == identity(value) for item in self.selected(dimension))
+
     def toggle(self, dimension: Dimension, value: str) -> FilterDraft:
         field = f"{dimension}s"
         selected = self.selected(dimension)
-        updated = tuple(item for item in selected if item != value)
+        identity = model_identity if dimension == "model" else str.casefold
+        updated = tuple(item for item in selected if identity(item) != identity(value))
         if len(updated) == len(selected):
             updated = (*selected, value)
         return replace(self, filters=replace(self.filters, **{field: updated}))
@@ -78,7 +83,7 @@ def discover_filter_choices(
     discovered_projects = tuple(project_label(project, projects) for project in projects)
     return FilterChoices(
         agents=_values((*selected.agents, *discovered_agents)),
-        models=_values((*selected.models, *discovered_models)),
+        models=_values((*selected.models, *discovered_models), identity=model_identity),
         projects=_values((*selected.projects, *discovered_projects)),
         unavailable=frozenset(
             dimension
@@ -146,7 +151,7 @@ def _render_filter_draft(
     rows = "\n".join(
         clip_width(
             f"{'›' if index == draft.choice_index % len(values) else ' '} "
-            f"{'[x]' if value in draft.selected(draft.dimension) else '[ ]'} {value}",
+            f"{'[x]' if draft.contains(draft.dimension, value) else '[ ]'} {value}",
             width,
         )
         for index, value in enumerate(values)
@@ -160,5 +165,9 @@ def _render_filter_draft(
     return f"{clip_width(tabs, width)}\n{body}"
 
 
-def _values(values: tuple[str, ...]) -> tuple[str, ...]:
-    return tuple(sorted(set(values), key=lambda value: (value.casefold(), value)))
+def _values(
+    values: tuple[str, ...], *, identity: Callable[[str], str] | None = None
+) -> tuple[str, ...]:
+    if identity is None:
+        return tuple(sorted(set(values), key=lambda value: (value.casefold(), value)))
+    return tuple(sorted(dict.fromkeys(identity(value) for value in values)))

@@ -21,6 +21,7 @@ from ccusage_viz.options import (
 )
 from ccusage_viz.processing.historical import HistoricalModel
 from ccusage_viz.processing.summaries import required_summary_coverage
+from ccusage_viz.project_identity import ProjectLabelContext, next_project_label_context
 from ccusage_viz.query.coordinator import QueryHandle
 from ccusage_viz.query.models import ProviderResult, QueryTrigger
 from ccusage_viz.query.runtime import QueryRuntime
@@ -113,6 +114,7 @@ class HistoricalChartComponent:
         "model",
         "owner_id",
         "pending_generation",
+        "project_label_context",
         "render_revision",
         "runtime",
         "snapshot",
@@ -142,6 +144,7 @@ class HistoricalChartComponent:
         self.generation = 0
         self.pending_generation: int | None = None
         self.render_revision = 0
+        self.project_label_context: ProjectLabelContext = 0
         self.accepted_at: datetime | None = None
         self.error: BaseException | None = None
         self.supplemental_error: BaseException | None = None
@@ -353,6 +356,16 @@ class HistoricalChartComponent:
             summary_notices=summary_notices,
         )
 
+    def cycle_project_label_context(self) -> None:
+        """Restore up to two verified opaque label tokens for this session."""
+        chart = self._candidate_chart()
+        if getattr(chart, "by", None) != "project":
+            return
+        self.project_label_context = next_project_label_context(self.project_label_context)
+        self.render_revision += 1
+        if self.snapshot is not None and not self.is_pending:
+            self.model = self._process(self.candidate, self.snapshot)
+
     def render(self, context: RenderContext) -> str:
         if self.model is None:
             raise RuntimeError("historical component has no accepted model")
@@ -390,6 +403,7 @@ class HistoricalChartComponent:
             notices=notices,
             summary_notices=snapshot.summary_notices,
             coverage=snapshot.coverage,
+            project_label_context=self.project_label_context,
         )
         if not isinstance(model, self.definition.model_type):
             raise TypeError(f"{self.definition.chart_id} definition produced incompatible model")

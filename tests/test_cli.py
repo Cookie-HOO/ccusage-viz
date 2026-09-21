@@ -91,7 +91,7 @@ def test_all_commands_accept_exactly_three_density_values() -> None:
     assert caught.value.key == "error.arguments"
 
 
-@pytest.mark.parametrize("command", ("timeline", "ranking"))
+@pytest.mark.parametrize("command", ("timeline", "ranking", "monitor"))
 def test_project_aggregation_defaults_to_name_and_accepts_exact(command: str) -> None:
     parser = build_parser(load_translator("en"))
     assert parser.parse_args([command]).project_aggregation == "name"
@@ -639,6 +639,7 @@ def test_dashboard_narrow_and_all_presets_expand_to_concrete_state() -> None:
     assert {pane.chart.presentation.density for pane in all_panes.panes} == {"minimal"}
     assert all_panes.panes[5].chart.kind == "stack"
     assert all_panes.panes[5].chart.presentation.style == "grouped-thin"
+    assert all_panes.panes[5].chart.presentation.theme == "contrast"
     assert len({pane.chart.presentation.theme for pane in all_panes.panes}) > 3
 
 

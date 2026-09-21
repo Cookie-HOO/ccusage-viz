@@ -7,6 +7,7 @@ from collections.abc import Callable, Hashable, Mapping
 from dataclasses import dataclass, replace
 from shutil import get_terminal_size
 
+from ccusage_viz.adjustment_timeout import AdjustmentIdleTimer, AdjustmentTimeout
 from ccusage_viz.bootstrap import build_chart_registry, build_query_runtime
 from ccusage_viz.command_copy import (
     copy_command,
@@ -18,7 +19,11 @@ from ccusage_viz.command_copy import (
 from ccusage_viz.core.time import refresh_date_range
 from ccusage_viz.data_view import BodyView, next_body_view, render_snapshot_data
 from ccusage_viz.deltas import RefreshDeltas, RefreshRanks
-from ccusage_viz.diagnostics import color_enabled, format_error
+from ccusage_viz.diagnostics import (
+    color_enabled,
+    format_error,
+    transient_query_recovery_lines,
+)
 from ccusage_viz.errors import QueryError, UsageError
 from ccusage_viz.filter_draft import discover_filter_choices, run_filter_editor
 from ccusage_viz.historical_component import (
@@ -82,10 +87,10 @@ _ADJUSTMENT_QUICK_KEYS = {
     "ranking": frozenset("dpPb+-=tTs"),
 }
 _ADJUSTMENT_ADVANCED_KEYS = {
-    "timeline": frozenset("folAk"),
+    "timeline": frozenset("folAPk"),
     "calendar": frozenset("f"),
     "stack": frozenset("fclk"),
-    "ranking": frozenset("foA"),
+    "ranking": frozenset("foAP"),
 }
 
 _ADJUSTMENT_ACTIONS = {
@@ -103,6 +108,7 @@ _ADJUSTMENT_ACTIONS = {
             ("f", "filter"),
             ("o", "other"),
             ("A", "project_aggregation"),
+            ("P", "project_label_context"),
             ("l", "legend"),
             ("k", "weekdays"),
         ),
@@ -130,7 +136,12 @@ _ADJUSTMENT_ACTIONS = {
             ("t/T", "theme"),
             ("s", "style"),
         ),
-        "advanced": (("f", "filter"), ("o", "other"), ("A", "project_aggregation")),
+        "advanced": (
+            ("f", "filter"),
+            ("o", "other"),
+            ("A", "project_aggregation"),
+            ("P", "project_label_context"),
+        ),
     },
 }
 
@@ -143,7 +154,7 @@ def _adjustment_key_supported(
     command: str, page: str, key: str, *, project_grouping: bool = False
 ) -> bool:
     keys = _ADJUSTMENT_QUICK_KEYS if page == "quick" else _ADJUSTMENT_ADVANCED_KEYS
-    return key in keys[command] and (key != "A" or project_grouping)
+    return key in keys[command] and (key not in {"A", "P"} or project_grouping)
 
 
 def _adjustment_actions(
@@ -152,7 +163,7 @@ def _adjustment_actions(
     return tuple(
         AdjustmentAction(key, translator.text(f"adjustment.{label}"), priority)
         for priority, (key, label) in enumerate(_ADJUSTMENT_ACTIONS[command][page])
-        if key != "A" or project_grouping
+        if key not in {"A", "P"} or project_grouping
     )
 
 
@@ -246,6 +257,15 @@ def run_runtime_adjustment(
     rendered_options: StandaloneLaunch | None = None
     render_warning: str | None = None
     adjustment_page = "quick"
+    idle_timer = AdjustmentIdleTimer()
+
+    def read_adjustment_key() -> str | None:
+        key = read_key(min(0.1, idle_timer.remaining()))
+        if key is None:
+            idle_timer.check()
+        else:
+            idle_timer.record_input()
+        return key
 
     def grouping_choices() -> tuple[str, ...]:
         if current.chart.kind == "timeline":
@@ -339,6 +359,7 @@ def run_runtime_adjustment(
                 project_grouping=(
                     current.chart.project_aggregation if current.chart.by == "project" else "—"
                 ),
+                project_label_context=getattr(component, "project_label_context", 0),
             )
         if isinstance(current.chart, (TimelineConfig, StackConfig)):
             state_values["weekday"] = translator.text(f"label.weekday_{current.chart.weekdays}")
@@ -400,7 +421,7 @@ def run_runtime_adjustment(
         with input_mode():
             paint()
             while True:
-                key = read_key(0.1)
+                key = read_adjustment_key()
                 if get_terminal_size() != last_size:
                     paint()
                 if key == "\x03":
@@ -446,13 +467,20 @@ def run_runtime_adjustment(
                         translator,
                         width=editor_size.columns,
                         paint=paint_filter_editor,
-                        read_key=lambda: read_key(0.1),
+                        read_key=read_adjustment_key,
                     )
                     if edited is not None and edited != current.chart.filters:
                         current = replace_chart_filters(current, edited)
                         paint()
                     else:
                         paint()
+                elif (
+                    adjustment_page == "advanced"
+                    and key == "P"
+                    and _project_grouping_available(current.chart)
+                ):
+                    component.cycle_project_label_context()
+                    paint()
                 elif key is not None and _adjustment_key_supported(
                     current.chart.kind,
                     adjustment_page,
@@ -464,6 +492,10 @@ def run_runtime_adjustment(
                         current = updated
                         theme_index = COLOR_SCHEMES.index(current.chart.presentation.theme)
                         paint()
+    except AdjustmentTimeout:
+        if rendered is not None:
+            return RuntimeAdjustmentResult(current, rendered)
+        return None
     except KeyboardInterrupt:
         return None
 
@@ -524,7 +556,14 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
     def notices() -> tuple[str, ...]:
         active = lifecycle.active
         manual_refresh_operations.intersection_update({active} if active is not None else ())
-        return (translator.text("status.tui_refreshing"),) if manual_refresh_operations else ()
+        manual = (translator.text("status.tui_refreshing"),) if manual_refresh_operations else ()
+        error = getattr(component, "error", None)
+        recovery = (
+            transient_query_recovery_lines(error, translator, initial=last_snapshot is None)
+            if error is not None
+            else None
+        )
+        return (*manual, *(recovery or ()))
 
     def controls() -> str:
         if controls_hidden:
@@ -606,8 +645,21 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
                 render_warning = None
         footer = controls()
         accepted = getattr(component, "accepted_options", None) or current
+        error = getattr(component, "error", None)
+        recovery = (
+            transient_query_recovery_lines(error, translator, initial=last_snapshot is None)
+            if error is not None
+            else None
+        )
         body = (
-            last_chart
+            format_error(
+                error,
+                translator,
+                color=color,
+                color_scheme=current.chart.presentation.theme,
+            )
+            if error is not None and recovery is not None
+            else last_chart
             if body_view == "chart"
             else wrap_command(format_command(current), size.columns)
             if body_view == "command"
@@ -684,11 +736,15 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
         try:
             return lifecycle.start_ready(now=now, start=start)
         except BaseException as exc:
-            base_status = format_error(
-                exc,
-                translator,
-                color=style_enabled(),
-                color_scheme=current.chart.presentation.theme,
+            base_status = (
+                translator.text("status.data_temporarily_unavailable")
+                if transient_query_recovery_lines(exc, translator, initial=last_snapshot is None)
+                else format_error(
+                    exc,
+                    translator,
+                    color=style_enabled(),
+                    color_scheme=current.chart.presentation.theme,
+                )
             )
             if isinstance(exc, UsageError):
                 terminal_error = exc
@@ -719,11 +775,15 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
                 start=start,
             )
         except BaseException as exc:
-            base_status = format_error(
-                exc,
-                translator,
-                color=style_enabled(),
-                color_scheme=current.chart.presentation.theme,
+            base_status = (
+                translator.text("status.data_temporarily_unavailable")
+                if transient_query_recovery_lines(exc, translator, initial=last_snapshot is None)
+                else format_error(
+                    exc,
+                    translator,
+                    color=style_enabled(),
+                    color_scheme=current.chart.presentation.theme,
+                )
             )
             if isinstance(exc, UsageError):
                 terminal_error = exc

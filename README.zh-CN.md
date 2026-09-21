@@ -115,6 +115,11 @@ ccuv ranking --by project
 
 ![Ranking 视图：按总 Token 排列的项目](docs/assets/readme/standalone-ranking.png)
 
+> [!TIP]
+> 项目 Ranking 默认使用保守的 **Name** 聚合：无歧义的 Claude–Codex 配对会成为一个图表项目。按 `v`
+> 打开数据视图，可看到聚合前的安全来源行；相同且非空的 `merge_group` 表示这些行会相加为同一个图表项目。
+> 使用 `--project-aggregation exact` 可关闭跨 Agent 聚合。
+
 ### 项目归因覆盖范围
 
 下方兼容性基线在 macOS 上使用 **ccusage 20.0.23** 完成验证。“Token 总量”指 ccusage
@@ -242,6 +247,7 @@ npm 不可用时，请手动安装 [`ccusage`](https://github.com/ryoppippi/ccus
 | [设计哲学](docs/design-philosophy.zh-CN.md) | 哪些产品边界、配置归属和呈现原则是刻意的设计？ |
 | [架构](docs/architecture.zh-CN.md) | 为维护者说明 CLI 路由、Host、Pane、Provider、处理和渲染如何组织。 |
 | [路线图（英文）](ROADMAP.md) | 计划、延后事项和反馈方向是什么？ |
+| [已知问题](docs/known-issues.zh-CN.md) | 已识别哪些间歇性 `ccusage` 问题，以及如何安全恢复？ |
 
 可通过[Bug 报告表单](https://github.com/Cookie-HOO/ccusage-viz/issues/new?template=bug_report.yml)提交可复现问题，或通过[功能请求表单](https://github.com/Cookie-HOO/ccusage-viz/issues/new?template=feature_request.yml)提出改进建议。
 

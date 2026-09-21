@@ -8,14 +8,18 @@
 
 ## 0.1.1
 
-`0.1.1` 在 `0.1.0` 基础上新增：
+`0.1.1` 聚焦项目归属安全、交互可靠性和项目视图的可检查性：
 
-- 更安全的 Codex 项目归属，以及更清晰的不完整归属提示；
-- 交互视图中更好的查询、刷新和部分结果状态；
-- 更稳健的 Monitor 累积 Token / TPM 状态处理；
-- 历史视图、Monitor 和 TUI 中随终端宽度收缩的活跃筛选摘要；
-- 项目数据输出中稳定的合并组字段；
-- 更新的中英文使用文档。
+- 更安全的项目呈现：绝不将 Claude 的不透明标识还原为文件系统路径；采用保守的 Claude–Codex Name 聚合、更清晰的带 Agent 的 Exact 标签，并改善不完整归属提示；
+- 为按项目分组的 Monitor 提供 `--project-aggregation name|exact`，同时在显示投影前保留精确计数器和增量；
+- 通过与图表一致的 `display_project` 标签及仅限当前 payload 的 `merge_group` 值，为项目 Markdown 和 JSON 数据视图提供有边界的聚合 provenance；Ranking 会把 Name 分组展开为安全的来源行，而 `Other` 保持仅聚合；
+- Agent、模型和项目选择器改为完整值、不区分大小写的匹配；筛选、聚合、Monitor 计数器和显示统一使用小写模型 identity；
+- 更清晰的候选查询、刷新和部分结果状态，包括历史视图、Monitor 和 TUI 中随终端宽度收缩的活跃筛选摘要；
+- 针对已识别的 `unified_daily` 本地数据库瞬时失败提供恢复导向的处理：可能时保留已接受视图，UI 提供脱敏的重试/下次刷新提示，且不会暴露 stderr；
+- standalone 和 Dashboard 调整模式在连续三分钟没有键盘或鼠标交互时自动返回；打开的筛选草稿会按与 `Esc` 相同的语义取消；
+- 更新英文和简体中文的使用、设计、README 与已知问题指引。
+
+`merge_group` 仅在当前数据 payload 内具有确定性，并非持久项目标识。其来源行是有边界的显示 provenance，不是原始记录或文件系统路径导出。
 
 ## 延后的 collector 集成
 

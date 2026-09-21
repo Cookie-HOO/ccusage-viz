@@ -50,6 +50,28 @@ def test_filter_choices_use_normalized_facts_and_keep_selected_values() -> None:
     assert choices.unavailable == frozenset()
 
 
+def test_model_choices_and_toggles_ignore_casing() -> None:
+    records = (
+        UsageRecord(
+            None,
+            "Claude Code",
+            _usage(30),
+            SourceKind.UNIFIED_DAILY,
+            models=(
+                ModelBreakdown("GPT-5.6-Luna", _usage(10)),
+                ModelBreakdown("gpt-5.6-luna", _usage(20)),
+            ),
+        ),
+    )
+
+    choices = discover_filter_choices(records, Filters(models=("GPT-5.6-Luna",)))
+    draft = FilterDraft(Filters(models=("GPT-5.6-Luna",)))
+
+    assert choices.models == ("gpt-5.6-luna",)
+    assert draft.contains("model", "gpt-5.6-luna")
+    assert draft.toggle("model", "gpt-5.6-luna").filters.models == ()
+
+
 def test_unavailable_project_dimension_keeps_only_existing_selection() -> None:
     records = (UsageRecord(None, "Claude Code", _usage(10), SourceKind.UNIFIED_DAILY),)
 

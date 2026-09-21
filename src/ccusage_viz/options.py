@@ -119,6 +119,7 @@ class MonitorConfig:
     presentation: ChartPresentation = ChartPresentation(style="bars")
     by: Dimension | None = None
     top: int | None = None
+    project_aggregation: ProjectAggregation = "name"
 
 
 HistoricalChartConfig: TypeAlias = TimelineConfig | CalendarConfig | StackConfig | RankingConfig
@@ -299,7 +300,11 @@ def adjust_chart(chart: ChartConfig, key: str, *, demo: bool = False) -> ChartCo
         and chart.by is not None
     ):
         return replace(chart, top=max(1, (chart.top or 1) - 1))
-    if key == "A" and isinstance(chart, (TimelineConfig, RankingConfig)) and chart.by == "project":
+    if (
+        key == "A"
+        and isinstance(chart, (TimelineConfig, RankingConfig, MonitorConfig))
+        and chart.by == "project"
+    ):
         return replace(
             chart,
             project_aggregation=_cycle(PROJECT_AGGREGATIONS, chart.project_aggregation, 1),

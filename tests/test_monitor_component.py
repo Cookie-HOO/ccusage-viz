@@ -36,6 +36,7 @@ def options(
     window_seconds: int = 300,
     top: int | None = None,
     filters: Filters | None = None,
+    project_aggregation: str = "name",
 ) -> StandaloneLaunch:
     return StandaloneLaunch(
         ProcessConfig(),
@@ -47,6 +48,7 @@ def options(
             presentation=ChartPresentation(style=style),
             by=by,
             top=top,
+            project_aggregation=project_aggregation,
         ),
     )
 
@@ -156,7 +158,7 @@ def test_monitor_list_uses_the_same_observed_ranking_model() -> None:
     assert ranking.model(now=10, count=4, wall=wall) == listing.model(now=10, count=4, wall=wall)
 
 
-def test_monitor_project_ranking_and_list_share_safe_exact_labels() -> None:
+def test_monitor_project_ranking_and_list_share_safe_merged_labels() -> None:
     ranking = MonitorComponent(
         options(by="project", style="ranking"), registry=build_chart_registry()
     )
@@ -201,11 +203,75 @@ def test_monitor_project_ranking_and_list_share_safe_exact_labels() -> None:
             assert component.accept(completion(component, records), now=now, wall=wall)
 
     entries = ranking.ranking_model(now=10, count=4, wall=wall).observed_entries
-    assert {(entry.agent, entry.label) for entry in entries} == {
-        ("claude", "app"),
-        ("codex", "app"),
-    }
+    assert {(entry.agent, entry.label) for entry in entries} == {(None, "app")}
     assert ranking.model(now=10, count=4, wall=wall) == listing.model(now=10, count=4, wall=wall)
+
+
+def test_monitor_project_aggregation_switches_presentation_without_rebaseline() -> None:
+    component = MonitorComponent(
+        options(by="project", style="ranking"), registry=build_chart_registry()
+    )
+    wall = datetime(2026, 9, 19, 12, 0, tzinfo=UTC)
+    samples = (
+        (
+            UsageRecord(
+                date(2026, 9, 19),
+                "claude",
+                usage(100),
+                SourceKind.CLAUDE_DAILY_PROJECTS,
+                ProjectRef("claude", "-private-work-app", "app"),
+            ),
+            UsageRecord(
+                date(2026, 9, 19),
+                "codex",
+                usage(100),
+                SourceKind.CODEX_SESSIONS,
+                ProjectRef("codex", "/private/work/app", "app"),
+            ),
+        ),
+        (
+            UsageRecord(
+                date(2026, 9, 19),
+                "claude",
+                usage(160),
+                SourceKind.CLAUDE_DAILY_PROJECTS,
+                ProjectRef("claude", "-private-work-app", "app"),
+            ),
+            UsageRecord(
+                date(2026, 9, 19),
+                "codex",
+                usage(140),
+                SourceKind.CODEX_SESSIONS,
+                ProjectRef("codex", "/private/work/app", "app"),
+            ),
+        ),
+    )
+    for now, records in zip((0, 10), samples, strict=True):
+        assert component.accept(completion(component, records), now=now, wall=wall)
+
+    name_entries = component.ranking_model(now=10, count=4, wall=wall).observed_entries
+    intervals = tuple(component.observer.intervals)
+    generation = component.generation
+    component.configure(
+        replace(
+            component.candidate,
+            chart=replace(component.candidate.chart, project_aggregation="exact"),
+        ),
+        data_affecting=False,
+    )
+    exact_entries = component.ranking_model(now=10, count=4, wall=wall).observed_entries
+
+    assert component.generation == generation
+    assert not component.rebaseline_pending
+    assert tuple(component.observer.intervals) == intervals
+    assert [(entry.agent, entry.label, entry.value) for entry in name_entries] == [
+        (None, "app", 100.0)
+    ]
+    assert {(entry.agent, entry.label, entry.value) for entry in exact_entries} == {
+        ("claude", "claude · app", 60.0),
+        ("codex", "codex · app", 40.0),
+    }
+    assert sum(entry.value for entry in exact_entries) == name_entries[0].value
 
 
 def test_monitor_component_total_and_model_presentation_stays_at_accepted_sample() -> None:

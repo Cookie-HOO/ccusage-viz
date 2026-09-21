@@ -5,6 +5,7 @@ from collections.abc import Callable
 from datetime import datetime, timedelta
 from shutil import get_terminal_size
 
+from ccusage_viz.adjustment_timeout import AdjustmentIdleTimer, AdjustmentTimeout
 from ccusage_viz.bootstrap import build_chart_registry, build_query_runtime
 from ccusage_viz.command_copy import (
     copy_command,
@@ -14,7 +15,7 @@ from ccusage_viz.command_copy import (
     wrap_command,
 )
 from ccusage_viz.data_view import BodyView, next_body_view, render_monitor_data
-from ccusage_viz.diagnostics import format_error
+from ccusage_viz.diagnostics import format_error, transient_query_recovery_lines
 from ccusage_viz.errors import UsageError, VizError
 from ccusage_viz.filter_draft import discover_filter_choices, run_filter_editor
 from ccusage_viz.i18n import Translator
@@ -140,7 +141,15 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
     def notices() -> tuple[str, ...]:
         active = lifecycle.active
         manual_refresh_operations.intersection_update({active} if active is not None else ())
-        return (translator.text("status.tui_refreshing"),) if manual_refresh_operations else ()
+        manual = (translator.text("status.tui_refreshing"),) if manual_refresh_operations else ()
+        recovery = (
+            transient_query_recovery_lines(
+                component.error, translator, initial=component.accepted_options is None
+            )
+            if component.error is not None
+            else None
+        )
+        return (*manual, *(recovery or ()))
 
     def paint(*, force: bool = False) -> None:
         nonlocal last_size
@@ -166,8 +175,33 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
             )
         )
         now = time.monotonic()
+        recovery = (
+            transient_query_recovery_lines(
+                component.error, translator, initial=component.accepted_options is None
+            )
+            if component.error is not None
+            else None
+        )
         try:
-            if component.error is not None:
+            if (
+                component.error is not None
+                and recovery is not None
+                and component.accepted_options is None
+            ):
+                body = format_error(
+                    component.error,
+                    translator,
+                    color=terminal.color,
+                    color_scheme=config.chart.presentation.theme,
+                )
+            elif component.error is not None and component.accepted_options is not None:
+                body = render_component(
+                    component,
+                    config,
+                    terminal,
+                    control_rows=0 if controls_hidden else 2,
+                )
+            elif component.error is not None:
                 body = (
                     format_error(
                         component.error,
@@ -221,6 +255,15 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
     def pick_appearance() -> bool:
         adjustment_page = "quick"
         data_affecting = False
+        idle_timer = AdjustmentIdleTimer()
+
+        def read_adjustment_key() -> str | None:
+            key = read_key(min(0.1, idle_timer.remaining()))
+            if key is None:
+                idle_timer.check()
+            else:
+                idle_timer.record_input()
+            return key
 
         def actions() -> tuple[AdjustmentAction, ...]:
             definitions = (
@@ -234,7 +277,16 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                     ("s", "style"),
                 )
                 if adjustment_page == "quick"
-                else (("f", "filter"), ("l", "legend"))
+                else (
+                    (
+                        ("f", "filter"),
+                        ("A", "project_aggregation"),
+                        ("P", "project_label_context"),
+                        ("l", "legend"),
+                    )
+                    if monitor_chart(component.candidate).by == "project"
+                    else (("f", "filter"), ("l", "legend"))
+                )
             )
             return tuple(
                 AdjustmentAction(key, translator.text(f"adjustment.{label}"), priority)
@@ -274,11 +326,24 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                 else {
                     "legend_position": translator.text(
                         f"label.legend_{chart.presentation.legend.replace('-', '_')}"
-                    )
+                    ),
+                    **(
+                        {
+                            "project_aggregation": chart.project_aggregation,
+                            "project_label_context": component.project_label_context,
+                        }
+                        if chart.by == "project"
+                        else {}
+                    ),
                 }
             )
+            state_key = (
+                "status.monitor_adjust_advanced_nonproject"
+                if adjustment_page == "advanced" and chart.by != "project"
+                else f"status.monitor_adjust_{adjustment_page}"
+            )
             adjustment_controls = adjustment_rows(
-                translator.text(f"status.monitor_adjust_{adjustment_page}", **values),
+                translator.text(state_key, **values),
                 translator.text(f"adjustment.page_{adjustment_page}"),
                 actions(),
                 width=terminal.width,
@@ -301,7 +366,10 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
 
         paint_picker()
         while True:
-            key = read_key(0.1)
+            try:
+                key = read_adjustment_key()
+            except AdjustmentTimeout:
+                return data_affecting
             if key == "\x03":
                 raise KeyboardInterrupt
             if key in {"\x1b", "\r", "\n"}:
@@ -334,22 +402,31 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                         )
                     )
 
-                edited = run_filter_editor(
-                    chart.filters,
-                    discover_filter_choices(component.accepted_records, chart.filters),
-                    translator,
-                    width=terminal.width,
-                    paint=paint_filter_editor,
-                    read_key=lambda: read_key(0.1),
-                )
+                try:
+                    edited = run_filter_editor(
+                        chart.filters,
+                        discover_filter_choices(component.accepted_records, chart.filters),
+                        translator,
+                        width=terminal.width,
+                        paint=paint_filter_editor,
+                        read_key=read_adjustment_key,
+                    )
+                except AdjustmentTimeout:
+                    return data_affecting
                 if edited is not None and edited != chart.filters:
                     component.configure(replace_chart_filters(config, edited), data_affecting=True)
                     data_affecting = True
             elif (
+                adjustment_page == "advanced"
+                and key == "P"
+                and monitor_chart(component.candidate).by == "project"
+            ):
+                component.cycle_project_label_context()
+            elif (
                 adjustment_page == "quick"
                 and key in {"d", "s", "t", "T", "b", "w", "i", "+", "=", "-", "_"}
                 or adjustment_page == "advanced"
-                and key == "l"
+                and key in {"l", "A"}
             ):
                 config = component.candidate
                 updated = adjust_standalone(config, key)

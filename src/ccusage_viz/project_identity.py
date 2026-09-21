@@ -10,14 +10,20 @@ from ccusage_viz.domain import ProjectRef
 from ccusage_viz.selectors import SelectorCandidate, resolve_selectors
 
 ProjectAggregation: TypeAlias = Literal["name", "exact"]
+ProjectLabelContext: TypeAlias = Literal[0, 1, 2]
 PROJECT_AGGREGATIONS: tuple[ProjectAggregation, ...] = ("name", "exact")
 ProjectGroupKey: TypeAlias = tuple[str, ...]
 
-_OPAQUE_PATH_MARKERS = frozenset(
-    {"project", "projects", "repo", "repos", "workspace", "workspaces", "src"}
-)
-_HOME_PATH_PREFIX = ("users",)
 _GENERIC_PROJECT_NAMES = frozenset({"project", "unknown", "untitled"})
+_SHORT_OPAQUE_LABELS: dict[tuple[str, str], str] = {}
+_SHORT_OPAQUE_DEPTHS: dict[tuple[str, str], int] = {}
+
+
+@dataclass(frozen=True, slots=True)
+class _OpaqueLabelCandidate:
+    label: str
+    removal_depth: int
+    cacheable: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,28 +36,21 @@ class ExactProjectDisplayKey:
 
 
 @dataclass(frozen=True, slots=True)
+class ProjectDisplayKey:
+    """A Monitor display projection that leaves exact counter identity upstream."""
+
+    key: ProjectGroupKey
+    label: str = field(compare=False, hash=False)
+    agent: str | None = field(default=None, compare=False, hash=False)
+
+
+@dataclass(frozen=True, slots=True)
 class ProjectGroup:
     """A display-only group of exact, agent-scoped project identities."""
 
     key: ProjectGroupKey
     label: str
     members: tuple[ProjectRef, ...]
-
-
-def _opaque_project_name(raw_id: str) -> str | None:
-    """Extract a project leaf from ccusage's path-encoded opaque identifiers."""
-    if not raw_id.startswith("-"):
-        return None
-    parts = tuple(part for part in raw_id.strip("-").split("-") if part)
-    if tuple(part.casefold() for part in parts[:1]) == _HOME_PATH_PREFIX and len(parts) == 2:
-        return parts[-1] if _is_safe_display_name(parts[-1]) else None
-    marker_positions = tuple(
-        index for index, part in enumerate(parts) if part.casefold() in _OPAQUE_PATH_MARKERS
-    )
-    if not marker_positions or marker_positions[-1] == len(parts) - 1:
-        return None
-    name = "-".join(parts[marker_positions[-1] + 1 :])
-    return name if _is_safe_display_name(name) else None
 
 
 def _is_safe_display_name(value: str) -> bool:
@@ -83,12 +82,12 @@ def normalized_project_leaf(project: ProjectRef) -> str | None:
 
 
 def project_display_name(raw_id: str) -> str:
-    """Return a safe project basename or recognized opaque project leaf."""
+    """Return a safe basename for a real path, never decode opaque identifiers."""
     value = raw_id.rstrip("/\\")
     if value and ("/" in value or "\\" in value):
         leaf = PurePath(value.replace("\\", "/")).name
         return leaf if _is_displayable_path_leaf(leaf) else "Project"
-    return _opaque_project_name(raw_id) or "Project"
+    return "Project"
 
 
 def make_project_ref(agent: str, raw_id: str, display_name: str | None = None) -> ProjectRef:
@@ -98,24 +97,230 @@ def make_project_ref(agent: str, raw_id: str, display_name: str | None = None) -
     return ProjectRef(agent, raw_id, display)
 
 
-def _display_names(projects: tuple[ProjectRef, ...]) -> dict[tuple[str, str], str]:
-    unnamed = tuple(
+def _opaque_components(project: ProjectRef) -> tuple[str, ...] | None:
+    if project.agent != "claude" or not project.raw_id.startswith("-"):
+        return None
+    components = tuple(
+        normalize("NFC", part) for part in project.raw_id.strip("-").split("-") if part
+    )
+    return components or None
+
+
+def _opaque_prefix_depths(
+    projects: Iterable[ProjectRef],
+) -> dict[tuple[str, str], tuple[int, ...]]:
+    """Return every independently proved removable prefix depth per opaque ID.
+
+    Components are opaque tokens. Prefixes are compared case-insensitively, but
+    no token is interpreted as a path, namespace, or otherwise meaningful name.
+    """
+    component_by_key = {
+        project.key: components
+        for project in projects
+        if (components := _opaque_components(project)) is not None
+    }
+    members_by_prefix: dict[tuple[str, ...], set[tuple[str, str]]] = {}
+    for key, components in component_by_key.items():
+        normalized = tuple(component.casefold() for component in components)
+        for depth in range(1, len(normalized)):
+            members_by_prefix.setdefault(normalized[:depth], set()).add(key)
+
+    depths: dict[tuple[str, str], tuple[int, ...]] = {}
+    for key, components in component_by_key.items():
+        normalized = tuple(component.casefold() for component in components)
+        eligible = tuple(
+            depth
+            for depth in range(1, len(normalized))
+            if len(members := members_by_prefix[normalized[:depth]]) >= 2
+            and all(len(component_by_key[member]) > depth for member in members)
+        )
+        if eligible:
+            depths[key] = eligible
+    return depths
+
+
+def _opaque_label_candidates(
+    project: ProjectRef,
+    components: tuple[str, ...],
+    depths: tuple[int, ...],
+    context: ProjectLabelContext,
+) -> tuple[_OpaqueLabelCandidate, ...]:
+    """Return shortest-first labels backed by verified opaque-token removal."""
+    candidates = [
+        _OpaqueLabelCandidate(
+            label,
+            depth,
+            cacheable=True,
+        )
+        for depth in reversed(depths)
+        if _is_safe_display_name(label := "-".join(components[max(0, depth - context) :]))
+    ]
+    cached = _SHORT_OPAQUE_LABELS.get(project.key)
+    cached_depth = _SHORT_OPAQUE_DEPTHS.get(project.key)
+    if (
+        cached is not None
+        and cached_depth is not None
+        and cached_depth > 0
+        and cached == "-".join(components[cached_depth:])
+    ):
+        label = "-".join(components[max(0, cached_depth - context) :])
+        if _is_safe_display_name(label):
+            candidates.append(_OpaqueLabelCandidate(label, cached_depth, cacheable=True))
+    return tuple(
         sorted(
-            (project for project in projects if not _is_safe_display_name(project.display_name)),
-            key=lambda project: project.key,
+            set(candidates),
+            key=lambda item: (len(item.label), item.label.casefold(), -item.removal_depth),
         )
     )
-    aliases = {project.key: f"Project {index}" for index, project in enumerate(unnamed, 1)}
-    return {project.key: aliases.get(project.key, project.display_name) for project in projects}
 
 
-def exact_project_label(project: ProjectRef, projects: Iterable[ProjectRef]) -> str:
+def _display_label_key(value: str) -> str:
+    return normalize("NFC", value).casefold()
+
+
+def _resolve_opaque_label_collisions(
+    candidates: dict[tuple[str, str], tuple[_OpaqueLabelCandidate, ...]],
+    raw_ids: dict[tuple[str, str], str],
+    occupied: set[str],
+) -> dict[tuple[str, str], _OpaqueLabelCandidate]:
+    """Choose the shortest verified opaque labels that do not collide."""
+    positions = {key: 0 for key in candidates}
+    labels = {
+        key: values[0] if values else _OpaqueLabelCandidate(raw_ids[key], 0)
+        for key, values in candidates.items()
+    }
+    while True:
+        by_label: dict[str, list[tuple[str, str]]] = {}
+        for key, candidate in labels.items():
+            by_label.setdefault(_display_label_key(candidate.label), []).append(key)
+        advanced = False
+        for label, keys in sorted(by_label.items()):
+            if label not in occupied and len(keys) == 1:
+                continue
+            for key in sorted(keys)[1 if label not in occupied else 0 :]:
+                if positions[key] + 1 < len(candidates[key]):
+                    positions[key] += 1
+                    labels[key] = candidates[key][positions[key]]
+                    advanced = True
+        if not advanced:
+            break
+
+    for candidate in labels.values():
+        occupied.add(_display_label_key(candidate.label))
+    return labels
+
+
+def project_display_names(
+    projects: Iterable[ProjectRef],
+    *,
+    cache_shortened: bool = False,
+    context: ProjectLabelContext = 0,
+) -> dict[tuple[str, str], str]:
+    """Return deterministic safe display bases for one complete project pool.
+
+    Claude's hyphen-flattened identifiers are opaque. A common leading component
+    sequence is therefore removable display-only context, never a reconstructed
+    filesystem path or an identity/grouping key. Successfully shortened opaque
+    labels remain available for the lifetime of the process when a later pool is
+    too narrow to establish the same common prefix again.
+    """
+    pool = unique_projects(projects)
+    opaque = tuple(
+        sorted(
+            (
+                project
+                for project in pool
+                if _opaque_components(project) is not None and project.display_name == "Project"
+            ),
+            key=lambda item: item.key,
+        )
+    )
+    depths = _opaque_prefix_depths(opaque)
+    names: dict[tuple[str, str], str] = {}
+    for project in pool:
+        value = normalize("NFC", project.display_name).strip()
+        if _is_safe_display_name(value) and value.casefold() not in _GENERIC_PROJECT_NAMES:
+            names[project.key] = value
+
+    opaque_candidates: dict[tuple[str, str], tuple[_OpaqueLabelCandidate, ...]] = {}
+    raw_ids: dict[tuple[str, str], str] = {}
+    for project in opaque:
+        components = _opaque_components(project)
+        assert components is not None
+        raw_ids[project.key] = project.raw_id
+        opaque_candidates[project.key] = (
+            *_opaque_label_candidates(project, components, depths.get(project.key, ()), context),
+            _OpaqueLabelCandidate(project.raw_id, 0),
+        )
+
+    opaque_labels = _resolve_opaque_label_collisions(
+        opaque_candidates,
+        raw_ids,
+        {_display_label_key(label) for label in names.values()},
+    )
+    names.update({key: candidate.label for key, candidate in opaque_labels.items()})
+    if cache_shortened and context == 0:
+        for key, candidate in opaque_labels.items():
+            if candidate.cacheable and candidate.removal_depth > 0:
+                components = _opaque_components(
+                    next(project for project in opaque if project.key == key)
+                )
+                assert components is not None
+                short_label = "-".join(components[candidate.removal_depth :])
+                cached = _SHORT_OPAQUE_LABELS.get(key)
+                if cached is None or (len(short_label), short_label.casefold()) < (
+                    len(cached),
+                    cached.casefold(),
+                ):
+                    _SHORT_OPAQUE_LABELS[key] = short_label
+                    _SHORT_OPAQUE_DEPTHS[key] = candidate.removal_depth
+
+    unnamed = tuple(
+        sorted((project for project in pool if project.key not in names), key=lambda item: item.key)
+    )
+    names.update({project.key: f"Project {index}" for index, project in enumerate(unnamed, 1)})
+    return names
+
+
+def next_project_label_context(context: ProjectLabelContext) -> ProjectLabelContext:
+    """Return the next bounded opaque-label restore level."""
+    if context == 0:
+        return 1
+    if context == 1:
+        return 2
+    return 0
+
+
+def _clear_short_opaque_labels() -> None:
+    """Clear process-local opaque display cache for isolated tests."""
+    _SHORT_OPAQUE_LABELS.clear()
+    _SHORT_OPAQUE_DEPTHS.clear()
+
+
+def _display_names(projects: tuple[ProjectRef, ...]) -> dict[tuple[str, str], str]:
+    """Backward-compatible internal name for the common display projection."""
+    return project_display_names(projects)
+
+
+def _same_display_name(left: str, right: str) -> bool:
+    return normalize("NFC", left).casefold() == normalize("NFC", right).casefold()
+
+
+def exact_project_label(
+    project: ProjectRef,
+    projects: Iterable[ProjectRef],
+    *,
+    labels: dict[tuple[str, str], str] | None = None,
+    context: ProjectLabelContext = 0,
+) -> str:
     """Return an exact-project label; the agent is displayed separately."""
     pool = unique_projects(projects)
-    names = _display_names(pool)
+    names = labels or project_display_names(pool, context=context)
     display_name = names[project.key]
     same_agent = tuple(
-        item for item in pool if item.agent == project.agent and names[item.key] == display_name
+        item
+        for item in sorted(pool, key=lambda item: item.key)
+        if item.agent == project.agent and _same_display_name(names[item.key], display_name)
     )
     if len(same_agent) <= 1:
         return display_name
@@ -150,25 +355,70 @@ def exact_project_display_label(key: ExactProjectDisplayKey) -> str:
     return f"{key.agent} · {key.label}"
 
 
+def project_display_keys(
+    projects: Iterable[ExactProjectDisplayKey],
+    aggregation: ProjectAggregation = "name",
+    *,
+    context: ProjectLabelContext = 0,
+) -> dict[ExactProjectDisplayKey, ProjectDisplayKey]:
+    """Project Monitor's exact keys into presentation-only project groups."""
+    exact = tuple(projects)
+    refs = tuple(
+        make_project_ref(item.agent, item.raw_id)
+        if item.agent == "claude" and item.raw_id.startswith("-") and item.label == "Project"
+        else ProjectRef(item.agent, item.raw_id, item.label)
+        for item in exact
+    )
+    groups = project_groups(refs, aggregation, context=context)
+    return {
+        item: ProjectDisplayKey(
+            groups[item.agent, item.raw_id].key,
+            groups[item.agent, item.raw_id].label,
+            item.agent if aggregation == "exact" else None,
+        )
+        for item in exact
+    }
+
+
 def project_label(project: ProjectRef, projects: Iterable[ProjectRef]) -> str:
     """Return a deterministic, recognizable, presentation-safe selector label."""
     pool = unique_projects(projects)
     names = _display_names(pool)
+    opaque = tuple(item for item in pool if _opaque_components(item) is not None)
+    names.update(project_display_names(opaque))
     display_name = names[project.key]
-    peers = tuple(item for item in pool if names[item.key] == display_name)
+    peers = tuple(item for item in pool if _same_display_name(names[item.key], display_name))
     if len(peers) <= 1:
         return display_name
-    same_agent = tuple(item for item in peers if item.agent == project.agent)
+    same_agent = tuple(
+        item for item in sorted(peers, key=lambda item: item.key) if item.agent == project.agent
+    )
     if len(same_agent) == 1:
         return f"{display_name} ({project.agent})"
     return f"{display_name} ({project.agent} {same_agent.index(project) + 1})"
 
 
-def merged_project_label(members: Iterable[ProjectRef]) -> str:
-    """Return a stable, safe display label for a same-name project group."""
+def merged_project_label(
+    members: Iterable[ProjectRef],
+    projects: Iterable[ProjectRef] | None = None,
+    *,
+    labels: dict[tuple[str, str], str] | None = None,
+    context: ProjectLabelContext = 0,
+) -> str:
+    """Return a stable safe label without influencing project pairing evidence."""
+    members = tuple(members)
+    names = labels or project_display_names(
+        unique_projects(projects if projects is not None else members), context=context
+    )
+    values = tuple(names[member.key] for member in members)
+    proven = tuple(
+        names[member.key]
+        for member in members
+        if _opaque_components(member) is None or names[member.key] != member.raw_id
+    )
     return min(
-        (normalize("NFC", member.display_name).strip() for member in members),
-        key=lambda value: (value.casefold(), value),
+        proven or values,
+        key=lambda value: (normalize("NFC", value).casefold(), normalize("NFC", value)),
     )
 
 
@@ -248,7 +498,11 @@ def _claude_codex_pairs(pool: tuple[ProjectRef, ...]) -> dict[tuple[str, str], s
 
 
 def project_groups(
-    projects: Iterable[ProjectRef], aggregation: ProjectAggregation = "name"
+    projects: Iterable[ProjectRef],
+    aggregation: ProjectAggregation = "name",
+    *,
+    cache_shortened: bool = False,
+    context: ProjectLabelContext = 0,
 ) -> dict[tuple[str, str], ProjectGroup]:
     """Index exact projects into stable projection groups.
 
@@ -256,6 +510,7 @@ def project_groups(
     aliases are comparison keys only; exact upstream identities remain intact.
     """
     pool = unique_projects(projects)
+    labels = project_display_names(pool, cache_shortened=cache_shortened, context=context)
     pair_aliases = _claude_codex_pairs(pool) if aggregation == "name" else {}
     grouped: dict[ProjectGroupKey, list[ProjectRef]] = {}
     for project in pool:
@@ -271,9 +526,9 @@ def project_groups(
     for key, members in grouped.items():
         ordered = tuple(sorted(members, key=lambda item: item.key))
         if key[1] == "name":
-            label = merged_project_label(ordered)
+            label = merged_project_label(ordered, pool, labels=labels)
         else:
-            label = exact_project_label(ordered[0], pool)
+            label = exact_project_label(ordered[0], pool, labels=labels)
         group = ProjectGroup(key, label, ordered)
         for member in ordered:
             result[member.key] = group
@@ -296,28 +551,9 @@ def resolve_projects(
         SelectorCandidate(
             item.key,
             item,
-            (
-                project_label(item, pool),
-                item.display_name,
-                item.raw_id,
-                f"{item.agent}:{item.raw_id}",
-            ),
+            (project_label(item, pool),),
             label=project_label(item, pool),
         )
         for item in pool
     )
-
-    def expand_display_name(
-        selector: str, exact: tuple[SelectorCandidate[ProjectRef], ...]
-    ) -> tuple[SelectorCandidate[ProjectRef], ...]:
-        display_matches = tuple(
-            item for item in exact if item.value.display_name.casefold() == selector.casefold()
-        )
-        return display_matches or exact
-
-    return resolve_selectors(
-        selectors,
-        candidates,
-        dimension="project",
-        expand_exact=expand_display_name,
-    )
+    return resolve_selectors(selectors, candidates, dimension="project")

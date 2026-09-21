@@ -1,14 +1,25 @@
 from __future__ import annotations
 
 import json
+from collections import defaultdict
 from collections.abc import Iterable
 from typing import TYPE_CHECKING, Literal
 
 from ccusage_viz.chart_models import CalendarModel, RankingModel, StackModel, TimelineModel
-from ccusage_viz.domain import TokenUsage
+from ccusage_viz.domain import TokenUsage, UsageRecord
 from ccusage_viz.formatting import format_tokens
+from ccusage_viz.options import RankingConfig
 from ccusage_viz.processing import process_historical
-from ccusage_viz.project_identity import ExactProjectDisplayKey, exact_project_display_label
+from ccusage_viz.processing.filtering import prepare_filtered_scope
+from ccusage_viz.project_identity import (
+    ExactProjectDisplayKey,
+    ProjectDisplayKey,
+    exact_project_agent,
+    exact_project_display_label,
+    exact_project_label,
+    project_groups,
+    unique_projects,
+)
 
 if TYPE_CHECKING:
     from ccusage_viz.historical_component import UsageSnapshot
@@ -78,48 +89,111 @@ def _historical_model(options: StandaloneLaunch, snapshot: UsageSnapshot):
     )
 
 
-def _exact_project_agent(key: object) -> str | None:
-    if (
-        isinstance(key, tuple)
-        and len(key) == 4
-        and key[:2] == ("project", "exact")
-        and isinstance(key[2], str)
-    ):
-        return key[2]
-    return None
-
-
-def _merged_project_alias(key: object) -> str | None:
-    if (
-        isinstance(key, tuple)
-        and len(key) == 3
-        and key[:2] == ("project", "name")
-        and isinstance(key[2], str)
-    ):
-        return key[2]
-    return None
-
-
-def _merge_groups(keys: Iterable[object]) -> dict[object, int]:
-    aliases = sorted(
-        {alias for key in keys if (alias := _merged_project_alias(key)) is not None},
-        key=str.casefold,
+def _project_source_rows(
+    model: RankingModel,
+    records: Iterable[UsageRecord],
+    options: RankingConfig,
+) -> list[dict[str, object]]:
+    """Expand displayed project ranks into safe source-level provenance rows."""
+    scope = prepare_filtered_scope(
+        tuple(records),
+        options.date_range,
+        agents=options.filters.agents,
+        models=options.filters.models,
+        projects=options.filters.projects,
     )
-    return {("project", "name", alias): index for index, alias in enumerate(aliases, start=1)}
+    projects = unique_projects(
+        record.project for record in scope.records if record.project is not None
+    )
+    groups = project_groups(projects, options.project_aggregation)
+    projects_by_key = {project.key: project for project in projects}
+    usage_by_project: dict[tuple[str, str], TokenUsage] = defaultdict(TokenUsage.zero)
+    for record in scope.records:
+        if record.project is not None:
+            usage_by_project[record.project.key] += record.usage
+
+    entries = {entry.key: (rank, entry) for rank, entry in enumerate(model.entries, start=1)}
+    member_keys = {
+        key: tuple(member.key for member in group.members)
+        for key, group in {group.key: group for group in groups.values()}.items()
+    }
+    merge_groups = {
+        key: index
+        for index, key in enumerate(
+            sorted(
+                (key for key, members in member_keys.items() if len(members) > 1),
+                key=repr,
+            )
+        )
+    }
+
+    rows: list[dict[str, object]] = []
+    for key, (rank, entry) in entries.items():
+        if entry.is_other:
+            rows.append(
+                {
+                    "rank": rank,
+                    "display_project": entry.label,
+                    "project": entry.label,
+                    "agent": None,
+                    "merge_group": None,
+                    "is_other": True,
+                    **_usage_values(entry.usage),
+                }
+            )
+            continue
+        for project_key in member_keys.get(key, ()):
+            project = projects_by_key[project_key]
+            rows.append(
+                {
+                    "rank": rank,
+                    "display_project": entry.label,
+                    "project": exact_project_label(project, projects),
+                    "agent": project.agent,
+                    "merge_group": merge_groups.get(key),
+                    "is_other": False,
+                    **_usage_values(usage_by_project[project.key]),
+                }
+            )
+    return rows
+
+
+def _merge_group_indices(keys: Iterable[object]) -> dict[object, int]:
+    """Assign payload-local IDs only to actual cross-agent project merges."""
+    merged = sorted(
+        {
+            key
+            for key in keys
+            if isinstance(key, tuple) and len(key) > 1 and key[:2] == ("project", "name")
+        },
+        key=repr,
+    )
+    return {key: index for index, key in enumerate(merged)}
 
 
 def _historical_rows(
     model: TimelineModel | CalendarModel | StackModel | RankingModel,
+    options: StandaloneLaunch,
+    records: Iterable[UsageRecord],
 ) -> list[dict[str, object]]:
     if isinstance(model, TimelineModel):
-        include_agent = any(_exact_project_agent(series.key) is not None for series in model.series)
-        merge_groups = _merge_groups(series.key for series in model.series)
+        include_agent = any(exact_project_agent(series.key) is not None for series in model.series)
+        merge_groups = _merge_group_indices(series.key for series in model.series)
         return [
             {
                 "period": day.isoformat(),
                 "series": series.label,
-                **({"agent": _exact_project_agent(series.key)} if include_agent else {}),
-                **({"合并组": merge_groups[series.key]} if series.key in merge_groups else {}),
+                **(
+                    {
+                        "display_project": series.label,
+                        "agent": exact_project_agent(series.key),
+                        "merge_group": merge_groups.get(series.key),
+                    }
+                    if isinstance(series.key, tuple)
+                    and len(series.key) > 1
+                    and series.key[0] == "project"
+                    else ({"agent": exact_project_agent(series.key)} if include_agent else {})
+                ),
                 "is_other": series.is_other,
                 **_usage_values(usage),
             }
@@ -139,14 +213,13 @@ def _historical_rows(
             for component in model.components
             for day, usage in zip(model.days, component.values, strict=True)
         ]
-    include_agent = any(_exact_project_agent(entry.key) is not None for entry in model.entries)
-    merge_groups = _merge_groups(entry.key for entry in model.entries)
+    chart = options.chart
+    if isinstance(chart, RankingConfig) and chart.by == "project":
+        return _project_source_rows(model, records, chart)
     return [
         {
             "rank": rank,
             "project": entry.label,
-            **({"agent": _exact_project_agent(entry.key)} if include_agent else {}),
-            **({"合并组": merge_groups[entry.key]} if entry.key in merge_groups else {}),
             "is_other": entry.is_other,
             **_usage_values(entry.usage),
         }
@@ -186,7 +259,7 @@ def snapshot_data_payload(
     if snapshot is None:
         return None, []
     model = _historical_model(options, snapshot)
-    return options.chart.kind, _historical_rows(model)
+    return options.chart.kind, _historical_rows(model, options, snapshot.records)
 
 
 def _display_payload(payload: str, terminal: Terminal, *, complete: bool) -> str:
@@ -223,18 +296,47 @@ def render_snapshot_data(
     return _display_payload(payload, terminal, complete=complete)
 
 
+def _monitor_display_project(name: ProjectDisplayKey) -> str:
+    return f"{name.agent} · {name.label}" if name.agent is not None else name.label
+
+
 def monitor_data_payload(
     buckets: Iterable[ObservedBucket], *, by: str | None
 ) -> list[dict[str, object]]:
-    """Return one row per exact displayed Monitor bucket series value."""
+    """Return one row per projected Monitor bucket series value."""
+    buckets = tuple(buckets)
     unit = "tpm" if by in {None, "model"} else "tokens"
+    merge_groups = _merge_group_indices(
+        name
+        for bucket in buckets
+        for name in bucket.values
+        if isinstance(name, ProjectDisplayKey)
+        for name in (name.key,)
+    )
     return [
         {
             "ended_at": bucket.ended_wall.isoformat(),
             "series": (
-                exact_project_display_label(name)
+                _monitor_display_project(name)
+                if isinstance(name, ProjectDisplayKey)
+                else exact_project_display_label(name)
                 if isinstance(name, ExactProjectDisplayKey)
                 else name
+            ),
+            **(
+                {
+                    "display_project": _monitor_display_project(name),
+                    "agent": name.agent,
+                    "merge_group": merge_groups.get(name.key),
+                }
+                if isinstance(name, ProjectDisplayKey)
+                else {
+                    "display_project": exact_project_display_label(name),
+                    "agent": name.agent,
+                    "merge_group": None,
+                }
+                if isinstance(name, ExactProjectDisplayKey)
+                else {}
             ),
             "value": value,
             "unit": unit,

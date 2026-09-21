@@ -23,7 +23,7 @@ from ccusage_viz.core.time import DateRange
 from ccusage_viz.coverage import DateCoverage, DateInterval
 from ccusage_viz.deltas import RefreshRanks
 from ccusage_viz.domain import Notice, SourceKind, TokenUsage, UsageRecord
-from ccusage_viz.errors import SchemaError, UsageError
+from ccusage_viz.errors import QueryError, SchemaError, UsageError
 from ccusage_viz.formatting import display_width
 from ccusage_viz.historical_component import HistoricalChartComponent, UsageSnapshot
 from ccusage_viz.historical_render import RenderedChart
@@ -1215,6 +1215,64 @@ def test_dashboard_monitor_and_error_panes_do_not_contribute_chart_notices() -> 
     assert rendered.notices == ()
 
 
+def test_dashboard_pane_preserves_accepted_chart_for_transient_unified_daily_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parser = build_parser(load_translator("en"))
+    options = _to_options(parser.parse_args(["dashboard", "--demo"]))
+    pane = _new_pane(
+        standalone_from_pane(options, parse_dashboard_pane("timeline", host=options)),
+        "pane:timeline",
+    )
+    assert isinstance(pane.component, HistoricalChartComponent)
+    pane.component.seed(pane.component.candidate, UsageSnapshot((), (), 0.1))
+    pane.component.fail(
+        QueryError(
+            "error.ccusage_failed",
+            query="unified_daily",
+            code=1,
+            stderr="SQLITE_BUSY: database is locked at /private/example.db",
+        ),
+        generation=pane.component.generation,
+    )
+    monkeypatch.setattr(
+        tui_module,
+        "render_historical_component",
+        lambda *_args, **_kwargs: RenderedChart("accepted chart", ()),
+    )
+
+    rendered = _pane_render(pane, load_translator("en"), Terminal(58, 16, False, True))
+
+    assert rendered.chart == "accepted chart"
+    assert rendered.notices == ("The next refresh may recover; press r to try now.",)
+
+
+def test_dashboard_pane_uses_safe_placeholder_for_initial_transient_error() -> None:
+    parser = build_parser(load_translator("en"))
+    options = _to_options(parser.parse_args(["dashboard", "--demo"]))
+    pane = _new_pane(
+        standalone_from_pane(options, parse_dashboard_pane("timeline", host=options)),
+        "pane:timeline",
+    )
+    assert isinstance(pane.component, HistoricalChartComponent)
+    pane.component.fail(
+        QueryError(
+            "error.ccusage_failed",
+            query="unified_daily",
+            code=1,
+            stderr="SQLITE_BUSY: database is locked at /private/example.db",
+        ),
+        generation=pane.component.generation,
+    )
+
+    rendered = _pane_render(pane, load_translator("en"), Terminal(58, 16, False, True))
+
+    assert rendered.chart == (
+        "Usage data is temporarily unavailable.\nThe next refresh may recover; press r to try now."
+    )
+    assert "/private/example.db" not in rendered.chart
+
+
 def test_dashboard_pane_localizes_schema_errors() -> None:
     parser = build_parser(load_translator("en"))
     options = _to_options(parser.parse_args(["dashboard", "--demo"]))
@@ -1297,7 +1355,7 @@ def test_dashboard_pane_adjustment_state_changes_with_page() -> None:
     assert quick != advanced
 
 
-@pytest.mark.parametrize("command", ("timeline", "ranking"))
+@pytest.mark.parametrize("command", ("timeline", "ranking", "monitor"))
 def test_project_aggregation_is_advanced_only_for_project_panes(command: str) -> None:
     parser = build_parser(load_translator("en"))
     dashboard = _to_options(parser.parse_args(["dashboard", "--pane", f"{command} --by project"]))

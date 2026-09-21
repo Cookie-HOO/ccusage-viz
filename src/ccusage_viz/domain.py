@@ -10,6 +10,11 @@ from typing import TypeAlias
 NoticeValue: TypeAlias = str | int | float | bool | None
 
 
+def model_identity(value: str) -> str:
+    """Return the sole case-insensitive identity and display form for a model."""
+    return value.casefold()
+
+
 class Agent(StrEnum):
     CLAUDE = "claude"
     CODEX = "codex"

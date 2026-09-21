@@ -44,7 +44,7 @@ DASHBOARD_PRESETS = {
             "calendar --theme github --density minimal",
             "ranking --by project --style dots --theme gruvbox --density minimal",
             "stack --style stacked-pattern --theme dracula --density minimal",
-            "stack --style grouped-thin --theme catppuccin --density minimal",
+            "stack --style grouped-thin --theme contrast --density minimal",
             "monitor --style points --theme github --density minimal",
             "monitor --by model --style ranking --theme nord --density minimal",
             "monitor --by agent --style ranking --theme gruvbox --density minimal",

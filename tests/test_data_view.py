@@ -140,10 +140,15 @@ def test_exact_project_data_rows_have_an_explicit_agent_field() -> None:
     table = render_snapshot_data(options, snapshot, translator, terminal)
     payload = loads(render_snapshot_data(options, snapshot, translator, terminal, view="data-json"))
 
-    assert table.splitlines()[0].startswith("| rank | project | agent | is_other | total |")
-    assert [(row["project"], row["agent"]) for row in payload["rows"]] == [
-        ("app", "claude"),
-        ("app", "codex"),
+    assert table.splitlines()[0].startswith(
+        "| rank | display_project | project | agent | merge_group | is_other | total |"
+    )
+    assert [
+        (row["display_project"], row["project"], row["agent"], row["merge_group"])
+        for row in payload["rows"]
+    ] == [
+        ("claude · -home-me-projects-app", "-home-me-projects-app", "claude", None),
+        ("codex · app", "app", "codex", None),
     ]
 
 
@@ -198,19 +203,38 @@ def test_merged_project_data_rows_expose_stable_merge_group_only() -> None:
     assert ranking["rows"] == [
         {
             "rank": 1,
-            "project": "app",
-            "合并组": 1,
+            "display_project": "app",
+            "project": "-home-me-projects-app",
+            "agent": "claude",
+            "merge_group": 0,
             "is_other": False,
-            "total": 30,
-            "input": 15,
-            "output": 15,
+            "total": 20,
+            "input": 10,
+            "output": 10,
             "cache_read": 0,
             "cache_creation": 0,
             "other": 0,
-        }
+        },
+        {
+            "rank": 1,
+            "display_project": "app",
+            "project": "app",
+            "agent": "codex",
+            "merge_group": 0,
+            "is_other": False,
+            "total": 10,
+            "input": 5,
+            "output": 5,
+            "cache_read": 0,
+            "cache_creation": 0,
+            "other": 0,
+        },
     ]
-    assert all(row["合并组"] == 1 for row in timeline["rows"])
-    assert table.splitlines()[0].startswith("| rank | project | 合并组 | is_other | total |")
+    assert {row["display_project"] for row in timeline["rows"]} == {"app"}
+    assert {row["merge_group"] for row in timeline["rows"]} == {0}
+    assert table.splitlines()[0].startswith(
+        "| rank | display_project | project | agent | merge_group | is_other | total |"
+    )
 
 
 def test_exact_project_rows_keep_agent_column_for_other_rows() -> None:
@@ -252,13 +276,17 @@ def test_exact_project_rows_keep_agent_column_for_other_rows() -> None:
     table = render_snapshot_data(options, snapshot, translator, terminal)
     payload = loads(render_snapshot_data(options, snapshot, translator, terminal, view="data-json"))
 
-    assert table.splitlines()[0].startswith("| rank | project | agent | is_other | total |")
+    assert table.splitlines()[0].startswith(
+        "| rank | display_project | project | agent | merge_group | is_other | total |"
+    )
     assert all(line.count("|") == table.splitlines()[0].count("|") for line in table.splitlines())
     assert payload["rows"] == [
         {
             "rank": 1,
-            "project": "app",
+            "display_project": "claude · -home-me-projects-app",
+            "project": "-home-me-projects-app",
             "agent": "claude",
+            "merge_group": None,
             "is_other": False,
             "total": 20,
             "input": 10,
@@ -269,8 +297,10 @@ def test_exact_project_rows_keep_agent_column_for_other_rows() -> None:
         },
         {
             "rank": 2,
+            "display_project": "Other",
             "project": "Other",
             "agent": None,
+            "merge_group": None,
             "is_other": True,
             "total": 10,
             "input": 5,
@@ -348,4 +378,7 @@ def test_monitor_project_data_uses_safe_separated_series_label() -> None:
     )
 
     assert payload["rows"][0]["series"] == "claude · app"
+    assert payload["rows"][0]["display_project"] == "claude · app"
+    assert payload["rows"][0]["agent"] == "claude"
+    assert payload["rows"][0]["merge_group"] is None
     assert "/private" not in payload["rows"][0]["series"]

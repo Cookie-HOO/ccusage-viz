@@ -27,7 +27,12 @@ from ccusage_viz.processing.monitor import (
     monitor_key_sort_key,
     monitor_rank_keys,
 )
-from ccusage_viz.project_identity import ExactProjectDisplayKey
+from ccusage_viz.project_identity import (
+    ExactProjectDisplayKey,
+    ProjectDisplayKey,
+    ProjectLabelContext,
+    next_project_label_context,
+)
 from ccusage_viz.query.coordinator import QueryHandle
 from ccusage_viz.query.models import ProviderResult, QueryTrigger
 from ccusage_viz.query.runtime import QueryRuntime
@@ -78,6 +83,7 @@ class MonitorComponent:
         "monitor_started_at",
         "observer",
         "owner_id",
+        "project_label_context",
         "rank_changes",
         "rebaseline_pending",
         "refreshed_at",
@@ -103,11 +109,14 @@ class MonitorComponent:
         self.candidate = options
         self.accepted_options: StandaloneLaunch | None = None
         self.accepted_records: tuple[UsageRecord, ...] = ()
+        self.project_label_context: ProjectLabelContext = 0
         self.observer = ObservedTPM(
             window_seconds=chart.window_seconds,
             by=chart.by,
             top=chart.top,
             model_selectors=chart.filters.models,
+            project_aggregation=chart.project_aggregation,
+            project_label_context=self.project_label_context,
         )
         self.generation = 0
         self.render_revision = 0
@@ -235,6 +244,8 @@ class MonitorComponent:
             registry=self.registry,
             monitor_started_at=self.monitor_started_at,
         )
+        preview.project_label_context = self.project_label_context
+        preview.observer.project_label_context = preview.project_label_context
         preview.accepted_options = options
         preview.accepted_at = self.accepted_at
         preview.refreshed_at = self.refreshed_at
@@ -263,6 +274,14 @@ class MonitorComponent:
     def display(self) -> MonitorComponent:
         """Return the safe immediate display view for the current candidate."""
         return self if self.display_query_pending else self.preview(self.candidate)
+
+    def cycle_project_label_context(self) -> None:
+        """Restore up to two verified opaque label tokens for this session."""
+        if self._monitor_config(self._active_options()).by != "project":
+            return
+        self.project_label_context = next_project_label_context(self.project_label_context)
+        self.observer.project_label_context = self.project_label_context
+        self.render_revision += 1
 
     def clear_changes(self) -> None:
         self.value_changes.clear()
@@ -296,7 +315,13 @@ class MonitorComponent:
         series = tuple(
             ScalarSeries(
                 name,
-                name,
+                (
+                    f"{name.agent} · {name.label}"
+                    if isinstance(name, ProjectDisplayKey) and name.agent is not None
+                    else name.label
+                    if isinstance(name, ProjectDisplayKey)
+                    else str(name)
+                ),
                 tuple(bucket.values.get(name) for bucket in buckets),
                 name == "Other",
             )
@@ -334,6 +359,7 @@ class MonitorComponent:
             observed_entries=entries,
             metric=self._metric(),
             observed_scope=self._scope(),
+            project_aggregation=self._monitor_config(self._active_options()).project_aggregation,
         )
 
     def model(
@@ -378,8 +404,9 @@ class MonitorComponent:
 
     @staticmethod
     def _observed_entry(name: MonitorKey, value: float) -> ScalarRankingEntry:
-        if isinstance(name, ExactProjectDisplayKey):
-            return ScalarRankingEntry(name, name.label, value, agent=name.agent)
+        if isinstance(name, (ExactProjectDisplayKey, ProjectDisplayKey)):
+            label = f"{name.agent} · {name.label}" if name.agent is not None else name.label
+            return ScalarRankingEntry(name, label, value, agent=name.agent)
         return ScalarRankingEntry(name, str(name), value, name == "Other")
 
     def _current_entries(self) -> tuple[ScalarRankingEntry, ...]:
@@ -416,6 +443,8 @@ class MonitorComponent:
         self.observer.by = chart.by
         self.observer.top = chart.top
         self.observer.model_selectors = chart.filters.models
+        self.observer.project_aggregation = chart.project_aggregation
+        self.observer.project_label_context = self.project_label_context
 
     def _definition(self, model: TimelineModel | RankingModel) -> ChartDefinition:
         chart_id = "ranking" if isinstance(model, RankingModel) else "timeline"

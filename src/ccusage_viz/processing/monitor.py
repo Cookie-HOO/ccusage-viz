@@ -7,22 +7,28 @@ from datetime import datetime, timedelta
 from math import floor, isfinite, log10
 from typing import Any, TypeAlias, cast
 
-from ccusage_viz.domain import TokenUsage, UsageRecord
+from ccusage_viz.domain import TokenUsage, UsageRecord, model_identity
 from ccusage_viz.options import StandaloneLaunch
 from ccusage_viz.project_identity import (
     ExactProjectDisplayKey,
+    ProjectAggregation,
+    ProjectDisplayKey,
+    ProjectLabelContext,
     exact_project_display_key,
+    project_display_keys,
     resolve_projects,
     unique_projects,
 )
 
-MonitorKey: TypeAlias = str | ExactProjectDisplayKey
+MonitorKey: TypeAlias = str | ExactProjectDisplayKey | ProjectDisplayKey
 
 
 def monitor_key_sort_key(key: MonitorKey) -> tuple[str, str, str]:
     """Sort Monitor dimensions without treating display text as identity."""
     if isinstance(key, ExactProjectDisplayKey):
         return ("project", key.label.casefold(), key.agent.casefold())
+    if isinstance(key, ProjectDisplayKey):
+        return ("project", key.label.casefold(), (key.agent or "").casefold())
     return ("scalar", key.casefold(), "")
 
 
@@ -81,11 +87,15 @@ class ObservedTPM:
         by: str | None,
         top: int | None,
         model_selectors: tuple[str, ...] = (),
+        project_aggregation: ProjectAggregation = "name",
+        project_label_context: ProjectLabelContext = 0,
     ) -> None:
         self.window_seconds = window_seconds
         self.by = by
         self.top = top
         self.model_selectors = model_selectors
+        self.project_aggregation = project_aggregation
+        self.project_label_context = project_label_context
         self.previous: CounterSnapshot | None = None
         self.previous_at: float | None = None
         self.previous_raw_at: float | None = None
@@ -103,12 +113,18 @@ class ObservedTPM:
         self.sample_generation = 0
         self.y_axis_generation = -1
 
-    def _scale_semantics(self) -> tuple[str | None, int, int | None, tuple[str, ...]]:
+    def _scale_semantics(
+        self,
+    ) -> tuple[str | None, int, int | None, tuple[str, ...] | tuple[ProjectAggregation]]:
         return (
             self.by,
             self.window_seconds,
             self.top,
-            self.model_selectors if self.by == "model" else (),
+            self.model_selectors
+            if self.by == "model"
+            else (self.project_aggregation,)
+            if self.by == "project"
+            else (),
         )
 
     def update_y_axis(self, maximum: float) -> float:
@@ -131,17 +147,21 @@ class ObservedTPM:
     def _normalize(self, snapshot: CounterSnapshot) -> CounterSnapshot:
         # A bounded identity set keeps monitor memory finite. Agent/project labels
         # remain independent projections; model tracking preserves existing behavior.
+        normalized_models: defaultdict[str, TokenUsage] = defaultdict(TokenUsage.zero)
+        for name, usage in snapshot.models.items():
+            normalized = model_identity(name)
+            normalized_models[normalized] = normalized_models[normalized] + usage
         available = self.model_limit - len(self.tracked_models)
         if available > 0:
             self.tracked_models.update(
-                sorted(set(snapshot.models) - self.tracked_models)[:available]
+                sorted(set(normalized_models) - self.tracked_models)[:available]
             )
-        overflowed = any(name not in self.tracked_models for name in snapshot.models)
+        overflowed = any(name not in self.tracked_models for name in normalized_models)
         self.overflowed_models = self.overflowed_models or overflowed
         models = {
-            name: snapshot.models[name]
+            name: normalized_models[name]
             for name in sorted(self.tracked_models)
-            if name in snapshot.models
+            if name in normalized_models
         }
         return CounterSnapshot(
             snapshot.total, models, dict(snapshot.agents), dict(snapshot.projects)
@@ -351,6 +371,24 @@ class ObservedTPM:
         if self.by is None:
             return {"Total": float(segment.total)}
         values = getattr(segment, f"{self.by}s")
+        if self.by == "project":
+            exact = tuple(
+                name
+                for source in (*self.rollups, *self.intervals)
+                for name in source.projects
+                if isinstance(name, ExactProjectDisplayKey)
+            )
+            displays = project_display_keys(
+                exact,
+                self.project_aggregation,
+                context=self.project_label_context,
+            )
+            projected: defaultdict[MonitorKey, float] = defaultdict(float)
+            for name, value in values.items():
+                projected[displays[name] if isinstance(name, ExactProjectDisplayKey) else name] += (
+                    value
+                )
+            return dict(projected)
         if self.by != "model" or not self.model_selectors:
             return {name: float(value) for name, value in values.items()}
         selected: defaultdict[MonitorKey, float] = defaultdict(float)
@@ -476,6 +514,8 @@ def _copy_observer(observer: ObservedTPM) -> ObservedTPM:
         by=observer.by,
         top=observer.top,
         model_selectors=observer.model_selectors,
+        project_aggregation=observer.project_aggregation,
+        project_label_context=observer.project_label_context,
     )
     copy.previous = observer.previous
     copy.previous_at = observer.previous_at
@@ -518,9 +558,9 @@ def _top_other(
 
 
 def _matches_selector(value: str, selectors: tuple[str, ...]) -> bool:
-    """Match monitor startup selectors without changing their stored spelling."""
+    """Match complete monitor selectors without changing their stored spelling."""
     normalized = value.casefold()
-    return any(selector.casefold() in normalized for selector in selectors)
+    return any(selector.casefold() == normalized for selector in selectors)
 
 
 def _agent_records(
@@ -546,7 +586,8 @@ def _counters(records: tuple[UsageRecord, ...]) -> CounterSnapshot:
         if record.project is not None:
             projects[exact_project_display_key(record.project, project_refs)] += record.usage
         for model in record.models:
-            models[model.model] = models[model.model] + model.usage
+            name = model_identity(model.model)
+            models[name] = models[name] + model.usage
     return CounterSnapshot(total, dict(models), dict(agents), dict(projects))
 
 

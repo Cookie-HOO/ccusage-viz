@@ -59,7 +59,11 @@ def test_filters_or_within_dimension_and_and_across_dimensions() -> None:
     )
     period = DateRange(date(2026, 1, 1), date(2026, 1, 2), None)
     filtered, _ = filter_records(
-        records, period, agents=("claude", "codex"), projects=("app",), models=("son", "cod")
+        records,
+        period,
+        agents=("claude", "codex"),
+        projects=("app (claude)", "app (codex)"),
+        models=("sonnet", "codex"),
     )
     assert [item.usage.total for item in filtered] == [10, 20]
 
@@ -71,11 +75,11 @@ def test_filter_candidates_are_independent_across_dimensions() -> None:
     )
     period = DateRange(date(2026, 1, 1), date(2026, 1, 2), None)
 
-    filtered, notices = filter_records(records, period, agents=("claude",), models=("cod",))
+    filtered, notices = filter_records(records, period, agents=("claude",), models=("codex",))
     assert filtered == ()
     assert notices[-1].values == {"dimension": "model", "values": "codex"}
 
-    filtered, notices = filter_records(records, period, agents=("claude",), projects=("ool",))
+    filtered, notices = filter_records(records, period, agents=("claude",), projects=("tool",))
     assert filtered == ()
     assert notices[-1].values == {"dimension": "project", "values": "tool"}
 
@@ -88,7 +92,7 @@ def test_filters_remain_and_across_independently_resolved_dimensions() -> None:
     period = DateRange(date(2026, 1, 1), date(2026, 1, 2), None)
 
     filtered, _ = filter_records(
-        records, period, agents=("claude",), projects=("app",), models=("son",)
+        records, period, agents=("claude",), projects=("app",), models=("sonnet",)
     )
     assert [item.usage.total for item in filtered] == [10]
 
@@ -133,9 +137,9 @@ def test_project_aggregation_merges_only_unambiguous_cross_agent_names() -> None
         ("tool", 10),
     ]
     assert [(entry.label, entry.usage.total) for entry in exact.entries] == [
-        ("app", 30),
-        ("app", 20),
-        ("tool", 10),
+        ("claude · -home-me-projects-app", 30),
+        ("codex · app", 20),
+        ("codex · tool", 10),
     ]
     assert [entry.key for entry in exact.entries[:2]] == [
         ("project", "exact", "claude", "-home-me-projects-app"),
@@ -181,9 +185,9 @@ def test_project_aggregation_does_not_merge_ambiguous_same_agent_names() -> None
     model = build_timeline(records, period, by="project", project_aggregation="name")
 
     assert [(series.label, series.total.total) for series in model.series] == [
-        ("app", 30),
-        ("app 1", 20),
-        ("app 2", 10),
+        ("-home-me-projects-app", 30),
+        ("app 2", 20),
+        ("app 1", 10),
     ]
 
 

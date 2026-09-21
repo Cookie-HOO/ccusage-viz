@@ -353,8 +353,8 @@ def overlay_plot_column(
 
 
 def plot_height(context: RenderContext, *, text_rows: int) -> int:
-    """Reserve renderer-owned text rows and plotext's final margin."""
-    return max(8, context.height - text_rows - 1)
+    """Size plotext so its axis rows fill the renderer's available chart area."""
+    return max(8, context.height - text_rows + 1)
 
 
 def plot_text(context: RenderContext) -> str:

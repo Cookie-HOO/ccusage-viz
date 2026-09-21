@@ -12,37 +12,16 @@ def candidates():
     )
 
 
-def test_exact_match_wins_before_contains() -> None:
-    assert resolve_selectors(("alpha",), candidates(), dimension="model") == ("alpha",)
-
-
-def test_unique_contains_and_or_across_repeated_selectors() -> None:
-    assert resolve_selectors(("phabet", "BETA"), candidates(), dimension="model") == (
-        "alphabet",
+def test_complete_case_insensitive_matches_are_or_and_deduplicated() -> None:
+    assert resolve_selectors(("ALPHA", "BETA", "alpha"), candidates(), dimension="model") == (
+        "alpha",
         "beta",
     )
 
 
-def test_ambiguous_contains_and_no_match_raise_localizable_errors() -> None:
-    with pytest.raises(UsageError) as ambiguous:
-        resolve_selectors(("alph",), candidates(), dimension="model")
-    assert ambiguous.value.key == "error.selector_ambiguous"
-    assert ambiguous.value.values == {
-        "selector": "alph",
-        "dimension": "model",
-        "candidates": "  - Alpha\n  - Alphabet",
-    }
-    many = tuple(
-        SelectorCandidate(str(index), f"alpha-{index}", (f"Alpha {index}",)) for index in range(8)
-    )
-    with pytest.raises(UsageError) as truncated:
-        resolve_selectors(("alpha",), many, dimension="model")
-    assert truncated.value.key == "error.selector_ambiguous_more"
-    assert truncated.value.values["remaining"] == 3
-    candidates_value = truncated.value.values["candidates"]
-    assert isinstance(candidates_value, str)
-    assert candidates_value.count("\n") == 4
-
-    with pytest.raises(UsageError) as missing:
-        resolve_selectors(("omega",), candidates(), dimension="model")
-    assert missing.value.key == "error.selector_no_match"
+def test_partial_and_missing_selectors_raise_a_no_match_error() -> None:
+    for selector in ("alph", "phabet", "omega"):
+        with pytest.raises(UsageError) as missing:
+            resolve_selectors((selector,), candidates(), dimension="model")
+        assert missing.value.key == "error.selector_no_match"
+        assert missing.value.values == {"selector": selector, "dimension": "model"}

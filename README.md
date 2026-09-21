@@ -124,6 +124,13 @@ ccuv ranking --by project
 
 ![Ranking view: projects ordered by total tokens](docs/assets/readme/standalone-ranking.png)
 
+> [!TIP]
+> Project Ranking uses conservative **Name** aggregation by default: an unambiguous
+> Claude–Codex pair becomes one chart project. Press `v` for its data views: they
+> show the safe source rows before aggregation, and equal non-empty `merge_group`
+> values identify the rows summed into one chart project. Use
+> `--project-aggregation exact` to disable cross-Agent aggregation.
+
 ### Project attribution coverage
 
 The compatibility baseline below was verified on macOS with **ccusage 20.0.23**.
@@ -267,6 +274,7 @@ These documents answer the deeper questions:
 | [Design philosophy](docs/design-philosophy.md) | Which product boundaries, ownership rules, and presentation principles are intentional? |
 | [Architecture](docs/architecture.md) | How do CLI routes, hosts, panes, providers, processing, and renderers fit together for maintainers? |
 | [Roadmap](ROADMAP.md) | What is planned, deferred, or open for feedback? |
+| [Known issues](docs/known-issues.md) | Which intermittent `ccusage` problems are recognized, and how can I recover safely? |
 
 Report reproducible problems with the [bug report form](https://github.com/Cookie-HOO/ccusage-viz/issues/new?template=bug_report.yml), or propose improvements through the [feature request form](https://github.com/Cookie-HOO/ccusage-viz/issues/new?template=feature_request.yml).
 

@@ -307,6 +307,12 @@ def _add_monitor(parser: argparse.ArgumentParser, tr: Translator) -> None:
         "--by", choices=("agent", "model", "project"), help=tr.text("help.monitor_by")
     )
     parser.add_argument("--top", type=int, help=tr.text("help.monitor_top"))
+    parser.add_argument(
+        "--project-aggregation",
+        choices=PROJECT_AGGREGATIONS,
+        default="name",
+        help=tr.text("help.project_aggregation"),
+    )
     parser.add_argument("--agent", action="append", default=[], help=tr.text("help.agent"))
     parser.add_argument("--model", action="append", default=[], help=tr.text("help.model"))
     parser.add_argument("--project", action="append", default=[], help=tr.text("help.project"))
@@ -439,7 +445,13 @@ def _chart_from_namespace(namespace: argparse.Namespace, *, timezone: str | None
         top = 3
     if command == "monitor":
         return MonitorConfig(
-            "monitor", _parse_window(namespace.window), filters, presentation, namespace.by, top
+            kind="monitor",
+            window_seconds=_parse_window(namespace.window),
+            filters=filters,
+            presentation=presentation,
+            by=namespace.by,
+            top=top,
+            project_aggregation=getattr(namespace, "project_aggregation", "name"),
         )
     date_range = resolve_date_range(
         command,
