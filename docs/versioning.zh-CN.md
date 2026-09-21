@@ -21,4 +21,4 @@
 
 DSH 专属 provider 与 contract 试验不属于 `0.1.1`。
 
-下一个补丁版本仅发布当前已完成的工作。之后的次版本可在 npm 包形式的 `ccuv-collector` 及其 JSON 协议稳定后再集成。该集成将使用由 collector 所有、对 ccuv 透明的 agent identity 和 provenance 契约，而不是 DSH 专属 ccuv provider。
+`0.1.1` 发布当前已完成的工作。之后的次版本可在 npm 包形式的 `ccuv-collector` 及其 JSON 协议稳定后再集成。该集成将使用由 collector 所有、对 ccuv 透明的 agent identity 和 provenance 契约，而不是 DSH 专属 ccuv provider。

@@ -21,4 +21,4 @@
 
 DSH-specific provider and contract experiments are intentionally not part of `0.1.1`.
 
-The next patch release ships the completed current work. A subsequent minor release may integrate the npm-packaged `ccuv-collector` once its package and JSON protocol are stable. That integration will use a collector-owned, opaque agent identity and provenance contract rather than a DSH-specific ccuv provider.
+`0.1.1` ships the completed current work. A subsequent minor release may integrate the npm-packaged `ccuv-collector` once its package and JSON protocol are stable. That integration will use a collector-owned, opaque agent identity and provenance contract rather than a DSH-specific ccuv provider.
