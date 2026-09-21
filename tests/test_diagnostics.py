@@ -3,7 +3,7 @@ from io import StringIO
 import pytest
 
 from ccusage_viz.diagnostics import color_enabled, format_error, highlight_matches
-from ccusage_viz.errors import UsageError
+from ccusage_viz.errors import SchemaError, UsageError
 from ccusage_viz.i18n import load_translator
 
 
@@ -31,6 +31,16 @@ def test_ambiguous_diagnostic_highlights_candidates_only() -> None:
     rendered = format_error(error, load_translator("en"), color=True)
     assert rendered.count("\x1b[38;5;") == 2
     assert "matches multiple" in rendered
+
+
+def test_schema_diagnostic_is_localized() -> None:
+    rendered = format_error(
+        SchemaError("error.schema", path="$.projects", reason="expected object"),
+        load_translator("en"),
+    )
+    assert rendered != "error.schema"
+    assert "$.projects" in rendered
+    assert "expected object" in rendered
 
 
 def test_redirected_and_explicitly_disabled_diagnostics_are_plain(

@@ -64,6 +64,27 @@ def test_parse_claude_instances() -> None:
     assert record.source is SourceKind.CLAUDE_DAILY_PROJECTS
 
 
+def test_parse_claude_instances_accepts_empty_daily_response() -> None:
+    payload = {
+        "daily": [],
+        "totals": {
+            "cacheCreationTokens": 0,
+            "cacheReadTokens": 0,
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "totalCost": -0.0,
+            "totalTokens": 0,
+        },
+    }
+    assert parse_usage_records(QueryKind.CLAUDE_DAILY_PROJECTS, payload) == ()
+
+
+@pytest.mark.parametrize("payload", [{}, {"daily": [{}]}, {"projects": None}])
+def test_parse_claude_instances_rejects_other_non_project_responses(payload: object) -> None:
+    with pytest.raises(SchemaError):
+        parse_usage_records(QueryKind.CLAUDE_DAILY_PROJECTS, payload)
+
+
 @pytest.mark.parametrize("container", ["sessions", "session", "data"])
 def test_parse_codex_synthetic_session_shapes(container: str) -> None:
     payload = {container: [usage(session="abc", projectPath="/tmp/project", projectName="demo")]}
@@ -75,19 +96,32 @@ def test_parse_codex_synthetic_session_shapes(container: str) -> None:
     assert record.project.display_name == "demo"
 
 
-def test_codex_windows_path_uses_shared_display_normalization() -> None:
-    payload = {"sessions": [usage(directory=r"C:\\work\\repo")]}
+def test_codex_cwd_takes_precedence_over_storage_directory() -> None:
+    payload = {"sessions": [usage(cwd=r"C:\\work\\repo", directory="2026/06/04")]}
+
     (record,) = parse_usage_records(QueryKind.CODEX_SESSIONS, payload)
+
     assert record.project is not None
+    assert record.project.key == ("codex", r"C:\\work\\repo")
     assert record.project.display_name == "repo"
 
 
-def test_parse_current_codex_directory_and_model_map_shape() -> None:
+def test_codex_directory_is_never_a_project_identity() -> None:
+    payload = {"sessions": [usage(directory="2026/06/04", projectName="04")]}
+
+    (record,) = parse_usage_records(QueryKind.CODEX_SESSIONS, payload)
+
+    assert record.project is not None
+    assert record.project.key == ("codex", "unassigned-codex")
+    assert record.project.display_name == "Unassigned Codex"
+
+
+def test_parse_codex_model_map_with_official_project() -> None:
     payload = {
         "sessions": [
             usage(
-                directory="/workspace/api",
-                sessionId="/workspace/api/session.jsonl",
+                projectPath="/workspace/api",
+                directory="2026/06/04",
                 models={"gpt-5": usage(reasoningOutputTokens=2)},
             )
         ]
