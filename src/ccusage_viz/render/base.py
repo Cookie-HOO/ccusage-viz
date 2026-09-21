@@ -46,6 +46,7 @@ class RenderContext:
     weekday_mode: str = "auto"
     period: str | None = None
     title_content: str | None = None
+    filter_summary: str | None = None
     density: Literal["minimal", "compact", "full"] = "full"
     pending: bool = False
     audit: RenderAudit | None = None
@@ -134,7 +135,9 @@ def render_audit(context: RenderContext) -> str:
 
 
 def title_with_querying(title: str, context: RenderContext) -> str:
-    """Annotate a title when its rendered facts are intentionally incomplete."""
+    """Annotate a title with its active scope and incomplete-query state."""
+    if context.filter_summary:
+        title = f"{title} · {context.filter_summary}"
     if context.audit is None or not context.audit.querying:
         return title
     marker = styled_text(

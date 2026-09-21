@@ -34,6 +34,7 @@ from ccusage_viz.options import (
     replace_chart_filters,
 )
 from ccusage_viz.render.base import RenderAudit, RenderContext
+from ccusage_viz.render.filters import active_filter_summary
 from ccusage_viz.terminal import FramePainter, Terminal, compose_frame, inspect_terminal
 from ccusage_viz.terminal_ui import (
     AdjustmentAction,
@@ -115,6 +116,9 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
             deltas=target.deltas,
             rank_deltas=target.rank_deltas,
             title_content=translator.text(f"label.{monitor_chart(config).by or 'total'}"),
+            filter_summary=active_filter_summary(
+                monitor_chart(config).filters, translator, width=terminal.width
+            ),
             density=config.chart.presentation.density,
             pending=display_query_pending,
             audit=RenderAudit(

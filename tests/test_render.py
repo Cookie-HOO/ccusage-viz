@@ -36,6 +36,7 @@ from ccusage_viz.i18n import load_translator
 from ccusage_viz.options import (
     CalendarConfig,
     ChartPresentation,
+    Filters,
     ProcessConfig,
     RankingConfig,
     StackConfig,
@@ -51,6 +52,7 @@ from ccusage_viz.render.base import (
     render_audit,
 )
 from ccusage_viz.render.calendar import render_calendar
+from ccusage_viz.render.filters import active_filter_summary
 from ccusage_viz.render.observation import render_observation
 from ccusage_viz.render.palette import (
     CATEGORICAL,
@@ -341,6 +343,21 @@ def test_all_historical_renderers_omit_summary_at_minimal_density(renderer, mode
 
     assert "Today’s tokens" not in output
     assert "vs yesterday" not in output
+
+
+def test_active_filter_summary_orders_dimension_values_and_compacts() -> None:
+    filters = Filters(("dsh", "claude"), ("deepseek/chat",), ("ccusage-viz", "collector"))
+
+    full = active_filter_summary(filters, load_translator("en"), width=120)
+    compact = active_filter_summary(filters, load_translator("en"), width=72)
+    counted = active_filter_summary(filters, load_translator("zh"), width=16)
+
+    assert (
+        full == "Filters: Agent dsh, claude · Model deepseek/chat · Project ccusage-viz, collector"
+    )
+    assert compact == "Filters: Agent dsh +1 · Model deepseek/chat · Project ccusage-viz +1"
+    assert counted == "筛选：Agent 2 · 模型 1 · 项目 2"
+    assert active_filter_summary(Filters(), load_translator("en"), width=80) == ""
 
 
 def test_summary_shows_filter_dimension_count() -> None:

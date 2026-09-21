@@ -101,6 +101,7 @@ from ccusage_viz.query.coordinator import QueryHandle
 from ccusage_viz.query.models import ProviderResult
 from ccusage_viz.query.runtime import QueryRuntime
 from ccusage_viz.render.base import RenderAudit, RenderContext, styled_text
+from ccusage_viz.render.filters import active_filter_summary
 from ccusage_viz.render.palette import COLOR_SCHEMES, get_color_scheme
 from ccusage_viz.render.summary import render_summary, render_summary_placeholder
 from ccusage_viz.terminal import FramePainter, Terminal, compose_frame
@@ -883,6 +884,9 @@ def _pane_render(pane: TuiPane, translator: Translator, terminal: Terminal) -> P
                 hide_upper_right_axes=True,
                 deltas=component.deltas,
                 rank_deltas=component.rank_deltas,
+                filter_summary=active_filter_summary(
+                    active.chart.filters, translator, width=terminal.width
+                ),
                 density=active.chart.presentation.density,
                 pending=display_query_pending,
                 audit=RenderAudit(

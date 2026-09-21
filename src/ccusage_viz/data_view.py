@@ -89,16 +89,37 @@ def _exact_project_agent(key: object) -> str | None:
     return None
 
 
+def _merged_project_alias(key: object) -> str | None:
+    if (
+        isinstance(key, tuple)
+        and len(key) == 3
+        and key[:2] == ("project", "name")
+        and isinstance(key[2], str)
+    ):
+        return key[2]
+    return None
+
+
+def _merge_groups(keys: Iterable[object]) -> dict[object, int]:
+    aliases = sorted(
+        {alias for key in keys if (alias := _merged_project_alias(key)) is not None},
+        key=str.casefold,
+    )
+    return {("project", "name", alias): index for index, alias in enumerate(aliases, start=1)}
+
+
 def _historical_rows(
     model: TimelineModel | CalendarModel | StackModel | RankingModel,
 ) -> list[dict[str, object]]:
     if isinstance(model, TimelineModel):
         include_agent = any(_exact_project_agent(series.key) is not None for series in model.series)
+        merge_groups = _merge_groups(series.key for series in model.series)
         return [
             {
                 "period": day.isoformat(),
                 "series": series.label,
                 **({"agent": _exact_project_agent(series.key)} if include_agent else {}),
+                **({"合并组": merge_groups[series.key]} if series.key in merge_groups else {}),
                 "is_other": series.is_other,
                 **_usage_values(usage),
             }
@@ -119,11 +140,13 @@ def _historical_rows(
             for day, usage in zip(model.days, component.values, strict=True)
         ]
     include_agent = any(_exact_project_agent(entry.key) is not None for entry in model.entries)
+    merge_groups = _merge_groups(entry.key for entry in model.entries)
     return [
         {
             "rank": rank,
             "project": entry.label,
             **({"agent": _exact_project_agent(entry.key)} if include_agent else {}),
+            **({"合并组": merge_groups[entry.key]} if entry.key in merge_groups else {}),
             "is_other": entry.is_other,
             **_usage_values(entry.usage),
         }

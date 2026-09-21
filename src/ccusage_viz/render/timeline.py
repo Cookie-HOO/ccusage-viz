@@ -43,7 +43,6 @@ def _observed_heading(model: TimelineModel, context: RenderContext) -> str:
         if scope.state != "ready"
         else ""
     )
-    agents = f" · Agent {', '.join(scope.agents)}" if scope.agents else ""
     return title_with_querying(
         context.translator.text(
             "label.monitor_timeline_tokens"
@@ -51,7 +50,7 @@ def _observed_heading(model: TimelineModel, context: RenderContext) -> str:
             else "label.monitor_timeline_tpm",
             window=window,
             state=state,
-            agents=agents,
+            agents="",
             mode=mode,
         ),
         context,

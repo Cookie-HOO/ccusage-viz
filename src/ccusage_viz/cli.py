@@ -558,7 +558,10 @@ def _to_options(
     namespace: argparse.Namespace, *, explicit: frozenset[str] = frozenset()
 ) -> LaunchConfig:
     command = namespace.command or "timeline"
-    process = ProcessConfig(namespace.ccusage_bin, namespace.query_timeout)
+    process = ProcessConfig(
+        ccusage_bin=namespace.ccusage_bin,
+        query_timeout=namespace.query_timeout,
+    )
     if not math.isfinite(process.query_timeout) or process.query_timeout <= 0:
         raise UsageError("error.arguments", detail="--query-timeout must be positive and finite")
     if command == "dashboard":

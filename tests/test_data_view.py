@@ -147,6 +147,72 @@ def test_exact_project_data_rows_have_an_explicit_agent_field() -> None:
     ]
 
 
+def test_merged_project_data_rows_expose_stable_merge_group_only() -> None:
+    ranking_options = StandaloneLaunch(
+        ProcessConfig(),
+        StandaloneHostConfig(),
+        RankingConfig("ranking", DateRange(date(2026, 1, 1), date(2026, 1, 2), None)),
+    )
+    timeline_options = StandaloneLaunch(
+        ProcessConfig(),
+        StandaloneHostConfig(),
+        TimelineConfig(
+            "timeline",
+            DateRange(date(2026, 1, 1), date(2026, 1, 2), None),
+            by="project",
+        ),
+    )
+    snapshot = UsageSnapshot(
+        records=(
+            UsageRecord(
+                date(2026, 1, 1),
+                Agent.CLAUDE,
+                TokenUsage.from_parts(
+                    total=20, input=10, output=10, cache_read=0, cache_creation=0
+                ),
+                SourceKind.CLAUDE_DAILY_PROJECTS,
+                make_project_ref("claude", "-home-me-projects-app"),
+            ),
+            UsageRecord(
+                date(2026, 1, 2),
+                Agent.CODEX,
+                TokenUsage.from_parts(total=10, input=5, output=5, cache_read=0, cache_creation=0),
+                SourceKind.CODEX_SESSIONS,
+                make_project_ref("codex", "/workspace/app"),
+            ),
+        ),
+        notices=(),
+        elapsed=0,
+    )
+    terminal = Terminal(120, 40, False, False)
+    translator = load_translator("en")
+
+    ranking = loads(
+        render_snapshot_data(ranking_options, snapshot, translator, terminal, view="data-json")
+    )
+    timeline = loads(
+        render_snapshot_data(timeline_options, snapshot, translator, terminal, view="data-json")
+    )
+    table = render_snapshot_data(ranking_options, snapshot, translator, terminal)
+
+    assert ranking["rows"] == [
+        {
+            "rank": 1,
+            "project": "app",
+            "合并组": 1,
+            "is_other": False,
+            "total": 30,
+            "input": 15,
+            "output": 15,
+            "cache_read": 0,
+            "cache_creation": 0,
+            "other": 0,
+        }
+    ]
+    assert all(row["合并组"] == 1 for row in timeline["rows"])
+    assert table.splitlines()[0].startswith("| rank | project | 合并组 | is_other | total |")
+
+
 def test_exact_project_rows_keep_agent_column_for_other_rows() -> None:
     options = StandaloneLaunch(
         ProcessConfig(),

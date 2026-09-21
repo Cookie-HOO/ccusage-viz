@@ -1,6 +1,6 @@
 # Roadmap
 
-`ccusage-viz` is currently at **0.1.0**. This roadmap describes public product contracts, not private implementation plans.
+`ccusage-viz` is currently at **0.1.1**. This roadmap describes public product contracts, not private implementation plans.
 
 ## 0.1.x
 

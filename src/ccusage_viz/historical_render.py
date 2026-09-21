@@ -16,6 +16,7 @@ from ccusage_viz.options import (
 )
 from ccusage_viz.render import RenderContext
 from ccusage_viz.render.base import RenderAudit, content_heading, date_range_heading, render_audit
+from ccusage_viz.render.filters import active_filter_summary
 from ccusage_viz.render.summary import render_summary_placeholder
 from ccusage_viz.terminal import Terminal
 
@@ -121,6 +122,7 @@ def _context(
         weekday_mode=getattr(chart, "weekdays", "show"),
         period=chart.date_range.period if chart.date_range.relative_until else None,
         title_content=_title_content(options, translator, normalize_titles),
+        filter_summary=active_filter_summary(chart.filters, translator, width=terminal.width),
         density=chart.presentation.density,
         pending=component.is_pending,
         audit=RenderAudit(
