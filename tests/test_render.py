@@ -8,6 +8,7 @@ from datetime import date, datetime
 import plotext as plt
 import pytest
 
+from ccusage_viz.bootstrap import build_chart_registry
 from ccusage_viz.chart_models import (
     CalendarDay,
     CalendarModel,
@@ -29,8 +30,26 @@ from ccusage_viz.core.time import DateRange
 from ccusage_viz.domain import TokenUsage
 from ccusage_viz.errors import UsageError
 from ccusage_viz.formatting import display_width, strip_ansi
+from ccusage_viz.historical_component import HistoricalChartComponent, UsageSnapshot
+from ccusage_viz.historical_render import render_historical_component
 from ccusage_viz.i18n import load_translator
-from ccusage_viz.render.base import RenderAudit, RenderContext, isolated_plot, render_audit
+from ccusage_viz.options import (
+    CalendarConfig,
+    ChartPresentation,
+    ProcessConfig,
+    RankingConfig,
+    StackConfig,
+    StandaloneHostConfig,
+    StandaloneLaunch,
+    TimelineConfig,
+)
+from ccusage_viz.render.base import (
+    RenderAudit,
+    RenderContext,
+    isolated_plot,
+    observed_start_marker,
+    render_audit,
+)
 from ccusage_viz.render.calendar import render_calendar
 from ccusage_viz.render.observation import render_observation
 from ccusage_viz.render.palette import (
@@ -44,6 +63,7 @@ from ccusage_viz.render.palette import (
 from ccusage_viz.render.ranking import render_ranking
 from ccusage_viz.render.stack import render_stack
 from ccusage_viz.render.timeline import render_timeline
+from ccusage_viz.terminal import Terminal
 
 
 def usage(total: int) -> TokenUsage:
@@ -56,6 +76,70 @@ def context(ascii: bool = False) -> RenderContext:
 
 def period() -> DateRange:
     return DateRange(date(2026, 1, 1), date(2026, 1, 14), None)
+
+
+@pytest.mark.parametrize(
+    "config",
+    (
+        TimelineConfig("timeline", period(), presentation=ChartPresentation(theme="no-color")),
+        CalendarConfig(
+            "calendar", period(), presentation=ChartPresentation(theme="no-color", style="relative")
+        ),
+        StackConfig(
+            "stack", period(), presentation=ChartPresentation(theme="no-color", style="stacked")
+        ),
+        RankingConfig(
+            "ranking", period(), presentation=ChartPresentation(theme="no-color", style="bar")
+        ),
+    ),
+)
+def test_pending_historical_component_renders_candidate_safe_placeholder(config) -> None:
+    accepted = StandaloneLaunch(ProcessConfig(), StandaloneHostConfig(), config)
+    component = HistoricalChartComponent(
+        accepted, owner_id="render-test", runtime=None, registry=build_chart_registry()
+    )
+    component.seed(accepted, UsageSnapshot((), (), 0.1))
+    candidate = replace(
+        accepted,
+        chart=replace(
+            config,
+            date_range=DateRange(
+                date(2026, 2, 1), date(2026, 2, 14), None, period="14d", relative_until=True
+            ),
+        ),
+    )
+    component.configure(candidate, data_affecting=True)
+
+    output = render_historical_component(
+        component, load_translator("en"), Terminal(100, 30, False, False)
+    ).chart
+
+    assert "14d" in output
+    assert "Loading data…" in output
+    assert "??" in output
+    assert "querying" in output
+    assert "2026-01-01" not in output
+
+
+def test_title_querying_marker_is_semantic_and_localized() -> None:
+    querying = RenderContext(
+        80,
+        24,
+        load_translator("zh"),
+        color=False,
+        audit=RenderAudit(querying=True),
+    )
+    refreshing = RenderContext(
+        80,
+        24,
+        load_translator("en"),
+        color=False,
+        audit=RenderAudit(refreshing=True),
+    )
+    model = TimelineModel((date(2026, 1, 1),), (Series("total", "Total", (usage(1),)),))
+
+    assert "查询中" in render_timeline(model, querying)
+    assert "querying" not in render_timeline(model, refreshing)
 
 
 def test_normalized_content_headings_prefix_timeline_and_ranking() -> None:
@@ -88,6 +172,43 @@ def test_ranking_heading_shows_hidden_top_coverage() -> None:
     output = render_ranking(model, context(True))
 
     assert "Ranking · 2026-01-01–2026-01-14 · Top 1 · 60.0% of total" in output
+
+
+def test_pending_historical_ranking_masks_stale_figures() -> None:
+    summary = PeriodSummary(
+        "day",
+        date(2026, 1, 14),
+        60,
+        PercentChange(ChangeDirection.INCREASE, 20),
+        PercentChange(ChangeDirection.DECREASE, 10),
+        date(2026, 1, 7),
+    )
+    model = RankingModel(
+        (RankingEntry("a", "A", usage(60)),),
+        period(),
+        summary=summary,
+        denominator=usage(100),
+        top=1,
+        top_share=0.6,
+    )
+
+    output = render_ranking(
+        model,
+        RenderContext(
+            100,
+            24,
+            load_translator("en"),
+            color=False,
+            pending=True,
+            deltas={"a": 1},
+            rank_deltas={"a": 1},
+        ),
+    )
+
+    assert "??" in output
+    assert "60.0% of total" not in output
+    assert " 60 " not in output
+    assert "60.0%" not in output
 
 
 @pytest.mark.parametrize(
@@ -297,6 +418,83 @@ def test_ranking_and_custom_calendar_render_without_json_or_table() -> None:
     assert "Calendar" in calendar and "Less" in calendar and "#" in calendar
 
 
+def test_exact_project_ranking_qualifies_safe_labels_and_title() -> None:
+    model = RankingModel(
+        (
+            RankingEntry(
+                ("project", "exact", "claude", "-private-work-py-ccusage-viz"),
+                "py-ccusage-viz",
+                usage(1_200),
+            ),
+            RankingEntry(
+                ("project", "exact", "codex", "/private/work/py-ccusage-viz"),
+                "py-ccusage-viz",
+                usage(800),
+            ),
+            RankingEntry("Other", "Other", usage(500), is_other=True),
+        ),
+        period(),
+        project_aggregation="exact",
+    )
+
+    output = render_ranking(
+        model,
+        RenderContext(80, 24, load_translator("en"), color=False, ascii=True, period="14d"),
+    )
+    rows = output.splitlines()[-3:]
+
+    assert "Agent · Project · cumulative ranking · 14d" in output
+    assert "claude · py-ccusage-viz" not in rows[0]
+    assert "codex · py-ccusage-viz" not in rows[1]
+    assert "claude" in rows[0] and "py-ccusage-viz" in rows[0]
+    assert "codex" in rows[1] and "py-ccusage-viz" in rows[1]
+    assert "Other" in rows[2]
+    assert "-private-work-py-ccusage-viz" not in output
+    assert "/private/work/py-ccusage-viz" not in output
+
+
+def test_name_project_ranking_keeps_plain_label_for_exact_identity() -> None:
+    model = RankingModel(
+        (RankingEntry(("project", "exact", "claude", "-private-work-app"), "app", usage(1_200)),),
+        period(),
+    )
+
+    output = render_ranking(model, context(True))
+
+    assert "Ranking · 2026-01-01–2026-01-14" in output
+    assert "claude app" not in output
+    assert "app" in output
+
+
+def test_exact_project_ranking_keeps_agent_visible_in_narrow_context() -> None:
+    model = RankingModel(
+        (
+            RankingEntry(
+                ("project", "exact", "claude", "-private-work-very-long-project"),
+                "very-long-project",
+                usage(1_200),
+            ),
+            RankingEntry(
+                ("project", "exact", "codex", "/private/work/very-long-project"),
+                "very-long-project",
+                usage(800),
+            ),
+        ),
+        period(),
+        project_aggregation="exact",
+    )
+    output = render_ranking(
+        model,
+        RenderContext(40, 24, load_translator("en"), color=False, ascii=True),
+    )
+
+    rows = output.splitlines()[-2:]
+    assert "claude" in rows[0]
+    assert "codex" in rows[1]
+    assert all("claude ·" not in row and "codex ·" not in row for row in rows)
+    assert all("very-long-project" not in row for row in rows)
+
+
 def test_ranking_change_markers_separate_rank_activity_and_value() -> None:
     model = RankingModel(
         (
@@ -377,6 +575,25 @@ def test_empty_ranking_keeps_localized_effective_range() -> None:
     assert lines[1] == "所选范围内没有 Token 用量。"
 
 
+def test_observed_monitor_heading_marks_only_query_pending_candidates() -> None:
+    model = TimelineModel(
+        (),
+        (),
+        observed_at=(datetime(2026, 1, 1, 10, 0),),
+        observed_series=(ScalarSeries("Total", "Total", (1000.0,)),),
+        metric=MetricDescriptor("tpm"),
+        observed_scope=ObservedScope(900, "total", "sampling"),
+    )
+
+    querying = render_timeline(
+        model, replace(context(), audit=RenderAudit(querying=True), pending=True)
+    )
+    refreshing = render_timeline(model, replace(context(), audit=RenderAudit(refreshing=True)))
+
+    assert "querying" in querying
+    assert "querying" not in refreshing
+
+
 def test_observed_timeline_uses_wall_clock_axis_and_metric_heading() -> None:
     model = TimelineModel(
         (),
@@ -392,6 +609,87 @@ def test_observed_timeline_uses_wall_clock_axis_and_metric_heading() -> None:
     assert "Total TPM · recent 15m" in output
     assert "10:00" in output and "10:05" in output
     assert "2026-01-01" not in output
+
+
+def test_observed_start_marker_is_density_aware_and_time_anchored() -> None:
+    points = (
+        datetime(2026, 1, 1, 10, 0),
+        datetime(2026, 1, 1, 10, 5),
+        datetime(2026, 1, 1, 10, 10),
+    )
+    started_at = datetime(2026, 1, 1, 10, 2)
+
+    render_context = replace(context(), width=140)
+    full = observed_start_marker(points, started_at=started_at, context=render_context)
+    compact = observed_start_marker(
+        points, started_at=started_at, context=replace(render_context, density="compact")
+    )
+    minimal = observed_start_marker(
+        points, started_at=started_at, context=replace(render_context, density="minimal")
+    )
+
+    assert full is not None
+    assert full.position == pytest.approx(0.4)
+    assert full.label == "Monitor started 10:02"
+    assert compact is not None
+    assert compact.label == "Started 10:02"
+    assert minimal is not None
+    assert minimal.label is None
+    assert (
+        observed_start_marker(points, started_at=datetime(2026, 1, 1, 9, 59), context=context())
+        is None
+    )
+
+
+def test_observed_timeline_labels_visible_monitor_start_by_density() -> None:
+    model = TimelineModel(
+        (),
+        (),
+        observed_at=(
+            datetime(2026, 1, 1, 10, 0),
+            datetime(2026, 1, 1, 10, 5),
+            datetime(2026, 1, 1, 10, 10),
+        ),
+        monitor_started_at=datetime(2026, 1, 1, 10, 2),
+        observed_series=(ScalarSeries("Total", "Total", (1000.0, 1500.0, 2000.0)),),
+        metric=MetricDescriptor("tpm"),
+        observed_scope=ObservedScope(900, "total"),
+    )
+
+    full = render_timeline(model, replace(context(), width=140, density="full"))
+    compact = render_timeline(model, replace(context(), width=140, density="compact"))
+    minimal = render_timeline(model, replace(context(), width=140, density="minimal"))
+
+    assert "Monitor started 10:02" in full
+    assert "Started 10:02" in compact
+    assert "Monitor started 10:02" not in minimal
+    assert "Started 10:02" not in minimal
+
+
+def test_observed_timeline_overlays_a_thin_start_marker_without_plotext_line(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = TimelineModel(
+        (),
+        (),
+        observed_at=(
+            datetime(2026, 1, 1, 10, 0),
+            datetime(2026, 1, 1, 10, 5),
+            datetime(2026, 1, 1, 10, 10),
+        ),
+        monitor_started_at=datetime(2026, 1, 1, 10, 2),
+        observed_series=(ScalarSeries("Total", "Total", (1000.0, 1500.0, 2000.0)),),
+        metric=MetricDescriptor("tpm"),
+        observed_scope=ObservedScope(900, "total"),
+    )
+
+    monkeypatch.setattr(plt.figure, "line", lambda *args, **kwargs: pytest.fail("line called"))
+    unicode = render_timeline(model, replace(context(), width=100, density="minimal"))
+    ascii = render_timeline(model, replace(context(ascii=True), width=100, density="minimal"))
+
+    assert unicode.count("┆") > 4
+    assert "┆" not in ascii
+    assert ascii.count(":") > 4
 
 
 def test_observed_timeline_renders_sampling_state_with_real_translator() -> None:
@@ -613,6 +911,31 @@ def test_monitor_list_is_centered_and_omits_bar_tracks() -> None:
         for row in rows
     )
     assert all(display_width(line) <= 80 for line in output.splitlines())
+
+
+def test_monitor_project_ranking_and_list_use_separated_agent_labels() -> None:
+    model = RankingModel(
+        (),
+        None,
+        observed_entries=(
+            ScalarRankingEntry("claude-app", "app", 1_200.0, agent="claude"),
+            ScalarRankingEntry("codex-app", "app", 800.0, agent="codex"),
+        ),
+        metric=MetricDescriptor("tokens"),
+        observed_scope=ObservedScope(900, "project"),
+    )
+
+    ranking = render_ranking(model, context(True))
+    listing = render_ranking(
+        model,
+        RenderContext(80, 24, load_translator("en"), color=False, ascii=True, style="list"),
+    )
+
+    assert "Project · current Token" in ranking
+    assert "claude · app" not in ranking and "codex · app" not in ranking
+    assert "claude" in ranking and "codex" in ranking and ranking.count("app") >= 2
+    assert "claude · app" not in listing and "codex · app" not in listing
+    assert "claude" in listing and "codex" in listing and listing.count("app") >= 2
 
 
 def test_observed_ranking_does_not_compact_shared_model_prefixes() -> None:

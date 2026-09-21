@@ -7,6 +7,7 @@ import pytest
 
 import ccusage_viz.monitor as monitor_host
 from ccusage_viz.domain import ProjectRef, SourceKind, TokenUsage, UsageRecord
+from ccusage_viz.errors import SchemaError
 from ccusage_viz.i18n import load_translator
 from ccusage_viz.lifecycle import QueryTrigger
 from ccusage_viz.options import (
@@ -267,7 +268,9 @@ def test_counters_keep_project_display_labels_safe_and_distinct() -> None:
         ),
     )
 
-    assert set(_counters(records).projects) == {"app (claude)", "app (codex)"}
+    projects = _counters(records).projects
+    assert {(key.agent, key.label) for key in projects} == {("claude", "app"), ("codex", "app")}
+    assert all("/safe" not in key.label for key in projects)
 
 
 def test_agent_selection_is_applied_before_counters() -> None:
@@ -425,6 +428,82 @@ def test_wall_clock_sleep_gap_rebaselines_on_logical_clock_and_leaves_empty_buck
     assert buckets[0].values == {"Total": 240.0}
     assert buckets[1].values == {}
     assert buckets[2].values == {}
+
+
+def test_standalone_monitor_localizes_schema_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    launch = monitor_options()
+    painted: list[str] = []
+
+    class Runtime:
+        def cancel(self) -> None:
+            pass
+
+    class Component:
+        def __init__(self, selected: StandaloneLaunch, **_kwargs: object) -> None:
+            self.candidate = selected
+            self.accepted_options = None
+            self.error = SchemaError("error.schema", path="$.projects", reason="expected object")
+            self.accepted_at = None
+            self.last_elapsed = None
+            self.deltas = {}
+            self.rank_deltas = {}
+            self.generation = 0
+
+        def submit(self, *_args: object, **_kwargs: object) -> object:
+            component = self
+
+            class Submission:
+                generation = component.generation
+                handle: "Submission"
+
+                def __init__(self) -> None:
+                    self.handle = self
+
+                def done(self) -> bool:
+                    return True
+
+                def cancel(self) -> None:
+                    pass
+
+                def result(self) -> object:
+                    raise component.error
+
+            return Submission()
+
+        def fail(self, error: BaseException, *, generation: int) -> bool:
+            self.error = error
+            return True
+
+        def pause(self) -> None:
+            pass
+
+    class Screen:
+        def paint(self, frame: object, **_kwargs: object) -> None:
+            painted.append(str(frame))
+
+        def finish(self) -> None:
+            pass
+
+    keys = iter(("\x03",))
+    monkeypatch.setattr(monitor_host, "build_query_runtime", Runtime)
+    monkeypatch.setattr(monitor_host, "build_chart_registry", lambda: object())
+    monkeypatch.setattr(monitor_host, "MonitorComponent", Component)
+    monkeypatch.setattr(monitor_host, "FramePainter", Screen)
+    monkeypatch.setattr(monitor_host, "input_mode", nullcontext)
+    monkeypatch.setattr(monitor_host, "read_key", lambda _timeout: next(keys))
+    monkeypatch.setattr(monitor_host, "get_terminal_size", lambda: terminal_size((100, 30)))
+    monkeypatch.setattr(
+        monitor_host,
+        "inspect_terminal",
+        lambda *_args, **_kwargs: Terminal(100, 30, False, True),
+    )
+
+    assert monitor_host.run_monitor(launch, load_translator("en")) == 0
+    assert any(
+        "Unsupported ccusage data at $.projects: expected object" in frame for frame in painted
+    )
 
 
 def test_standalone_pause_discards_active_sample_and_preserves_paused_status(

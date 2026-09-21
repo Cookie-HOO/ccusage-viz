@@ -12,6 +12,7 @@ from ccusage_viz.historical_component import (
     HistoricalCompletion,
     HistoricalPurpose,
     UsageSnapshot,
+    historical_replacement_required,
 )
 from ccusage_viz.options import (
     ChartPresentation,
@@ -43,6 +44,32 @@ def component() -> HistoricalChartComponent:
         runtime=build_query_runtime(),
         registry=build_chart_registry(),
     )
+
+
+def test_historical_replacement_classifier_ignores_granularity_and_presentation() -> None:
+    previous = options()
+    assert not historical_replacement_required(previous, previous)
+    changed_period = replace(
+        previous,
+        chart=replace(
+            previous.chart, date_range=DateRange(date(2026, 2, 1), date(2026, 2, 7), None)
+        ),
+    )
+    assert historical_replacement_required(previous, changed_period)
+    changed_filter = replace(
+        previous,
+        chart=replace(previous.chart, filters=replace(previous.chart.filters, agents=("claude",))),
+    )
+    assert historical_replacement_required(previous, changed_filter)
+    changed_granularity = replace(previous, chart=replace(previous.chart, granularity="month"))
+    assert not historical_replacement_required(previous, changed_granularity)
+    changed_presentation = replace(
+        previous,
+        chart=replace(
+            previous.chart, presentation=replace(previous.chart.presentation, style="points")
+        ),
+    )
+    assert not historical_replacement_required(previous, changed_presentation)
 
 
 def test_component_acquires_and_accepts_provider_snapshot() -> None:
@@ -145,6 +172,35 @@ def test_component_keeps_accepted_options_until_replacement_succeeds() -> None:
 
     assert chart.candidate == changed
     assert chart.accepted_options == accepted
+    assert chart.is_pending
+    assert chart.has_pending_unknowns
+
+    assert chart.fail(RuntimeError("replacement failed"), generation=chart.generation)
+    assert not chart.is_pending
+    assert chart.accepted_options == accepted
+
+
+def test_component_reverts_pending_candidate_to_accepted_projection() -> None:
+    chart = component()
+    snapshot = UsageSnapshot((), (), 0.1)
+    chart.seed(chart.candidate, snapshot)
+    accepted = chart.accepted_options
+    assert accepted is not None
+    changed = replace(
+        accepted,
+        chart=replace(
+            accepted.chart,
+            date_range=DateRange(date(2026, 2, 1), date(2026, 2, 7), None),
+        ),
+    )
+    chart.configure(changed, data_affecting=True)
+
+    chart.configure(accepted, data_affecting=False)
+
+    assert chart.candidate == accepted
+    assert chart.accepted_options == accepted
+    assert not chart.is_pending
+    assert chart.model is not None
 
 
 def test_component_clears_current_error_when_submitting_again() -> None:
@@ -178,6 +234,58 @@ def test_component_separates_data_generation_from_render_revision() -> None:
     assert chart.model is not None
 
 
+def test_component_reprojects_project_aggregation_without_new_generation() -> None:
+    selected = replace(
+        options(),
+        chart=replace(options().chart, by="project", project_aggregation="name"),
+    )
+    chart = HistoricalChartComponent(
+        selected,
+        owner_id="test:aggregation",
+        runtime=None,
+        registry=build_chart_registry(),
+    )
+    snapshot = UsageSnapshot(
+        (
+            UsageRecord(
+                date(2026, 1, 1),
+                "claude",
+                TokenUsage(20, 20, 0, 0, 0),
+                SourceKind.CLAUDE_DAILY_PROJECTS,
+                ProjectRef("claude", "claude-app", "app"),
+            ),
+            UsageRecord(
+                date(2026, 1, 1),
+                "codex",
+                TokenUsage(10, 10, 0, 0, 0),
+                SourceKind.CODEX_SESSIONS,
+                ProjectRef("codex", "codex-app", "app"),
+            ),
+        ),
+        (),
+        0.1,
+    )
+    chart.seed(selected, snapshot)
+    generation = chart.generation
+    revision = chart.render_revision
+
+    exact = replace(
+        selected,
+        chart=replace(selected.chart, project_aggregation="exact"),
+    )
+    chart.configure(exact, data_affecting=False)
+
+    assert chart.snapshot is snapshot
+    assert chart.generation == generation
+    assert chart.render_revision == revision + 1
+    assert chart.accepted_options == exact
+    assert chart.model is not None
+    assert [series.key for series in chart.model.series] == [
+        ("project", "exact", "claude", "claude-app"),
+        ("project", "exact", "codex", "codex-app"),
+    ]
+
+
 def test_component_exposes_missing_full_comparison_coverage() -> None:
     chart = component()
     display = chart.display_coverage()
@@ -189,6 +297,7 @@ def test_component_exposes_missing_full_comparison_coverage() -> None:
     assert chart.missing_comparison_coverage().intervals == (
         DateInterval(date(2025, 12, 31), date(2025, 12, 31)),
     )
+    assert chart.has_pending_unknowns
 
 
 @pytest.mark.parametrize(
@@ -288,6 +397,7 @@ def test_component_merges_supplement_without_replacing_display_facts() -> None:
     assert chart.snapshot is not None
     assert chart.snapshot.records == (display_record, comparison_record)
     assert chart.snapshot.coverage == display.merge(comparison)
+    assert not chart.has_pending_unknowns
     assert chart.model is not None
     assert chart.model.summary is not None
     assert chart.model.summary.week_over_week is not None
@@ -308,6 +418,7 @@ def test_component_supplement_failure_preserves_facts_and_adds_local_notice() ->
     assert chart.snapshot is snapshot
     assert chart.error is None
     assert chart.supplemental_error is not None
+    assert not chart.has_pending_unknowns
     assert chart.model is not None
     assert chart.model.notices[-1].key == "notice.comparison_refresh_failed"
     assert chart.missing_comparison_coverage().intervals == (
@@ -446,10 +557,13 @@ def test_component_exposes_ranking_refresh_state_from_accepted_model() -> None:
     chart.seed(selected, UsageSnapshot(records, (), 0.1))
 
     assert chart.ranking_values() == {
-        ("claude", "api"): 20.0,
-        ("claude", "web"): 10.0,
+        ("project", "exact", "claude", "api"): 20.0,
+        ("project", "exact", "claude", "web"): 10.0,
     }
-    assert chart.ranking_keys() == (("claude", "api"), ("claude", "web"))
+    assert chart.ranking_keys() == (
+        ("project", "exact", "claude", "api"),
+        ("project", "exact", "claude", "web"),
+    )
 
 
 def test_component_rejects_ranking_state_for_another_chart() -> None:

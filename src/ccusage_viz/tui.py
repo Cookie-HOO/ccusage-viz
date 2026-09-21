@@ -49,7 +49,7 @@ from ccusage_viz.data_view import (
 from ccusage_viz.deltas import RefreshDeltas, RefreshRanks
 from ccusage_viz.diagnostics import format_error
 from ccusage_viz.domain import UsageRecord
-from ccusage_viz.errors import UsageError
+from ccusage_viz.errors import UsageError, VizError
 from ccusage_viz.filter_draft import discover_filter_choices, run_filter_editor
 from ccusage_viz.formatting import (
     center_text,
@@ -64,6 +64,7 @@ from ccusage_viz.historical_component import (
     HistoricalPurpose,
     HistoricalSubmission,
     UsageSnapshot,
+    historical_replacement_required,
     snapshot_from_result,
 )
 from ccusage_viz.historical_render import render_historical_component
@@ -149,7 +150,20 @@ class TuiPane:
 
 
 def _pane_options(pane: TuiPane) -> StandaloneLaunch:
-    return pane.component.accepted_options or pane.component.candidate
+    component = pane.component
+    return component.accepted_options or component.candidate
+
+
+def _pane_display_options(pane: TuiPane) -> StandaloneLaunch:
+    component = pane.component
+    if isinstance(component, HistoricalChartComponent) and getattr(component, "is_pending", False):
+        return component.candidate
+    if (
+        isinstance(component, MonitorComponent)
+        and component.candidate != component.accepted_options
+    ):
+        return component.candidate
+    return _pane_options(pane)
 
 
 @dataclass(slots=True)
@@ -804,15 +818,16 @@ def _pane_copy_payload(pane: TuiPane, translator: Translator, terminal: Terminal
 
 
 def _pane_render(pane: TuiPane, translator: Translator, terminal: Terminal) -> PaneRender:
-    active = _pane_options(pane)
+    active = _pane_display_options(pane)
     component = pane.component
     if pane.body_view == "command":
         return PaneRender(wrap_command(format_command(active), terminal.width))
     if pane.body_view == "full-command":
         return PaneRender(format_full_command_display(format_full_command(active), terminal.width))
     if pane.body_view in {"data-table", "data-json"}:
+        accepted = _pane_options(pane)
         if isinstance(component, MonitorComponent):
-            if not isinstance(active.chart, MonitorConfig):
+            if not isinstance(accepted.chart, MonitorConfig):
                 raise TypeError("monitor pane component has historical configuration")
             buckets = component.buckets(
                 max(8, min(32, terminal.width // 4)),
@@ -822,7 +837,7 @@ def _pane_render(pane: TuiPane, translator: Translator, terminal: Terminal) -> P
             return PaneRender(
                 render_monitor_data(
                     buckets,
-                    by=active.chart.by,
+                    by=accepted.chart.by,
                     translator=translator,
                     terminal=terminal,
                     view=pane.body_view,
@@ -830,7 +845,7 @@ def _pane_render(pane: TuiPane, translator: Translator, terminal: Terminal) -> P
             )
         return PaneRender(
             render_snapshot_data(
-                active,
+                accepted,
                 component.snapshot,
                 translator,
                 terminal,
@@ -846,11 +861,13 @@ def _pane_render(pane: TuiPane, translator: Translator, terminal: Terminal) -> P
                 color=terminal.color,
                 color_scheme=active.chart.presentation.theme,
             )
-            if isinstance(error, UsageError)
+            if isinstance(error, VizError)
             else str(error)
         )
     try:
         if isinstance(component, MonitorComponent):
+            display = component.display() if hasattr(component, "display") else component
+            display_query_pending = getattr(display, "display_query_pending", False)
             context = RenderContext(
                 terminal.width,
                 max(
@@ -867,16 +884,18 @@ def _pane_render(pane: TuiPane, translator: Translator, terminal: Terminal) -> P
                 deltas=component.deltas,
                 rank_deltas=component.rank_deltas,
                 density=active.chart.presentation.density,
+                pending=display_query_pending,
                 audit=RenderAudit(
                     component.accepted_at,
                     component.last_elapsed,
                     pane.scheduler.interval,
                     "sample",
                     refreshing=pane.lifecycle.submission is not None,
+                    querying=display_query_pending,
                 ),
             )
             candidate = PaneRender(
-                component.render(
+                display.render(
                     context,
                     now=time.monotonic(),
                     count=max(8, min(32, terminal.width // 4)),
@@ -948,10 +967,10 @@ _PANE_QUICK_ACTIONS = {
     "monitor": (("w", "window"), ("b", "group"), ("+/-", "top")),
 }
 _PANE_ADVANCED_ACTIONS = {
-    "timeline": (("o", "other"), ("l", "legend"), ("k", "weekdays")),
+    "timeline": (("o", "other"), ("A", "project_aggregation"), ("l", "legend"), ("k", "weekdays")),
     "calendar": (),
     "stack": (("c", "cache"), ("l", "legend"), ("k", "weekdays")),
-    "ranking": (("o", "other"),),
+    "ranking": (("o", "other"), ("A", "project_aggregation")),
     "monitor": (("l", "legend"),),
 }
 _COMMON_PANE_QUICK_ACTIONS = (
@@ -1009,30 +1028,61 @@ def _localized_actions(
     )
 
 
+def _project_grouping_available(chart: object | None) -> bool:
+    return isinstance(chart, (TimelineConfig, RankingConfig)) and chart.by == "project"
+
+
 def _pane_adjustment_actions(
-    command: str, page: str, translator: Translator
+    command: str,
+    page: str,
+    translator: Translator,
+    *,
+    chart: object | None = None,
 ) -> tuple[AdjustmentAction, ...]:
     actions = (
         (*_PANE_QUICK_ACTIONS[command], *_COMMON_PANE_QUICK_ACTIONS)
         if page == "quick"
         else (*_PANE_ADVANCED_ACTIONS[command], *_COMMON_PANE_ADVANCED_ACTIONS)
     )
-    return _localized_actions(actions, translator)
+    return _localized_actions(
+        tuple(
+            (key, label)
+            for key, label in actions
+            if key != "A" or _project_grouping_available(chart)
+        ),
+        translator,
+    )
 
 
-def _adjustment_controls(command: str, page: str, translator: Translator) -> str:
-    return " · ".join(action.text for action in _pane_adjustment_actions(command, page, translator))
+def _adjustment_controls(
+    command: str, page: str, translator: Translator, *, chart: object | None = None
+) -> str:
+    return " · ".join(
+        action.text for action in _pane_adjustment_actions(command, page, translator, chart=chart)
+    )
 
 
-def _adjustment_key_supported(command: str, page: str, key: str) -> bool:
+def _adjustment_key_supported(
+    command: str, page: str, key: str, *, chart: object | None = None
+) -> bool:
     actions = _PANE_QUICK_ACTIONS[command] if page == "quick" else _PANE_ADVANCED_ACTIONS[command]
-    supported = {char for spelling, _label in actions for char in spelling if char not in "/"}
+    supported = {
+        char
+        for spelling, _label in actions
+        if spelling != "A" or _project_grouping_available(chart)
+        for char in spelling
+        if char not in "/"
+    }
     supported.update({"d", "t", "T", "s"} if page == "quick" else ())
     return key in supported
 
 
 def _query_affecting_adjustment(command: str, key: str) -> bool:
-    """Return whether an adjustment needs a matching replacement snapshot."""
+    """Compatibility helper for key-only callers.
+
+    Runtime paths compare complete configurations through
+    :func:`historical_replacement_required` instead.
+    """
     return (
         key in {"p", "P"}
         or (key == "b" and command in {"timeline", "ranking", "monitor"})
@@ -1075,11 +1125,13 @@ def _adjustment_footer(
     body_view: BodyView,
     translator: Translator,
     width: int,
+    *,
+    chart: object | None = None,
 ) -> tuple[str, ...]:
     shared = adjustment_rows(
         state,
         translator.text(f"status.tui_adjust_{page}"),
-        _pane_adjustment_actions(command, page, translator),
+        _pane_adjustment_actions(command, page, translator, chart=chart),
         width=width,
         color=False,
         switch_action=translator.text(
@@ -1106,7 +1158,7 @@ def _adjustment_footer(
 
 
 def _pane_adjustment_state(pane: TuiPane, page: str, translator: Translator) -> str:
-    chart = _pane_options(pane).chart
+    chart = _pane_display_options(pane).chart
     if page == "quick":
         settings = (
             f"{chart.kind} · {chart.presentation.density} · {chart.presentation.theme} · "
@@ -1116,6 +1168,8 @@ def _pane_adjustment_state(pane: TuiPane, page: str, translator: Translator) -> 
         advanced: list[str] = []
         if isinstance(chart, (TimelineConfig, RankingConfig)):
             advanced.append(f"Other {chart.other}")
+            if chart.by == "project":
+                advanced.append(f"Project aggregation {chart.project_aggregation}")
         if isinstance(chart, (TimelineConfig, StackConfig)):
             advanced.extend((f"Legend {chart.presentation.legend}", f"Weekdays {chart.weekdays}"))
         if isinstance(chart, StackConfig):
@@ -1607,6 +1661,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 pane.body_view,
                 translator,
                 width,
+                chart=_pane_options(pane).chart,
             )
         if adjustment_mode == "global":
             state = translator.text(
@@ -1671,7 +1726,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         layout = grid_geometry(size.columns, size.lines, header_rows, 0)
         rect = layout.pane(index)
         framed = frame_style != "none" or index == focused
-        pane_options = _pane_options(panes[index])
+        pane_options = _pane_display_options(panes[index])
         return Terminal(
             max(1, rect.width - 2 if framed else rect.width),
             max(1, rect.height - 2 if framed else rect.height),
@@ -1721,7 +1776,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 # The active frame-less pane gets a selection ring, so reserve its
                 # interior too; its content is never overwritten by the indicator.
                 framed = frame_style != "none" or index == focused
-                pane_options = _pane_options(pane)
+                pane_options = _pane_display_options(pane)
                 interior_width = max(1, cell_width - 2 if framed else cell_width)
                 interior_height = max(1, cell_height - 2 if framed else cell_height)
                 terminal = Terminal(
@@ -2070,15 +2125,27 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                 active_grid = _grid_for_pane_count(active_grid, len(panes))
                                 focused = min(focused, len(panes) - 1)
                             elif _adjustment_key_supported(
-                                _pane_options(pane).chart.kind, adjustment_page, key
+                                _pane_options(pane).chart.kind,
+                                adjustment_page,
+                                key,
+                                chart=_pane_options(pane).chart,
                             ):
                                 component = pane.component
                                 base = component.candidate
                                 updated = adjust_standalone(base, key)
                                 if updated != base:
                                     _clear_changes(pane)
-                                    data_affecting = _query_affecting_adjustment(
-                                        base.chart.kind, key
+                                    data_affecting = (
+                                        historical_replacement_required(base, updated)
+                                        if isinstance(component, HistoricalChartComponent)
+                                        else (
+                                            isinstance(base.chart, MonitorConfig)
+                                            and isinstance(updated.chart, MonitorConfig)
+                                            and (
+                                                base.chart.by != updated.chart.by
+                                                or base.chart.filters != updated.chart.filters
+                                            )
+                                        )
                                     )
                                     component.configure(updated, data_affecting=data_affecting)
                                     if updated.host.interval != base.host.interval:

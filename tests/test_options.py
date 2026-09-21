@@ -112,6 +112,15 @@ def test_concise_command_keeps_effect_bearing_private_project_filter() -> None:
     assert reparsed.chart.filters == launch.chart.filters
 
 
+def test_project_aggregation_round_trips_in_commands() -> None:
+    parser = build_parser(load_translator("en"))
+    launch = _to_options(parser.parse_args(["ranking", "--project-aggregation", "exact"]))
+
+    assert format_command(launch) == "ccuv ranking --project-aggregation exact"
+    reparsed = _to_options(parser.parse_args(shlex.split(format_command(launch))[1:]))
+    assert reparsed.chart.project_aggregation == "exact"
+
+
 def test_default_timeline_range_is_fourteen_inclusive_days() -> None:
     result = resolve_date_range(
         "timeline", period=None, since=None, until=None, timezone=None, today=date(2026, 9, 12)

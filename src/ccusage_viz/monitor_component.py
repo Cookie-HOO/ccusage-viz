@@ -20,11 +20,14 @@ from ccusage_viz.deltas import RefreshDeltas, RefreshRanks
 from ccusage_viz.domain import UsageRecord
 from ccusage_viz.options import MonitorConfig, StandaloneLaunch
 from ccusage_viz.processing.monitor import (
+    MonitorKey,
     ObservedTPM,
     _copy_observer,
     monitor_counters,
+    monitor_key_sort_key,
     monitor_rank_keys,
 )
+from ccusage_viz.project_identity import ExactProjectDisplayKey
 from ccusage_viz.query.coordinator import QueryHandle
 from ccusage_viz.query.models import ProviderResult, QueryTrigger
 from ccusage_viz.query.runtime import QueryRuntime
@@ -68,9 +71,11 @@ class MonitorComponent:
         "accepted_options",
         "accepted_records",
         "candidate",
+        "display_query_pending",
         "error",
         "generation",
         "last_elapsed",
+        "monitor_started_at",
         "observer",
         "owner_id",
         "rank_changes",
@@ -89,6 +94,7 @@ class MonitorComponent:
         registry: ChartRegistry,
         owner_id: str = "monitor",
         runtime: QueryRuntime | None = None,
+        monitor_started_at: datetime | None = None,
     ) -> None:
         chart = self._monitor_config(options)
         self.registry = registry
@@ -108,8 +114,10 @@ class MonitorComponent:
         self.accepted_at: datetime | None = None
         self.refreshed_at: float | None = None
         self.last_elapsed: float | None = None
+        self.monitor_started_at = monitor_started_at
         self.error: BaseException | None = None
         self.rebaseline_pending = False
+        self.display_query_pending = False
         self.value_changes = RefreshDeltas()
         self.rank_changes = RefreshRanks()
 
@@ -159,6 +167,8 @@ class MonitorComponent:
             today=today,
         )
         handle = self.runtime.submit(intent)
+        if trigger is QueryTrigger.STARTUP and self.monitor_started_at is None:
+            self.monitor_started_at = datetime.now().astimezone()
         self.error = None
         return MonitorSubmission(self.generation, submitted, handle, started)
 
@@ -212,15 +222,33 @@ class MonitorComponent:
         return True
 
     def preview(self, options: StandaloneLaunch) -> MonitorComponent:
-        preview = MonitorComponent(options, registry=self.registry)
+        """Return a display-only view of ``options`` without changing accepted data.
+
+        A Monitor sample is interpreted using its window, filters, and grouping.
+        Reusing the accepted observer for a candidate that changes any of those
+        settings would give old observations candidate labels or scope.  Such a
+        candidate therefore gets an intentionally empty sampling view until its
+        first matching sample is accepted.
+        """
+        preview = MonitorComponent(
+            options,
+            registry=self.registry,
+            monitor_started_at=self.monitor_started_at,
+        )
         preview.accepted_options = options
-        preview.accepted_records = self.accepted_records
-        preview.observer = _copy_observer(self.observer)
-        preview._configure_observer(self._monitor_config(options))
         preview.accepted_at = self.accepted_at
         preview.refreshed_at = self.refreshed_at
         preview.last_elapsed = self.last_elapsed
         preview.render_revision = self.render_revision
+        preview.display_query_pending = self._data_configuration_changed(
+            self.accepted_options, options
+        )
+        if preview.display_query_pending:
+            return preview
+
+        preview.accepted_records = self.accepted_records
+        preview.observer = _copy_observer(self.observer)
+        preview._configure_observer(self._monitor_config(options))
         preview.value_changes = RefreshDeltas(
             dict(self.value_changes.previous),
             dict(self.value_changes.current),
@@ -231,6 +259,10 @@ class MonitorComponent:
             dict(self.rank_changes.current),
         )
         return preview
+
+    def display(self) -> MonitorComponent:
+        """Return the safe immediate display view for the current candidate."""
+        return self if self.display_query_pending else self.preview(self.candidate)
 
     def clear_changes(self) -> None:
         self.value_changes.clear()
@@ -246,7 +278,9 @@ class MonitorComponent:
             self.observer.rebaseline(self.observer.previous, now, wall)
         self.clear_changes()
 
-    def current_values(self, now: float, *, wall: datetime | None = None) -> dict[str, float]:
+    def current_values(
+        self, now: float, *, wall: datetime | None = None
+    ) -> dict[MonitorKey, float]:
         del now, wall
         return self.observer.current_values()
 
@@ -272,6 +306,7 @@ class MonitorComponent:
             (),
             (),
             observed_at=tuple(bucket.ended_wall for bucket in buckets),
+            monitor_started_at=self.monitor_started_at,
             observed_series=series,
             metric=self._metric(),
             observed_scope=self._scope(),
@@ -288,9 +323,9 @@ class MonitorComponent:
     ) -> RankingModel:
         values = self.current_values(now, wall=wall)
         entries = tuple(
-            ScalarRankingEntry(name, name, value, name == "Other")
+            self._observed_entry(name, value)
             for name, value in sorted(
-                values.items(), key=lambda item: (-item[1], item[0].casefold())
+                values.items(), key=lambda item: (-item[1], monitor_key_sort_key(item[0]))
             )
         )
         return RankingModel(
@@ -341,9 +376,15 @@ class MonitorComponent:
     def _buckets(self, now: float, count: int, wall: datetime | None):
         return self.buckets(count, now=now, wall=wall)
 
+    @staticmethod
+    def _observed_entry(name: MonitorKey, value: float) -> ScalarRankingEntry:
+        if isinstance(name, ExactProjectDisplayKey):
+            return ScalarRankingEntry(name, name.label, value, agent=name.agent)
+        return ScalarRankingEntry(name, str(name), value, name == "Other")
+
     def _current_entries(self) -> tuple[ScalarRankingEntry, ...]:
         return tuple(
-            ScalarRankingEntry(name, name, value, name == "Other")
+            self._observed_entry(name, value)
             for name, value in self.observer.current_values().items()
         )
 
@@ -382,6 +423,16 @@ class MonitorComponent:
         if not isinstance(model, definition.model_type):
             raise TypeError(f"{chart_id} definition received incompatible Monitor model")
         return definition
+
+    @staticmethod
+    def _data_configuration_changed(
+        accepted: StandaloneLaunch | None, candidate: StandaloneLaunch
+    ) -> bool:
+        if accepted is None:
+            return False
+        previous = MonitorComponent._monitor_config(accepted)
+        proposed = MonitorComponent._monitor_config(candidate)
+        return (previous.by, previous.filters) != (proposed.by, proposed.filters)
 
     @staticmethod
     def _monitor_config(options: StandaloneLaunch) -> MonitorConfig:

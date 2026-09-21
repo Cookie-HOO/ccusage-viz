@@ -48,6 +48,7 @@ def process_historical(
             aggregation=chart.granularity,
             coverage=coverage,
             filter_count=scope.filter_count,
+            project_aggregation=chart.project_aggregation,
         )
     if chart.kind == "calendar":
         return build_calendar(
@@ -80,4 +81,5 @@ def process_historical(
         summary_notices=summary_notices,
         coverage=coverage,
         filter_count=scope.filter_count,
+        project_aggregation=chart.project_aggregation,
     )

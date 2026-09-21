@@ -65,6 +65,10 @@ def _chart_args(config: StandaloneLaunch, *, full: bool, pane: bool = False) -> 
         args.extend(("--by", by))
     if top is not None and (full or not _is_default_top(chart, by, top)):
         args.extend(("--top", str(top)))
+    if isinstance(chart, (TimelineConfig, RankingConfig)) and (
+        full or chart.project_aggregation != "name"
+    ):
+        args.extend(("--project-aggregation", chart.project_aggregation))
     if isinstance(chart, (TimelineConfig, RankingConfig)) and (full or chart.other != "show"):
         args.extend(("--other", chart.other))
     if isinstance(chart, StackConfig) and (full or chart.cache != "combined"):

@@ -26,6 +26,7 @@ from ccusage_viz.historical_component import (
     HistoricalPurpose,
     HistoricalSubmission,
     UsageSnapshot,
+    historical_replacement_required,
 )
 from ccusage_viz.historical_render import render_historical_component
 from ccusage_viz.i18n import Translator
@@ -81,10 +82,10 @@ _ADJUSTMENT_QUICK_KEYS = {
     "ranking": frozenset("dpPb+-=tTs"),
 }
 _ADJUSTMENT_ADVANCED_KEYS = {
-    "timeline": frozenset("folk"),
+    "timeline": frozenset("folAk"),
     "calendar": frozenset("f"),
     "stack": frozenset("fclk"),
-    "ranking": frozenset("fo"),
+    "ranking": frozenset("foA"),
 }
 
 _ADJUSTMENT_ACTIONS = {
@@ -98,7 +99,13 @@ _ADJUSTMENT_ACTIONS = {
             ("t/T", "theme"),
             ("s", "style"),
         ),
-        "advanced": (("f", "filter"), ("o", "other"), ("l", "legend"), ("k", "weekdays")),
+        "advanced": (
+            ("f", "filter"),
+            ("o", "other"),
+            ("A", "project_aggregation"),
+            ("l", "legend"),
+            ("k", "weekdays"),
+        ),
     },
     "calendar": {
         "quick": (("p/P", "period"), ("d", "density"), ("t/T", "theme"), ("s", "style")),
@@ -123,22 +130,29 @@ _ADJUSTMENT_ACTIONS = {
             ("t/T", "theme"),
             ("s", "style"),
         ),
-        "advanced": (("f", "filter"), ("o", "other")),
+        "advanced": (("f", "filter"), ("o", "other"), ("A", "project_aggregation")),
     },
 }
 
 
-def _adjustment_key_supported(command: str, page: str, key: str) -> bool:
+def _project_grouping_available(chart: object) -> bool:
+    return isinstance(chart, (TimelineConfig, RankingConfig)) and chart.by == "project"
+
+
+def _adjustment_key_supported(
+    command: str, page: str, key: str, *, project_grouping: bool = False
+) -> bool:
     keys = _ADJUSTMENT_QUICK_KEYS if page == "quick" else _ADJUSTMENT_ADVANCED_KEYS
-    return key in keys[command]
+    return key in keys[command] and (key != "A" or project_grouping)
 
 
 def _adjustment_actions(
-    command: str, page: str, translator: Translator
+    command: str, page: str, translator: Translator, *, project_grouping: bool = False
 ) -> tuple[AdjustmentAction, ...]:
     return tuple(
         AdjustmentAction(key, translator.text(f"adjustment.{label}"), priority)
         for priority, (key, label) in enumerate(_ADJUSTMENT_ACTIONS[command][page])
+        if key != "A" or project_grouping
     )
 
 
@@ -270,7 +284,10 @@ def run_runtime_adjustment(
                 ascii=current.host.ascii,
                 size=last_size,
             )
-            component.configure(current, data_affecting=False)
+            component.configure(
+                current,
+                data_affecting=historical_replacement_required(options, current),
+            )
             candidate = render_component(
                 component,
                 translator,
@@ -303,7 +320,14 @@ def run_runtime_adjustment(
             "style_count": len(styles),
             "style": style,
         }
+        project_grouping = _project_grouping_available(current.chart)
         status_key = f"status.runtime_adjustment_{current.chart.kind}_{adjustment_page}"
+        if (
+            adjustment_page == "advanced"
+            and isinstance(current.chart, (TimelineConfig, RankingConfig))
+            and not project_grouping
+        ):
+            status_key += "_nonproject"
         state_values = dict(common)
         if isinstance(current.chart, (TimelineConfig, RankingConfig)):
             state_values.update(
@@ -312,6 +336,9 @@ def run_runtime_adjustment(
                 if current.chart.top is not None
                 else translator.text("label.all"),
                 other=translator.text("label.on" if current.chart.other == "show" else "label.off"),
+                project_grouping=(
+                    current.chart.project_aggregation if current.chart.by == "project" else "—"
+                ),
             )
         if isinstance(current.chart, (TimelineConfig, StackConfig)):
             state_values["weekday"] = translator.text(f"label.weekday_{current.chart.weekdays}")
@@ -334,7 +361,12 @@ def run_runtime_adjustment(
         controls = adjustment_rows(
             state,
             translator.text(f"adjustment.page_{adjustment_page}"),
-            _adjustment_actions(current.chart.kind, adjustment_page, translator),
+            _adjustment_actions(
+                current.chart.kind,
+                adjustment_page,
+                translator,
+                project_grouping=project_grouping,
+            ),
             width=terminal.width,
             color=terminal.color,
             switch_action=translator.text(
@@ -422,7 +454,10 @@ def run_runtime_adjustment(
                     else:
                         paint()
                 elif key is not None and _adjustment_key_supported(
-                    current.chart.kind, adjustment_page, key
+                    current.chart.kind,
+                    adjustment_page,
+                    key,
+                    project_grouping=_project_grouping_available(current.chart),
                 ):
                     updated = adjust_standalone(current, key)
                     if updated != current:
@@ -570,6 +605,7 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
                 last_notices = rendered.notices
                 render_warning = None
         footer = controls()
+        accepted = getattr(component, "accepted_options", None) or current
         body = (
             last_chart
             if body_view == "chart"
@@ -578,8 +614,8 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
             else format_full_command_display(format_full_command(current), size.columns)
             if body_view == "full-command"
             else render_snapshot_data(
-                current,
-                last_snapshot,
+                accepted,
+                getattr(component, "snapshot", None) or last_snapshot,
                 translator,
                 terminal,
                 view=body_view,
@@ -873,14 +909,15 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
                         ascii=current.host.ascii,
                         size=terminal_size(),
                     )
+                    accepted = getattr(component, "accepted_options", None) or current
                     copied = (
                         format_command(current)
                         if body_view == "command"
                         else format_full_command(current)
                         if body_view == "full-command"
                         else render_snapshot_data(
-                            current,
-                            last_snapshot,
+                            accepted,
+                            getattr(component, "snapshot", None) or last_snapshot,
                             translator,
                             terminal,
                             view=body_view,
@@ -906,14 +943,7 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
                         last_chart = picked.seed.chart
                         last_notices = picked.seed.notices
                         last_snapshot = picked.seed.snapshot
-                        current_chart = historical_chart(current)
-                        previous_chart = historical_chart(previous)
-                        data_affecting = current_chart != previous_chart and (
-                            current_chart.date_range != previous_chart.date_range
-                            or current_chart.filters != previous_chart.filters
-                            or getattr(current_chart, "by", None)
-                            != getattr(previous_chart, "by", None)
-                        )
+                        data_affecting = historical_replacement_required(previous, current)
                         component.configure(current, data_affecting=data_affecting)
                         if data_affecting:
                             request(LifecycleTrigger.CONFIGURATION, now=time.monotonic())

@@ -6,7 +6,7 @@ import plotext as plt
 
 from ccusage_viz.chart_models import ScalarSeries, Series, TimelineModel
 from ccusage_viz.errors import UsageError
-from ccusage_viz.formatting import center_text, clip_width
+from ccusage_viz.formatting import center_text, clip_width, display_width
 from ccusage_viz.render.base import (
     RenderContext,
     colored_mark,
@@ -16,9 +16,13 @@ from ccusage_viz.render.base import (
     date_range_heading,
     date_ticks,
     isolated_plot,
+    observed_start_marker,
     observed_ticks,
+    overlay_plot_column,
     plot_height,
     plot_text,
+    styled_text,
+    title_with_querying,
 )
 from ccusage_viz.render.palette import categorical_colors, get_color_scheme
 from ccusage_viz.render.summary import render_summary
@@ -40,14 +44,17 @@ def _observed_heading(model: TimelineModel, context: RenderContext) -> str:
         else ""
     )
     agents = f" · Agent {', '.join(scope.agents)}" if scope.agents else ""
-    return context.translator.text(
-        "label.monitor_timeline_tokens"
-        if model.metric.unit == "tokens"
-        else "label.monitor_timeline_tpm",
-        window=window,
-        state=state,
-        agents=agents,
-        mode=mode,
+    return title_with_querying(
+        context.translator.text(
+            "label.monitor_timeline_tokens"
+            if model.metric.unit == "tokens"
+            else "label.monitor_timeline_tpm",
+            window=window,
+            state=state,
+            agents=agents,
+            mode=mode,
+        ),
+        context,
     )
 
 
@@ -176,6 +183,15 @@ def render_timeline(model: TimelineModel, context: RenderContext) -> str:
             else date_ticks(model.days, context, aggregation=model.aggregation)
         )
         plt.figure.ruler("x").ticks(positions, labels)
+        start_marker = (
+            observed_start_marker(
+                model.observed_at,
+                started_at=model.monitor_started_at,
+                context=context,
+            )
+            if observed
+            else None
+        )
         values = (
             (
                 value
@@ -188,5 +204,25 @@ def render_timeline(model: TimelineModel, context: RenderContext) -> str:
         )
         configure_y_ticks(values, maximum=model.y_axis_max if observed else None)
         chart = plot_text(context)
+        if start_marker is not None:
+            axis_width = max(1, context.width - 12)
+            column = round(
+                start_marker.position / max(1, len(model.observed_at) - 1) * (axis_width - 1)
+            )
+            glyph = ":" if context.ascii else "┆"
+            chart = overlay_plot_column(
+                chart,
+                column=5 + column,
+                glyph=glyph,
+                style=styled_text(glyph, scheme.muted, context, dim=True)
+                if context.color
+                else None,
+            )
+            if start_marker.label is not None:
+                if start_marker.alignment == "right":
+                    indent = 5 + column + 1
+                else:
+                    indent = 5 + column - display_width(start_marker.label) - 1
+                chart = f"{chart}\n{' ' * max(0, indent)}{start_marker.label}"
         summary = render_summary(model.summary, context) if model.summary else ""
         return "\n".join(line for line in (summary, heading, legend, chart) if line)

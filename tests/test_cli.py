@@ -91,6 +91,18 @@ def test_all_commands_accept_exactly_three_density_values() -> None:
     assert caught.value.key == "error.arguments"
 
 
+@pytest.mark.parametrize("command", ("timeline", "ranking"))
+def test_project_aggregation_defaults_to_name_and_accepts_exact(command: str) -> None:
+    parser = build_parser(load_translator("en"))
+    assert parser.parse_args([command]).project_aggregation == "name"
+    assert (
+        parser.parse_args([command, "--project-aggregation", "exact"]).project_aggregation
+        == "exact"
+    )
+    with pytest.raises(UsageError):
+        parser.parse_args([command, "--project-aggregation", "agent"])
+
+
 def test_dashboard_has_no_global_density_option() -> None:
     parser = build_parser(load_translator("en"))
     with pytest.raises(UsageError) as caught:

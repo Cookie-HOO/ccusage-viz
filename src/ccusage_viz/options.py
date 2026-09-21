@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from ccusage_viz.core.time import DateRange, natural_period_start, today_for_timezone
 from ccusage_viz.core.time import parse_period as parse_core_period
 from ccusage_viz.errors import UsageError
+from ccusage_viz.project_identity import PROJECT_AGGREGATIONS, ProjectAggregation
 
 GRANULARITIES = ("day", "month", "quarter", "year")
 HEADER_SUMMARIES = (*GRANULARITIES, "none")
@@ -76,6 +77,7 @@ class TimelineConfig:
     other: str = "show"
     granularity: str = "day"
     weekdays: str = "show"
+    project_aggregation: ProjectAggregation = "name"
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,6 +108,7 @@ class RankingConfig:
     by: Dimension = "project"
     top: int = 10
     other: str = "show"
+    project_aggregation: ProjectAggregation = "name"
 
 
 @dataclass(frozen=True, slots=True)
@@ -296,6 +299,11 @@ def adjust_chart(chart: ChartConfig, key: str, *, demo: bool = False) -> ChartCo
         and chart.by is not None
     ):
         return replace(chart, top=max(1, (chart.top or 1) - 1))
+    if key == "A" and isinstance(chart, (TimelineConfig, RankingConfig)) and chart.by == "project":
+        return replace(
+            chart,
+            project_aggregation=_cycle(PROJECT_AGGREGATIONS, chart.project_aggregation, 1),
+        )
     if key == "o" and isinstance(chart, (TimelineConfig, RankingConfig)):
         return replace(chart, other=_cycle(OTHER_MODES, chart.other, 1))
     if key == "w" and isinstance(chart, MonitorConfig):

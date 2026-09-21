@@ -12,6 +12,13 @@
 second usage database. `ccusage` is required for real data and is **not**
 bundled with this project.
 
+## Product scope
+
+ccusage-viz focuses exclusively on **token consumption** and metrics derived
+from token consumption, such as observed tokens per minute (TPM). It does not
+provide session analytics, request counts, elapsed-time metrics, costs,
+pricing, balances, quotas, allowances, or other non-token account analytics.
+
 > This project is not affiliated with or endorsed by the `ccusage` project or
 > its maintainers.
 
@@ -117,6 +124,32 @@ ccuv ranking --by project
 
 ![Ranking view: projects ordered by total tokens](docs/assets/readme/standalone-ranking.png)
 
+### Project attribution coverage
+
+The compatibility baseline below was verified on macOS with **ccusage 20.0.23**.
+“Token totals” means ccusage reports the agent in unified usage data. “Historical
+project attribution” requires a stable, real project identity for each record.
+
+| Agent | Token totals | Historical project attribution | Agent version | ccusage version | Evidence |
+| --- | --- | --- | --- | --- | --- |
+| Claude Code | Verified | Verified | 2.1.278 | 20.0.23 | `claude daily --instances --json` provides project records. |
+| Codex | Verified | Verified | 0.139.0 | 20.0.23 | Uses ccusage `cwd`/project fields when present; otherwise resolves only matching local `session_meta.cwd` metadata. |
+| OpenCode | Verified | Unsupported (verified) | 1.17.20 | 20.0.23 | Real session output has no project identity field. |
+| Antigravity | Verified | Unsupported (verified) | 2.0.10 | 20.0.23 | Real `projectPath` values were the generic constant `Antigravity`, not workspaces. |
+
+Historical project views with OpenCode, Antigravity, or another unsupported agent
+show a warning and do not manufacture project rows; that agent's project usage
+may therefore be absent or incomplete. Default **Name** project aggregation only
+combines an unambiguous Claude–Codex pair; it never merges projects within one
+Agent and may use private parent segments only to disambiguate a shared basename.
+It does not prove those records came from one checkout. Use **Exact** project
+aggregation to keep every source identity separate.
+
+To move an agent to **Verified**, include in the same change a sanitized,
+non-empty real-data fixture, parser/provider coverage, project-ranking end-to-end
+validation, reconciliation with unified daily token totals, and the exact tested
+agent plus ccusage version.
+
 ### Monitor
 
 Use Monitor for process-local throughput observed from repeated cumulative
@@ -126,7 +159,10 @@ snapshots—not reconstructed hourly history:
 ccuv monitor
 ```
 
-An observed throughput window starts after a sampling baseline is established.
+An observed throughput window starts after a sampling baseline is established. Timeline views mark
+this Monitor invocation's start while it remains in the visible window, so time before the mark
+means unobserved rather than zero usage. The marker is a line at every density; its label is shown
+at full and compact density when space allows. Ranking and list presentations do not show it.
 
 ![Monitor view: observed token throughput window](docs/assets/readme/standalone-monitor-throughput.png)
 
@@ -219,8 +255,10 @@ unavailable.
 
 ## Further reading
 
-`ccusage-viz` is token-only and stateless: it does not read raw Agent logs,
-store a usage database, or calculate cost, quota, QPM, or rate-limit metrics.
+`ccusage-viz` is token-only and stateless: it does not analyze Agent transcripts,
+store a usage database, or calculate cost, quota, QPM, or rate-limit metrics. For Codex
+project attribution only, it may read the matching local session's `session_meta.cwd`; it
+never stores or displays session-log content.
 These documents answer the deeper questions:
 
 | Document | What it answers |

@@ -98,6 +98,7 @@ class TimelineModel:
     summary: PeriodSummary | None = None
     aggregation: str = "day"
     observed_at: tuple[datetime, ...] = field(default_factory=tuple)
+    monitor_started_at: datetime | None = None
     observed_series: tuple[ScalarSeries, ...] = field(default_factory=tuple)
     metric: MetricDescriptor = field(default_factory=MetricDescriptor)
     observed_scope: ObservedScope | None = None
@@ -107,6 +108,7 @@ class TimelineModel:
     def __post_init__(self) -> None:
         if (
             not self.observed_at
+            and self.monitor_started_at is None
             and not self.observed_series
             and not self.observed_current
             and self.observed_scope is None
@@ -206,6 +208,7 @@ class ScalarRankingEntry:
     label: str
     value: ChartValue
     is_other: bool = False
+    agent: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -221,6 +224,7 @@ class RankingModel:
     metric: MetricDescriptor = field(default_factory=MetricDescriptor)
     observed_scope: ObservedScope | None = None
     summary_notices: tuple[Notice, ...] = field(default_factory=tuple)
+    project_aggregation: Literal["name", "exact"] = "name"
 
     def __post_init__(self) -> None:
         if not self.observed_entries and self.observed_scope is None:

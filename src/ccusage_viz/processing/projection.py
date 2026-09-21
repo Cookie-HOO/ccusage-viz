@@ -18,7 +18,7 @@ from ccusage_viz.core.time import DateRange
 from ccusage_viz.coverage import DateCoverage
 from ccusage_viz.domain import Notice, TokenUsage, UsageRecord
 from ccusage_viz.processing.summaries import build_period_summary, build_range_summary, period_start
-from ccusage_viz.project_identity import project_label, unique_projects
+from ccusage_viz.project_identity import ProjectAggregation, project_groups, unique_projects
 
 _OTHER_KEY = ("other",)
 _TOTAL_KEY = ("total",)
@@ -43,10 +43,13 @@ def _aggregate_daily(values: dict[date, TokenUsage], aggregation: str) -> dict[d
 
 
 def _group_items(
-    records: Iterable[UsageRecord], by: str | None
+    records: Iterable[UsageRecord],
+    by: str | None,
+    project_aggregation: ProjectAggregation,
 ) -> tuple[tuple[Hashable, str, date, TokenUsage], ...]:
     records = tuple(records)
     projects = unique_projects(record.project for record in records if record.project is not None)
+    project_index = project_groups(projects, project_aggregation)
     output: list[tuple[Hashable, str, date, TokenUsage]] = []
     for record in records:
         day = record.day or date.min
@@ -55,9 +58,8 @@ def _group_items(
         elif by == "agent":
             output.append((("agent", record.agent), record.agent, day, record.usage))
         elif by == "project" and record.project is not None:
-            output.append(
-                (record.project.key, project_label(record.project, projects), day, record.usage)
-            )
+            group = project_index[record.project.key]
+            output.append((group.key, group.label, day, record.usage))
         elif by == "model":
             known_total = sum((item.usage.total for item in record.models), start=0)
             for breakdown in record.models:
@@ -89,10 +91,12 @@ def _ranked_groups(
 
 
 def _grouped_daily(
-    records: Iterable[UsageRecord], by: str | None
+    records: Iterable[UsageRecord],
+    by: str | None,
+    project_aggregation: ProjectAggregation,
 ) -> dict[Hashable, tuple[str, dict[date, TokenUsage]]]:
     grouped: dict[Hashable, tuple[str, dict[date, TokenUsage]]] = {}
-    for key, label, day, usage in _group_items(records, by):
+    for key, label, day, usage in _group_items(records, by, project_aggregation):
         if key not in grouped:
             grouped[key] = (label, defaultdict(TokenUsage.zero))
         grouped[key][1][day] = grouped[key][1][day] + usage
@@ -162,11 +166,14 @@ def build_timeline(
     aggregation: str = "day",
     coverage: DateCoverage = _EMPTY_COVERAGE,
     filter_count: int = 0,
+    project_aggregation: ProjectAggregation = "name",
 ) -> TimelineModel:
     records = tuple(records)
     days = period_axis(date_range, aggregation)
     groups, excluded = _top_other(
-        _ranked_groups(_grouped_daily(records, by)), top=top, show_other=show_other
+        _ranked_groups(_grouped_daily(records, by, project_aggregation)),
+        top=top,
+        show_other=show_other,
     )
     series = tuple(
         Series(
@@ -295,9 +302,10 @@ def build_ranking(
     summary_notices: Iterable[Notice] = (),
     coverage: DateCoverage = _EMPTY_COVERAGE,
     filter_count: int = 0,
+    project_aggregation: ProjectAggregation = "name",
 ) -> RankingModel:
     records = tuple(records)
-    ranked_groups = _ranked_groups(_grouped_daily(records, by))
+    ranked_groups = _ranked_groups(_grouped_daily(records, by, project_aggregation))
     denominator = sum(
         (sum(values.values(), start=TokenUsage.zero()) for _, _, values in ranked_groups),
         start=TokenUsage.zero(),
@@ -342,4 +350,5 @@ def build_ranking(
         top if top_share is not None else None,
         top_share,
         summary_notices=tuple(summary_notices) if summary is not None else (),
+        project_aggregation=project_aggregation if by == "project" else "name",
     )

@@ -85,6 +85,15 @@ def test_ranking_hidden_coverage_requires_consistent_metadata(
         )
 
 
+def test_historical_timeline_rejects_monitor_start_boundary() -> None:
+    with pytest.raises(ValueError, match="only observed axis"):
+        TimelineModel(
+            (date(2026, 1, 1),),
+            (),
+            monitor_started_at=datetime(2026, 1, 1, 12, 0),
+        )
+
+
 def test_observed_models_reject_historical_semantics() -> None:
     scope = ObservedScope(900, "model")
     with pytest.raises(ValueError, match="only observed axis"):

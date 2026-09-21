@@ -16,7 +16,7 @@ from ccusage_viz.charts.definition import HistoricalRenderer
 from ccusage_viz.charts.registry import ChartRegistry
 from ccusage_viz.core.time import DateRange
 from ccusage_viz.coverage import DateCoverage, DateInterval
-from ccusage_viz.domain import Notice
+from ccusage_viz.domain import Notice, SourceKind, TokenUsage, UsageRecord
 from ccusage_viz.errors import QueryError, UsageError
 from ccusage_viz.formatting import display_width, strip_ansi
 from ccusage_viz.historical_component import (
@@ -798,6 +798,62 @@ def test_runtime_adjustment_updates_display_options_from_retained_snapshot(
     assert result.options.chart.filters.projects == current.chart.filters.projects
 
 
+def test_runtime_adjustment_period_preview_hides_accepted_chart_facts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Screen:
+        def paint(self, *args, **kwargs) -> None:
+            pass
+
+    keys = iter(("P", "\x1b"))
+    rendered: list[RefreshResult] = []
+    monkeypatch.setattr("ccusage_viz.watch.input_mode", nullcontext)
+    monkeypatch.setattr("ccusage_viz.watch.read_key", lambda timeout: next(keys))
+    monkeypatch.setattr(
+        "ccusage_viz.watch.inspect_terminal",
+        lambda *args, **kwargs: Terminal(100, 30, False, True),
+    )
+    original_render_component = render_component
+
+    def capture_render(component, *args, **kwargs):
+        result = original_render_component(component, *args, **kwargs)
+        rendered.append(result)
+        return result
+
+    monkeypatch.setattr("ccusage_viz.watch.render_component", capture_render)
+    current = replace(
+        options(command="ranking"),
+        chart=replace(
+            options(command="ranking").chart,
+            date_range=DateRange(
+                date(2026, 1, 1), date(2026, 1, 14), None, period="14d", relative_until=True
+            ),
+        ),
+    )
+    snapshot = UsageSnapshot(
+        (
+            UsageRecord(
+                current.chart.date_range.until,
+                "claude",
+                TokenUsage(100, 100, 0, 0, 0),
+                SourceKind.UNIFIED_DAILY,
+            ),
+        ),
+        (),
+        0.25,
+    )
+
+    result = run_runtime_adjustment(
+        current, load_translator("en"), snapshot, cast(FramePainter, Screen())
+    )
+
+    assert isinstance(result, RuntimeAdjustmentResult)
+    assert result.options != current
+    assert "querying" in rendered[-1].chart
+    assert "??" in rendered[-1].chart
+    assert "100" not in rendered[-1].chart
+
+
 def test_runtime_adjustment_retains_last_chart_until_an_invalid_draft_recovers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -903,6 +959,37 @@ def test_project_adjustment_explains_missing_retained_attribution(
     assert isinstance(result, RuntimeAdjustmentResult)
     assert result.options.chart.by == "project"
     assert any("project data is not in this preview" in str(args[0].rows) for args in paints)
+
+
+def test_project_aggregation_adjustment_is_advanced_and_local(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paints: list[tuple[object, ...]] = []
+
+    class Screen:
+        def paint(self, *args, **kwargs) -> None:
+            paints.append(args)
+
+    keys = iter(("b", "b", "b", "a", "A", "\n"))
+    monkeypatch.setattr("ccusage_viz.watch.input_mode", nullcontext)
+    monkeypatch.setattr("ccusage_viz.watch.read_key", lambda timeout: next(keys))
+    monkeypatch.setattr(
+        "ccusage_viz.watch.inspect_terminal",
+        lambda *args, **kwargs: Terminal(100, 30, True, True),
+    )
+
+    result = run_runtime_adjustment(
+        options(command="timeline"),
+        load_translator("en"),
+        UsageSnapshot((), (), 0.25, includes_project_attribution=True),
+        cast(FramePainter, Screen()),
+    )
+
+    assert isinstance(result, RuntimeAdjustmentResult)
+    assert result.options.chart.by == "project"
+    assert result.options.chart.project_aggregation == "exact"
+    assert any("A project aggregation" in str(args[0].rows) for args in paints)
+    assert any("PROJECT AGGREGATION exact" in str(args[0].rows) for args in paints)
 
 
 def test_runtime_adjustment_ignores_removed_copy_key(

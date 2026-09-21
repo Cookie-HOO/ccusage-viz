@@ -8,6 +8,7 @@ from ccusage_viz.chart_models import CalendarModel, RankingModel, StackModel, Ti
 from ccusage_viz.domain import TokenUsage
 from ccusage_viz.formatting import format_tokens
 from ccusage_viz.processing import process_historical
+from ccusage_viz.project_identity import ExactProjectDisplayKey, exact_project_display_label
 
 if TYPE_CHECKING:
     from ccusage_viz.historical_component import UsageSnapshot
@@ -77,14 +78,27 @@ def _historical_model(options: StandaloneLaunch, snapshot: UsageSnapshot):
     )
 
 
+def _exact_project_agent(key: object) -> str | None:
+    if (
+        isinstance(key, tuple)
+        and len(key) == 4
+        and key[:2] == ("project", "exact")
+        and isinstance(key[2], str)
+    ):
+        return key[2]
+    return None
+
+
 def _historical_rows(
     model: TimelineModel | CalendarModel | StackModel | RankingModel,
 ) -> list[dict[str, object]]:
     if isinstance(model, TimelineModel):
+        include_agent = any(_exact_project_agent(series.key) is not None for series in model.series)
         return [
             {
                 "period": day.isoformat(),
                 "series": series.label,
+                **({"agent": _exact_project_agent(series.key)} if include_agent else {}),
                 "is_other": series.is_other,
                 **_usage_values(usage),
             }
@@ -104,10 +118,12 @@ def _historical_rows(
             for component in model.components
             for day, usage in zip(model.days, component.values, strict=True)
         ]
+    include_agent = any(_exact_project_agent(entry.key) is not None for entry in model.entries)
     return [
         {
             "rank": rank,
-            "group": entry.label,
+            "project": entry.label,
+            **({"agent": _exact_project_agent(entry.key)} if include_agent else {}),
             "is_other": entry.is_other,
             **_usage_values(entry.usage),
         }
@@ -118,11 +134,13 @@ def _historical_rows(
 def _markdown(rows: list[dict[str, object]]) -> str:
     if not rows:
         return ""
-    fields = tuple(rows[0])
+    fields = tuple(dict.fromkeys(field for row in rows for field in row))
     header = "| " + " | ".join(fields) + " |"
     separator = "| " + " | ".join("---" for _ in fields) + " |"
 
     def value(item: object) -> str:
+        if item is None:
+            return ""
         if isinstance(item, bool):
             return str(item).lower()
         if isinstance(item, int):
@@ -133,7 +151,7 @@ def _markdown(rows: list[dict[str, object]]) -> str:
         (
             header,
             separator,
-            *("| " + " | ".join(value(row[field]) for field in fields) + " |" for row in rows),
+            *("| " + " | ".join(value(row.get(field)) for field in fields) + " |" for row in rows),
         )
     )
 
@@ -190,12 +208,16 @@ def monitor_data_payload(
     return [
         {
             "ended_at": bucket.ended_wall.isoformat(),
-            "series": name,
+            "series": (
+                exact_project_display_label(name)
+                if isinstance(name, ExactProjectDisplayKey)
+                else name
+            ),
             "value": value,
             "unit": unit,
         }
         for bucket in buckets
-        for name, value in sorted(bucket.values.items(), key=lambda item: item[0].casefold())
+        for name, value in sorted(bucket.values.items(), key=lambda item: str(item[0]).casefold())
     ]
 
 

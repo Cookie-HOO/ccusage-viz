@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from concurrent.futures import Future
 from datetime import date
+from threading import Event
+from time import perf_counter
 from typing import cast
 
 import pytest
@@ -50,6 +52,41 @@ def test_runtime_selects_provider_from_query_intent() -> None:
     assert result.records
     assert result.provenance[0].provider.provider_id == "demo"
     assert result.includes_project_attribution
+
+
+def test_runtime_submits_without_waiting_for_plan_compilation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ccusage_viz.bootstrap import build_query_runtime
+
+    runtime = build_query_runtime()
+    selected = historical_query_intent(
+        historical(),
+        runtime.definition("demo"),
+        owner_id="standalone",
+        generation=0,
+        trigger=QueryTrigger.STARTUP,
+    )
+    provider = runtime.definition("demo").provider
+    started = Event()
+    release = Event()
+    provider_type = type(provider)
+    original = provider_type.compile
+
+    def compile_after_release(self, intent):
+        started.set()
+        assert release.wait(1)
+        return original(self, intent)
+
+    monkeypatch.setattr(provider_type, "compile", compile_after_release)
+    before = perf_counter()
+    handle = runtime.submit(selected)
+
+    assert perf_counter() - before < 0.1
+    assert started.wait(1)
+    assert not handle.done()
+    release.set()
+    assert handle.result().records
 
 
 def test_runtime_delegates_execution_and_cancellation() -> None:

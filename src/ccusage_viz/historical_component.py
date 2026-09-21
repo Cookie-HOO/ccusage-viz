@@ -29,6 +29,28 @@ from ccusage_viz.render.base import RenderContext
 _EMPTY_COVERAGE = DateCoverage()
 
 
+def historical_replacement_required(
+    previous: StandaloneLaunch, candidate: StandaloneLaunch
+) -> bool:
+    """Return whether a candidate needs replacement source coverage.
+
+    Granularity is deliberately excluded: Timeline and Stack can immediately
+    reproject accepted daily records, then request only missing comparison
+    coverage through the supplemental lifecycle when necessary.
+    """
+    previous_chart = previous.chart
+    candidate_chart = candidate.chart
+    if isinstance(previous_chart, MonitorConfig) or isinstance(candidate_chart, MonitorConfig):
+        raise TypeError("historical replacement checks do not support monitor configurations")
+    if type(previous_chart) is not type(candidate_chart):
+        raise TypeError("historical replacement checks require matching chart kinds")
+    return (
+        previous_chart.date_range != candidate_chart.date_range
+        or previous_chart.filters != candidate_chart.filters
+        or getattr(previous_chart, "by", None) != getattr(candidate_chart, "by", None)
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class UsageSnapshot:
     records: tuple[UsageRecord, ...]
@@ -90,6 +112,7 @@ class HistoricalChartComponent:
         "generation",
         "model",
         "owner_id",
+        "pending_generation",
         "render_revision",
         "runtime",
         "snapshot",
@@ -117,6 +140,7 @@ class HistoricalChartComponent:
         self.snapshot: UsageSnapshot | None = None
         self.model: HistoricalModel | None = None
         self.generation = 0
+        self.pending_generation: int | None = None
         self.render_revision = 0
         self.accepted_at: datetime | None = None
         self.error: BaseException | None = None
@@ -126,20 +150,41 @@ class HistoricalChartComponent:
         self._validate_options(options)
         if options == self.candidate:
             return
+        restores_accepted = options == self.accepted_options
         self.candidate = options
         if data_affecting:
             self.generation += 1
+            self.pending_generation = self.generation if self.snapshot is not None else None
         else:
             self.render_revision += 1
-            if self.snapshot is not None:
+            if self.snapshot is not None and (not self.is_pending or restores_accepted):
                 self.model = self._process(options, self.snapshot)
                 self.accepted_options = options
+                if restores_accepted:
+                    self.pending_generation = None
 
     def _candidate_chart(self) -> HistoricalChartConfig:
         chart = self.candidate.chart
         if isinstance(chart, MonitorConfig):
             raise TypeError("historical components do not support monitor configurations")
         return chart
+
+    @property
+    def is_pending(self) -> bool:
+        return self.pending_generation == self.generation
+
+    @property
+    def has_pending_unknowns(self) -> bool:
+        """Whether the current chart intentionally renders query-pending unknowns."""
+        if self.is_pending:
+            return True
+        chart = self._candidate_chart()
+        return (
+            self.snapshot is not None
+            and chart.presentation.density == "full"
+            and self.supplemental_error is None
+            and bool(self.missing_comparison_coverage().intervals)
+        )
 
     def display_coverage(self) -> DateCoverage:
         chart = self._candidate_chart()
@@ -227,6 +272,7 @@ class HistoricalChartComponent:
             self.supplemental_error = supplemental_error
             raise
         self.accepted_generation = self.generation
+        self.pending_generation = None
         self.accepted_options = self.candidate
         self.snapshot = snapshot
         self.model = model
@@ -253,6 +299,7 @@ class HistoricalChartComponent:
                 self.model = self._process(self.candidate, self.snapshot)
                 self.render_revision += 1
         else:
+            self.pending_generation = None
             self.error = error
         return True
 

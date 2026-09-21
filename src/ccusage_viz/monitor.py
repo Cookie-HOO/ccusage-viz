@@ -15,7 +15,7 @@ from ccusage_viz.command_copy import (
 )
 from ccusage_viz.data_view import BodyView, next_body_view, render_monitor_data
 from ccusage_viz.diagnostics import format_error
-from ccusage_viz.errors import UsageError
+from ccusage_viz.errors import UsageError, VizError
 from ccusage_viz.filter_draft import discover_filter_choices, run_filter_editor
 from ccusage_viz.i18n import Translator
 from ccusage_viz.lifecycle import (
@@ -58,6 +58,7 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
         registry=build_chart_registry(),
         owner_id="standalone:monitor",
         runtime=runtime,
+        monitor_started_at=datetime.now().astimezone(),
     )
     screen = FramePainter()
     started_at = time.monotonic()
@@ -97,6 +98,8 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
         *,
         control_rows: int,
     ) -> str:
+        display = target.display() if hasattr(target, "display") else target
+        display_query_pending = getattr(display, "display_query_pending", False)
         context = RenderContext(
             terminal.width,
             max(
@@ -113,15 +116,17 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
             rank_deltas=target.rank_deltas,
             title_content=translator.text(f"label.{monitor_chart(config).by or 'total'}"),
             density=config.chart.presentation.density,
+            pending=display_query_pending,
             audit=RenderAudit(
                 target.accepted_at,
                 target.last_elapsed,
                 config.host.interval,
                 "sample",
                 refreshing=lifecycle.submission is not None,
+                querying=display_query_pending,
             ),
         )
-        return target.render(
+        return display.render(
             context,
             now=time.monotonic(),
             count=max(8, min(32, terminal.width // 4)),
@@ -135,7 +140,8 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
 
     def paint(*, force: bool = False) -> None:
         nonlocal last_size
-        config = component.accepted_options or component.candidate
+        config = component.candidate
+        accepted = component.accepted_options or config
         terminal = terminal_for(config)
         last_size = (terminal.width, terminal.height)
         controls = (
@@ -165,7 +171,7 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                         color=terminal.color,
                         color_scheme=config.chart.presentation.theme,
                     )
-                    if isinstance(component.error, UsageError)
+                    if isinstance(component.error, VizError)
                     else str(component.error)
                 )
             elif body_view == "chart":
@@ -182,7 +188,7 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
             else:
                 body = render_monitor_data(
                     buckets(now, terminal),
-                    by=monitor_chart(config).by,
+                    by=monitor_chart(accepted).by,
                     translator=translator,
                     terminal=terminal,
                     view=body_view,
@@ -346,15 +352,7 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                 if updated != config:
                     old_chart = monitor_chart(config)
                     new_chart = monitor_chart(updated)
-                    key_affects_data = (
-                        old_chart.by,
-                        old_chart.window_seconds,
-                        config.host.interval,
-                    ) != (
-                        new_chart.by,
-                        new_chart.window_seconds,
-                        updated.host.interval,
-                    )
+                    key_affects_data = old_chart.by != new_chart.by
                     component.configure(updated, data_affecting=key_affects_data)
                     data_affecting = data_affecting or key_affects_data
             else:

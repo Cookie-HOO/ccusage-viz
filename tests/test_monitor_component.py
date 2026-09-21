@@ -2,7 +2,7 @@ from dataclasses import replace
 from datetime import UTC, date, datetime
 
 from ccusage_viz.bootstrap import build_chart_registry, build_query_runtime
-from ccusage_viz.domain import ModelBreakdown, SourceKind, TokenUsage, UsageRecord
+from ccusage_viz.domain import ModelBreakdown, ProjectRef, SourceKind, TokenUsage, UsageRecord
 from ccusage_viz.monitor_component import MonitorCompletion, MonitorComponent
 from ccusage_viz.options import (
     ChartPresentation,
@@ -62,29 +62,59 @@ def completion(
 
 def test_monitor_component_submits_provider_backed_demo_samples() -> None:
     launch = replace(options(), host=replace(options().host, demo_size="small"))
+    runtime = build_query_runtime()
     component = MonitorComponent(
         launch,
         registry=build_chart_registry(),
         owner_id="standalone:monitor",
-        runtime=build_query_runtime(),
+        runtime=runtime,
     )
 
-    first = component.submit(QueryTrigger.STARTUP, sample_ordinal=1, today=date(2026, 9, 19))
-    first_result = first.result()
-    second = component.submit(QueryTrigger.TICK, sample_ordinal=2, today=date(2026, 9, 19))
-    second_result = second.result()
+    try:
+        assert component.monitor_started_at is None
+        first = component.submit(QueryTrigger.STARTUP, sample_ordinal=1, today=date(2026, 9, 19))
+        started_at = component.monitor_started_at
+        assert started_at is not None
+        first_result = first.result()
+        second = component.submit(QueryTrigger.TICK, sample_ordinal=2, today=date(2026, 9, 19))
+        second_result = second.result()
+        component.submit(QueryTrigger.STARTUP, sample_ordinal=3, today=date(2026, 9, 19)).cancel()
+        component.submit(QueryTrigger.REFRESH, sample_ordinal=4, today=date(2026, 9, 19)).cancel()
 
-    assert first.generation == component.generation
-    assert first.options == launch
-    assert first_result.records
-    assert sum(record.usage.total for record in second_result.records) > sum(
-        record.usage.total for record in first_result.records
+        assert first.generation == component.generation
+        assert first.options == launch
+        assert first_result.records
+        assert sum(record.usage.total for record in second_result.records) > sum(
+            record.usage.total for record in first_result.records
+        )
+        assert first_result.elapsed >= 0
+        assert component.monitor_started_at == started_at
+    finally:
+        runtime.cancel()
+
+
+def test_monitor_component_preserves_an_injected_start_marker() -> None:
+    started_at = datetime(2026, 9, 19, 11, 59, tzinfo=UTC)
+    runtime = build_query_runtime()
+    component = MonitorComponent(
+        replace(options(), host=replace(options().host, demo_size="small")),
+        registry=build_chart_registry(),
+        runtime=runtime,
+        monitor_started_at=started_at,
     )
-    assert first_result.elapsed >= 0
+
+    try:
+        component.submit(QueryTrigger.STARTUP, sample_ordinal=1, today=date(2026, 9, 19)).cancel()
+        assert component.monitor_started_at == started_at
+    finally:
+        runtime.cancel()
 
 
 def test_monitor_component_accepts_cumulative_samples_and_projects_timeline() -> None:
-    component = MonitorComponent(options(), registry=build_chart_registry())
+    started_at = datetime(2026, 9, 19, 11, 59, tzinfo=UTC)
+    component = MonitorComponent(
+        options(), registry=build_chart_registry(), monitor_started_at=started_at
+    )
     wall = datetime(2026, 9, 19, 12, 0, tzinfo=UTC)
 
     assert component.accept(completion(component, (record(100),)), now=0, wall=wall)
@@ -100,6 +130,7 @@ def test_monitor_component_accepts_cumulative_samples_and_projects_timeline() ->
     assert model.observed_scope.state == "ready"
     assert model.metric.unit == "tpm"
     assert model.observed_at[-1] == wall
+    assert model.monitor_started_at == started_at
     assert model.observed_series[0].key == "Total"
     assert model.observed_series[0].values[-1] == 360
     assert model.y_axis_max == 500
@@ -122,6 +153,58 @@ def test_monitor_list_uses_the_same_observed_ranking_model() -> None:
         for now, records in zip((0, 10), samples, strict=True):
             assert component.accept(completion(component, records), now=now, wall=wall)
 
+    assert ranking.model(now=10, count=4, wall=wall) == listing.model(now=10, count=4, wall=wall)
+
+
+def test_monitor_project_ranking_and_list_share_safe_exact_labels() -> None:
+    ranking = MonitorComponent(
+        options(by="project", style="ranking"), registry=build_chart_registry()
+    )
+    listing = MonitorComponent(options(by="project", style="list"), registry=build_chart_registry())
+    wall = datetime(2026, 9, 19, 12, 0, tzinfo=UTC)
+    samples = (
+        (
+            UsageRecord(
+                date(2026, 9, 19),
+                "claude",
+                usage(100),
+                SourceKind.CLAUDE_DAILY_PROJECTS,
+                ProjectRef("claude", "-private-work-app", "app"),
+            ),
+            UsageRecord(
+                date(2026, 9, 19),
+                "codex",
+                usage(100),
+                SourceKind.CODEX_SESSIONS,
+                ProjectRef("codex", "/private/work/app", "app"),
+            ),
+        ),
+        (
+            UsageRecord(
+                date(2026, 9, 19),
+                "claude",
+                usage(160),
+                SourceKind.CLAUDE_DAILY_PROJECTS,
+                ProjectRef("claude", "-private-work-app", "app"),
+            ),
+            UsageRecord(
+                date(2026, 9, 19),
+                "codex",
+                usage(140),
+                SourceKind.CODEX_SESSIONS,
+                ProjectRef("codex", "/private/work/app", "app"),
+            ),
+        ),
+    )
+    for component in (ranking, listing):
+        for now, records in zip((0, 10), samples, strict=True):
+            assert component.accept(completion(component, records), now=now, wall=wall)
+
+    entries = ranking.ranking_model(now=10, count=4, wall=wall).observed_entries
+    assert {(entry.agent, entry.label) for entry in entries} == {
+        ("claude", "app"),
+        ("codex", "app"),
+    }
     assert ranking.model(now=10, count=4, wall=wall) == listing.model(now=10, count=4, wall=wall)
 
 
@@ -250,6 +333,101 @@ def test_monitor_component_rejects_stale_completion_and_failure() -> None:
     assert component.observer.previous is None
     assert not component.fail(RuntimeError("stale"), generation=0)
     assert component.error is None
+
+
+def test_monitor_candidate_preview_hides_accepted_values_for_data_configuration() -> None:
+    component = MonitorComponent(
+        options(by="model", style="ranking"), registry=build_chart_registry()
+    )
+    wall = datetime(2026, 9, 19, 12, 0, tzinfo=UTC)
+    component.accept(
+        completion(component, (record(100, models={"a": 60, "b": 40}),)), now=0, wall=wall
+    )
+    component.accept(
+        completion(component, (record(160, models={"a": 100, "b": 60}),)), now=10, wall=wall
+    )
+    accepted_buckets = component.buckets(4, now=10, wall=wall)
+    accepted_options = component.accepted_options
+
+    changed = replace(
+        component.candidate,
+        chart=replace(
+            component.candidate.chart,
+            by="agent",
+            window_seconds=600,
+            filters=Filters(agents=("claude",)),
+        ),
+    )
+    component.configure(changed, data_affecting=True)
+    preview = component.display()
+
+    assert preview.display_query_pending
+    assert preview.ranking_model(now=10, wall=wall).observed_entries == ()
+    assert preview.timeline_model(now=10, count=4, wall=wall).observed_series == ()
+    assert component.accepted_options == accepted_options
+    assert component.buckets(4, now=10, wall=wall) == accepted_buckets
+
+
+def test_monitor_window_preview_reprojects_retained_values_without_querying() -> None:
+    started_at = datetime(2026, 9, 19, 11, 59, tzinfo=UTC)
+    component = MonitorComponent(
+        options(window_seconds=300),
+        registry=build_chart_registry(),
+        monitor_started_at=started_at,
+    )
+    wall = datetime(2026, 9, 19, 12, 0, tzinfo=UTC)
+    component.accept(completion(component, (record(100),)), now=0, wall=wall)
+    component.accept(completion(component, (record(160),)), now=10, wall=wall)
+
+    component.configure(
+        replace(component.candidate, chart=replace(component.candidate.chart, window_seconds=600)),
+        data_affecting=False,
+    )
+    preview = component.display()
+
+    assert not preview.display_query_pending
+    assert preview.monitor_started_at == started_at
+    assert preview.timeline_model(now=10, count=4, wall=wall).monitor_started_at == started_at
+    assert preview.observer.window_seconds == 600
+    assert preview.ranking_model(now=10, wall=wall).observed_entries == (
+        component.ranking_model(now=10, wall=wall).observed_entries
+    )
+
+
+def test_monitor_data_candidate_marker_clears_after_matching_sample() -> None:
+    component = MonitorComponent(options(by="model"), registry=build_chart_registry())
+    wall = datetime(2026, 9, 19, 12, 0, tzinfo=UTC)
+    component.accept(
+        completion(component, (record(100, models={"a": 60, "b": 40}),)), now=0, wall=wall
+    )
+    component.configure(
+        replace(component.candidate, chart=replace(component.candidate.chart, by="agent")),
+        data_affecting=True,
+    )
+
+    assert component.display().display_query_pending
+    assert component.accept(completion(component, (record(160),)), now=10, wall=wall)
+    assert not component.display().display_query_pending
+
+
+def test_monitor_presentation_preview_retains_accepted_values() -> None:
+    component = MonitorComponent(options(), registry=build_chart_registry())
+    wall = datetime(2026, 9, 19, 12, 0, tzinfo=UTC)
+    component.accept(completion(component, (record(100),)), now=0, wall=wall)
+    component.accept(completion(component, (record(160),)), now=10, wall=wall)
+
+    presentation = replace(
+        component.candidate,
+        chart=replace(
+            component.candidate.chart,
+            presentation=replace(component.candidate.chart.presentation, style="line"),
+        ),
+    )
+    component.configure(presentation, data_affecting=False)
+
+    assert component.display().timeline_model(now=10, count=4, wall=wall).observed_series == (
+        component.timeline_model(now=10, count=4, wall=wall).observed_series
+    )
 
 
 def test_monitor_component_reconfigures_without_losing_observed_history() -> None:

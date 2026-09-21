@@ -1,17 +1,23 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Hashable, Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date, datetime
 from math import ceil
-from typing import Literal
+from typing import Literal, Protocol
 
 import plotext as plt
 
-from ccusage_viz.formatting import format_tokens, strip_ansi
+from ccusage_viz.formatting import display_width, format_tokens, strip_ansi
 from ccusage_viz.i18n import Translator
 from ccusage_viz.render.palette import get_color_scheme
+
+
+class ColorContext(Protocol):
+    @property
+    def color(self) -> bool: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,6 +27,7 @@ class RenderAudit:
     interval: float | None = None
     cadence: Literal["refresh", "sample"] = "refresh"
     refreshing: bool = False
+    querying: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,6 +47,7 @@ class RenderContext:
     period: str | None = None
     title_content: str | None = None
     density: Literal["minimal", "compact", "full"] = "full"
+    pending: bool = False
     audit: RenderAudit | None = None
 
 
@@ -61,6 +69,9 @@ def configure_plot(context: RenderContext) -> None:
     if context.hide_upper_right_axes:
         plt.figure.axes(False, axis=0, side=1)
         plt.figure.axes(False, axis=1, side=1)
+
+
+_ANSI_SEQUENCE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 
 
 _ASCII_PLOT_GLYPHS = str.maketrans(
@@ -122,13 +133,26 @@ def render_audit(context: RenderContext) -> str:
     return " · ".join(parts)
 
 
+def title_with_querying(title: str, context: RenderContext) -> str:
+    """Annotate a title when its rendered facts are intentionally incomplete."""
+    if context.audit is None or not context.audit.querying:
+        return title
+    marker = styled_text(
+        context.translator.text("status.querying"),
+        get_color_scheme(context.color_scheme).muted,
+        context,
+        dim=True,
+    )
+    return f"{title} · {marker}"
+
+
 def date_range_heading(name: str, since: date, until: date, context: RenderContext) -> str:
     if context.period is not None:
-        return f"{name} · {context.period}"
+        return title_with_querying(f"{name} · {context.period}", context)
     date_range = context.translator.text(
         "label.date_range", since=since.isoformat(), until=until.isoformat()
     )
-    return f"{name} · {date_range}"
+    return title_with_querying(f"{name} · {date_range}", context)
 
 
 def content_heading(name: str, since: date, until: date, context: RenderContext) -> str:
@@ -154,11 +178,62 @@ def configure_y_ticks(
     plt.figure.ruler("y").ticks(positions, labels)
 
 
+@dataclass(frozen=True, slots=True)
+class ObservedStartMarker:
+    position: float
+    label: str | None
+    alignment: Literal["left", "right"] | None
+
+
 def observed_ticks(points: tuple[datetime, ...]) -> tuple[list[int], list[str]]:
     if not points:
         return [], []
     positions = sorted({0, len(points) // 2, len(points) - 1})
     return positions, [points[index].strftime("%H:%M") for index in positions]
+
+
+def observed_start_marker(
+    points: tuple[datetime, ...], *, started_at: datetime | None, context: RenderContext
+) -> ObservedStartMarker | None:
+    """Position the Monitor session boundary on an observed wall-clock axis."""
+    if started_at is None or len(points) < 2 or points[0] >= points[-1]:
+        return None
+    if not points[0] <= started_at <= points[-1]:
+        return None
+    position = (
+        (started_at - points[0]).total_seconds()
+        / (points[-1] - points[0]).total_seconds()
+        * (len(points) - 1)
+    )
+    if context.density == "minimal":
+        return ObservedStartMarker(position, None, None)
+    key = (
+        "label.monitor_started_full"
+        if context.density == "full"
+        else "label.monitor_started_compact"
+    )
+    label = context.translator.text(key, time=started_at.strftime("%H:%M"))
+    axis_width = max(1, context.width - 12)
+    marker_column = position / max(1, len(points) - 1) * (axis_width - 1)
+    tick_positions, tick_labels = observed_ticks(points)
+    tick_ranges = [
+        (
+            index / max(1, len(points) - 1) * (axis_width - 1) - display_width(tick) / 2,
+            index / max(1, len(points) - 1) * (axis_width - 1) + display_width(tick) / 2,
+        )
+        for index, tick in zip(tick_positions, tick_labels, strict=True)
+    ]
+    for alignment in ("right", "left"):
+        if alignment == "right":
+            label_range = (marker_column + 1, marker_column + 1 + display_width(label))
+        else:
+            label_range = (marker_column - 1 - display_width(label), marker_column - 1)
+        if label_range[0] < 0 or label_range[1] > axis_width:
+            continue
+        if any(label_range[0] <= end and start <= label_range[1] for start, end in tick_ranges):
+            continue
+        return ObservedStartMarker(position, label, alignment)
+    return ObservedStartMarker(position, None, None)
 
 
 def date_ticks(
@@ -218,7 +293,7 @@ def date_ticks(
 def styled_text(
     text: str,
     color: int,
-    context: RenderContext,
+    context: ColorContext,
     *,
     bold: bool = False,
     dim: bool = False,
@@ -239,6 +314,39 @@ def background_mark(mark: str, color: int, context: RenderContext) -> str:
     if not context.color:
         return mark
     return plt.colorize(mark, plt.pixel(background=color)).string()
+
+
+def overlay_plot_column(
+    chart: str,
+    *,
+    column: int,
+    glyph: str,
+    style: str | None = None,
+) -> str:
+    """Overlay one narrow glyph in each plot row without disturbing its ANSI styling."""
+    rows = chart.splitlines()
+    if len(rows) < 4:
+        return chart
+    replacement = style if style else glyph
+
+    def replace_cell(row: str) -> str:
+        visible = 0
+        position = 0
+        while position < len(row):
+            match = _ANSI_SEQUENCE.match(row, position)
+            if match:
+                position = match.end()
+                continue
+            width = display_width(row[position])
+            if visible == column and width == 1:
+                return f"{row[:position]}{replacement}{row[position + 1 :]}"
+            visible += width
+            position += 1
+        return row
+
+    return "\n".join(
+        replace_cell(row) if 0 < index < len(rows) - 3 else row for index, row in enumerate(rows)
+    )
 
 
 def plot_height(context: RenderContext, *, text_rows: int) -> int:
