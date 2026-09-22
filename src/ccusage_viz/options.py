@@ -25,7 +25,7 @@ COMMAND_STYLES = {
     "calendar": ("relative", "grid"),
     "stack": ("stacked", "stacked-pattern", "grouped", "grouped-thin", "normalized"),
     "ranking": ("bar", "dot", "dots"),
-    "monitor": ("bars", "line", "step", "points", "line-points", "ranking", "list"),
+    "monitor": ("bars", "line", "step", "points", "line-points", "ranking", "list", "cumulative-bars"),
 }
 DEFAULT_STYLES = {command: styles[0] for command, styles in COMMAND_STYLES.items()}
 DASHBOARD_STYLES = ("minimal", "split", "framed", "accent")
@@ -41,6 +41,8 @@ MINIMUM_SIZES = {
 
 Dimension: TypeAlias = Literal["agent", "model", "project"]
 Density: TypeAlias = Literal["minimal", "compact", "full"]
+MonitorDayWindow: TypeAlias = Literal["today", "yesterday"]
+MonitorDistributionGranularity: TypeAlias = Literal["hour", "half-hour"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,6 +122,8 @@ class MonitorConfig:
     by: Dimension | None = None
     top: int | None = None
     project_aggregation: ProjectAggregation = "name"
+    day_window: MonitorDayWindow = "today"
+    distribution_granularity: MonitorDistributionGranularity = "hour"
 
 
 HistoricalChartConfig: TypeAlias = TimelineConfig | CalendarConfig | StackConfig | RankingConfig
@@ -209,6 +213,14 @@ def compatible_styles(command: str, by: str | None) -> tuple[str, ...]:
     if command == "monitor" and by is not None:
         return tuple(style for style in styles if style != "bars")
     return styles
+
+
+def is_monitor_distribution(chart: MonitorConfig) -> bool:
+    return chart.presentation.style == "cumulative-bars"
+
+
+def monitor_shows_window_control(chart: MonitorConfig) -> bool:
+    return chart.presentation.style not in {"ranking", "list"}
 
 
 def _cycle(values: tuple[str, ...], current: str, step: int) -> str:
@@ -312,9 +324,20 @@ def adjust_chart(chart: ChartConfig, key: str, *, demo: bool = False) -> ChartCo
     if key == "o" and isinstance(chart, (TimelineConfig, RankingConfig)):
         return replace(chart, other=_cycle(OTHER_MODES, chart.other, 1))
     if key == "w" and isinstance(chart, MonitorConfig):
+        if chart.presentation.style in {"ranking", "list"}:
+            return chart
+        if is_monitor_distribution(chart):
+            values: tuple[MonitorDayWindow, ...] = ("today", "yesterday")
+            return replace(chart, day_window=_cycle(values, chart.day_window, 1))
         values = (300, 900, 1800, 3600, 21600, 43200, 86400)
         nearest = min(values, key=lambda value: abs(value - chart.window_seconds))
         return replace(chart, window_seconds=values[(values.index(nearest) + 1) % len(values)])
+    if key == "g" and isinstance(chart, MonitorConfig) and is_monitor_distribution(chart):
+        values: tuple[MonitorDistributionGranularity, ...] = ("hour", "half-hour")
+        return replace(
+            chart,
+            distribution_granularity=_cycle(values, chart.distribution_granularity, 1),
+        )
     return chart
 
 

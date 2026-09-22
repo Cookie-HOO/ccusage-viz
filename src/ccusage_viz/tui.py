@@ -1084,14 +1084,23 @@ def _pane_adjustment_actions(
         if page == "quick"
         else (*_PANE_ADVANCED_ACTIONS[command], *_COMMON_PANE_ADVANCED_ACTIONS)
     )
-    return _localized_actions(
-        tuple(
-            (key, label)
-            for key, label in actions
-            if key not in {"A", "P"} or _project_grouping_available(chart)
-        ),
-        translator,
+    visible = tuple(
+        (key, label)
+        for key, label in actions
+        if (key not in {"A", "P"} or _project_grouping_available(chart))
+        and not (
+            isinstance(chart, MonitorConfig)
+            and chart.presentation.style in {"ranking", "list"}
+            and key == "w"
+        )
     )
+    if (
+        isinstance(chart, MonitorConfig)
+        and chart.presentation.style == "cumulative-bars"
+        and page == "quick"
+    ):
+        visible = (("w", "window"), ("g", "granularity"), *visible[1:])
+    return _localized_actions(visible, translator)
 
 
 def _adjustment_controls(
@@ -1109,10 +1118,17 @@ def _adjustment_key_supported(
     supported = {
         char
         for spelling, _label in actions
-        if spelling not in {"A", "P"} or _project_grouping_available(chart)
+        if (spelling not in {"A", "P"} or _project_grouping_available(chart))
+        and not (
+            isinstance(chart, MonitorConfig)
+            and chart.presentation.style in {"ranking", "list"}
+            and spelling == "w"
+        )
         for char in spelling
         if char not in "/"
     }
+    if isinstance(chart, MonitorConfig) and chart.presentation.style == "cumulative-bars" and page == "quick":
+        supported.add("g")
     supported.update({"d", "t", "T", "s"} if page == "quick" else ())
     return key in supported
 

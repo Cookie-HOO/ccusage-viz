@@ -32,6 +32,8 @@ from ccusage_viz.options import (
     MonitorConfig,
     StandaloneLaunch,
     adjust_standalone,
+    is_monitor_distribution,
+    monitor_shows_window_control,
     replace_chart_filters,
 )
 from ccusage_viz.render.base import RenderAudit, RenderContext
@@ -92,6 +94,11 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
             now=now,
             wall=datetime.now().astimezone(),
         )
+
+    def monitor_data(now: float, terminal: Terminal):
+        chart = monitor_chart(component.accepted_options or component.candidate)
+        model = component.model(now=now, count=max(8, min(32, terminal.width // 4)), wall=datetime.now().astimezone())
+        return model if chart.presentation.style == "cumulative-bars" else buckets(now, terminal)
 
     def render_component(
         target: MonitorComponent,
@@ -266,16 +273,21 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
             return key
 
         def actions() -> tuple[AdjustmentAction, ...]:
+            chart = monitor_chart(component.candidate)
+            quick_definitions = (
+                (("w", "window"),) if monitor_shows_window_control(chart) else ()
+            ) + (
+                (("g", "granularity"),) if is_monitor_distribution(chart) else ()
+            ) + (
+                ("i", "interval"),
+                ("b", "grouping"),
+                ("+/-", "top"),
+                ("d", "density"),
+                ("t/T", "theme"),
+                ("s", "style"),
+            )
             definitions = (
-                (
-                    ("w", "window"),
-                    ("i", "interval"),
-                    ("b", "grouping"),
-                    ("+/-", "top"),
-                    ("d", "density"),
-                    ("t/T", "theme"),
-                    ("s", "style"),
-                )
+                quick_definitions
                 if adjustment_page == "quick"
                 else (
                     (
@@ -284,7 +296,7 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                         ("P", "project_label_context"),
                         ("l", "legend"),
                     )
-                    if monitor_chart(component.candidate).by == "project"
+                    if chart.by == "project"
                     else (("f", "filter"), ("l", "legend"))
                 )
             )
@@ -424,7 +436,7 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                 component.cycle_project_label_context()
             elif (
                 adjustment_page == "quick"
-                and key in {"d", "s", "t", "T", "b", "w", "i", "+", "=", "-", "_"}
+                and key in {"d", "s", "t", "T", "b", "w", "g", "i", "+", "=", "-", "_"}
                 or adjustment_page == "advanced"
                 and key in {"l", "A"}
             ):
