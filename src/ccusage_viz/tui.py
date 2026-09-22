@@ -27,6 +27,7 @@ from ccusage_viz.dashboard_layout import (
 from ccusage_viz.dashboard_layout import (
     PaneRect,
     adjust_weight,
+    fixed_shape,
     layout_bands,
     layout_for_pane_count,
     reconcile_weights,
@@ -37,6 +38,9 @@ from ccusage_viz.dashboard_layout import (
 )
 from ccusage_viz.dashboard_layout import (
     parse_grid as parse_numeric_grid,
+)
+from ccusage_viz.dashboard_layout import (
+    parse_layout as parse_dashboard_layout,
 )
 from ccusage_viz.data_view import (
     BodyView,
@@ -1127,7 +1131,11 @@ def _adjustment_key_supported(
         for char in spelling
         if char not in "/"
     }
-    if isinstance(chart, MonitorConfig) and chart.presentation.style == "cumulative-bars" and page == "quick":
+    if (
+        isinstance(chart, MonitorConfig)
+        and chart.presentation.style == "cumulative-bars"
+        and page == "quick"
+    ):
         supported.add("g")
     supported.update({"d", "t", "T", "s"} if page == "quick" else ())
     return key in supported
@@ -1285,6 +1293,23 @@ def _adjustment_target(focused: int | None, key: str, pane_count: int) -> int | 
     return focused
 
 
+def _layout_shortcut_capacity(shortcut: str) -> int | None:
+    value = _LAYOUT_SHORTCUT_VALUES[shortcut]
+    if "x" not in value:
+        return None
+    rows, columns = fixed_shape(value)
+    return rows * columns
+
+
+def _layout_shortcut_available(shortcut: str, pane_count: int) -> bool:
+    return parse_dashboard_layout(_LAYOUT_SHORTCUT_VALUES[shortcut], pane_count) is not None
+
+
+def _next_available_layout_shortcut(index: int, available: tuple[int, ...], direction: int) -> int:
+    position = available.index(index)
+    return available[(position + direction) % len(available)]
+
+
 def _choose_layout_shortcut(
     screen: FramePainter,
     translator: Translator,
@@ -1292,13 +1317,33 @@ def _choose_layout_shortcut(
     *,
     height: int,
     current: str,
+    pane_count: int,
     read_input: Callable[[], object] | None = None,
 ) -> str | None:
-    index = _LAYOUT_SHORTCUTS.index(current) if current in _LAYOUT_SHORTCUTS else 0
+    available = tuple(
+        index
+        for index, shortcut in enumerate(_LAYOUT_SHORTCUTS)
+        if _layout_shortcut_available(shortcut, pane_count)
+    )
+    if not available:
+        return None
+    current_index = next(
+        (
+            item_index
+            for item_index, shortcut in enumerate(_LAYOUT_SHORTCUTS)
+            if current in {shortcut, _LAYOUT_SHORTCUT_VALUES[shortcut]}
+        ),
+        None,
+    )
+    index = current_index if current_index in available else available[0]
     while True:
         choices = "\n".join(
-            f"{'›' if item == _LAYOUT_SHORTCUTS[index] else ' '} {item}"
-            for item in _LAYOUT_SHORTCUTS
+            (
+                f"{'›' if item_index == index else ' '} {shortcut}"
+                if item_index in available
+                else f"  {shortcut} · {translator.text('status.tui_layout_unavailable', capacity=_layout_shortcut_capacity(shortcut), count=pane_count)}"
+            )
+            for item_index, shortcut in enumerate(_LAYOUT_SHORTCUTS)
         )
         screen.paint(
             compose_frame(
@@ -1313,9 +1358,9 @@ def _choose_layout_shortcut(
             continue
         key = event.value
         if key in {"j", "\x1b[B"}:
-            index = (index + 1) % len(_LAYOUT_SHORTCUTS)
+            index = _next_available_layout_shortcut(index, available, 1)
         elif key in {"k", "\x1b[A"}:
-            index = (index - 1) % len(_LAYOUT_SHORTCUTS)
+            index = _next_available_layout_shortcut(index, available, -1)
         elif key in {"\r", "\n"}:
             return _LAYOUT_SHORTCUTS[index]
         elif key == "\x1b":
@@ -2338,6 +2383,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                 decoder,
                                 height=get_terminal_size().lines,
                                 current=active_layout or active_grid,
+                                pane_count=len(panes),
                                 read_input=lambda: read_adjustment_event(decoder),
                             )
                         except AdjustmentTimeout:

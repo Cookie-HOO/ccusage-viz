@@ -14,7 +14,12 @@ from ccusage_viz.command_copy import (
     format_full_command_display,
     wrap_command,
 )
-from ccusage_viz.data_view import BodyView, next_body_view, render_monitor_data
+from ccusage_viz.data_view import (
+    BodyView,
+    next_body_view,
+    render_monitor_data,
+    render_monitor_distribution_data,
+)
 from ccusage_viz.diagnostics import format_error, transient_query_recovery_lines
 from ccusage_viz.errors import UsageError, VizError
 from ccusage_viz.filter_draft import discover_filter_choices, run_filter_editor
@@ -97,7 +102,11 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
 
     def monitor_data(now: float, terminal: Terminal):
         chart = monitor_chart(component.accepted_options or component.candidate)
-        model = component.model(now=now, count=max(8, min(32, terminal.width // 4)), wall=datetime.now().astimezone())
+        model = component.model(
+            now=now,
+            count=max(8, min(32, terminal.width // 4)),
+            wall=datetime.now().astimezone(),
+        )
         return model if chart.presentation.style == "cumulative-bars" else buckets(now, terminal)
 
     def render_component(
@@ -231,12 +240,22 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
             elif body_view == "full-command":
                 body = format_full_command_display(format_full_command(config), terminal.width)
             else:
-                body = render_monitor_data(
-                    buckets(now, terminal),
-                    by=monitor_chart(accepted).by,
-                    translator=translator,
-                    terminal=terminal,
-                    view=body_view,
+                data = monitor_data(now, terminal)
+                body = (
+                    render_monitor_distribution_data(
+                        data,
+                        translator=translator,
+                        terminal=terminal,
+                        view=body_view,
+                    )
+                    if is_monitor_distribution(monitor_chart(accepted))
+                    else render_monitor_data(
+                        data,
+                        by=monitor_chart(accepted).by,
+                        translator=translator,
+                        terminal=terminal,
+                        view=body_view,
+                    )
                 )
             screen.paint(
                 compose_frame(body, status, controls, notices(), height=terminal.height),
@@ -275,16 +294,16 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
         def actions() -> tuple[AdjustmentAction, ...]:
             chart = monitor_chart(component.candidate)
             quick_definitions = (
-                (("w", "window"),) if monitor_shows_window_control(chart) else ()
-            ) + (
-                (("g", "granularity"),) if is_monitor_distribution(chart) else ()
-            ) + (
-                ("i", "interval"),
-                ("b", "grouping"),
-                ("+/-", "top"),
-                ("d", "density"),
-                ("t/T", "theme"),
-                ("s", "style"),
+                ((("w", "window"),) if monitor_shows_window_control(chart) else ())
+                + ((("g", "granularity"),) if is_monitor_distribution(chart) else ())
+                + (
+                    ("i", "interval"),
+                    ("b", "grouping"),
+                    ("+/-", "top"),
+                    ("d", "density"),
+                    ("t/T", "theme"),
+                    ("s", "style"),
+                )
             )
             definitions = (
                 quick_definitions
@@ -324,16 +343,25 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                 if chart.window_seconds % 3600 == 0
                 else f"{chart.window_seconds // 60}m"
             )
+            quick_values = {
+                "interval": f"{candidate.host.interval:g}",
+                "mode": mode,
+                "top": top,
+                "theme": chart.presentation.theme,
+                "style": chart.presentation.style,
+                "density": chart.presentation.density,
+            }
+            if is_monitor_distribution(chart):
+                quick_values.update(
+                    day_window=translator.text(f"label.monitor_distribution_{chart.day_window}"),
+                    granularity=translator.text(
+                        f"label.monitor_distribution_{chart.distribution_granularity}"
+                    ),
+                )
+            else:
+                quick_values.update(window=window)
             values = (
-                {
-                    "window": window,
-                    "interval": f"{candidate.host.interval:g}",
-                    "mode": mode,
-                    "top": top,
-                    "theme": chart.presentation.theme,
-                    "style": chart.presentation.style,
-                    "density": chart.presentation.density,
-                }
+                quick_values
                 if adjustment_page == "quick"
                 else {
                     "legend_position": translator.text(
@@ -352,6 +380,8 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
             state_key = (
                 "status.monitor_adjust_advanced_nonproject"
                 if adjustment_page == "advanced" and chart.by != "project"
+                else "status.monitor_distribution_adjust_quick"
+                if adjustment_page == "quick" and is_monitor_distribution(chart)
                 else f"status.monitor_adjust_{adjustment_page}"
             )
             adjustment_controls = adjustment_rows(

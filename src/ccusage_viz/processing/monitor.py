@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict, deque
-from collections.abc import Mapping
+from collections.abc import Hashable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from math import floor, isfinite, log10
@@ -320,7 +320,9 @@ class ObservedTPM:
         merged: list[CoverageSpan] = []
         for span in sorted(spans, key=lambda item: item.started_at):
             if merged and span.started_at <= merged[-1].ended_at:
-                merged[-1] = CoverageSpan(merged[-1].started_at, max(merged[-1].ended_at, span.ended_at))
+                merged[-1] = CoverageSpan(
+                    merged[-1].started_at, max(merged[-1].ended_at, span.ended_at)
+                )
             else:
                 merged.append(span)
         return tuple(merged)
@@ -493,7 +495,11 @@ class ObservedTPM:
                 duration = segment.ended_at - segment.started_at
                 if overlap <= 0 or duration <= 0:
                     continue
-                covered += self._covered_seconds(segment, max(bucket_start, segment.started_at), min(bucket_end, segment.ended_at))
+                covered += self._covered_seconds(
+                    segment,
+                    max(bucket_start, segment.started_at),
+                    min(bucket_end, segment.ended_at),
+                )
                 for key, value in self._values(segment).items():
                     if value <= 0:
                         continue
@@ -539,7 +545,9 @@ class ObservedTPM:
             boundaries.append(datetime.fromtimestamp(timestamp, wall.tzinfo))
 
         segments = self._segments(now)
-        values_by_bucket: list[defaultdict[MonitorKey, float]] = [defaultdict(float) for _ in boundaries[:-1]]
+        values_by_bucket: list[defaultdict[MonitorKey, float]] = [
+            defaultdict(float) for _ in boundaries[:-1]
+        ]
         coverage_by_bucket: list[list[CoverageSpan]] = [[] for _ in boundaries[:-1]]
         totals: defaultdict[MonitorKey, float] = defaultdict(float)
         for segment in segments:
@@ -552,10 +560,14 @@ class ObservedTPM:
                 if isinstance(segment, MinuteRollup)
                 else (CoverageSpan(segment.started_at, segment.ended_at),)
             )
-            for index, (started_wall, ended_wall) in enumerate(zip(boundaries, boundaries[1:], strict=False)):
+            for index, (started_wall, ended_wall) in enumerate(
+                zip(boundaries, boundaries[1:], strict=False)
+            ):
                 started_at = now + started_wall.timestamp() - wall.timestamp()
                 ended_at = now + ended_wall.timestamp() - wall.timestamp()
-                overlap = max(0.0, min(ended_at, segment.ended_at) - max(started_at, segment.started_at))
+                overlap = max(
+                    0.0, min(ended_at, segment.ended_at) - max(started_at, segment.started_at)
+                )
                 if overlap > 0:
                     for key, value in segment_values.items():
                         contribution = value * overlap / duration
@@ -581,11 +593,12 @@ class ObservedTPM:
         if "Other" in selected:
             ordered.append("Other")
         series = tuple(
-            TimeOfDaySeries(key, monitor_key_label(key), key == "Other")
-            for key in ordered
+            TimeOfDaySeries(key, monitor_key_label(key), key == "Other") for key in ordered
         )
         buckets: list[TimeOfDayBucket] = []
-        for index, (started_wall, ended_wall) in enumerate(zip(boundaries, boundaries[1:], strict=False)):
+        for index, (started_wall, ended_wall) in enumerate(
+            zip(boundaries, boundaries[1:], strict=False)
+        ):
             spans = self._coverage_spans(*coverage_by_bucket[index])
             started_at = now + started_wall.timestamp() - wall.timestamp()
             ended_at = now + ended_wall.timestamp() - wall.timestamp()
@@ -604,12 +617,17 @@ class ObservedTPM:
                     values[key if key in selected else "Other"] += value
                 for key in ordered:
                     values.setdefault(key, 0.0)
-            buckets.append(TimeOfDayBucket(started_wall, ended_wall, coverage, values))
+            bucket_values: dict[Hashable, float] = dict(values.items())
+            buckets.append(TimeOfDayBucket(started_wall, ended_wall, coverage, bucket_values))
 
         observed_from = (
-            datetime.fromtimestamp(self.intervals[0].started_at - now + wall.timestamp(), wall.tzinfo)
+            datetime.fromtimestamp(
+                self.intervals[0].started_at - now + wall.timestamp(), wall.tzinfo
+            )
             if self.intervals
-            else datetime.fromtimestamp(self.rollups[0].started_at - now + wall.timestamp(), wall.tzinfo)
+            else datetime.fromtimestamp(
+                self.rollups[0].started_at - now + wall.timestamp(), wall.tzinfo
+            )
             if self.rollups
             else None
         )
@@ -646,7 +664,9 @@ class ObservedTPM:
             duration = segment.ended_at - segment.started_at
             if overlap <= 0 or duration <= 0:
                 continue
-            seconds += self._covered_seconds(segment, max(cutoff, segment.started_at), min(now, segment.ended_at))
+            seconds += self._covered_seconds(
+                segment, max(cutoff, segment.started_at), min(now, segment.ended_at)
+            )
             for key, value in self._values(segment).items():
                 tokens[key] += value * overlap / duration
         if seconds <= 0:

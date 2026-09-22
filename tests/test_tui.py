@@ -38,6 +38,7 @@ from ccusage_viz.tui import (
     _adjustment_footer,
     _adjustment_key_supported,
     _adjustment_target,
+    _choose_layout_shortcut,
     _choose_pane_type,
     _dashboard_title_line,
     _grid_for_pane_count,
@@ -1687,6 +1688,56 @@ def test_refresh_ranks_tracks_movement_and_clear() -> None:
     assert ranks.current == {"b": 1, "a": -1}
     ranks.clear()
     assert ranks.previous == ranks.current == {}
+
+
+def test_layout_chooser_shows_unavailable_layouts_and_skips_them() -> None:
+    frames: list[object] = []
+
+    class Screen:
+        def paint(self, frame: object, **_kwargs: object) -> None:
+            frames.append(frame)
+
+    events = iter((KeyEvent("j"), KeyEvent("\r")))
+
+    assert (
+        _choose_layout_shortcut(
+            Screen(),
+            load_translator("en"),
+            InputDecoder(),
+            height=20,
+            current="wide",
+            pane_count=4,
+            read_input=lambda: next(events),
+        )
+        == "all"
+    )
+
+    initial = "\n".join(frames[0].rows)
+    selected = "\n".join(frames[1].rows)
+    assert "› wide" in initial
+    assert "narrow · unavailable: 3 cells for 4 panes" in initial
+    assert "› all" in selected
+
+
+def test_layout_chooser_preserves_current_fixed_grid_value() -> None:
+    class Screen:
+        def paint(self, _frame: object, **_kwargs: object) -> None:
+            pass
+
+    events = iter((KeyEvent("\r"),))
+
+    assert (
+        _choose_layout_shortcut(
+            Screen(),
+            load_translator("en"),
+            InputDecoder(),
+            height=20,
+            current="3x1",
+            pane_count=3,
+            read_input=lambda: next(events),
+        )
+        == "narrow"
+    )
 
 
 def test_pane_chooser_reuses_dashboard_decoder_and_ignores_mouse(

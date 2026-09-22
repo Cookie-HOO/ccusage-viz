@@ -2,6 +2,7 @@ from dataclasses import replace
 from datetime import UTC, date, datetime
 
 from ccusage_viz.bootstrap import build_chart_registry, build_query_runtime
+from ccusage_viz.chart_models import TimeOfDayDistributionModel
 from ccusage_viz.domain import ModelBreakdown, ProjectRef, SourceKind, TokenUsage, UsageRecord
 from ccusage_viz.monitor_component import MonitorCompletion, MonitorComponent
 from ccusage_viz.options import (
@@ -110,6 +111,34 @@ def test_monitor_component_preserves_an_injected_start_marker() -> None:
         assert component.monitor_started_at == started_at
     finally:
         runtime.cancel()
+
+
+def test_monitor_distribution_reprojects_accepted_samples_without_rebaseline() -> None:
+    component = MonitorComponent(options(style="cumulative-bars"), registry=build_chart_registry())
+    wall = datetime(2026, 9, 19, 9, 0, tzinfo=UTC)
+
+    assert component.accept(completion(component, (record(100),)), now=0, wall=wall)
+    assert component.accept(completion(component, (record(160),)), now=60, wall=wall)
+    initial = component.model(now=60, count=8, wall=wall)
+
+    assert isinstance(initial, TimeOfDayDistributionModel)
+    original_generation = component.generation
+    updated = replace(
+        component.candidate,
+        chart=replace(
+            component.candidate.chart,
+            day_window="yesterday",
+            distribution_granularity="half-hour",
+        ),
+    )
+    component.configure(updated, data_affecting=False)
+    model = component.model(now=60, count=8, wall=wall)
+
+    assert isinstance(model, TimeOfDayDistributionModel)
+    assert model.day_window == "yesterday"
+    assert model.granularity == "half-hour"
+    assert component.generation == original_generation
+    assert component.observer.previous is not None
 
 
 def test_monitor_component_accepts_cumulative_samples_and_projects_timeline() -> None:

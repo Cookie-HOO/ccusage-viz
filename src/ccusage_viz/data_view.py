@@ -5,7 +5,13 @@ from collections import defaultdict
 from collections.abc import Iterable
 from typing import TYPE_CHECKING, Literal
 
-from ccusage_viz.chart_models import CalendarModel, RankingModel, StackModel, TimelineModel
+from ccusage_viz.chart_models import (
+    CalendarModel,
+    RankingModel,
+    StackModel,
+    TimelineModel,
+    TimeOfDayDistributionModel,
+)
 from ccusage_viz.domain import TokenUsage, UsageRecord
 from ccusage_viz.formatting import format_tokens
 from ccusage_viz.options import RankingConfig
@@ -344,6 +350,68 @@ def monitor_data_payload(
         for bucket in buckets
         for name, value in sorted(bucket.values.items(), key=lambda item: str(item[0]).casefold())
     ]
+
+
+def monitor_distribution_data_payload(
+    model: TimeOfDayDistributionModel,
+) -> list[dict[str, object]]:
+    """Return exact displayed rows for a calendar-aligned Monitor distribution."""
+    merge_groups = _merge_group_indices(
+        series.key.key for series in model.series if isinstance(series.key, ProjectDisplayKey)
+    )
+    series_by_key = {series.key: series for series in model.series}
+    rows: list[dict[str, object]] = []
+    for bucket in model.buckets:
+        for key, series in series_by_key.items():
+            value = bucket.values.get(key) if bucket.coverage.value != "unobserved" else None
+            row: dict[str, object] = {
+                "started_at": bucket.started_at.isoformat(),
+                "ended_at": bucket.ended_at.isoformat(),
+                "day_window": model.day_window,
+                "granularity": model.granularity,
+                "series": _monitor_display_project(key)
+                if isinstance(key, ProjectDisplayKey)
+                else exact_project_display_label(key)
+                if isinstance(key, ExactProjectDisplayKey)
+                else series.label,
+                "is_other": series.is_other,
+                "value": value,
+                "unit": "tokens",
+                "coverage": bucket.coverage.value,
+            }
+            if isinstance(key, ProjectDisplayKey):
+                row.update(
+                    display_project=_monitor_display_project(key),
+                    agent=key.agent,
+                    merge_group=merge_groups.get(key.key),
+                )
+            elif isinstance(key, ExactProjectDisplayKey):
+                row.update(
+                    display_project=exact_project_display_label(key),
+                    agent=key.agent,
+                    merge_group=None,
+                )
+            rows.append(row)
+    return rows
+
+
+def render_monitor_distribution_data(
+    model: TimeOfDayDistributionModel,
+    *,
+    translator: Translator,
+    terminal: Terminal,
+    view: Literal["data-table", "data-json"] = "data-table",
+    complete: bool = False,
+) -> str:
+    rows = monitor_distribution_data_payload(model)
+    if not rows:
+        return translator.text("message.monitor_empty")
+    payload = (
+        json.dumps({"rows": rows}, indent=2, ensure_ascii=False)
+        if view == "data-json"
+        else _markdown(rows)
+    )
+    return _display_payload(payload, terminal, complete=complete)
 
 
 def render_monitor_data(

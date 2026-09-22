@@ -6,6 +6,26 @@
 - **次版本（`0.x.0`）**：新的面向用户能力、数据源集成，或可能需要迁移的公开契约变更。
 - 在 `1.0` 前，公开接口仍可能在次版本之间变化。
 
+## 0.1.2
+
+`0.1.2` 为 Monitor 增加按本地时间段查看已保留 Token 增量的专用视图：
+
+- `cumulative-bars` 将已接受的 Monitor 采样投影为本地日历日的 Token 柱，而非 TPM；
+  沿用 Total、Agent、模型和项目分组，并在所选整天内确定 Top/Other；
+- Monitor 调整新增今天/昨天以及每小时/30 分钟分桶。这些操作只重投影已保留采样，
+  不会重新建立观测基线或改变采样频率；
+- 分桶保留完整、部分和未观测覆盖状态；表格/JSON 输出会区分观测到的零值与缺失的观测，
+  保留采样或重置造成的间隔，并处理本地夏令时回退日；
+- Monitor 表格和 JSON 视图提供带时区的分桶边界、日期窗口、粒度、Token 单位数值、
+  覆盖状态，以及已有的有边界项目显示 provenance 字段；
+- 独立 Monitor 与 Dashboard Monitor 的控制、渲染、英文/简体中文使用指南和回归测试
+  已围绕该视图对齐；
+- Dashboard 的 `z` 布局选择器会保留固定容量布局的可见性，但会将无法容纳当前 Pane 数量的
+  选项标为不可用，且导航会跳过这些选项。
+
+这是仅限内存中已观测 Monitor 历史的功能；它不会从历史 provider 重建日内数据，
+也不包含 collector 集成。
+
 ## 0.1.1
 
 `0.1.1` 聚焦项目归属安全、交互可靠性和项目视图的可检查性：
@@ -23,6 +43,4 @@
 
 ## 延后的 collector 集成
 
-DSH 专属 provider 与 contract 试验不属于 `0.1.1`。
-
-`0.1.1` 发布当前已完成的工作。之后的次版本可在 npm 包形式的 `ccuv-collector` 及其 JSON 协议稳定后再集成。该集成将使用由 collector 所有、对 ccuv 透明的 agent identity 和 provenance 契约，而不是 DSH 专属 ccuv provider。
+之后的次版本可在 npm 包形式的 `ccuv-collector` 及其 JSON 协议稳定后再集成。该集成将使用由 collector 所有、对 ccuv 透明的 agent identity 和 provenance 契约。

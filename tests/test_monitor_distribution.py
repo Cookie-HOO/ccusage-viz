@@ -23,7 +23,11 @@ def test_distribution_splits_intervals_at_half_hour_boundaries() -> None:
 
     model = observer.time_of_day_distribution(120 * 60.0, wall=wall + timedelta(hours=2))
 
-    values = [bucket.values["Total"] for bucket in model.buckets if bucket.coverage is not DistributionCoverage.UNOBSERVED]
+    values = [
+        bucket.values["Total"]
+        for bucket in model.buckets
+        if bucket.coverage is not DistributionCoverage.UNOBSERVED
+    ]
     assert values == [45.0, 60.0, 15.0]
 
 
@@ -57,7 +61,9 @@ def test_distribution_uses_safe_project_display_labels() -> None:
     project = ExactProjectDisplayKey("claude", "/safe/private/path", "app")
     wall = datetime(2026, 1, 1, tzinfo=UTC)
     observer.add(CounterSnapshot(usage(0), projects={project: usage(0)}), 0.0, wall)
-    observer.add(CounterSnapshot(usage(10), projects={project: usage(10)}), 60.0, wall + timedelta(minutes=1))
+    observer.add(
+        CounterSnapshot(usage(10), projects={project: usage(10)}), 60.0, wall + timedelta(minutes=1)
+    )
 
     model = observer.time_of_day_distribution(60.0, wall=wall + timedelta(minutes=1))
 

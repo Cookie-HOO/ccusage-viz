@@ -21,6 +21,12 @@ def test_catalogs_have_the_same_keys_and_placeholders() -> None:
     assert "Advanced" not in EN_MESSAGES["status.tui_global_quick_controls"]
     assert "高级" not in ZH_MESSAGES["status.tui_global_quick_controls"]
     assert "status.tui_global_advanced_controls" not in EN_MESSAGES
+    assert EN_MESSAGES["label.monitor_distribution_hour"] == "Hourly"
+    assert ZH_MESSAGES["label.monitor_distribution_hour"] == "每小时"
+    assert EN_MESSAGES["label.monitor_distribution_half-hour"] == "30 min"
+    assert ZH_MESSAGES["label.monitor_distribution_half-hour"] == "30分钟"
+    assert EN_MESSAGES["label.monitor_distribution_observed_from"] == "observed from {time}"
+    assert ZH_MESSAGES["label.monitor_distribution_observed_from"] == "自 {time} 起观测"
 
 
 @pytest.mark.parametrize(

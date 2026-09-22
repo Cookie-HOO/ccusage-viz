@@ -6,6 +6,33 @@
 - **Minor (`0.x.0`)**: new user-facing capabilities, source integrations, or public-contract changes that may require migration before 1.0.
 - Before `1.0`, public interfaces may still change between minor releases.
 
+## 0.1.2
+
+`0.1.2` adds a Monitor-only view of retained token increments by local time of
+day:
+
+- `cumulative-bars` projects accepted Monitor samples into local calendar-day
+  token bars instead of TPM, with existing Total, Agent, Model, and Project
+  grouping plus full-day Top/Other selection;
+- Monitor adjustment adds Today/Yesterday and hourly/30-minute bucket controls.
+  These reproject retained samples without rebaselining the observer or changing
+  the sampling cadence;
+- distribution buckets retain full, partial, and unobserved coverage states,
+  distinguish observed zero from missing observation data in table/JSON output,
+  preserve sampling/reset gaps, and handle local DST fall-back days;
+- Monitor table and JSON views expose aware bucket bounds, selected day and
+  granularity, token-unit values, coverage, and the existing bounded project
+  display provenance fields;
+- standalone and Dashboard Monitor controls, renderer behavior, English and
+  Simplified Chinese usage guidance, and regression coverage were aligned around
+  the new view;
+- Dashboard's `z` layout chooser now keeps fixed-capacity layouts visible but
+  marks choices that cannot fit the current Pane count as unavailable, and
+  navigation skips those choices.
+
+This is observed, in-memory Monitor history only. It does not reconstruct
+intraday history from historical providers or add a collector integration.
+
 ## 0.1.1
 
 `0.1.1` improves project attribution safety, interactive reliability, and
@@ -40,6 +67,6 @@ not a raw-record or filesystem-path export.
 
 ## Deferred collector integration
 
-DSH-specific provider and contract experiments are intentionally not part of `0.1.1`.
-
-`0.1.1` ships the completed current work. A subsequent minor release may integrate the npm-packaged `ccuv-collector` once its package and JSON protocol are stable. That integration will use a collector-owned, opaque agent identity and provenance contract rather than a DSH-specific ccuv provider.
+A subsequent minor release may integrate the npm-packaged `ccuv-collector` once
+its package and JSON protocol are stable. That integration will use a
+collector-owned, opaque agent identity and provenance contract.

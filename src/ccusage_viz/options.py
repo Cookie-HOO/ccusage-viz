@@ -25,7 +25,16 @@ COMMAND_STYLES = {
     "calendar": ("relative", "grid"),
     "stack": ("stacked", "stacked-pattern", "grouped", "grouped-thin", "normalized"),
     "ranking": ("bar", "dot", "dots"),
-    "monitor": ("bars", "line", "step", "points", "line-points", "ranking", "list", "cumulative-bars"),
+    "monitor": (
+        "bars",
+        "line",
+        "step",
+        "points",
+        "line-points",
+        "ranking",
+        "list",
+        "cumulative-bars",
+    ),
 }
 DEFAULT_STYLES = {command: styles[0] for command, styles in COMMAND_STYLES.items()}
 DASHBOARD_STYLES = ("minimal", "split", "framed", "accent")

@@ -254,6 +254,35 @@ def test_monitor_list_is_available_for_total_and_grouped_views() -> None:
     assert adjust_standalone(monitor, "b").chart.presentation.style == "ranking"
 
 
+def test_monitor_distribution_adjustments_change_only_display_projection() -> None:
+    monitor = StandaloneLaunch(
+        ProcessConfig(),
+        StandaloneHostConfig(interval=15),
+        MonitorConfig("monitor", 3600, presentation=ChartPresentation(style="cumulative-bars")),
+    )
+
+    yesterday = adjust_standalone(monitor, "w")
+    half_hour = adjust_standalone(monitor, "g")
+
+    assert yesterday.chart.day_window == "yesterday"
+    assert yesterday.chart.distribution_granularity == "hour"
+    assert yesterday.chart.window_seconds == monitor.chart.window_seconds
+    assert half_hour.chart.day_window == "today"
+    assert half_hour.chart.distribution_granularity == "half-hour"
+    assert half_hour.chart.window_seconds == monitor.chart.window_seconds
+    assert adjust_standalone(monitor, "i").host.interval == 30
+
+
+def test_monitor_ranking_and_list_do_not_adjust_the_rolling_window() -> None:
+    for style in ("ranking", "list"):
+        monitor = StandaloneLaunch(
+            ProcessConfig(),
+            StandaloneHostConfig(),
+            MonitorConfig("monitor", 3600, presentation=ChartPresentation(style=style)),
+        )
+        assert adjust_standalone(monitor, "w") == monitor
+
+
 def test_monitor_copy_keeps_startup_selection() -> None:
     launch = StandaloneLaunch(
         ProcessConfig(),
