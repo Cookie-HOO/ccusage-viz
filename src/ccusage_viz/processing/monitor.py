@@ -5,8 +5,14 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from math import floor, isfinite, log10
-from typing import Any, TypeAlias, cast
+from typing import Any, Literal, TypeAlias, cast
 
+from ccusage_viz.chart_models import (
+    DistributionCoverage,
+    TimeOfDayBucket,
+    TimeOfDayDistributionModel,
+    TimeOfDaySeries,
+)
 from ccusage_viz.domain import TokenUsage, UsageRecord, model_identity
 from ccusage_viz.options import StandaloneLaunch
 from ccusage_viz.project_identity import (
@@ -32,6 +38,13 @@ def monitor_key_sort_key(key: MonitorKey) -> tuple[str, str, str]:
     return ("scalar", key.casefold(), "")
 
 
+def monitor_key_label(key: MonitorKey) -> str:
+    """Return the safe display label for a Monitor dimension identity."""
+    if isinstance(key, (ExactProjectDisplayKey, ProjectDisplayKey)):
+        return key.label
+    return key
+
+
 @dataclass(frozen=True, slots=True)
 class CounterSnapshot:
     total: TokenUsage
@@ -53,6 +66,16 @@ class ObservedInterval:
 
 
 @dataclass(frozen=True, slots=True)
+class CoverageSpan:
+    started_at: float
+    ended_at: float
+
+    def __post_init__(self) -> None:
+        if self.ended_at <= self.started_at:
+            raise ValueError("coverage spans must have positive duration")
+
+
+@dataclass(frozen=True, slots=True)
 class MinuteRollup:
     minute: int
     started_at: float
@@ -63,6 +86,7 @@ class MinuteRollup:
     models: dict[str, float]
     agents: dict[str, float]
     projects: dict[MonitorKey, float]
+    coverage_spans: tuple[CoverageSpan, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,7 +102,7 @@ class ObservedTPM:
 
     model_limit = 256
     native_seconds = 3600
-    retention_seconds = 24 * 3600
+    retention_seconds = 50 * 3600
 
     def __init__(
         self,
@@ -291,8 +315,19 @@ class ObservedTPM:
             {name: value * fraction for name, value in interval.projects.items()},
         )
 
+    @staticmethod
+    def _coverage_spans(*spans: CoverageSpan) -> tuple[CoverageSpan, ...]:
+        merged: list[CoverageSpan] = []
+        for span in sorted(spans, key=lambda item: item.started_at):
+            if merged and span.started_at <= merged[-1].ended_at:
+                merged[-1] = CoverageSpan(merged[-1].started_at, max(merged[-1].ended_at, span.ended_at))
+            else:
+                merged.append(span)
+        return tuple(merged)
+
     def _append_rollup(self, interval: ObservedInterval) -> None:
         minute = int(interval.started_at // 60)
+        spans = (CoverageSpan(interval.started_at, interval.ended_at),)
         rollup = MinuteRollup(
             minute,
             interval.started_at,
@@ -303,6 +338,7 @@ class ObservedTPM:
             dict(interval.models),
             dict(interval.agents),
             dict(interval.projects),
+            spans,
         )
         if self.rollups and self.rollups[-1].minute == minute:
             previous = self.rollups.pop()
@@ -318,11 +354,24 @@ class ObservedTPM:
                 min(previous.started_at, rollup.started_at),
                 max(previous.ended_at, rollup.ended_at),
                 max(previous.ended_wall, rollup.ended_wall),
-                previous.covered_seconds + rollup.covered_seconds,
+                0.0,
                 previous.total + rollup.total,
                 merged(previous.models, rollup.models),
                 merged(previous.agents, rollup.agents),
                 merged(previous.projects, rollup.projects),
+                self._coverage_spans(*previous.coverage_spans, *rollup.coverage_spans),
+            )
+            rollup = MinuteRollup(
+                rollup.minute,
+                rollup.started_at,
+                rollup.ended_at,
+                rollup.ended_wall,
+                sum(span.ended_at - span.started_at for span in rollup.coverage_spans),
+                rollup.total,
+                rollup.models,
+                rollup.agents,
+                rollup.projects,
+                rollup.coverage_spans,
             )
         self.rollups.append(rollup)
 
@@ -360,6 +409,13 @@ class ObservedTPM:
                     {name: value * fraction for name, value in rollup.models.items()},
                     {name: value * fraction for name, value in rollup.agents.items()},
                     {name: value * fraction for name, value in rollup.projects.items()},
+                    self._coverage_spans(
+                        *(
+                            CoverageSpan(max(cutoff, span.started_at), span.ended_at)
+                            for span in rollup.coverage_spans
+                            if span.ended_at > cutoff
+                        )
+                    ),
                 )
             )
 
@@ -399,10 +455,14 @@ class ObservedTPM:
 
     @staticmethod
     def _covered_seconds(
-        segment: MinuteRollup | ObservedInterval, overlap: float, duration: float
+        segment: MinuteRollup | ObservedInterval, started_at: float, ended_at: float
     ) -> float:
-        covered = segment.covered_seconds if isinstance(segment, MinuteRollup) else segment.seconds
-        return covered * overlap / duration
+        if isinstance(segment, MinuteRollup):
+            return sum(
+                max(0.0, min(ended_at, span.ended_at) - max(started_at, span.started_at))
+                for span in segment.coverage_spans
+            )
+        return max(0.0, min(ended_at, segment.ended_at) - max(started_at, segment.started_at))
 
     def buckets(
         self, now: float, count: int, wall: datetime | None = None
@@ -433,7 +493,7 @@ class ObservedTPM:
                 duration = segment.ended_at - segment.started_at
                 if overlap <= 0 or duration <= 0:
                     continue
-                covered += self._covered_seconds(segment, overlap, duration)
+                covered += self._covered_seconds(segment, max(bucket_start, segment.started_at), min(bucket_end, segment.ended_at))
                 for key, value in self._values(segment).items():
                     if value <= 0:
                         continue
@@ -450,6 +510,118 @@ class ObservedTPM:
             ended_wall = wall - timedelta(seconds=max(0.0, now - bucket_end))
             buckets.append(ObservedBucket(bucket_start, bucket_end, ended_wall, projected))
         return tuple(buckets)
+
+    def time_of_day_distribution(
+        self,
+        now: float,
+        *,
+        wall: datetime | None = None,
+        day_window: Literal["today", "yesterday"] = "today",
+        granularity: Literal["hour", "half-hour"] = "hour",
+    ) -> TimeOfDayDistributionModel:
+        """Project retained monitor increments into local calendar-time buckets."""
+        wall = wall or datetime.now().astimezone()
+        if wall.tzinfo is None:
+            raise ValueError("time-of-day distributions require an aware wall time")
+        if day_window not in {"today", "yesterday"}:
+            raise ValueError("day_window must be today or yesterday")
+        if granularity not in {"hour", "half-hour"}:
+            raise ValueError("granularity must be hour or half-hour")
+
+        day = wall.date() - timedelta(days=day_window == "yesterday")
+        day_start = datetime.combine(day, datetime.min.time(), tzinfo=wall.tzinfo)
+        day_end = datetime.combine(day + timedelta(days=1), datetime.min.time(), tzinfo=wall.tzinfo)
+        step_seconds = 3600 if granularity == "hour" else 1800
+        boundaries = [day_start]
+        timestamp = day_start.timestamp()
+        while timestamp < day_end.timestamp():
+            timestamp = min(timestamp + step_seconds, day_end.timestamp())
+            boundaries.append(datetime.fromtimestamp(timestamp, wall.tzinfo))
+
+        segments = self._segments(now)
+        values_by_bucket: list[defaultdict[MonitorKey, float]] = [defaultdict(float) for _ in boundaries[:-1]]
+        coverage_by_bucket: list[list[CoverageSpan]] = [[] for _ in boundaries[:-1]]
+        totals: defaultdict[MonitorKey, float] = defaultdict(float)
+        for segment in segments:
+            duration = segment.ended_at - segment.started_at
+            if duration <= 0:
+                continue
+            segment_values = self._values(segment)
+            spans = (
+                segment.coverage_spans
+                if isinstance(segment, MinuteRollup)
+                else (CoverageSpan(segment.started_at, segment.ended_at),)
+            )
+            for index, (started_wall, ended_wall) in enumerate(zip(boundaries, boundaries[1:], strict=False)):
+                started_at = now + started_wall.timestamp() - wall.timestamp()
+                ended_at = now + ended_wall.timestamp() - wall.timestamp()
+                overlap = max(0.0, min(ended_at, segment.ended_at) - max(started_at, segment.started_at))
+                if overlap > 0:
+                    for key, value in segment_values.items():
+                        contribution = value * overlap / duration
+                        values_by_bucket[index][key] += contribution
+                        totals[key] += contribution
+                for span in spans:
+                    covered_start = max(started_at, span.started_at)
+                    covered_end = min(ended_at, span.ended_at)
+                    if covered_end > covered_start:
+                        coverage_by_bucket[index].append(CoverageSpan(covered_start, covered_end))
+
+        selected = _top_names(dict(totals), self.top if self.by is not None else None)
+        if self.by is None:
+            selected = {"Total"}
+        else:
+            selected = set(selected)
+            if any(key not in selected for key in totals):
+                selected.add("Other")
+        ordered = sorted(
+            (key for key in selected if key != "Other"),
+            key=lambda key: (-totals.get(key, 0.0), monitor_key_sort_key(key)),
+        )
+        if "Other" in selected:
+            ordered.append("Other")
+        series = tuple(
+            TimeOfDaySeries(key, monitor_key_label(key), key == "Other")
+            for key in ordered
+        )
+        buckets: list[TimeOfDayBucket] = []
+        for index, (started_wall, ended_wall) in enumerate(zip(boundaries, boundaries[1:], strict=False)):
+            spans = self._coverage_spans(*coverage_by_bucket[index])
+            started_at = now + started_wall.timestamp() - wall.timestamp()
+            ended_at = now + ended_wall.timestamp() - wall.timestamp()
+            covered = sum(span.ended_at - span.started_at for span in spans)
+            duration = ended_at - started_at
+            coverage = (
+                DistributionCoverage.FULL
+                if duration > 0 and covered >= duration
+                else DistributionCoverage.PARTIAL
+                if covered > 0
+                else DistributionCoverage.UNOBSERVED
+            )
+            values: defaultdict[MonitorKey, float] = defaultdict(float)
+            if coverage is not DistributionCoverage.UNOBSERVED:
+                for key, value in values_by_bucket[index].items():
+                    values[key if key in selected else "Other"] += value
+                for key in ordered:
+                    values.setdefault(key, 0.0)
+            buckets.append(TimeOfDayBucket(started_wall, ended_wall, coverage, values))
+
+        observed_from = (
+            datetime.fromtimestamp(self.intervals[0].started_at - now + wall.timestamp(), wall.tzinfo)
+            if self.intervals
+            else datetime.fromtimestamp(self.rollups[0].started_at - now + wall.timestamp(), wall.tzinfo)
+            if self.rollups
+            else None
+        )
+        return TimeOfDayDistributionModel(
+            tuple(buckets),
+            series,
+            observed_from,
+            day_window,
+            granularity,
+            project_aggregation=self.project_aggregation,
+            project_label_context=self.project_label_context,
+        )
 
     def current_values(self) -> dict[MonitorKey, float]:
         """Project only the newest valid sample pair into the current display."""
@@ -474,7 +646,7 @@ class ObservedTPM:
             duration = segment.ended_at - segment.started_at
             if overlap <= 0 or duration <= 0:
                 continue
-            seconds += self._covered_seconds(segment, overlap, duration)
+            seconds += self._covered_seconds(segment, max(cutoff, segment.started_at), min(now, segment.ended_at))
             for key, value in self._values(segment).items():
                 tokens[key] += value * overlap / duration
         if seconds <= 0:
