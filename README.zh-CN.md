@@ -8,7 +8,21 @@
 
 `ccusage-viz` 是面向 [`ccusage`](https://github.com/ryoppippi/ccusage) Token
 数据的独立、非官方终端可视化工具。它把 `ccusage` 命令输出转换为交互式终端图表，
-不会额外创建用量数据库。真实数据需要 `ccusage`，本项目**不内置**它。
+不会额外创建用量数据库。目前真实数据主要依赖 `ccusage`；本项目需要 `ccusage`，且**不内置**它。
+
+## 快速开始
+
+```bash
+uv tool install ccusage-viz
+ccuv dashboard
+```
+
+## 支持的 Agent
+
+Agent 覆盖范围跟随 `ccusage`。其当前支持的 Agent 包括 Claude Code、Codex、OpenCode、Amp、
+Droid、Codebuff、Hermes Agent、pi-agent、Goose、OpenClaw、Kilo、Kimi、Qwen、GitHub Copilot CLI、
+Gemini CLI、Antigravity、Grok Build CLI 和 ZCode。完整且最新的列表，以及安装和各数据源的细节，
+请参阅 [ccusage 支持列表](https://ccusage.com/)。
 
 ## 产品边界
 
@@ -28,11 +42,19 @@ ccuv dashboard wide
 
 ### `wide`（默认）
 
+```bash
+ccuv dashboard wide
+```
+
 由 Timeline、Stack、Ranking 和 Monitor Pane 组成的均衡 2×2 总览。
 
 ![wide Dashboard 预设：均衡的 2×2 总览](docs/assets/readme/dashboard-wide.png)
 
 ### `narrow`
+
+```bash
+ccuv dashboard narrow
+```
 
 适合较窄终端的紧凑纵向聚焦布局。
 
@@ -40,17 +62,29 @@ ccuv dashboard wide
 
 ### `all`
 
+```bash
+ccuv dashboard all
+```
+
 同时展示多种代表性 Pane 形态的宽广画廊布局。
 
 ![all Dashboard 预设：代表性 Pane 的宽广画廊](docs/assets/readme/dashboard-all.png)
 
 ### `spotlight-wide`
 
+```bash
+ccuv dashboard spotlight-wide
+```
+
 Timeline 位于通栏首行，其余 Pane 位于下方。
 
 ![spotlight-wide Dashboard 预设：Timeline 位于通栏首行](docs/assets/readme/dashboard-spotlight-wide.png)
 
 ### `spotlight-wide2`
+
+```bash
+ccuv dashboard spotlight-wide2
+```
 
 Timeline 和 Stack 分别占据连续的通栏行，较小的 Pane 位于其后。
 

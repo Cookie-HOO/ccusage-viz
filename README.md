@@ -9,8 +9,23 @@
 `ccusage-viz` is an independent, unofficial terminal visualizer for
 [`ccusage`](https://github.com/ryoppippi/ccusage) token data. It turns
 `ccusage` command output into interactive terminal charts without creating a
-second usage database. `ccusage` is required for real data and is **not**
-bundled with this project.
+second usage database. It currently relies primarily on `ccusage` for real
+data; `ccusage` is required and is **not** bundled with this project.
+
+## Quick start
+
+```bash
+uv tool install ccusage-viz
+ccuv dashboard
+```
+
+## Supported agents
+
+Agent coverage follows `ccusage`. Its current supported agents include Claude
+Code, Codex, OpenCode, Amp, Droid, Codebuff, Hermes Agent, pi-agent, Goose,
+OpenClaw, Kilo, Kimi, Qwen, GitHub Copilot CLI, Gemini CLI, Antigravity, Grok
+Build CLI, and ZCode. See the [ccusage support list](https://ccusage.com/) for
+the authoritative and up-to-date list, plus setup and source-specific details.
 
 ## Product scope
 
@@ -33,11 +48,19 @@ ccuv dashboard wide
 
 ### `wide` (default)
 
+```bash
+ccuv dashboard wide
+```
+
 A balanced 2×2 overview of Timeline, Stack, Ranking, and Monitor panes.
 
 ![Wide Dashboard preset: balanced 2×2 overview](docs/assets/readme/dashboard-wide.png)
 
 ### `narrow`
+
+```bash
+ccuv dashboard narrow
+```
 
 A compact, vertically focused layout for a narrower terminal.
 
@@ -45,17 +68,29 @@ A compact, vertically focused layout for a narrower terminal.
 
 ### `all`
 
+```bash
+ccuv dashboard all
+```
+
 A broad gallery that keeps several representative pane forms visible at once.
 
 ![All Dashboard preset: broad gallery of representative panes](docs/assets/readme/dashboard-all.png)
 
 ### `spotlight-wide`
 
+```bash
+ccuv dashboard spotlight-wide
+```
+
 Timeline receives the leading full-width row; the remaining panes follow below.
 
 ![Spotlight-wide Dashboard preset: Timeline leads in a full-width row](docs/assets/readme/dashboard-spotlight-wide.png)
 
 ### `spotlight-wide2`
+
+```bash
+ccuv dashboard spotlight-wide2
+```
 
 Timeline and Stack receive consecutive full-width rows before the smaller panes.
 
