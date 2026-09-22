@@ -13,6 +13,7 @@ from ccusage_viz.chart_models import (
     ScalarRankingEntry,
     ScalarSeries,
     TimelineModel,
+    TimeOfDayDistributionModel,
 )
 from ccusage_viz.charts.definition import ChartDefinition
 from ccusage_viz.charts.registry import ChartRegistry
@@ -368,11 +369,26 @@ class MonitorComponent:
         now: float,
         count: int,
         wall: datetime | None = None,
-    ) -> TimelineModel | RankingModel:
+    ) -> TimelineModel | RankingModel | TimeOfDayDistributionModel:
         chart = self._monitor_config(self._active_options())
         if chart.presentation.style in {"ranking", "list"}:
             return self.ranking_model(now=now, count=count, wall=wall)
+        if chart.presentation.style == "cumulative-bars":
+            return self.distribution_model(now=now, wall=wall)
         return self.timeline_model(now=now, count=count, wall=wall)
+
+    def distribution_model(
+        self, *, now: float, wall: datetime | None = None
+    ) -> TimeOfDayDistributionModel:
+        chart = self._monitor_config(self._active_options())
+        projection_now = self.refreshed_at if self.refreshed_at is not None else now
+        projection_wall = self.accepted_at if self.accepted_at is not None else wall
+        return self.observer.time_of_day_distribution(
+            self.observer.display_now(projection_now),
+            wall=projection_wall,
+            day_window=chart.day_window,
+            granularity=chart.distribution_granularity,
+        )
 
     def render(
         self,
@@ -383,6 +399,12 @@ class MonitorComponent:
         wall: datetime | None = None,
     ) -> str:
         model = self.model(now=now, count=count, wall=wall)
+        if isinstance(model, TimeOfDayDistributionModel):
+            from ccusage_viz.render.monitor_distribution import render_monitor_distribution
+
+            chart = render_monitor_distribution(model, context)
+            audit = render_audit(context)
+            return "\n".join(line for line in (chart, audit) if line)
         definition = self._definition(model)
         chart = definition.renderer(model, context)
         observation = render_observation(model, context)

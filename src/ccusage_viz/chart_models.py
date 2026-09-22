@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from collections.abc import Hashable
+from collections.abc import Hashable, Mapping
 from dataclasses import KW_ONLY, dataclass, field
 from datetime import date, datetime
 from enum import StrEnum
+from types import MappingProxyType
 from typing import Literal
 
 from ccusage_viz.core.time import DateRange
@@ -39,6 +40,12 @@ class ComparisonState(StrEnum):
     PENDING = "pending"
     UNAVAILABLE = "unavailable"
     FAILED = "failed"
+
+
+class DistributionCoverage(StrEnum):
+    FULL = "full"
+    PARTIAL = "partial"
+    UNOBSERVED = "unobserved"
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,6 +133,53 @@ class TimelineModel:
     @property
     def total(self) -> TokenUsage:
         return sum((item.total for item in self.series), start=TokenUsage.zero())
+
+
+@dataclass(frozen=True, slots=True)
+class TimeOfDaySeries:
+    key: GroupKey
+    label: str
+    is_other: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class TimeOfDayBucket:
+    started_at: datetime
+    ended_at: datetime
+    coverage: DistributionCoverage
+    values: Mapping[GroupKey, ChartValue] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.started_at.tzinfo is None or self.ended_at.tzinfo is None:
+            raise ValueError("time-of-day bucket boundaries must be timezone-aware")
+        if self.ended_at.timestamp() <= self.started_at.timestamp():
+            raise ValueError("time-of-day bucket must have positive duration")
+        if self.coverage is DistributionCoverage.UNOBSERVED and self.values:
+            raise ValueError("unobserved time-of-day buckets cannot have values")
+        object.__setattr__(self, "values", MappingProxyType(dict(self.values)))
+
+
+@dataclass(frozen=True, slots=True)
+class TimeOfDayDistributionModel:
+    buckets: tuple[TimeOfDayBucket, ...]
+    series: tuple[TimeOfDaySeries, ...]
+    observed_from: datetime | None
+    day_window: Literal["today", "yesterday"]
+    granularity: Literal["hour", "half-hour"]
+    metric: MetricDescriptor = field(default_factory=MetricDescriptor)
+    project_aggregation: Literal["name", "exact"] = "name"
+    project_label_context: int = 0
+
+    def __post_init__(self) -> None:
+        if self.metric.unit != "tokens":
+            raise ValueError("time-of-day distributions use token increments")
+        if self.observed_from is not None and self.observed_from.tzinfo is None:
+            raise ValueError("observed-from time must be timezone-aware")
+        keys = {series.key for series in self.series}
+        if len(keys) != len(self.series):
+            raise ValueError("time-of-day series keys must be unique")
+        if any(not set(bucket.values).issubset(keys) for bucket in self.buckets):
+            raise ValueError("time-of-day bucket values must reference selected series")
 
 
 @dataclass(frozen=True, slots=True)

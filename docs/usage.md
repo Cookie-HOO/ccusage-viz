@@ -333,6 +333,18 @@ help and rejected for Monitor: Monitor is always continuous. In total mode it
 reports total tokens per minute. Grouped `model` reports model throughput;
 grouped Agent and project views use observed latest-pair token growth.
 
+The `cumulative-bars` style is a separate calendar-day Token view. It shows
+increments accumulated in each local natural hour (or half-hour), rather than
+TPM. Press `w` to switch **Today** (default) and **Yesterday**, and `g` to
+switch **Hourly** and **30 min** buckets. It uses the same grouping, Top/Other,
+and stable series colors as the other Monitor styles. The current unfinished
+bucket and startup fragment are visibly partial; sampling gaps and other time
+without trustworthy observation are hatched/dim rather than shown as zero. An
+observed zero remains a zero-valued bucket. Monitor retains minute-level aggregate
+rollups for up to 50 hours for this view; it does not reconstruct intraday
+history from date-only historical providers. In `ranking` and `list`, `w` is
+not shown because those styles already describe the current observation.
+
 <!-- guide:dashboard-startup -->
 
 ## Dashboard startup and composition
@@ -464,6 +476,24 @@ selected binary path, and query timeout. Copying is not persistence: the
 program writes no configuration automatically. Runtime changes last only for
 the current process; save a copied command yourself if you want to reuse it.
 
+### Shortcut conventions
+
+Adjustment shortcuts are scoped to the visible page or Dashboard management mode;
+the control footer always shows the active meaning. Lowercase keys are the usual
+direct actions for the current chart or page. `t/T` is the only directional pair:
+`t` cycles the theme forward and `T` cycles it backward.
+
+Uppercase does not generally mean “reverse.” `A` and `P` are low-frequency,
+Advanced project-presentation controls that appear only while grouped by project:
+`A` cycles project aggregation (`name`/`exact`) and `P` reveals progressively more
+safe project-label context. `f`, `l`, `o`, `k`, and `c` remain lowercase because
+they are direct actions despite appearing on the Advanced page.
+
+Historical `p/P` is a compatibility exception: `p` cycles trailing periods and
+`P` cycles natural periods. They are two period preset families, not a directional
+pair. It is intentionally documented separately from the `t/T` rule and does
+not change `P`'s Advanced project-label meaning.
+
 ### Historical adjustment flow
 
 For Timeline, Calendar, Stack, and Ranking, press `m` in chart view. The
@@ -480,11 +510,11 @@ Dashboard layout and Pane-type subpickers also cancel and return to browse mode.
 
 | Chart | Quick page | Advanced page |
 | --- | --- | --- |
-| Timeline | `p/P` period; `g` granularity; `b` grouping; `+/-` Top; `d` density; `t/T` theme; `s` style | `f` filters; `o` Other; `A` project aggregation when grouped by project; `l` legend; `k` weekday labels |
+| Timeline | `p/P` period; `g` granularity; `b` grouping; `+/-` Top; `d` density; `t/T` theme; `s` style | `f` filters; `o` Other; `A` project aggregation and `P` project-label context when grouped by project; `l` legend; `k` weekday labels |
 | Calendar | `p/P` period; `d` density; `t/T` theme; `s` style | `f` filters |
 | Stack | `p/P` period; `g` granularity; `d` density; `t/T` theme; `s` style | `f` filters; `c` cache mode; `l` legend; `k` weekday labels |
-| Ranking | `p/P` period; `b` grouping; `+/-` Top; `d` density; `t/T` theme; `s` style | `f` filters; `o` Other; `A` project aggregation when grouped by project |
-| Monitor | `w` window; `i` sampling interval; `b` grouping; `+/-` Top; `d` density; `t/T` theme; `s` style | `f` filters; `A` project aggregation when grouped by project; `l` legend |
+| Ranking | `p/P` period; `b` grouping; `+/-` Top; `d` density; `t/T` theme; `s` style | `f` filters; `o` Other; `A` project aggregation and `P` project-label context when grouped by project |
+| Monitor | Timeline styles: `w` window; `i` sampling interval; `b` grouping; `+/-` Top; `d` density; `t/T` theme; `s` style. `cumulative-bars`: `w` Today/Yesterday; `g` hour/30 min; `b` grouping; `+/-` Top; `d` density; `t/T` theme; `s` style. Ranking/list omit `w`. | `f` filters; `A` project aggregation and `P` project-label context when grouped by project; `l` legend |
 
 `p` cycles trailing presets (`7d`, `14d`, `30d`, `365d`). `P` cycles natural
 presets (`1mo`, `1q`, `1y`). Neither changes a fixed explicit-date range.
@@ -506,7 +536,7 @@ show `refreshing`, but does not show `querying`.
 | Timeline/Stack granularity | Accepted daily records are reprojected immediately. If only out-of-range comparison coverage is missing, the chart and current values remain visible; only comparison values show `??` with `querying`. |
 | Historical visual controls | Existing accepted facts are immediately restyled or reprojected; no `querying` marker. |
 | Monitor grouping or filters | The pane enters an empty safe sampling view with `querying`; prior observations are not relabeled as the candidate grouping/filter. |
-| Monitor window, Top, interval, or visual controls | Retained observations are immediately reprojected or restyled; no `querying` marker. |
+| Monitor window, Top, interval, distribution day/granularity, or visual controls | Retained observations are immediately reprojected or restyled; no `querying` marker. |
 
 `??` therefore means that the specific displayed fact is not yet verified for
 the active candidate. When the matching result is accepted, the marker and its
@@ -535,8 +565,8 @@ Press `m` or `M` from Monitor's chart view. `a` switches pages;
 
 | Page | Controls |
 | --- | --- |
-| Quick | `w` window; `i` sampling interval; `b` grouping; `+/-` Top; `d` density; `t/T` theme; `s` style |
-| Advanced | `f` filters; `A` project aggregation when grouped by project; `l` legend |
+| Quick | Timeline styles: `w` window and `i` sampling interval; `cumulative-bars`: `w` Today/Yesterday, `g` hour/30 min, and `i` sampling interval; ranking/list omit `w`; all applicable styles retain `b` grouping, `+/-` Top, `d` density, `t/T` theme, and `s` style |
+| Advanced | `f` filters; `A` project aggregation and `P` project-label context when grouped by project; `l` legend |
 
 Grouping and filters require a fresh matching observation baseline; window
 changes reproject retained observations immediately. When the interval changes,
@@ -563,10 +593,14 @@ While adjusting a Pane, `v` cycles its view; `r` replaces it; `N` inserts
 before; `n` inserts after; `x` deletes it when more than one Pane remains;
 `[`/`]` reorder it; and `Tab` moves focus to the next Pane. `{`/`}` adjust
 logical column shares; `_`/`=` adjust logical row shares. Focused Pane Quick
-keys are the historical/Monitor chart controls listed above, except Monitor
-has no `i` because sampling belongs to the Dashboard host. Global Dashboard
+keys are the historical/Monitor chart controls listed above, including the
+project-only Advanced `A` and `P` controls, except Monitor has no `i` because
+sampling belongs to the Dashboard host. Global Dashboard
 adjustment uses `t/T` for shell theme, `s` for shell style, `h` for header
-style, `u` for header summary, and `z` for layout.
+style, `u` for header summary, and `z` for layout. Pressing `z` opens the layout
+chooser: use `j`/`k` or arrow keys to select a compatible layout, then `Enter`
+to apply it or `Esc` to cancel. Fixed-capacity layouts that cannot fit the
+current Pane count remain listed as unavailable and are skipped by navigation.
 
 <!-- guide:troubleshooting -->
 

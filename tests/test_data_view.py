@@ -1,12 +1,19 @@
 from datetime import date, datetime
 from json import loads
 
+from ccusage_viz.chart_models import (
+    DistributionCoverage,
+    TimeOfDayBucket,
+    TimeOfDayDistributionModel,
+    TimeOfDaySeries,
+)
 from ccusage_viz.core.time import DateRange
 from ccusage_viz.data_view import (
     body_view_copy_kind,
     next_body_view,
     next_dashboard_body_view,
     render_monitor_data,
+    render_monitor_distribution_data,
     render_snapshot_data,
 )
 from ccusage_viz.domain import Agent, SourceKind, TokenUsage, UsageRecord
@@ -354,6 +361,62 @@ def test_monitor_data_markdown_and_json_share_bucket_values() -> None:
     assert payload["rows"] == [
         {"ended_at": "2026-01-01T12:00:00", "series": "Other", "value": 3.0, "unit": "tpm"},
         {"ended_at": "2026-01-01T12:00:00", "series": "Total", "value": 42.5, "unit": "tpm"},
+    ]
+
+
+def test_monitor_distribution_data_distinguishes_unobserved_and_observed_zero() -> None:
+    started = datetime(2026, 1, 1, 9, 0).astimezone()
+    model = TimeOfDayDistributionModel(
+        (
+            TimeOfDayBucket(
+                started,
+                started.replace(hour=10),
+                DistributionCoverage.UNOBSERVED,
+            ),
+            TimeOfDayBucket(
+                started.replace(hour=10),
+                started.replace(hour=11),
+                DistributionCoverage.FULL,
+                {"Total": 0.0},
+            ),
+        ),
+        (TimeOfDaySeries("Total", "Total"),),
+        started,
+        "today",
+        "hour",
+    )
+    payload = loads(
+        render_monitor_distribution_data(
+            model,
+            translator=load_translator("en"),
+            terminal=Terminal(120, 40, False, False),
+            view="data-json",
+        )
+    )
+
+    assert payload["rows"] == [
+        {
+            "started_at": started.isoformat(),
+            "ended_at": started.replace(hour=10).isoformat(),
+            "day_window": "today",
+            "granularity": "hour",
+            "series": "Total",
+            "is_other": False,
+            "value": None,
+            "unit": "tokens",
+            "coverage": "unobserved",
+        },
+        {
+            "started_at": started.replace(hour=10).isoformat(),
+            "ended_at": started.replace(hour=11).isoformat(),
+            "day_window": "today",
+            "granularity": "hour",
+            "series": "Total",
+            "is_other": False,
+            "value": 0.0,
+            "unit": "tokens",
+            "coverage": "full",
+        },
     ]
 
 

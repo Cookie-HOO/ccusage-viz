@@ -1,9 +1,10 @@
 # Roadmap
 
-`ccusage-viz` is currently at **0.1.1**. This roadmap describes public product contracts, not private implementation plans.
+`ccusage-viz` is currently at **0.1.2**. This roadmap describes public product contracts, not private implementation plans.
 
 ## 0.1.x
 
+- `0.1.2` adds Monitor-local, calendar-day token distribution through `cumulative-bars`, including Today/Yesterday and hourly/30-minute projection controls, transparent retained-sample coverage, and table/JSON inspection. It does not add a collector integration.
 - Continue refining Dashboard layouts, pane scheduling, and the global summary without adding compatibility aliases.
 - Evaluate interval-aware completed-result caches and bounded recent/history refreshes for long-range Watch and Dashboard historical panes. Current polling intentionally remains unchanged until correctness, invalidation, and source-specific semantics are validated.
 
@@ -11,7 +12,7 @@
 
 Integrate npm-packaged `ccuv-collector` after its package and versioned JSON protocol
 are stable. It will supplement `ccusage` only for token data that `ccusage` does
-not cover, beginning with DeepSeek Harness.
+not cover.
 
 `ccuv-collector` owns normalization, local incremental state, adapter-local
 deduplication, and opaque Agent/provenance identity across its own adapters.

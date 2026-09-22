@@ -145,6 +145,7 @@ def test_all_commands_accept_themes() -> None:
         ("monitor", "step"),
         ("monitor", "points"),
         ("monitor", "line-points"),
+        ("monitor", "cumulative-bars"),
         ("monitor", "ranking"),
         ("monitor", "list"),
     ],
@@ -167,6 +168,14 @@ def test_historical_ranking_rejects_monitor_list_style() -> None:
     with pytest.raises(UsageError) as caught:
         parser.parse_args(["ranking", "--style", "list"])
     assert caught.value.key == "error.arguments"
+
+
+def test_historical_charts_reject_monitor_distribution_style() -> None:
+    parser = build_parser(load_translator("en"))
+    for command in ("timeline", "calendar", "stack", "ranking"):
+        with pytest.raises(UsageError) as caught:
+            parser.parse_args([command, "--style", "cumulative-bars"])
+        assert caught.value.key == "error.arguments"
 
 
 def test_timeline_rejects_removed_point_style() -> None:

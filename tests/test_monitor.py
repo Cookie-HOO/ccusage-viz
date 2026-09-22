@@ -355,7 +355,7 @@ def test_observed_tpm_rebaselines_decreased_total_without_negative_rate() -> Non
     assert observer.rates(120.0) == {"Total": 20.0}
 
 
-def test_native_history_rolls_up_after_one_hour_and_evicts_after_24_hours() -> None:
+def test_native_history_rolls_up_after_one_hour_and_evicts_after_fifty_hours() -> None:
     observer = ObservedTPM(window_seconds=24 * 3600, by=None, top=None)
     observer.add(snapshot(0), 0.0)
     observer.add(snapshot(60), 60.0)
@@ -365,7 +365,7 @@ def test_native_history_rolls_up_after_one_hour_and_evicts_after_24_hours() -> N
     assert not observer.intervals
     assert len(observer.rollups) == 2
 
-    observer.rates(24 * 3600 + 121.0)
+    observer.rates(50 * 3600 + 121.0)
     assert not observer.rollups
 
 
@@ -447,12 +447,12 @@ def test_same_minute_rollups_merge_across_maintenance_calls() -> None:
     assert observer.rollups[-1].total == 10.0
 
 
-def test_retention_clips_exactly_at_24_hour_cutoff() -> None:
+def test_retention_clips_exactly_at_fifty_hour_cutoff() -> None:
     observer = ObservedTPM(window_seconds=24 * 3600, by=None, top=None)
     observer.add(snapshot(0), 0.0)
     observer.add(snapshot(120), 120.0)
 
-    assert observer.rates(24 * 3600 + 30.0) == {"Total": 60.0}
+    assert observer.rates(50 * 3600 + 30.0) == {}
     assert observer.rollups[0].started_at == 30.0
     assert sum(item.total for item in observer.rollups) == 90.0
 

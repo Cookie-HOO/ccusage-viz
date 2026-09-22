@@ -14,6 +14,7 @@ from ccusage_viz.chart_models import (
     CalendarModel,
     ChangeDirection,
     ComparisonState,
+    DistributionCoverage,
     MetricDescriptor,
     ObservedScope,
     PercentChange,
@@ -25,6 +26,9 @@ from ccusage_viz.chart_models import (
     Series,
     StackModel,
     TimelineModel,
+    TimeOfDayBucket,
+    TimeOfDayDistributionModel,
+    TimeOfDaySeries,
 )
 from ccusage_viz.core.time import DateRange
 from ccusage_viz.domain import TokenUsage
@@ -53,6 +57,7 @@ from ccusage_viz.render.base import (
 )
 from ccusage_viz.render.calendar import render_calendar
 from ccusage_viz.render.filters import active_filter_summary
+from ccusage_viz.render.monitor_distribution import render_monitor_distribution
 from ccusage_viz.render.observation import render_observation
 from ccusage_viz.render.palette import (
     CATEGORICAL,
@@ -1150,6 +1155,67 @@ def test_calendar_labels_follow_selected_language() -> None:
     assert "一" in calendar and "三" in calendar and "五" in calendar
     assert "较少 . o O # 较多" in calendar
     assert "Jan" not in calendar
+
+
+def _distribution_model() -> TimeOfDayDistributionModel:
+    started = datetime(2026, 9, 22, 9, 0).astimezone()
+    first_end = datetime(2026, 9, 22, 10, 0).astimezone()
+    second_end = datetime(2026, 9, 22, 11, 0).astimezone()
+    third_end = datetime(2026, 9, 22, 12, 0).astimezone()
+    return TimeOfDayDistributionModel(
+        (
+            TimeOfDayBucket(started, first_end, DistributionCoverage.UNOBSERVED),
+            TimeOfDayBucket(
+                first_end,
+                second_end,
+                DistributionCoverage.PARTIAL,
+                {"alpha": 60.0, "beta": 40.0},
+            ),
+            TimeOfDayBucket(
+                second_end,
+                third_end,
+                DistributionCoverage.FULL,
+                {"alpha": 0.0, "beta": 0.0},
+            ),
+        ),
+        (TimeOfDaySeries("alpha", "Alpha"), TimeOfDaySeries("beta", "Beta")),
+        datetime(2026, 9, 22, 9, 18).astimezone(),
+        "today",
+        "hour",
+    )
+
+
+def test_distribution_renderer_exposes_coverage_and_observation_metadata() -> None:
+    output = render_monitor_distribution(_distribution_model(), context(True))
+
+    assert "Total · Token cumulative bars · Today" in output
+    assert "Hourly · observed from 09:18" in output
+    assert "not observed" in output
+    assert "#" in output  # full coverage
+    assert "+" in output  # partial coverage
+    assert ":" in output  # unobserved coverage
+    assert "o" in output  # observed zero
+    assert "09:00" in output and "12:00" in output
+
+
+def test_distribution_renderer_uses_available_panel_height() -> None:
+    output = render_monitor_distribution(
+        _distribution_model(),
+        RenderContext(80, 20, load_translator("en"), color=False, ascii=True),
+    )
+
+    assert len(output.splitlines()) == 20
+
+
+def test_distribution_renderer_ascii_no_color_is_safe_and_width_bounded() -> None:
+    output = render_monitor_distribution(
+        _distribution_model(),
+        RenderContext(40, 16, load_translator("en"), color=False, ascii=True),
+    )
+
+    assert "\x1b[" not in output
+    assert all(display_width(line) <= 40 for line in output.splitlines())
+    assert "▒" not in output and "░" not in output and "█" not in output
 
 
 def test_timeline_area_requires_one_visible_series() -> None:
