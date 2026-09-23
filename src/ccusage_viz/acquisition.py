@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
-from ccusage_viz.core.time import today_for_timezone
+from ccusage_viz.core.time import local_today
 from ccusage_viz.coverage import DateCoverage, DateInterval
 from ccusage_viz.options import MonitorConfig, StandaloneLaunch
 from ccusage_viz.query.models import (
@@ -35,7 +35,7 @@ def monitor_query_intent(
     if not isinstance(chart, MonitorConfig):
         raise TypeError("monitor query planning requires a monitor configuration")
     provider = definition.provider
-    current_day = today_for_timezone(options.host.timezone, today)
+    current_day = local_today(today)
     scope_interval = DateInterval(current_day - timedelta(days=1), current_day)
     project_required = bool(chart.filters.projects) or chart.by == "project"
     available_options = {
@@ -63,7 +63,7 @@ def monitor_query_intent(
         generation=generation,
         trigger=trigger,
         provider=provider.provider,
-        scope=DataScope((scope_interval,), options.host.timezone),
+        scope=DataScope((scope_interval,)),
         missing_intervals=(scope_interval,),
         resolution=DataResolution.DATE,
         dimensions=("project",) if project_required else ("agent",),
@@ -117,7 +117,7 @@ def historical_query_intent(
         generation=generation,
         trigger=trigger,
         provider=provider.provider,
-        scope=DataScope(required_coverage.intervals, chart.date_range.timezone),
+        scope=DataScope(required_coverage.intervals),
         missing_intervals=coverage.missing_coverage(required_coverage).intervals,
         resolution=DataResolution.DATE,
         dimensions=("project",) if project_required else ("agent",),

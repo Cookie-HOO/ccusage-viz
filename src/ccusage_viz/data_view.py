@@ -268,17 +268,6 @@ def snapshot_data_payload(
     return options.chart.kind, _historical_rows(model, options, snapshot.records)
 
 
-def _display_payload(payload: str, terminal: Terminal, *, complete: bool) -> str:
-    """Keep textual inspection views compact while preserving copy payloads."""
-    if complete:
-        return payload
-    lines = payload.splitlines()
-    visible = max(1, terminal.height - 4)
-    if len(lines) <= visible:
-        return payload
-    return "\n".join((*lines[: max(0, visible - 1)], "…"))
-
-
 def render_snapshot_data(
     options: StandaloneLaunch,
     snapshot: UsageSnapshot | None,
@@ -286,7 +275,6 @@ def render_snapshot_data(
     terminal: Terminal,
     *,
     view: Literal["data-table", "data-json"] = "data-table",
-    complete: bool = False,
 ) -> str:
     """Render the displayed historical chart model as Markdown or JSON."""
     command, rows = snapshot_data_payload(options, snapshot)
@@ -299,7 +287,7 @@ def render_snapshot_data(
         if view == "data-json"
         else _markdown(rows)
     )
-    return _display_payload(payload, terminal, complete=complete)
+    return payload
 
 
 def _monitor_display_project(name: ProjectDisplayKey) -> str:
@@ -401,7 +389,6 @@ def render_monitor_distribution_data(
     translator: Translator,
     terminal: Terminal,
     view: Literal["data-table", "data-json"] = "data-table",
-    complete: bool = False,
 ) -> str:
     rows = monitor_distribution_data_payload(model)
     if not rows:
@@ -411,7 +398,7 @@ def render_monitor_distribution_data(
         if view == "data-json"
         else _markdown(rows)
     )
-    return _display_payload(payload, terminal, complete=complete)
+    return payload
 
 
 def render_monitor_data(
@@ -421,7 +408,6 @@ def render_monitor_data(
     translator: Translator,
     terminal: Terminal,
     view: Literal["data-table", "data-json"] = "data-table",
-    complete: bool = False,
 ) -> str:
     """Render exact displayed Monitor buckets as Markdown or JSON."""
     rows = monitor_data_payload(buckets, by=by)
@@ -432,4 +418,4 @@ def render_monitor_data(
         if view == "data-json"
         else _markdown(rows)
     )
-    return _display_payload(payload, terminal, complete=complete)
+    return payload

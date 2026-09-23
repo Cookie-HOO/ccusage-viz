@@ -13,7 +13,6 @@ def test_watch_refresh_advances_rolling_periods(period: str | None) -> None:
         period=period,
         since=None,
         until=None,
-        timezone=None,
         today=date(2026, 9, 12),
     )
 
@@ -31,7 +30,6 @@ def test_watch_refresh_preserves_explicit_ranges(until: str | None) -> None:
         period=None,
         since="2026-09-01",
         until=until,
-        timezone=None,
         today=date(2026, 9, 12),
     )
 

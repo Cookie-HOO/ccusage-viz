@@ -32,7 +32,6 @@ class ProviderRef:
 @dataclass(frozen=True, slots=True)
 class DataScope:
     intervals: tuple[DateInterval, ...]
-    timezone: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "intervals", DateCoverage(self.intervals).intervals)
@@ -108,7 +107,6 @@ class QueryIntent:
                         (item.since.isoformat(), item.until.isoformat())
                         for item in self.scope.intervals
                     ),
-                    self.scope.timezone,
                     tuple(
                         (item.since.isoformat(), item.until.isoformat())
                         for item in self.missing_intervals

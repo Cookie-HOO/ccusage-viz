@@ -63,6 +63,11 @@ from ccusage_viz.terminal_ui import (
     notice_lines,
     read_key,
 )
+from ccusage_viz.text_viewport import (
+    next_text_offset,
+    render_text_viewport,
+    text_viewport_overflows,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -518,6 +523,9 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
     lifecycle: LifecycleOperation[HistoricalSubmission] = LifecycleOperation("standalone")
     controls_hidden = False
     body_view: BodyView = "chart"
+    text_offsets: dict[BodyView, int] = {}
+    text_line_counts: dict[BodyView, int] = {}
+    text_visible_rows: dict[BodyView, int] = {}
     last_chart = ""
     last_notices: tuple[str, ...] = ()
     last_snapshot: UsageSnapshot | None = None
@@ -565,17 +573,18 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
         )
         return (*manual, *(recovery or ()))
 
-    def controls() -> str:
-        if controls_hidden:
+    def controls(*, overflowing: bool = False) -> str:
+        if body_view == "chart" and controls_hidden:
             return ""
+        key = {
+            "chart": "status.keys",
+            "command": "status.command_keys",
+            "full-command": "status.full_command_keys",
+            "data-table": "status.data_table_keys",
+            "data-json": "status.data_json_keys",
+        }[body_view]
         keys = translator.text(
-            {
-                "chart": "status.keys",
-                "command": "status.command_keys",
-                "full-command": "status.full_command_keys",
-                "data-table": "status.data_table_keys",
-                "data-json": "status.data_json_keys",
-            }[body_view]
+            key, scroll=translator.text("status.text_scroll_keys") if overflowing else ""
         )
         if current.host.demo_size:
             keys = f"{keys} · {translator.text('status.demo_keys')}"
@@ -643,7 +652,11 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
                 last_chart = rendered.chart
                 last_notices = rendered.notices
                 render_warning = None
-        footer = controls()
+        overflowing = text_viewport_overflows(
+            line_count=text_line_counts.get(body_view, 0),
+            visible_rows=text_visible_rows.get(body_view, 0),
+        )
+        footer = controls(overflowing=body_view != "chart" and overflowing)
         accepted = getattr(component, "accepted_options", None) or current
         error = getattr(component, "error", None)
         recovery = (
@@ -673,23 +686,35 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
                 view=body_view,
             )
         )
+        control_rows = () if not footer else controls_line(footer, width=size.columns, color=color)
+        formatted_notices = notice_lines(
+            (
+                (*notices(), *last_notices, render_warning)
+                if render_warning is not None
+                else (*notices(), *last_notices)
+            ),
+            width=size.columns,
+            color=color,
+            ascii=current.host.ascii,
+            translator=translator,
+            color_scheme=current.chart.presentation.theme,
+        )
+        if body_view != "chart":
+            viewport = render_text_viewport(
+                body,
+                offset=text_offsets.get(body_view, 0),
+                visible_rows=size.lines - 1 - len(control_rows) - len(formatted_notices),
+            )
+            text_offsets[body_view] = viewport.offset
+            text_line_counts[body_view] = viewport.line_count
+            text_visible_rows[body_view] = viewport.visible_rows
+            body = viewport.body
         active_screen.paint(
             compose_frame(
                 body,
                 status(),
-                () if not footer else controls_line(footer, width=size.columns, color=color),
-                notice_lines(
-                    (
-                        (*notices(), *last_notices, render_warning)
-                        if render_warning is not None
-                        else (*notices(), *last_notices)
-                    ),
-                    width=size.columns,
-                    color=color,
-                    ascii=current.host.ascii,
-                    translator=translator,
-                    color_scheme=current.chart.presentation.theme,
-                ),
+                control_rows,
+                formatted_notices,
                 height=size.lines,
             ),
             force=force,
@@ -945,7 +970,7 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
                 key = read_key(0.05)
                 if key == "\x03":
                     raise KeyboardInterrupt
-                if key == "r":
+                if body_view == "chart" and key == "r":
                     manual_refresh_operations.clear()
                     if request(
                         LifecycleTrigger.MANUAL,
@@ -956,7 +981,17 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
                         if operation is not None:
                             manual_refresh_operations.add(operation)
                     paint(force=True)
-                elif key in {"h", "H"}:
+                elif body_view != "chart" and key in {"\x1b[A", "\x1b[B", "h", "e"}:
+                    offset = next_text_offset(
+                        key,
+                        offset=text_offsets.get(body_view, 0),
+                        line_count=text_line_counts.get(body_view, 0),
+                        visible_rows=text_visible_rows.get(body_view, 0),
+                    )
+                    assert offset is not None
+                    text_offsets[body_view] = offset
+                    paint(force=True)
+                elif body_view == "chart" and key in {"h", "H"}:
                     controls_hidden = not controls_hidden
                     paint(force=True)
                 elif key in {"v", "V"}:
@@ -981,7 +1016,6 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
                             translator,
                             terminal,
                             view=body_view,
-                            complete=True,
                         )
                     )
                     copied_successfully = copy_command(copied)
@@ -997,6 +1031,7 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
                     picked = run_runtime_adjustment(
                         current, translator, last_snapshot, active_screen
                     )
+                    body_view = "chart"
                     if picked is not None:
                         previous = component.candidate
                         current = picked.options
@@ -1014,7 +1049,7 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
                                 data_affecting=False,
                             )
                     paint()
-                elif key == " ":
+                elif body_view == "chart" and key == " ":
                     if not lifecycle.paused:
                         scheduler.pause()
                         lifecycle.pause()

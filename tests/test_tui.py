@@ -61,6 +61,7 @@ from ccusage_viz.tui import (
     _replace_header_interval,
     _replace_pane,
     _set_header_theme,
+    _text_view_footer,
     compose_panes,
     pane_at,
     pane_rects,
@@ -91,21 +92,21 @@ def test_dashboard_defaults_to_a_filled_four_pane_dashboard() -> None:
     assert all(pane.chart.presentation.density == "compact" for pane in options.panes)
 
 
-def test_dashboard_timezone_is_host_owned_and_round_trips() -> None:
+def test_dashboard_commands_use_local_date_context_and_reject_timezone() -> None:
     parser = build_parser(load_translator("en"))
-    dashboard = _to_options(parser.parse_args(["dashboard", "--timezone", "UTC"]))
+    dashboard = _to_options(parser.parse_args(["dashboard"]))
 
     full = format_full_dashboard_command(dashboard)
     reparsed = _to_options(parser.parse_args(shlex.split(full)[1:]))
 
-    assert dashboard.host.timezone == "UTC"
-    assert reparsed.host.timezone == "UTC"
-    assert all(
-        pane.chart.date_range.timezone is None
-        for pane in reparsed.panes
-        if hasattr(pane.chart, "date_range")
+    assert "--timezone" not in full
+    assert (
+        _header_options(reparsed).chart.date_range.since
+        <= _header_options(reparsed).chart.date_range.until
     )
-    assert _header_options(reparsed).chart.date_range.timezone == "UTC"
+    with pytest.raises(UsageError) as caught:
+        parser.parse_args(["dashboard", "--timezone", "UTC"])
+    assert caught.value.key == "error.arguments"
 
 
 def test_dashboard_layout_weights_round_trip_through_full_command() -> None:
@@ -345,8 +346,10 @@ def test_dashboard_panes_host_chart_components_without_legacy_runners() -> None:
     assert not hasattr(monitor, "monitor_runner")
 
 
+@pytest.mark.parametrize("text_view", (False, True))
 def test_dashboard_pause_cancels_automatic_panes_and_manual_refresh_remains_allowed(
     monkeypatch: pytest.MonkeyPatch,
+    text_view: bool,
 ) -> None:
     parser = build_parser(load_translator("en"))
     options = _to_options(
@@ -429,7 +432,11 @@ def test_dashboard_pause_cancels_automatic_panes_and_manual_refresh_remains_allo
         def finish(self) -> None:
             events.append(("finish",))
 
-    keys = iter((KeyEvent(" "), KeyEvent("r"), KeyEvent("\x03")))
+    keys = iter(
+        (KeyEvent("v"), KeyEvent("r"), KeyEvent(" "), KeyEvent("\x03"))
+        if text_view
+        else (KeyEvent(" "), KeyEvent("r"), KeyEvent("\x03"))
+    )
     runtime = Runtime()
     monkeypatch.setattr(tui_module, "build_query_runtime", lambda: runtime)
     monkeypatch.setattr(tui_module, "build_chart_registry", lambda: object())
@@ -443,15 +450,16 @@ def test_dashboard_pause_cancels_automatic_panes_and_manual_refresh_remains_allo
     monkeypatch.setattr(tui_module, "_pane_render", lambda *_args: tui_module.PaneRender("chart"))
 
     assert tui_module.run_tui(options, load_translator("en")) == 0
-    assert [(event[1], event[2]) for event in events if event[0] == "submit"] == [
-        (QueryTrigger.STARTUP, 0),
-        (QueryTrigger.REFRESH, 0),
-    ]
+    expected_submissions = [(QueryTrigger.STARTUP, 0)]
+    if not text_view:
+        expected_submissions.append((QueryTrigger.REFRESH, 0))
+    assert [
+        (event[1], event[2]) for event in events if event[0] == "submit"
+    ] == expected_submissions
     painted_text = "\n".join("\n".join(event[1].rows) for event in events if event[0] == "paint")
-    assert "refresh requested" in painted_text
-    assert len(submissions) == 2
+    assert (not text_view) == ("refresh requested" in painted_text)
+    assert len(submissions) == len(expected_submissions)
     assert submissions[0].cancelled.is_set()
-    assert submissions[1].cancelled.is_set()
     assert not any(event[0] == "fail" for event in events)
     assert events[-3:] == [
         ("submission-cancel", 0),
@@ -1394,7 +1402,7 @@ def test_calendar_advanced_adjustment_uses_the_shared_filter_control() -> None:
 def test_tui_adjustment_footer_separates_dashboard_management() -> None:
     translator = load_translator("en")
     timeline_chart = TimelineConfig(
-        "timeline", DateRange(date(2026, 1, 1), date(2026, 1, 14), None), by="project"
+        "timeline", DateRange(date(2026, 1, 1), date(2026, 1, 14)), by="project"
     )
     timeline_quick = _adjustment_controls("timeline", "quick", translator, chart=timeline_chart)
     timeline_advanced = _adjustment_controls(
@@ -1437,6 +1445,20 @@ def test_tui_adjustment_footer_separates_dashboard_management() -> None:
     assert "Tab next pane" in quick_rows[4]
     assert quick_rows[2:] == advanced_rows[2:]
     assert "[Finish]" not in "\n".join(quick_rows)
+
+
+def test_tui_text_footer_is_minimal_and_only_advertises_overflow() -> None:
+    translator = load_translator("en")
+
+    compact = _text_view_footer("data-table", translator, 120, line_count=2, visible_rows=2)[0]
+    overflowing = _text_view_footer("data-table", translator, 120, line_count=3, visible_rows=2)[0]
+
+    assert compact == "y copy · v view"
+    assert "↑/↓ scroll · h top · e end" not in compact
+    assert overflowing == "↑/↓ scroll · h top · e end · y copy · v view"
+    assert "Quick" not in overflowing
+    assert "replace" not in overflowing
+    assert "next pane" not in overflowing
 
 
 def test_dashboard_title_centers_and_right_aligns_freshness() -> None:
@@ -1559,8 +1581,8 @@ def test_header_cold_period_keeps_structure_with_unknown_detail() -> None:
 
     assert len(lines) == 2
     assert "Dashboard" in lines[0]
-    assert "Quarter-to-date tokens ??" in lines[1]
-    assert "prior quarter-to-" in lines[1]
+    assert "Loading…" in lines[1]
+    assert "?" not in lines[1]
 
 
 def test_header_successful_interval_replaces_cached_rows_authoritatively() -> None:
@@ -2014,6 +2036,7 @@ def test_dashboard_pane_height_keys_adjust_only_shared_row_weights(
         )
     )
     copied: list[str] = []
+    rendered_views: list[str] = []
 
     class Runtime:
         def cancel(self) -> None:
@@ -2070,6 +2093,7 @@ def test_dashboard_pane_height_keys_adjust_only_shared_row_weights(
         (
             KeyEvent("s"),
             KeyEvent(key),
+            KeyEvent("v"),
             KeyEvent("\x1b"),
             KeyEvent("v"),
             KeyEvent("y"),
@@ -2086,13 +2110,20 @@ def test_dashboard_pane_height_keys_adjust_only_shared_row_weights(
     monkeypatch.setattr(
         tui_module, "get_terminal_size", lambda: __import__("os").terminal_size((100, 30))
     )
-    monkeypatch.setattr(tui_module, "_pane_render", lambda *_args: tui_module.PaneRender("chart"))
+
+    def render(pane: object, *_args: object) -> tui_module.PaneRender:
+        rendered_views.append(pane.body_view)
+        return tui_module.PaneRender("chart")
+
+    monkeypatch.setattr(tui_module, "_pane_render", render)
 
     assert tui_module.run_tui(options, load_translator("en")) == 0
 
     assert copied
     assert f"--row-weight {expected[0]} --row-weight {expected[1]}" in copied[-1]
     assert "--top 10" in copied[-1]
+    assert "command" in rendered_views
+    assert rendered_views[-2:] == ["chart", "chart"]
 
 
 def test_dashboard_pane_adjustment_preserves_chart_top_shortcuts() -> None:

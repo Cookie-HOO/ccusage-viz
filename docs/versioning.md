@@ -2,9 +2,29 @@
 
 `ccusage-viz` uses semantic versioning while it remains pre-1.0:
 
-- **Patch (`0.1.x`)**: bug fixes, verified rendering/query improvements, documentation, and other changes that preserve the current public workflow.
-- **Minor (`0.x.0`)**: new user-facing capabilities, source integrations, or public-contract changes that may require migration before 1.0.
-- Before `1.0`, public interfaces may still change between minor releases.
+- **Patch (`0.1.x`)**: bug fixes, verified rendering/query improvements, documentation, and Alpha-stage CLI or interaction refinements. Compatibility changes are documented in the release notes.
+- **Minor (`0.x.0`)**: substantial new user-facing capabilities or source integrations before 1.0.
+- Before `1.0`, public interfaces may still change between releases.
+
+## 0.1.3
+
+`0.1.3` refines the Alpha interaction and presentation contracts:
+
+- historical ranges, Monitor query scopes, copied commands, and forwarded `ccusage`
+  queries now use the host machine's local natural date; `--timezone` is no longer
+  accepted, so users who relied on a different IANA boundary must run ccuv on a
+  host configured for that local date;
+- command, full-command, Markdown-table, and JSON inspection pages now scroll
+  complete rendered text with Up/Down, `h` (top), and `e` (end); notices and
+  controls remain fixed, and copying always retains the complete payload;
+- the existing Monitor `cumulative-bars` presentation now uses clearer
+  day/granularity titles, centered local-time labels, adaptive bar widths,
+  responsive legends, deterministic Dashboard Demo warmup, and README examples;
+- removed the redundant notice emitted when all groups already fit within
+  `--top` and therefore no Other series is needed.
+
+This release does not reconstruct historical intraday data or add any collector
+integration.
 
 ## 0.1.2
 

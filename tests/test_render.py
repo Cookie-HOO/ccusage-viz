@@ -82,7 +82,7 @@ def context(ascii: bool = False) -> RenderContext:
 
 
 def period() -> DateRange:
-    return DateRange(date(2026, 1, 1), date(2026, 1, 14), None)
+    return DateRange(date(2026, 1, 1), date(2026, 1, 14))
 
 
 @pytest.mark.parametrize(
@@ -111,7 +111,7 @@ def test_pending_historical_component_renders_candidate_safe_placeholder(config)
         chart=replace(
             config,
             date_range=DateRange(
-                date(2026, 2, 1), date(2026, 2, 14), None, period="14d", relative_until=True
+                date(2026, 2, 1), date(2026, 2, 14), period="14d", relative_until=True
             ),
         ),
     )
@@ -1185,17 +1185,35 @@ def _distribution_model() -> TimeOfDayDistributionModel:
     )
 
 
-def test_distribution_renderer_exposes_coverage_and_observation_metadata() -> None:
+def test_distribution_renderer_keeps_observation_metadata_outside_the_chart() -> None:
     output = render_monitor_distribution(_distribution_model(), context(True))
 
-    assert "Total · Token cumulative bars · Today" in output
-    assert "Hourly · observed from 09:18" in output
+    assert "Total · Token cumulative bars · Today · Hourly" in output
+    assert "observed from" not in output
     assert "not observed" in output
-    assert "#" in output  # full coverage
-    assert "+" in output  # partial coverage
-    assert ":" in output  # unobserved coverage
-    assert "o" in output  # observed zero
-    assert "09:00" in output and "12:00" in output
+    assert "#" in output
+    assert "09" in output and "11" in output
+    assert "09:00" not in output and "11:00" not in output
+
+
+def test_distribution_renderer_centers_hour_labels_on_bar_columns() -> None:
+    model = _distribution_model()
+    output = render_monitor_distribution(
+        model,
+        RenderContext(80, 16, load_translator("en"), color=False, ascii=True),
+    )
+    lines = output.splitlines()
+    second_bar = next(line.index("+") for line in lines[2:-2] if "+" in line)
+    second_tick = lines[-1].index("10")
+
+    assert second_tick + 1 == second_bar + 1
+
+
+def test_distribution_renderer_keeps_half_hour_tick_precision() -> None:
+    model = replace(_distribution_model(), granularity="half-hour")
+    output = render_monitor_distribution(model, context(True))
+
+    assert "09:00" in output and "11:00" in output
 
 
 def test_distribution_renderer_uses_available_panel_height() -> None:
@@ -1205,6 +1223,30 @@ def test_distribution_renderer_uses_available_panel_height() -> None:
     )
 
     assert len(output.splitlines()) == 20
+
+
+@pytest.mark.parametrize(
+    ("legend", "expected", "missing"),
+    [
+        ("below-title", "Alpha", "Alpha 60"),
+        ("inside", "Alpha", "Alpha 60"),
+        ("values", "Alpha 60", "not observed"),
+        ("hidden", "", "Alpha"),
+    ],
+)
+def test_distribution_renderer_honors_every_monitor_legend_mode(
+    legend: str, expected: str, missing: str
+) -> None:
+    output = render_monitor_distribution(
+        _distribution_model(),
+        RenderContext(
+            80, 16, load_translator("en"), color=False, ascii=True, legend_position=legend
+        ),
+    )
+
+    assert expected in output
+    if missing:
+        assert missing not in output
 
 
 def test_distribution_renderer_ascii_no_color_is_safe_and_width_bounded() -> None:

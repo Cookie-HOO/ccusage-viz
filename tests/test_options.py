@@ -32,7 +32,7 @@ def timeline(
 ) -> StandaloneLaunch:
     date_range = (
         resolve_date_range(
-            "timeline", period="14d", since=None, until=None, timezone=None, today=date(2026, 9, 12)
+            "timeline", period="14d", since=None, until=None, today=date(2026, 9, 12)
         )
         if rolling
         else resolve_date_range(
@@ -40,7 +40,6 @@ def timeline(
             period=None,
             since="2026-01-01",
             until="2026-08-31",
-            timezone=None,
             today=date(2026, 9, 12),
         )
     )
@@ -123,7 +122,7 @@ def test_project_aggregation_round_trips_in_commands() -> None:
 
 def test_default_timeline_range_is_fourteen_inclusive_days() -> None:
     result = resolve_date_range(
-        "timeline", period=None, since=None, until=None, timezone=None, today=date(2026, 9, 12)
+        "timeline", period=None, since=None, until=None, today=date(2026, 9, 12)
     )
     assert (result.since, result.until, result.days, result.period) == (
         date(2026, 8, 30),
@@ -157,7 +156,6 @@ def test_invalid_ranges_fail(period: str | None, since: str | None, until: str |
             period=period,
             since=since,
             until=until,
-            timezone=None,
             today=date(2026, 9, 12),
         )
 
@@ -201,7 +199,6 @@ def test_calendar_style_key_cycles_between_relative_and_grid() -> None:
                 period="7d",
                 since=None,
                 until=None,
-                timezone=None,
                 today=date(2026, 9, 12),
             ),
         ),
@@ -312,10 +309,10 @@ def test_full_command_preserves_implicit_until_semantics() -> None:
 def test_command_serializers_round_trip_typed_launch() -> None:
     launch = StandaloneLaunch(
         ProcessConfig(ccusage_bin="/private/bin/ccusage"),
-        StandaloneHostConfig(timezone="UTC", ascii=True, interval=5),
+        StandaloneHostConfig(ascii=True, interval=5),
         TimelineConfig(
             "timeline",
-            DateRange(date(2026, 9, 1), date(2026, 9, 14), "UTC"),
+            DateRange(date(2026, 9, 1), date(2026, 9, 14)),
             filters=Filters(
                 agents=("claude",),
                 models=("public model",),

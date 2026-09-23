@@ -12,7 +12,7 @@ def record_identity(record: UsageRecord) -> tuple[date, str, tuple[str, str], st
 
 
 def test_demo_sizes_only_change_magnitude() -> None:
-    period = DateRange(date(2026, 1, 1), date(2026, 1, 8), None)
+    period = DateRange(date(2026, 1, 1), date(2026, 1, 8))
     small = generate_demo("small", period)
     medium = generate_demo("medium", period)
     large = generate_demo("large", period)
