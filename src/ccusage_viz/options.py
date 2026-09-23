@@ -3,9 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from datetime import date
 from typing import Literal, TypeAlias
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from ccusage_viz.core.time import DateRange, natural_period_start, today_for_timezone
+from ccusage_viz.core.time import DateRange, local_today, natural_period_start
 from ccusage_viz.core.time import parse_period as parse_core_period
 from ccusage_viz.errors import UsageError
 from ccusage_viz.project_identity import PROJECT_AGGREGATIONS, ProjectAggregation
@@ -142,7 +141,6 @@ ChartConfig: TypeAlias = HistoricalChartConfig | MonitorConfig
 @dataclass(frozen=True, slots=True)
 class StandaloneHostConfig:
     provider: str = "ccusage"
-    timezone: str | None = None
     ascii: bool = False
     demo_size: str | None = None
     watch: bool = True
@@ -157,7 +155,6 @@ class PaneConfig:
 @dataclass(frozen=True, slots=True)
 class DashboardHostConfig:
     provider: str = "ccusage"
-    timezone: str | None = None
     ascii: bool = False
     demo_size: str | None = None
     grid: str = "2x2"
@@ -282,7 +279,7 @@ def adjust_chart(chart: ChartConfig, key: str, *, demo: bool = False) -> ChartCo
             ("below-title", "hidden")
             if isinstance(chart, StackConfig)
             else ("below-title", "inside", "values", "hidden")
-            if isinstance(chart, MonitorConfig)
+            if isinstance(chart, MonitorConfig) and chart.presentation.style == "cumulative-bars"
             else ("below-title", "inside", "hidden")
         )
         return replace(
@@ -390,18 +387,9 @@ def resolve_date_range(
     period: str | None,
     since: str | None,
     until: str | None,
-    timezone: str | None,
     today: date | None = None,
 ) -> DateRange:
-    if timezone:
-        try:
-            ZoneInfo(timezone)
-        except (ZoneInfoNotFoundError, ValueError) as exc:
-            raise UsageError("error.timezone", value=timezone) from exc
-    try:
-        current = today_for_timezone(timezone, today)
-    except (ZoneInfoNotFoundError, ValueError) as exc:
-        raise UsageError("error.timezone", value=timezone) from exc
+    current = local_today(today)
     if period is not None and (since is not None or until is not None):
         raise UsageError("error.date_conflict")
     if until is not None and since is None:
@@ -413,13 +401,11 @@ def resolve_date_range(
         start = _parse_date(since)
         if start > end:
             raise UsageError("error.date_order")
-        return DateRange(
-            start, end, timezone, fixed_bounds=until is not None, implicit_until=until is None
-        )
+        return DateRange(start, end, fixed_bounds=until is not None, implicit_until=until is None)
     canonical_period = period or COMMAND_DEFAULT_PERIODS[command]
     value, unit = parse_period(canonical_period)
     try:
         start = natural_period_start(end, value, unit)
     except (OverflowError, ValueError) as exc:
         raise UsageError("error.arguments", detail="--period is out of range") from exc
-    return DateRange(start, end, timezone, relative_until=True, period=canonical_period)
+    return DateRange(start, end, relative_until=True, period=canonical_period)

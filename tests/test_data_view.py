@@ -37,7 +37,7 @@ def _options() -> StandaloneLaunch:
         StandaloneHostConfig(interval=5),
         TimelineConfig(
             "timeline",
-            DateRange(date(2026, 1, 1), date(2026, 1, 31), None),
+            DateRange(date(2026, 1, 1), date(2026, 1, 31)),
             by="agent",
             top=1,
             granularity="month",
@@ -115,7 +115,7 @@ def test_exact_project_data_rows_have_an_explicit_agent_field() -> None:
         StandaloneHostConfig(),
         RankingConfig(
             "ranking",
-            DateRange(date(2026, 1, 1), date(2026, 1, 1), None),
+            DateRange(date(2026, 1, 1), date(2026, 1, 1)),
             project_aggregation="exact",
         ),
     )
@@ -163,14 +163,14 @@ def test_merged_project_data_rows_expose_stable_merge_group_only() -> None:
     ranking_options = StandaloneLaunch(
         ProcessConfig(),
         StandaloneHostConfig(),
-        RankingConfig("ranking", DateRange(date(2026, 1, 1), date(2026, 1, 2), None)),
+        RankingConfig("ranking", DateRange(date(2026, 1, 1), date(2026, 1, 2))),
     )
     timeline_options = StandaloneLaunch(
         ProcessConfig(),
         StandaloneHostConfig(),
         TimelineConfig(
             "timeline",
-            DateRange(date(2026, 1, 1), date(2026, 1, 2), None),
+            DateRange(date(2026, 1, 1), date(2026, 1, 2)),
             by="project",
         ),
     )
@@ -250,7 +250,7 @@ def test_exact_project_rows_keep_agent_column_for_other_rows() -> None:
         StandaloneHostConfig(),
         RankingConfig(
             "ranking",
-            DateRange(date(2026, 1, 1), date(2026, 1, 1), None),
+            DateRange(date(2026, 1, 1), date(2026, 1, 1)),
             top=1,
             project_aggregation="exact",
         ),
@@ -319,7 +319,7 @@ def test_exact_project_rows_keep_agent_column_for_other_rows() -> None:
     ]
 
 
-def test_data_display_clips_but_complete_copy_payload_does_not() -> None:
+def test_data_display_keeps_the_complete_payload() -> None:
     snapshot = UsageSnapshot(
         records=tuple(
             UsageRecord(
@@ -339,10 +339,11 @@ def test_data_display_clips_but_complete_copy_payload_does_not() -> None:
     terminal = Terminal(120, 6, False, False)
 
     displayed = render_snapshot_data(_options(), snapshot, translator, terminal)
-    copied = render_snapshot_data(_options(), snapshot, translator, terminal, complete=True)
 
-    assert displayed.endswith("…")
-    assert len(copied.splitlines()) > len(displayed.splitlines())
+    assert not displayed.endswith("…")
+    assert displayed == render_snapshot_data(
+        _options(), snapshot, translator, Terminal(120, 100, False, False)
+    )
 
 
 def test_monitor_data_markdown_and_json_share_bucket_values() -> None:

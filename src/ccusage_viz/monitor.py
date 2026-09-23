@@ -51,6 +51,11 @@ from ccusage_viz.terminal_ui import (
     input_mode,
     read_key,
 )
+from ccusage_viz.text_viewport import (
+    next_text_offset,
+    render_text_viewport,
+    text_viewport_overflows,
+)
 
 
 def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
@@ -75,6 +80,9 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
     lifecycle: LifecycleOperation[MonitorSubmission] = LifecycleOperation("standalone:monitor")
     controls_hidden = False
     body_view: BodyView = "chart"
+    text_offsets: dict[BodyView, int] = {}
+    text_line_counts: dict[BodyView, int] = {}
+    text_visible_rows: dict[BodyView, int] = {}
     demo_ordinal = 0
     status = translator.text("status.loading")
     last_size: tuple[int, int] | None = None
@@ -173,9 +181,13 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
         accepted = component.accepted_options or config
         terminal = terminal_for(config)
         last_size = (terminal.width, terminal.height)
+        overflowing = text_viewport_overflows(
+            line_count=text_line_counts.get(body_view, 0),
+            visible_rows=text_visible_rows.get(body_view, 0),
+        )
         controls = (
             ()
-            if controls_hidden
+            if body_view == "chart" and controls_hidden
             else controls_line(
                 translator.text(
                     {
@@ -184,7 +196,10 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                         "full-command": "status.monitor_full_command_controls",
                         "data-table": "status.monitor_data_table_controls",
                         "data-json": "status.monitor_data_json_controls",
-                    }[body_view]
+                    }[body_view],
+                    scroll=translator.text("status.text_scroll_keys")
+                    if body_view != "chart" and overflowing
+                    else "",
                 ),
                 width=terminal.width,
                 color=terminal.color,
@@ -257,8 +272,19 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                         view=body_view,
                     )
                 )
+            formatted_notices = notices()
+            if body_view != "chart":
+                viewport = render_text_viewport(
+                    body,
+                    offset=text_offsets.get(body_view, 0),
+                    visible_rows=terminal.height - 1 - len(controls) - len(formatted_notices),
+                )
+                text_offsets[body_view] = viewport.offset
+                text_line_counts[body_view] = viewport.line_count
+                text_visible_rows[body_view] = viewport.visible_rows
+                body = viewport.body
             screen.paint(
-                compose_frame(body, status, controls, notices(), height=terminal.height),
+                compose_frame(body, status, controls, formatted_notices, height=terminal.height),
                 force=force,
             )
         except UsageError as exc:
@@ -612,7 +638,7 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                 key = read_key(0.05)
                 if key == "\x03":
                     raise KeyboardInterrupt
-                if key == "r":
+                if body_view == "chart" and key == "r":
                     manual_refresh_operations.clear()
                     if request(
                         LifecycleTrigger.MANUAL,
@@ -623,7 +649,17 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                         if operation is not None:
                             manual_refresh_operations.add(operation)
                     paint(force=True)
-                elif key in {"h", "H"}:
+                elif body_view != "chart" and key in {"\x1b[A", "\x1b[B", "h", "e"}:
+                    offset = next_text_offset(
+                        key,
+                        offset=text_offsets.get(body_view, 0),
+                        line_count=text_line_counts.get(body_view, 0),
+                        visible_rows=text_visible_rows.get(body_view, 0),
+                    )
+                    assert offset is not None
+                    text_offsets[body_view] = offset
+                    paint(force=True)
+                elif body_view == "chart" and key in {"h", "H"}:
                     controls_hidden = not controls_hidden
                     paint(force=True)
                 elif key in {"v", "V"}:
@@ -643,7 +679,6 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                             translator=translator,
                             terminal=terminal,
                             view=body_view,
-                            complete=True,
                         )
                     )
                     copied_successfully = copy_command(copied)
@@ -658,13 +693,14 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                 elif key in {"m", "M"} and body_view == "chart":
                     previous_interval = component.candidate.host.interval
                     data_affecting = pick_appearance()
+                    body_view = "chart"
                     if data_affecting:
                         now = time.monotonic()
                         if component.candidate.host.interval != previous_interval:
                             scheduler.rebuild(component.candidate.host.interval, now=now)
                         request(LifecycleTrigger.CONFIGURATION, now=now)
                     paint()
-                elif key == " ":
+                elif body_view == "chart" and key == " ":
                     resumed = False
                     if not lifecycle.paused:
                         scheduler.pause()

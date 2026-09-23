@@ -7,6 +7,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from shutil import get_terminal_size
+from threading import Event
 
 from ccusage_viz.acquisition import historical_provider_id, historical_query_intent
 from ccusage_viz.adjustment_timeout import AdjustmentIdleTimer, AdjustmentTimeout
@@ -19,7 +20,7 @@ from ccusage_viz.command_copy import (
     format_full_dashboard_command,
     wrap_command,
 )
-from ccusage_viz.core.time import DateRange, refresh_date_range, today_for_timezone
+from ccusage_viz.core.time import DateRange, local_today, refresh_date_range
 from ccusage_viz.coverage import DateCoverage, DateInterval
 from ccusage_viz.dashboard_layout import (
     PaneLayout as ResolvedPaneLayout,
@@ -108,10 +109,15 @@ from ccusage_viz.query.runtime import QueryRuntime
 from ccusage_viz.render.base import RenderAudit, RenderContext, styled_text
 from ccusage_viz.render.filters import active_filter_summary
 from ccusage_viz.render.palette import COLOR_SCHEMES, get_color_scheme
-from ccusage_viz.render.summary import render_summary, render_summary_placeholder
+from ccusage_viz.render.summary import render_summary
 from ccusage_viz.terminal import FramePainter, Terminal, compose_frame
 from ccusage_viz.terminal_ui import AdjustmentAction, adjustment_rows
 from ccusage_viz.terminal_ui import notice_lines as format_notice_lines
+from ccusage_viz.text_viewport import (
+    next_text_offset,
+    render_text_viewport,
+    text_viewport_overflows,
+)
 from ccusage_viz.tui_input import InputDecoder, KeyEvent, MouseEvent, read_event, tui_input_mode
 
 _PANE_COMMANDS = ("timeline", "calendar", "stack", "ranking", "monitor")
@@ -132,7 +138,14 @@ class MonitorOutcome:
     error: BaseException | None = None
 
 
-PaneFuture = Future[HistoricalOutcome] | Future[MonitorOutcome]
+@dataclass(frozen=True, slots=True)
+class MonitorWarmupOutcome:
+    generation: int
+    completions: tuple[MonitorCompletion, ...] = ()
+    error: BaseException | None = None
+
+
+PaneFuture = Future[HistoricalOutcome] | Future[MonitorOutcome] | Future[MonitorWarmupOutcome]
 
 
 @dataclass(slots=True)
@@ -141,9 +154,13 @@ class TuiPane:
     scheduler: FixedIntervalScheduler
     lifecycle: LifecycleOperation[PaneFuture]
     demo_ordinal: int = 0
+    demo_warmed_generation: int | None = None
     render_warning: UsageError | None = None
     last_render: PaneRender | None = None
     body_view: BodyView = "chart"
+    text_offsets: dict[BodyView, int] = field(default_factory=dict)
+    text_line_counts: dict[BodyView, int] = field(default_factory=dict)
+    text_visible_rows: dict[BodyView, int] = field(default_factory=dict)
     previous_values: dict[Hashable, float] = field(default_factory=dict)
     deltas: dict[Hashable, float] = field(default_factory=dict)
     values_initialized: bool = False
@@ -191,11 +208,11 @@ def _header_options(
     base: DashboardLaunch, interval: DateInterval | None = None
 ) -> StandaloneLaunch:
     """Build the dashboard's deliberately unfiltered, all-agent daily query."""
-    today = today_for_timezone(base.host.timezone)
+    today = local_today()
     interval = interval or DateInterval(today - timedelta(days=7), today)
     chart = TimelineConfig(
         "timeline",
-        DateRange(interval.since, interval.until, base.host.timezone),
+        DateRange(interval.since, interval.until),
         presentation=ChartPresentation(theme=base.host.theme, style="linear", legend="hidden"),
         other="hide",
     )
@@ -203,7 +220,6 @@ def _header_options(
         base.process,
         StandaloneHostConfig(
             provider=base.host.provider,
-            timezone=base.host.timezone,
             ascii=base.host.ascii,
             demo_size=base.host.demo_size,
             interval=base.host.header_interval,
@@ -242,7 +258,7 @@ def _header_refresh_interval(
     period = header.summary_period
     if period == "none":
         return None
-    current = today or today_for_timezone(header.options.host.timezone)
+    current = today or local_today()
     required = required_summary_coverage(current, period)
     uncovered = tuple(
         missing for interval in required.intervals for missing in header.coverage.missing(interval)
@@ -260,7 +276,7 @@ def _header_summary(header: DashboardHeader, period: str):
         return None
     summary = build_period_summary(
         header.records,
-        today_for_timezone(header.options.host.timezone),
+        local_today(),
         period,
         header.coverage,
     )
@@ -307,18 +323,7 @@ def _header_lines(
     if header.summary_period == "none":
         detail = ""
     elif summary is None:
-        detail = render_summary_placeholder(
-            header.summary_period,
-            today_for_timezone(header.options.host.timezone),
-            RenderContext(
-                terminal.width,
-                1,
-                translator,
-                color=terminal.color,
-                ascii=terminal.ascii,
-                color_scheme=header.options.chart.presentation.theme,
-            ),
-        )
+        detail = translator.text("status.loading")
     else:
         detail = render_summary(
             summary,
@@ -753,6 +758,30 @@ def _await_monitor_submission(submission: MonitorSubmission) -> MonitorOutcome:
         return MonitorOutcome(submission.generation, error=exc)
 
 
+def _await_monitor_warmup(
+    component: MonitorComponent,
+    *,
+    generation: int,
+    trigger: LifecycleTrigger,
+    steps: int,
+    cancelled: Event,
+) -> MonitorWarmupOutcome:
+    """Collect the deterministic cumulative demo history off the TUI thread."""
+    completions: list[MonitorCompletion] = []
+    try:
+        for ordinal in range(1, steps + 1):
+            if cancelled.is_set() or component.generation != generation:
+                return MonitorWarmupOutcome(generation)
+            submission = component.submit(query_trigger(trigger), sample_ordinal=ordinal)
+            completion = submission.result()
+            if cancelled.is_set() or component.generation != generation:
+                return MonitorWarmupOutcome(generation)
+            completions.append(completion)
+        return MonitorWarmupOutcome(generation, tuple(completions))
+    except BaseException as exc:
+        return MonitorWarmupOutcome(generation, tuple(completions), exc)
+
+
 def _refresh_deltas(pane: TuiPane, values: dict[Hashable, float]) -> None:
     tracker = RefreshDeltas(
         pane.previous_values,
@@ -811,7 +840,6 @@ def _pane_copy_payload(pane: TuiPane, translator: Translator, terminal: Terminal
             translator=translator,
             terminal=terminal,
             view=view,
-            complete=True,
         )
     return render_snapshot_data(
         active,
@@ -819,7 +847,6 @@ def _pane_copy_payload(pane: TuiPane, translator: Translator, terminal: Terminal
         translator,
         terminal,
         view=view,
-        complete=True,
     )
 
 
@@ -899,8 +926,17 @@ def _pane_render(pane: TuiPane, translator: Translator, terminal: Terminal) -> P
         return PaneRender(message, recovery or ())
     try:
         if isinstance(component, MonitorComponent):
+            if component.accepted_options is None and pane.lifecycle.submission is not None:
+                return PaneRender(translator.text("status.loading"))
             display = component.display() if hasattr(component, "display") else component
             display_query_pending = getattr(display, "display_query_pending", False)
+            title_chart = (
+                active.chart
+                if not display_query_pending or component.accepted_options is None
+                else component.accepted_options.chart
+            )
+            if not isinstance(title_chart, MonitorConfig):
+                raise TypeError("monitor pane component has historical configuration")
             context = RenderContext(
                 terminal.width,
                 max(
@@ -913,6 +949,7 @@ def _pane_render(pane: TuiPane, translator: Translator, terminal: Terminal) -> P
                 color_scheme=active.chart.presentation.theme,
                 style=active.chart.presentation.style,
                 legend_position=active.chart.presentation.legend,
+                title_content=translator.text(f"label.{title_chart.by or 'total'}"),
                 hide_upper_right_axes=True,
                 deltas=component.deltas,
                 rank_deltas=component.rank_deltas,
@@ -973,13 +1010,25 @@ def _local_pane_content(
     notices: tuple[str, ...],
     *,
     height: int,
-) -> str:
-    """Keep a bounded notice band inside one pane's content area."""
+    offset: int = 0,
+    scrollable: bool = False,
+    return_metadata: bool = False,
+) -> str | tuple[str, int, int, int]:
+    """Keep notices fixed below an optionally scrollable pane body."""
     notice_rows = min(len(notices), max(0, height - 3))
     chart_height = max(0, height - notice_rows)
-    chart_lines = chart.splitlines()[:chart_height]
+    viewport = render_text_viewport(chart, offset=offset, visible_rows=chart_height)
+    chart_lines = (viewport.body if scrollable else chart).splitlines()[:chart_height]
     chart_lines.extend("" for _ in range(chart_height - len(chart_lines)))
-    return "\n".join((*chart_lines, *notices[:notice_rows]))
+    content = "\n".join((*chart_lines, *notices[:notice_rows]))
+    if not return_metadata:
+        return content
+    return (
+        content,
+        viewport.offset if scrollable else 0,
+        viewport.line_count,
+        viewport.visible_rows,
+    )
 
 
 def _cycle(values: tuple[str, ...], current: str, step: int) -> str:
@@ -1151,6 +1200,31 @@ def _query_affecting_adjustment(command: str, key: str) -> bool:
         key in {"p", "P"}
         or (key == "b" and command in {"timeline", "ranking", "monitor"})
         or (command == "monitor" and key == "w")
+    )
+
+
+def _text_view_footer(
+    body_view: BodyView,
+    translator: Translator,
+    width: int,
+    *,
+    line_count: int,
+    visible_rows: int,
+) -> tuple[str, ...]:
+    """Render the always-visible, read-only footer for a text body view."""
+    scroll = (
+        f"↑/↓ {translator.text('status.text_scroll')} · "
+        f"h {translator.text('status.text_top')} · "
+        f"e {translator.text('status.text_end')} · "
+        if text_viewport_overflows(line_count=line_count, visible_rows=visible_rows)
+        else ""
+    )
+    return (
+        clip_width(
+            f"{scroll}y {translator.text('label.adjust_copy')} · "
+            f"v {translator.text('label.adjust_view')}",
+            width,
+        ),
     )
 
 
@@ -1434,10 +1508,14 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
     adjustment_timer: AdjustmentIdleTimer | None = None
     browse_controls_hidden = False
     body_view: DashboardBodyView = "chart"
+    dashboard_text_offset = 0
+    dashboard_text_line_count = 0
+    dashboard_text_visible_rows = 0
     chooser_overlay: tuple[int, str] | None = None
     copied_status: str | None = None
     pane_copy_status: str | None = None
     manual_refresh_operations: set[OperationToken] = set()
+
     last_successful_update: datetime | None = None
     last_size: tuple[int, int] | None = None
     screen = FramePainter(sys.stdout)
@@ -1449,13 +1527,17 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             focused, \
             grid_draft, \
             grid_error, \
-            pane_copy_status
+            pane_copy_status, \
+            body_view
         adjustment_mode = None
         adjustment_timer = None
         focused = None
         grid_draft = None
         grid_error = None
         pane_copy_status = None
+        body_view = "chart"
+        for pane in panes:
+            pane.body_view = "chart"
 
     def read_adjustment_event(decoder: InputDecoder) -> object:
         if adjustment_timer is None:
@@ -1479,6 +1561,24 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
     ) -> tuple[PaneFuture, Callable[[], None]]:
         component = pane.component
         if isinstance(component, MonitorComponent):
+            if (
+                component.candidate.host.demo_size
+                and pane.demo_warmed_generation != component.generation
+            ):
+                chart = component.candidate.chart
+                if not isinstance(chart, MonitorConfig):
+                    raise TypeError("monitor pane component has historical configuration")
+                cancelled = Event()
+                steps = min(24, max(8, chart.window_seconds))
+                warmup_future = executor.submit(
+                    _await_monitor_warmup,
+                    component,
+                    generation=component.generation,
+                    trigger=operation.trigger,
+                    steps=steps,
+                    cancelled=cancelled,
+                )
+                return warmup_future, cancelled.set
             try:
                 submission = component.submit(
                     query_trigger(operation.trigger),
@@ -1590,7 +1690,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             header.options,
             chart=replace(
                 header.options.chart,
-                date_range=DateRange(requested.since, requested.until, options.host.timezone),
+                date_range=DateRange(requested.since, requested.until),
             ),
         )
         intent = historical_query_intent(
@@ -1722,18 +1822,50 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     else:
                         pane.lifecycle.abandon(operation)
                 else:
-                    assert loaded.completion is not None
                     if isinstance(component, MonitorComponent):
-                        assert isinstance(loaded, MonitorOutcome)
-                        accepted = component.accept(
-                            loaded.completion,
-                            now=observed_at,
-                            wall=datetime.now().astimezone(),
-                        )
-                        if accepted:
-                            pane.demo_ordinal += 1
+                        if isinstance(loaded, MonitorWarmupOutcome):
+                            if not loaded.completions:
+                                pane.lifecycle.abandon(operation)
+                                retire_manual_refresh(operation)
+                                continue
+                            chart = component.candidate.chart
+                            if not isinstance(chart, MonitorConfig):
+                                raise TypeError(
+                                    "monitor pane component has historical configuration"
+                                )
+                            steps = len(loaded.completions)
+                            demo_now = observed_at
+                            demo_wall = datetime.now().astimezone()
+                            demo_seconds = chart.window_seconds / max(1, steps - 1)
+                            accepted = all(
+                                component.accept(
+                                    completion,
+                                    now=demo_now - (steps - ordinal) * demo_seconds,
+                                    wall=demo_wall
+                                    - timedelta(seconds=(steps - ordinal) * demo_seconds),
+                                    detect_gap=False,
+                                )
+                                for ordinal, completion in enumerate(loaded.completions, start=1)
+                            )
+                            if accepted:
+                                pane.demo_ordinal = steps
+                                pane.demo_warmed_generation = loaded.generation
+                                pane.scheduler.rebuild(
+                                    component.candidate.host.interval, now=observed_at
+                                )
+                        else:
+                            assert isinstance(loaded, MonitorOutcome)
+                            assert loaded.completion is not None
+                            accepted = component.accept(
+                                loaded.completion,
+                                now=observed_at,
+                                wall=datetime.now().astimezone(),
+                            )
+                            if accepted:
+                                pane.demo_ordinal += 1
                     else:
                         assert isinstance(loaded, HistoricalOutcome)
+                        assert loaded.completion is not None
                         accepted = component.accept(loaded.completion)
                         if accepted and component.candidate.chart.kind == "ranking":
                             _refresh_deltas(pane, component.ranking_values())
@@ -1798,17 +1930,25 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             return tuple(rows)
         if adjustment_mode == "pane" and focused is not None:
             pane = panes[focused]
+            if pane.body_view != "chart":
+                return _text_view_footer(
+                    pane.body_view,
+                    translator,
+                    width,
+                    line_count=pane.text_line_counts.get(pane.body_view, 0),
+                    visible_rows=pane.text_visible_rows.get(pane.body_view, 0),
+                )
             state = grid_error or _pane_adjustment_state(pane, adjustment_page, translator)
             if pane_copy_status is not None and grid_error is None:
                 state = f"{pane_copy_status} · {state}"
             return _adjustment_footer(
                 state,
-                _pane_options(pane).chart.kind,
+                _pane_display_options(pane).chart.kind,
                 adjustment_page,
                 pane.body_view,
                 translator,
                 width,
-                chart=_pane_options(pane).chart,
+                chart=_pane_display_options(pane).chart,
             )
         if adjustment_mode == "global":
             state = translator.text(
@@ -1821,6 +1961,14 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 state=grid_error or state,
                 translator=translator,
                 width=width,
+            )
+        if body_view != "chart":
+            return _text_view_footer(
+                body_view,
+                translator,
+                width,
+                line_count=dashboard_text_line_count,
+                visible_rows=dashboard_text_visible_rows,
             )
         if browse_controls_hidden:
             return ()
@@ -1882,7 +2030,8 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         )
 
     def paint(*, force: bool = False) -> None:
-        nonlocal last_size
+        nonlocal last_size, dashboard_text_offset, dashboard_text_line_count
+        nonlocal dashboard_text_visible_rows
         size = get_terminal_size()
         last_size = (size.columns, size.lines)
         header_terminal = Terminal(
@@ -1893,24 +2042,25 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         )
         status = None
         if body_view != "chart":
-            body = format_full_command_display(full_dashboard_command(), size.columns)
-            screen.paint(
-                compose_frame(body, status, controls(), notices(), height=size.lines), force=force
+            control_rows = controls()
+            notice_rows = notices()
+            viewport = render_text_viewport(
+                format_full_command_display(full_dashboard_command(), size.columns),
+                offset=dashboard_text_offset,
+                visible_rows=size.lines - len(control_rows) - len(notice_rows),
             )
-            return
-        initial_pending = all(
-            pane.component.accepted_options is None and pane.component.error is None
-            for pane in panes
-        )
-        if initial_pending:
-            completed = sum(pane.lifecycle.submission is None for pane in panes)
-            loading = center_text(
-                f"{translator.text('label.dashboard')} · {translator.text('status.loading')} {completed}/{len(panes)}",
-                size.columns,
-            )
-            body = "\n".join((*header_lines, loading))
+            dashboard_text_offset = viewport.offset
+            dashboard_text_line_count = viewport.line_count
+            dashboard_text_visible_rows = viewport.visible_rows
             screen.paint(
-                compose_frame(body, status, controls(), notices(), height=size.lines), force=force
+                compose_frame(
+                    viewport.body,
+                    status,
+                    control_rows,
+                    notice_rows,
+                    height=size.lines,
+                ),
+                force=force,
             )
             return
 
@@ -1944,13 +2094,21 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     translator=translator,
                     color_scheme=pane_options.chart.presentation.theme,
                 )
-                rendered_panes.append(
-                    _local_pane_content(
-                        rendered.chart,
-                        local_notices,
-                        height=interior_height,
-                    )
+                pane_content = _local_pane_content(
+                    rendered.chart,
+                    local_notices,
+                    height=interior_height,
+                    offset=pane.text_offsets.get(pane.body_view, 0),
+                    scrollable=pane.body_view != "chart",
+                    return_metadata=True,
                 )
+                assert isinstance(pane_content, tuple)
+                content, offset, line_count, visible_rows = pane_content
+                if pane.body_view != "chart":
+                    pane.text_offsets[pane.body_view] = offset
+                    pane.text_line_counts[pane.body_view] = line_count
+                    pane.text_visible_rows[pane.body_view] = visible_rows
+                rendered_panes.append(content)
             return rendered_panes
 
         layout = grid_geometry(size.columns, size.lines, len(header_lines), int(status is not None))
@@ -2118,6 +2276,38 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         continue
                     if key in {"\r", "\n", "\x1b"}:
                         end_adjustment()
+                        paint()
+                        continue
+                    assert focused is not None
+                    pane = panes[focused]
+                    if pane.body_view != "chart":
+                        if key in {"\x1b[A", "\x1b[B", "h", "e"}:
+                            offset = next_text_offset(
+                                key,
+                                offset=pane.text_offsets.get(pane.body_view, 0),
+                                line_count=pane.text_line_counts.get(pane.body_view, 0),
+                                visible_rows=pane.text_visible_rows.get(pane.body_view, 0),
+                            )
+                            assert offset is not None
+                            pane.text_offsets[pane.body_view] = offset
+                        elif key in {"v", "V"}:
+                            pane.body_view = next_body_view(pane.body_view)
+                            pane_copy_status = None
+                        elif key in {"y", "Y"} and body_view_copy_kind(pane.body_view) is not None:
+                            copy_kind = body_view_copy_kind(pane.body_view)
+                            assert copy_kind is not None
+                            copied = copy_command(
+                                _pane_copy_payload(pane, translator, pane_terminal(focused))
+                            )
+                            pane_copy_status = translator.text(
+                                "status.command_copied"
+                                if copied and copy_kind in {"command", "full-command"}
+                                else "status.data_copied"
+                                if copied
+                                else "status.command_copy_failed"
+                            )
+                        paint()
+                        continue
                     else:
                         next_focused = _adjustment_target(focused, key, len(panes))
                         if next_focused != focused:
@@ -2191,22 +2381,6 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                             elif key == "v":
                                 pane.body_view = next_body_view(pane.body_view)
                                 pane_copy_status = None
-                            elif (
-                                key in {"y", "Y"}
-                                and body_view_copy_kind(pane.body_view) is not None
-                            ):
-                                copy_kind = body_view_copy_kind(pane.body_view)
-                                assert copy_kind is not None
-                                copied = copy_command(
-                                    _pane_copy_payload(pane, translator, pane_terminal(focused))
-                                )
-                                pane_copy_status = translator.text(
-                                    "status.command_copied"
-                                    if copied and copy_kind in {"command", "full-command"}
-                                    else "status.data_copied"
-                                    if copied
-                                    else "status.command_copy_failed"
-                                )
                             elif key == "r":
                                 try:
                                     choice = choose_pane_type("replace", focused)
@@ -2294,14 +2468,14 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                             elif (
                                 adjustment_page == "advanced"
                                 and key == "P"
-                                and _project_grouping_available(_pane_options(pane).chart)
+                                and _project_grouping_available(_pane_display_options(pane).chart)
                             ):
                                 pane.component.cycle_project_label_context()
                             elif _adjustment_key_supported(
-                                _pane_options(pane).chart.kind,
+                                _pane_display_options(pane).chart.kind,
                                 adjustment_page,
                                 key,
-                                chart=_pane_options(pane).chart,
+                                chart=_pane_display_options(pane).chart,
                             ):
                                 component = pane.component
                                 base = component.candidate
@@ -2359,7 +2533,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         )
                         if header_style != "hidden" and header.summary_period != "none":
                             required = required_summary_coverage(
-                                today_for_timezone(header.options.host.timezone),
+                                local_today(),
                                 header.summary_period,
                             )
                             if any(not header.coverage.covers(item) for item in required.intervals):
@@ -2370,9 +2544,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         header.generation += 1
                         header.lifecycle.detach_active()
                         if header_style != "hidden" and next_summary != "none":
-                            required = required_summary_coverage(
-                                today_for_timezone(header.options.host.timezone), next_summary
-                            )
+                            required = required_summary_coverage(local_today(), next_summary)
                             if any(not header.coverage.covers(item) for item in required.intervals):
                                 refresh_header(trigger=LifecycleTrigger.CONFIGURATION)
                     elif key == "z":
@@ -2411,11 +2583,22 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         continue
                     paint()
                     continue
-                if key in {"h", "H"}:
+                if body_view != "chart" and key in {"\x1b[A", "\x1b[B", "h", "e"}:
+                    offset = next_text_offset(
+                        key,
+                        offset=dashboard_text_offset,
+                        line_count=dashboard_text_line_count,
+                        visible_rows=dashboard_text_visible_rows,
+                    )
+                    assert offset is not None
+                    dashboard_text_offset = offset
+                    paint(force=True)
+                    continue
+                if body_view == "chart" and key in {"h", "H"}:
                     browse_controls_hidden = not browse_controls_hidden
                     paint(force=True)
                     continue
-                if key == "r":
+                if body_view == "chart" and key == "r":
                     manual_refresh_operations.clear()
                     for index in range(len(panes)):
                         if refresh(
@@ -2445,7 +2628,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     )
                 elif key == "\t":
                     continue
-                elif key == " ":
+                elif body_view == "chart" and key == " ":
                     paused = all(item.lifecycle.paused for item in panes)
                     now = time.monotonic()
                     if not paused:

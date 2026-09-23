@@ -226,8 +226,6 @@ def build_timeline(
     model_notices = tuple(notices)
     if _has_invalid_model_attribution(records, by):
         model_notices += (Notice("notice.model_overattributed"),)
-    if show_other and top is not None and groups and excluded == 0:
-        model_notices += (Notice("notice.other_not_needed", {"count": len(groups), "top": top}),)
     summary = _build_summary(
         records,
         date_range,
@@ -369,8 +367,6 @@ def build_ranking(
     model_notices = tuple(notices)
     if _has_invalid_model_attribution(records, by):
         model_notices += (Notice("notice.model_overattributed"),)
-    if show_other and top is not None and groups and excluded == 0:
-        model_notices += (Notice("notice.other_not_needed", {"count": len(groups), "top": top}),)
     summary = _build_summary(
         records,
         date_range,

@@ -55,7 +55,7 @@ from ccusage_viz.watch import (
 
 
 def options(*, command: str = "ranking", demo: str | None = "small") -> StandaloneLaunch:
-    date_range = DateRange(date(2026, 1, 1), date(2026, 1, 14), None)
+    date_range = DateRange(date(2026, 1, 1), date(2026, 1, 14))
     presentation = ChartPresentation(theme="no-color")
     chart = (
         TimelineConfig("timeline", date_range, presentation=presentation, top=3, other="hide")
@@ -160,8 +160,10 @@ def test_one_shot_requires_complete_atomic_coverage() -> None:
     )
 
 
+@pytest.mark.parametrize("text_view", (False, True))
 def test_historical_pause_cancels_automatic_query_and_manual_refresh_remains_allowed(
     monkeypatch: pytest.MonkeyPatch,
+    text_view: bool,
 ) -> None:
     launch = replace(options(), host=replace(options().host, watch=True))
     events: list[tuple[object, ...]] = []
@@ -234,7 +236,7 @@ def test_historical_pause_cancels_automatic_query_and_manual_refresh_remains_all
         def finish(self) -> None:
             events.append(("finish",))
 
-    keys = iter((" ", "r", "\x03"))
+    keys = iter(("v", "r", " ", "\x03") if text_view else (" ", "r", "\x03"))
     runtime = Runtime()
     monkeypatch.setattr("ccusage_viz.watch.build_query_runtime", lambda: runtime)
     monkeypatch.setattr("ccusage_viz.watch.build_chart_registry", lambda: object())
@@ -249,15 +251,17 @@ def test_historical_pause_cancels_automatic_query_and_manual_refresh_remains_all
     )
 
     assert run_watch(launch, load_translator("en")) == 0
-    assert [(event[1], event[2]) for event in events if event[0] == "submit"] == [
-        (QueryTrigger.STARTUP, 0),
-        (QueryTrigger.REFRESH, 0),
-    ]
-    assert len(submissions) == 2
-    assert submissions[0].cancelled
-    assert submissions[1].cancelled
+    expected_submissions = [(QueryTrigger.STARTUP, 0)]
+    if not text_view:
+        expected_submissions.append((QueryTrigger.REFRESH, 0))
+    assert [
+        (event[1], event[2]) for event in events if event[0] == "submit"
+    ] == expected_submissions
+    assert len(submissions) == len(expected_submissions)
+    assert (not text_view) == any(
+        event[0] == "paint" and "paused" in str(event[1]) for event in events
+    )
     assert not any(event[0] == "fail" for event in events)
-    assert any(event[0] == "paint" and "paused" in str(event[1]) for event in events)
     assert events[-3:] == [
         ("submission-cancel", 0),
         ("runtime-cancel",),
@@ -826,7 +830,7 @@ def test_runtime_adjustment_period_preview_hides_accepted_chart_facts(
         chart=replace(
             options(command="ranking").chart,
             date_range=DateRange(
-                date(2026, 1, 1), date(2026, 1, 14), None, period="14d", relative_until=True
+                date(2026, 1, 1), date(2026, 1, 14), period="14d", relative_until=True
             ),
         ),
     )
@@ -884,7 +888,7 @@ def test_runtime_adjustment_retains_last_chart_until_an_invalid_draft_recovers(
         options(command="stack"),
         chart=replace(
             options(command="stack").chart,
-            date_range=DateRange(date(2026, 1, 1), date(2026, 1, 7), None),
+            date_range=DateRange(date(2026, 1, 1), date(2026, 1, 7)),
         ),
     )
     result = run_runtime_adjustment(

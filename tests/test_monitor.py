@@ -308,7 +308,7 @@ def test_monitor_reuses_a_shortened_opaque_project_label_from_process_cache() ->
 
     build_ranking(
         (app, tool),
-        DateRange(date(2026, 1, 1), date(2026, 1, 1), None),
+        DateRange(date(2026, 1, 1), date(2026, 1, 1)),
         by="project",
     )
     singleton = _counters((app,)).projects
@@ -550,8 +550,10 @@ def test_standalone_monitor_localizes_schema_errors(
     )
 
 
+@pytest.mark.parametrize("text_view", (False, True))
 def test_standalone_pause_discards_active_sample_and_preserves_paused_status(
     monkeypatch: pytest.MonkeyPatch,
+    text_view: bool,
 ) -> None:
     launch = monitor_options()
     events: list[tuple[object, ...]] = []
@@ -614,7 +616,7 @@ def test_standalone_pause_discards_active_sample_and_preserves_paused_status(
         def finish(self) -> None:
             events.append(("finish",))
 
-    keys = iter((" ", "\x03"))
+    keys = iter(("v", "r", " ", "\x03") if text_view else (" ", "\x03"))
     monkeypatch.setattr(monitor_host, "build_query_runtime", lambda: runtime)
     monkeypatch.setattr(monitor_host, "build_chart_registry", lambda: object())
     monkeypatch.setattr(monitor_host, "MonitorComponent", Component)
@@ -629,11 +631,15 @@ def test_standalone_pause_discards_active_sample_and_preserves_paused_status(
     )
 
     assert monitor_host.run_monitor(launch, load_translator("en")) == 0
-    assert ("submit", QueryTrigger.STARTUP, 1) in events
-    assert ("pause",) in events
+    assert [event for event in events if event[0] == "submit"] == [
+        ("submit", QueryTrigger.STARTUP, 1)
+    ]
+    assert (not text_view) == (("pause",) in events)
     assert ("submission-cancel",) in events
     assert not any(event[0] == "fail" for event in events)
-    assert any(event[0] == "paint" and "paused" in str(event[1]) for event in events)
+    assert (not text_view) == any(
+        event[0] == "paint" and "paused" in str(event[1]) for event in events
+    )
     assert events[-2:] == [("runtime-cancel",), ("finish",)]
 
 

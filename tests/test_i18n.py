@@ -25,8 +25,8 @@ def test_catalogs_have_the_same_keys_and_placeholders() -> None:
     assert ZH_MESSAGES["label.monitor_distribution_hour"] == "每小时"
     assert EN_MESSAGES["label.monitor_distribution_half-hour"] == "30 min"
     assert ZH_MESSAGES["label.monitor_distribution_half-hour"] == "30分钟"
-    assert EN_MESSAGES["label.monitor_distribution_observed_from"] == "observed from {time}"
-    assert ZH_MESSAGES["label.monitor_distribution_observed_from"] == "自 {time} 起观测"
+    assert EN_MESSAGES["label.monitor_distribution_unobserved"] == "not observed"
+    assert ZH_MESSAGES["label.monitor_distribution_unobserved"] == "未观测"
 
 
 @pytest.mark.parametrize(
@@ -45,7 +45,7 @@ def test_locale_detection(
     locale_name: str | None, expected: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     if locale_name is None:
-        monkeypatch.setattr("locale.getlocale", lambda: (None, None))
+        monkeypatch.setattr("locale.getlocale", lambda: (None))
         assert detect_language() == expected
     else:
         assert detect_language(locale_name) == expected
