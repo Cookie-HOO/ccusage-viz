@@ -26,7 +26,7 @@ def intent(chart_kind: str) -> QueryIntent:
         0,
         QueryTrigger.STARTUP,
         ProviderRef("ccusage"),
-        DataScope((interval,), "UTC"),
+        DataScope((interval,)),
         (interval,),
         DataResolution.DATE,
         ("project",) if chart_kind == "ranking" else ("agent",),
@@ -40,7 +40,7 @@ def test_ccusage_provider_owns_logical_to_physical_planning() -> None:
 
     assert query.operation == "unified_daily"
     assert query.arguments[:3] == ("daily", "--by-agent", "--json")
-    assert query.arguments[-4:] == ("--timezone", "UTC", "--offline", "--no-cost")
+    assert query.arguments[-2:] == ("--offline", "--no-cost")
     assert CCUSAGE_DEFINITION.provider.fingerprint(query) == query.fingerprint
 
 

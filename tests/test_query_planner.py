@@ -24,7 +24,7 @@ from ccusage_viz.query.models import QueryTrigger
 def options(
     command: str, *, by: str | None = None, projects: tuple[str, ...] = ()
 ) -> StandaloneLaunch:
-    date_range = DateRange(date(2026, 1, 2), date(2026, 1, 3), "UTC")
+    date_range = DateRange(date(2026, 1, 2), date(2026, 1, 3))
     filters = Filters(projects=projects)
     chart = (
         TimelineConfig("timeline", date_range, filters=filters, by=by)
@@ -62,7 +62,7 @@ def intent(
 def monitor_options(*, by: str | None = None, demo_size: str | None = None) -> StandaloneLaunch:
     return StandaloneLaunch(
         ProcessConfig(),
-        StandaloneHostConfig(timezone="UTC", demo_size=demo_size),
+        StandaloneHostConfig(demo_size=demo_size),
         MonitorConfig("monitor", 300, by=by),
     )
 
@@ -80,7 +80,6 @@ def test_monitor_intent_always_queries_complete_yesterday_today_scope() -> None:
     expected = DateInterval(date(2026, 1, 2), date(2026, 1, 3))
     assert selected.scope.intervals == (expected,)
     assert selected.missing_intervals == (expected,)
-    assert selected.scope.timezone == "UTC"
     assert selected.dimensions == ("agent",)
     assert dict(selected.execution_options) == {"chart_kind": "monitor"}
     assert CCUSAGE_DEFINITION.provider.compile(selected).queries[0].operation == "unified_daily"
@@ -123,7 +122,7 @@ def test_default_plan_uses_unified_by_agent_query() -> None:
     (query,) = CCUSAGE_DEFINITION.provider.compile(intent(options("timeline"))).queries
     assert query.operation == "unified_daily"
     assert query.arguments[:3] == ("daily", "--by-agent", "--json")
-    assert query.arguments[-4:] == ("--timezone", "UTC", "--offline", "--no-cost")
+    assert query.arguments[-2:] == ("--offline", "--no-cost")
     assert query.coverage.intervals == (DateInterval(date(2026, 1, 2), date(2026, 1, 3)),)
 
 

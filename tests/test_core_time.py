@@ -4,10 +4,10 @@ import pytest
 
 from ccusage_viz.core.time import (
     DateRange,
+    local_today,
     natural_period_start,
     parse_period,
     refresh_date_range,
-    today_for_timezone,
 )
 
 
@@ -50,24 +50,22 @@ def test_natural_period_start_rejects_unknown_unit() -> None:
         natural_period_start(date(2026, 9, 13), 1, "w")
 
 
-def test_today_override_does_not_resolve_timezone() -> None:
+def test_local_today_uses_explicit_override() -> None:
     expected = date(2026, 9, 13)
 
-    assert today_for_timezone("Not/A-Timezone", expected) == expected
+    assert local_today(expected) == expected
 
 
 def test_refresh_date_range_advances_only_rolling_ranges() -> None:
     rolling = DateRange(
         date(2026, 9, 7),
         date(2026, 9, 13),
-        None,
         relative_until=True,
         period="7d",
     )
     fixed = DateRange(
         date(2026, 9, 1),
         date(2026, 9, 7),
-        None,
         fixed_bounds=True,
     )
 

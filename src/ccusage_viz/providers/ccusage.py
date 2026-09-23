@@ -83,7 +83,6 @@ class CcusageProvider:
     ) -> tuple[PhysicalQuery, ...]:
         since = interval.since.isoformat()
         until = interval.until.isoformat()
-        timezone = ("--timezone", intent.scope.timezone) if intent.scope.timezone else ()
         coverage = DateCoverage.from_interval(interval.since, interval.until)
         if mode == "claude_daily_projects":
             return (
@@ -99,7 +98,6 @@ class CcusageProvider:
                         since.replace("-", ""),
                         "--until",
                         until.replace("-", ""),
-                        *timezone,
                         "--offline",
                     ),
                     intent.execution_context,
@@ -118,7 +116,6 @@ class CcusageProvider:
                     since,
                     "--until",
                     until,
-                    *timezone,
                     "--offline",
                     "--no-cost",
                 ),
@@ -142,7 +139,6 @@ class CcusageProvider:
                             encoded_day,
                             "--until",
                             encoded_day,
-                            *timezone,
                             "--offline",
                             "--no-cost",
                         ),
@@ -170,7 +166,6 @@ class CcusageProvider:
                     since,
                     "--until",
                     until,
-                    *timezone,
                     "--offline",
                     "--no-cost",
                 ),

@@ -77,7 +77,7 @@ class DemoProvider:
         raw_ordinal = ordinal[0] if ordinal else "0"
         records = generate_demo(
             size,
-            DateRange(date.fromisoformat(raw_since), date.fromisoformat(raw_until), None),
+            DateRange(date.fromisoformat(raw_since), date.fromisoformat(raw_until)),
             cancelled=cancelled.is_set,
         )
         sample_ordinal = int(raw_ordinal)

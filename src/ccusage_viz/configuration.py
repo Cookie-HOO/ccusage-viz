@@ -32,7 +32,7 @@ def default_pane(kind: str, *, dashboard: DashboardLaunch) -> PaneConfig:
     if kind == "monitor":
         chart = MonitorConfig("monitor", 3600, presentation=presentation)
     else:
-        date_range = resolve_date_range(kind, period=None, since=None, until=None, timezone=None)
+        date_range = resolve_date_range(kind, period=None, since=None, until=None)
         if kind == "timeline":
             chart = TimelineConfig("timeline", date_range, presentation=presentation)
         elif kind == "calendar":
@@ -55,7 +55,6 @@ def standalone_from_pane(dashboard: DashboardLaunch, pane: PaneConfig) -> Standa
     )
     host = StandaloneHostConfig(
         provider=dashboard.host.provider,
-        timezone=dashboard.host.timezone,
         ascii=dashboard.host.ascii,
         demo_size=dashboard.host.demo_size,
         watch=True,

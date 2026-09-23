@@ -43,7 +43,7 @@ def _ranking_records(*projects: ProjectRef) -> tuple[UsageRecord, ...]:
 def _populate_ranking_label_cache(*projects: ProjectRef, top: int | None = None) -> None:
     build_ranking(
         _ranking_records(*projects),
-        DateRange(date(2026, 1, 1), date(2026, 1, 1), None),
+        DateRange(date(2026, 1, 1), date(2026, 1, 1)),
         by="project",
         top=top,
     )

@@ -31,7 +31,7 @@ def options() -> StandaloneLaunch:
         StandaloneHostConfig(provider="demo", demo_size="small"),
         TimelineConfig(
             "timeline",
-            DateRange(date(2026, 1, 1), date(2026, 1, 7), None),
+            DateRange(date(2026, 1, 1), date(2026, 1, 7)),
             presentation=ChartPresentation(theme="no-color"),
         ),
     )
@@ -51,9 +51,7 @@ def test_historical_replacement_classifier_ignores_granularity_and_presentation(
     assert not historical_replacement_required(previous, previous)
     changed_period = replace(
         previous,
-        chart=replace(
-            previous.chart, date_range=DateRange(date(2026, 2, 1), date(2026, 2, 7), None)
-        ),
+        chart=replace(previous.chart, date_range=DateRange(date(2026, 2, 1), date(2026, 2, 7))),
     )
     assert historical_replacement_required(previous, changed_period)
     changed_filter = replace(
@@ -119,7 +117,7 @@ def test_component_rejects_stale_success_and_failure_without_mutation() -> None:
         chart.candidate,
         chart=replace(
             chart.candidate.chart,
-            date_range=DateRange(date(2026, 2, 1), date(2026, 2, 7), None),
+            date_range=DateRange(date(2026, 2, 1), date(2026, 2, 7)),
         ),
     )
     chart.configure(changed, data_affecting=True)
@@ -164,7 +162,7 @@ def test_component_keeps_accepted_options_until_replacement_succeeds() -> None:
         chart.candidate,
         chart=replace(
             chart.candidate.chart,
-            date_range=DateRange(date(2026, 2, 1), date(2026, 2, 7), None),
+            date_range=DateRange(date(2026, 2, 1), date(2026, 2, 7)),
         ),
     )
 
@@ -190,7 +188,7 @@ def test_component_reverts_pending_candidate_to_accepted_projection() -> None:
         accepted,
         chart=replace(
             accepted.chart,
-            date_range=DateRange(date(2026, 2, 1), date(2026, 2, 7), None),
+            date_range=DateRange(date(2026, 2, 1), date(2026, 2, 7)),
         ),
     )
     chart.configure(changed, data_affecting=True)
@@ -503,7 +501,7 @@ def test_component_new_generation_primary_resets_old_facts() -> None:
         chart.candidate,
         chart=replace(
             chart.candidate.chart,
-            date_range=DateRange(date(2026, 2, 1), date(2026, 2, 7), None),
+            date_range=DateRange(date(2026, 2, 1), date(2026, 2, 7)),
         ),
     )
     chart.configure(changed, data_affecting=True)

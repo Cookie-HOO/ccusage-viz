@@ -47,7 +47,7 @@ def test_model_case_variants_filter_and_group_as_one_model() -> None:
         _record(1, "claude", "/claude/app", "GPT-5.6-Luna", 10),
         _record(1, "claude", "/claude/app", "gpt-5.6-luna", 20),
     )
-    selected_range = DateRange(date(2026, 1, 1), date(2026, 1, 1), None)
+    selected_range = DateRange(date(2026, 1, 1), date(2026, 1, 1))
 
     filtered, notices = filter_records(records, selected_range, models=("GPT-5.6-Luna",))
     model = build_timeline(filtered, selected_range, by="model", notices=notices)
@@ -63,7 +63,7 @@ def test_selected_values_without_rows_emit_notices_and_keep_available_groups() -
         _record(1, "claude", "/claude/app", "sonnet", 10),
         _record(3, "codex", "/codex/app", "gpt", 20),
     )
-    selected_range = DateRange(date(2026, 1, 1), date(2026, 1, 1), None)
+    selected_range = DateRange(date(2026, 1, 1), date(2026, 1, 1))
 
     filtered, notices = filter_records(
         records,
@@ -95,7 +95,7 @@ def test_selected_values_without_rows_emit_notices_and_keep_available_groups() -
 
 def test_absent_explicit_selections_do_not_render_unselected_rows() -> None:
     records = (_record(1, "claude", "/claude/app", "sonnet", 10),)
-    selected_range = DateRange(date(2026, 1, 1), date(2026, 1, 1), None)
+    selected_range = DateRange(date(2026, 1, 1), date(2026, 1, 1))
 
     filtered, notices = filter_records(
         records,
@@ -115,7 +115,7 @@ def test_absent_explicit_selections_do_not_render_unselected_rows() -> None:
 
 def test_mixed_known_and_absent_model_selection_renders_known_model() -> None:
     records = (_record(1, "claude", "/claude/app", "sonnet", 10),)
-    selected_range = DateRange(date(2026, 1, 1), date(2026, 1, 1), None)
+    selected_range = DateRange(date(2026, 1, 1), date(2026, 1, 1))
 
     filtered, notices = filter_records(
         records,

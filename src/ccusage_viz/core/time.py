@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, replace
-from datetime import date, datetime, timedelta
-from zoneinfo import ZoneInfo
+from datetime import date, timedelta
 
 _PERIOD_PATTERN = re.compile(r"(?P<value>[1-9][0-9]*)(?P<unit>d|mo|q|y)$")
 
@@ -12,7 +11,6 @@ _PERIOD_PATTERN = re.compile(r"(?P<value>[1-9][0-9]*)(?P<unit>d|mo|q|y)$")
 class DateRange:
     since: date
     until: date
-    timezone: str | None
     relative_until: bool = False
     period: str | None = None
     fixed_bounds: bool = False
@@ -44,18 +42,14 @@ def natural_period_start(end: date, value: int, unit: str) -> date:
     raise ValueError(f"unsupported period unit: {unit}")
 
 
-def today_for_timezone(timezone: str | None, today: date | None = None) -> date:
-    if today is not None:
-        return today
-    if timezone is None:
-        return date.today()
-    return datetime.now(ZoneInfo(timezone)).date()
+def local_today(today: date | None = None) -> date:
+    return today if today is not None else date.today()
 
 
 def refresh_date_range(date_range: DateRange, *, today: date | None = None) -> DateRange:
     """Advance a rolling period while leaving startup-anchored ranges frozen."""
     if not date_range.relative_until or date_range.period is None:
         return date_range
-    end = today_for_timezone(date_range.timezone, today)
+    end = local_today(today)
     value, unit = parse_period(date_range.period)
     return replace(date_range, since=natural_period_start(end, value, unit), until=end)

@@ -23,7 +23,7 @@ def _intent(*, owner: str = "pane:1", generation: int = 4) -> QueryIntent:
         generation,
         QueryTrigger.REFRESH,
         ProviderRef("ccusage"),
-        DataScope((interval,), "UTC"),
+        DataScope((interval,)),
         (interval,),
         DataResolution.DATE,
         ("agent", "project"),

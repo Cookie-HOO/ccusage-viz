@@ -31,7 +31,7 @@ def options(**changes: object) -> StandaloneLaunch:
         host,
         TimelineConfig(
             "timeline",
-            DateRange(date(2026, 1, 1), date(2026, 1, 14), None),
+            DateRange(date(2026, 1, 1), date(2026, 1, 14)),
             presentation=ChartPresentation(),
         ),
     )

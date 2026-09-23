@@ -53,8 +53,6 @@ def _chart_args(config: StandaloneLaunch, *, full: bool, pane: bool = False) -> 
             args.extend(("--since", date_range.since.isoformat()))
             if not date_range.implicit_until:
                 args.extend(("--until", date_range.until.isoformat()))
-        if not pane and config.host.timezone:
-            args.extend(("--timezone", config.host.timezone))
         if isinstance(chart, (TimelineConfig, StackConfig)):
             if full or chart.granularity != "day":
                 args.extend(("--granularity", chart.granularity))
@@ -186,8 +184,6 @@ def format_full_dashboard_command(
         args.extend(("--column-weight", str(weight)))
     for weight in row_weights if row_weights is not None else host.row_weights or ():
         args.extend(("--row-weight", str(weight)))
-    if host.timezone is not None:
-        args.extend(("--timezone", host.timezone))
     if host.demo_size is not None:
         args.extend(("--demo", host.demo_size))
     args.extend(

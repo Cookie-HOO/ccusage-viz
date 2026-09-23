@@ -30,7 +30,7 @@ def options(**changes: object) -> StandaloneLaunch:
     return StandaloneLaunch(
         process,
         host,
-        TimelineConfig("timeline", DateRange(date(2026, 1, 1), date(2026, 1, 2), None)),
+        TimelineConfig("timeline", DateRange(date(2026, 1, 1), date(2026, 1, 2))),
         explicit,
     )
 

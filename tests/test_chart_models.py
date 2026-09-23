@@ -78,7 +78,7 @@ def test_ranking_hidden_coverage_requires_consistent_metadata(
     with pytest.raises(ValueError):
         RankingModel(
             (RankingEntry("a", "A", usage(50)),),
-            DateRange(date(2026, 1, 1), date(2026, 1, 1), None),
+            DateRange(date(2026, 1, 1), date(2026, 1, 1)),
             denominator=usage(denominator),
             top=top,
             top_share=share,
@@ -107,7 +107,7 @@ def test_observed_models_reject_historical_semantics() -> None:
     with pytest.raises(ValueError, match="only observed entries"):
         RankingModel(
             (),
-            DateRange(date(2026, 1, 1), date(2026, 1, 1), None),
+            DateRange(date(2026, 1, 1), date(2026, 1, 1)),
             observed_entries=(ScalarRankingEntry("a", "A", 10.0),),
             observed_scope=scope,
         )

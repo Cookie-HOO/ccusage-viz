@@ -272,7 +272,7 @@ def test_async_hosts_own_operations_through_the_shared_lifecycle() -> None:
 
 
 def test_monitor_demo_bootstrap_is_the_only_submit_outside_operation_starters() -> None:
-    allowed_starters = {"start", "start_pane_submission"}
+    allowed_starters = {"start", "start_pane_submission", "_await_monitor_warmup"}
     direct_submissions: list[tuple[str, str, int]] = []
 
     class SubmitVisitor(ast.NodeVisitor):

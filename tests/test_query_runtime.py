@@ -27,7 +27,7 @@ def historical(*, demo_size: str | None = "small") -> StandaloneLaunch:
     return StandaloneLaunch(
         ProcessConfig(),
         StandaloneHostConfig(demo_size=demo_size),
-        TimelineConfig("timeline", DateRange(date(2026, 1, 2), date(2026, 1, 3), None)),
+        TimelineConfig("timeline", DateRange(date(2026, 1, 2), date(2026, 1, 3))),
     )
 
 

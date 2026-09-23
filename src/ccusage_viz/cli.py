@@ -66,7 +66,6 @@ _PANE_FORBIDDEN_OPTIONS = frozenset(
         "--interval",
         "--no-watch",
         "--watch",
-        "--timezone",
         "--ascii",
         "--demo",
         "--lang",
@@ -192,7 +191,6 @@ def _add_history_shared(
     parser.add_argument("--period", help=tr.text("help.period"))
     parser.add_argument("--since", help=tr.text("help.since"))
     parser.add_argument("--until", help=tr.text("help.until"))
-    parser.add_argument("--timezone", help=tr.text("help.timezone"))
     if command in {"timeline", "stack"}:
         parser.add_argument(
             "--granularity",
@@ -287,7 +285,6 @@ def _add_tui(parser: argparse.ArgumentParser, tr: Translator) -> None:
     parser.add_argument("--ccusage-bin", default="ccusage", help=tr.text("help.ccusage_bin"))
     parser.add_argument("--query-timeout", type=float, default=30.0, help=argparse.SUPPRESS)
     parser.add_argument("--ascii", action="store_true", help=tr.text("help.ascii"))
-    parser.add_argument("--timezone", help=tr.text("help.timezone"))
     parser.add_argument(
         "--theme",
         dest="color_scheme",
@@ -425,7 +422,7 @@ def _inject_default_command(argv: list[str]) -> list[str]:
     return ["timeline", *argv]
 
 
-def _chart_from_namespace(namespace: argparse.Namespace, *, timezone: str | None):
+def _chart_from_namespace(namespace: argparse.Namespace):
     command = namespace.command or "timeline"
     filters = Filters(
         tuple(namespace.agent), tuple(namespace.model), tuple(getattr(namespace, "project", ()))
@@ -444,6 +441,8 @@ def _chart_from_namespace(namespace: argparse.Namespace, *, timezone: str | None
     if command in {"timeline", "monitor"} and namespace.by is not None and top is None:
         top = 3
     if command == "monitor":
+        if style != "cumulative-bars" and presentation.legend == "values":
+            presentation = replace(presentation, legend="below-title")
         return MonitorConfig(
             kind="monitor",
             window_seconds=_parse_window(namespace.window),
@@ -458,7 +457,6 @@ def _chart_from_namespace(namespace: argparse.Namespace, *, timezone: str | None
         period=namespace.period,
         since=namespace.since,
         until=namespace.until,
-        timezone=timezone,
     )
     if command == "timeline":
         return TimelineConfig(
@@ -547,7 +545,7 @@ def parse_pane_fragment(fragment: str, *, host: DashboardLaunch | None = None) -
     explicit = _explicit_fields(tokens)
     try:
         namespace = build_parser(Translator("en", dict(CATALOGS["en"]))).parse_args(tokens)
-        chart = _chart_from_namespace(namespace, timezone=None)
+        chart = _chart_from_namespace(namespace)
         if "density" not in explicit:
             chart = replace(
                 chart,
@@ -641,7 +639,6 @@ def _to_options(
             if not math.isfinite(cadence) or cadence < 1:
                 raise UsageError("error.interval_min", minimum=1)
         host = DashboardHostConfig(
-            timezone=namespace.timezone,
             ascii=namespace.ascii,
             demo_size=namespace.demo,
             grid=grid,
@@ -673,10 +670,9 @@ def _to_options(
             launch,
             panes=tuple(parse_pane_fragment(fragment, host=launch) for fragment in fragments),
         )
-    chart = _chart_from_namespace(namespace, timezone=getattr(namespace, "timezone", None))
+    chart = _chart_from_namespace(namespace)
     interval = _validate_chart(namespace, chart, explicit=explicit, demo=namespace.demo)
     host = StandaloneHostConfig(
-        timezone=getattr(namespace, "timezone", None),
         ascii=namespace.ascii,
         demo_size=namespace.demo,
         watch=not getattr(namespace, "no_watch", False),
