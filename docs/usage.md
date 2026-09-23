@@ -96,10 +96,9 @@ the conflict is caused by explicitly specifying a theme. `--ascii` without a
 
 | Option | Accepted values | Default | Applies to | Behavior |
 | --- | --- | --- | --- | --- |
-| `--period PERIOD` | Positive integer followed by `d`, `mo`, `q`, or `y` (for example `14d`, `13mo`, `1q`) | Timeline/Stack/Ranking: `14d`; Calendar: `365d` | Historical routes | Rolling range ending today in the selected timezone. |
+| `--period PERIOD` | Positive integer followed by `d`, `mo`, `q`, or `y` (for example `14d`, `13mo`, `1q`) | Timeline/Stack/Ranking: `14d`; Calendar: `365d` | Historical routes | Rolling range ending on the host machine's local date. |
 | `--since YYYY-MM-DD` | ISO date | unset | Historical routes | First date in a fixed or open-ended range. |
 | `--until YYYY-MM-DD` | ISO date | unset | Historical routes | Final date in a fixed range. Requires `--since`. |
-| `--timezone IANA_ZONE` | Valid IANA timezone, for example `Asia/Shanghai` | Local timezone | Historical routes | Resolves “today” and relative boundaries. |
 | `--agent VALUE` | Repeatable text | none | Historical routes and Monitor | Filter by a complete Agent value. |
 | `--model VALUE` | Repeatable text | none | Historical routes and Monitor | Filter by a complete model value. |
 | `--project VALUE` | Repeatable text | none | Historical routes and Monitor | Filter by a complete safe project label. |
@@ -153,7 +152,6 @@ The following combinations are rejected:
 | `--until` without `--since` | An end date needs a start date. |
 | `--since` later than `--until` | Date order is invalid. |
 | Future `--until` | Historical data cannot end in the future. |
-| Invalid timezone | `--timezone` must name an installed IANA timezone. |
 | `--interval` with `--no-watch` | A one-shot invocation has no scheduling interval. |
 | Historical `--interval` below `2` | Historical watching has a two-second minimum. |
 
@@ -409,7 +407,6 @@ contains `--density`.
 | Option | Values/default | Host-owned behavior |
 | --- | --- | --- |
 | `--demo [SIZE]`, `--lang`, `--ccusage-bin`, `--query-timeout` | Same semantics as standalone; bare demo is `medium`; timeout default `30` | Provider/process/input configuration for all panes. `--query-timeout` is hidden advanced configuration. |
-| `--timezone IANA_ZONE` | Local timezone unless given | Historical time interpretation for host panes. |
 | `--ascii` | off | ASCII rendering for the host and panes. It conflicts with an explicit Pane `--theme`. |
 | `--theme THEME` | `classic` | Dashboard shell theme, distinct from each Pane chart theme. |
 | `--grid ROWSxCOLUMNS` | Custom construction only | Logical grid for the selected pane count. |
@@ -438,7 +435,7 @@ Pane fragments may contain only a chart command (`timeline`, `calendar`,
 host/lifecycle options such as:
 
 ```text
---interval --no-watch --watch --timezone --ascii --demo --lang
+--interval --no-watch --watch --ascii --demo --lang
 --ccusage-bin --query-timeout --pane --grid --refresh-interval
 --sampling-interval --header-style --header-summary --header-interval
 --help --version -h
@@ -462,11 +459,13 @@ restriction is stated:
 | Key | Behavior |
 | --- | --- |
 | `Ctrl-C` | Exit. |
-| `r` | Refresh a historical query or request a Monitor sample immediately. |
-| `h` | Show/hide the session-only control footer. |
+| `r` | In chart view, refresh a historical query or request a Monitor sample immediately; it has no action in a non-chart text view. |
+| `h` / `H` | In chart view, show/hide the session-only control footer. In a text view, lowercase `h` goes to the first line; `H` has no action. |
+| `e` | In a non-chart text view, go to the final line. |
+| `Up` / `Down` | In a non-chart text view, scroll one rendered line. |
 | `v` | Cycle chart, compact command, full command, Markdown table, JSON, then chart. |
 | `y` | Copy the current command/data text from a non-chart view. |
-| `Space` | Pause/resume scheduling. |
+| `Space` | In chart view, pause/resume scheduling; it has no action in a non-chart text view. |
 | `m` | Open adjustment only from the chart view. |
 | `s` / `d` / `l` | In supported adjustment pickers: style / density / legend controls. |
 
@@ -474,7 +473,9 @@ The compact command view omits defaults and private project paths. The full
 command view includes effective settings, including private project paths,
 selected binary path, and query timeout. Copying is not persistence: the
 program writes no configuration automatically. Runtime changes last only for
-the current process; save a copied command yourself if you want to reuse it.
+the current process; save a copied command yourself if you want to reuse it. Text
+scrolling changes only the visible viewport: `y` always copies the complete,
+unscrolled command or data payload.
 
 ### Shortcut conventions
 
@@ -503,10 +504,12 @@ Visual-only changes update the preview immediately; data-affecting changes are
 used by the subsequent configuration refresh after commit.
 
 Adjustment mode closes automatically after **three minutes** with no keyboard or
-mouse interaction: standalone charts return to normal preview and Dashboard
-returns to browse mode. Changes already applied in a picker keep their normal
-close semantics, while an open filter draft is discarded just as with `Esc`.
-Dashboard layout and Pane-type subpickers also cancel and return to browse mode.
+mouse interaction. Enter, `Esc`, and that timeout return a standalone interface
+to its chart view. The same Dashboard exits restore ordinary browse mode with the
+Dashboard body and every Pane in chart view. Changes already applied in a picker
+keep their normal close semantics, while an open filter draft is discarded just
+as with `Esc`. Dashboard layout and Pane-type subpickers also cancel and return
+to browse mode.
 
 | Chart | Quick page | Advanced page |
 | --- | --- | --- |
@@ -579,17 +582,25 @@ Dashboard has separate navigation and ownership rules. In browse mode:
 
 | Key | Behavior |
 | --- | --- |
-| `r` | Refresh all panes. |
+| `r` | In chart browse mode, refresh all panes; it has no action in the full-command view. |
 | `s` | Adjust the first pane. |
 | Mouse click | Adjust the clicked pane. |
 | `g` | Open global Dashboard adjustment. |
-| `h` | Toggle Dashboard footer. |
+| `h` / `H` | In chart browse mode, toggle the Dashboard footer. In the full-command view, lowercase `h` goes to the first line; `H` has no action. |
+| `e`, `Up` / `Down` | In the full Dashboard command view, go to the final line or scroll one rendered line. |
 | `v` | Show the full Dashboard command. |
 | `y` | Copy from command view. |
-| `Space` | Pause/resume Dashboard scheduling. |
+| `Space` | In chart browse mode, pause/resume Dashboard scheduling; it has no action in the full-command view. |
 | `Ctrl-C` | Exit. |
 
-While adjusting a Pane, `v` cycles its view; `r` replaces it; `N` inserts
+While adjusting a Pane, `v` cycles its view. In a non-chart pane text view,
+`Up`/`Down` scroll one line, `h` goes to the first line, and `e` goes to the
+final line; the pane's notices remain fixed. Its always-visible footer contains
+only reading, copying, and view-cycle actions, and only advertises scrolling
+when the text overflows. `r` and `Space` have no action there; chart
+Quick/Advanced controls and Dashboard pane management remain unavailable while
+text is shown. Enter, `Esc`, or the inactivity timeout exits adjustment and
+restores every Pane to chart view. In chart view, `r` replaces it; `N` inserts
 before; `n` inserts after; `x` deletes it when more than one Pane remains;
 `[`/`]` reorder it; and `Tab` moves focus to the next Pane. `{`/`}` adjust
 logical column shares; `_`/`=` adjust logical row shares. Focused Pane Quick

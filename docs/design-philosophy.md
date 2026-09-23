@@ -36,7 +36,6 @@ This document records the stable product concepts and design constraints of `ccu
    | ASCII | Shell and every Pane use basic characters without color |
    | Real or Demo source mode | Summary and every Pane use one source mode |
    | Demo Size | Demo Summary and every Pane use one scale |
-   | Timezone | Summary and every Pane use the same natural-day boundaries and time labels |
    | Refresh Interval | Drives Summary and every historical Pane; a Pane owns no Watch or local refresh |
    | Sampling Interval | Drives every Monitor Pane; a Pane owns no local sampling cadence |
 
@@ -47,7 +46,7 @@ This document records the stable product concepts and design constraints of `ccu
    | Theme, Style, Density, and Legend | Each Pane defines chart presentation; Theme does not inherit Dashboard Theme |
    | Chart-specific settings | Belong only to the corresponding Pane |
 
-   Pane configuration and Pane fragments must not contain Demo Mode or Demo Size. Standalone still owns its own Demo settings, Timezone, Interval, refresh, and pause behavior. Every Pane must remain independently explainable; copying it as Standalone materializes the necessary Dashboard-owned context.
+   Pane configuration and Pane fragments must not contain Demo Mode or Demo Size. Standalone still owns its own Demo settings, Interval, refresh, and pause behavior. Every Pane must remain independently explainable; copying it as Standalone materializes the necessary Dashboard-owned context.
 
 2. **Process context is not Pane configuration.**
 
@@ -57,7 +56,7 @@ This document records the stable product concepts and design constraints of `ccu
 
 1. **Time and Filters define Data Scope together.**
 
-   Time range, timezone, and Agent, Model, and Project Filters determine the data used by both chart and Summary. Selections use OR within a dimension and AND across dimensions. Candidate values for each dimension depend only on time range and timezone; dimensions do not narrow one another.
+   Time range and Agent, Model, and Project Filters determine the data used by both chart and Summary. Selections use OR within a dimension and AND across dimensions. Candidate values for each dimension depend only on time range; dimensions do not narrow one another.
 
 2. **By, Top, and Other do not change Data Scope.**
 
@@ -69,9 +68,9 @@ This document records the stable product concepts and design constraints of `ccu
 
 4. **Rolling and fixed date modes make different promises.**
 
-   Period defines a rolling range whose bounds advance with natural days in the selected Timezone. Day periods are trailing windows including today; Month, Quarter, and Year periods include the requested number of natural calendar periods and run from the earliest boundary through today. Thus `14d` means today plus the preceding 13 days, while `1mo`, `1q`, and `1y` mean month-to-date, quarter-to-date, and year-to-date. A trailing span that does not need calendar alignment can always be expressed in days.
+   Period defines a rolling range whose bounds advance with natural days on the host machine's local natural day. Day periods are trailing windows including today; Month, Quarter, and Year periods include the requested number of natural calendar periods and run from the earliest boundary through today. Thus `14d` means today plus the preceding 13 days, while `1mo`, `1q`, and `1y` mean month-to-date, quarter-to-date, and year-to-date. A trailing span that does not need calendar alignment can always be expressed in days.
 
-   Supplying Since or Until selects fixed-date mode; Until alone is invalid, while Since alone resolves its end to today's date in the selected Timezone at startup. Every fixed-date view presents the resolved start and end dates explicitly, including a lone Since; it does not use a special since-to-date title. Fixed boundaries never advance during the session: an included current day may continue accumulating, but after midnight in the selected Timezone the range remains on that original date and becomes fully historical. Granularity is independent of the date mode, defaults to Day, and may be adjusted without changing the range.
+   Supplying Since or Until selects fixed-date mode; Until alone is invalid, while Since alone resolves its end to today's date on the host machine's local natural day at startup. Every fixed-date view presents the resolved start and end dates explicitly, including a lone Since; it does not use a special since-to-date title. Fixed boundaries never advance during the session: an included current day may continue accumulating, but after midnight on the host machine's local natural day the range remains on that original date and becomes fully historical. Granularity is independent of the date mode, defaults to Day, and may be adjusted without changing the range.
 
 5. **Historical Ranking and observed Monitor Ranking share visual grammar only.**
 
@@ -133,7 +132,7 @@ This document records the stable product concepts and design constraints of `ccu
 
    Users may supply initial configuration through the CLI or enter the TUI from a default command and adjust visually. Runtime entry points cover product settings that users may compare or change repeatedly during a session. An adjustment must immediately represent the effective state and remain reproducible through a copied command.
 
-   **Exception:** Settings that normally remain stable during a session, require open-ended string input, change the entire data lifecycle, or belong to the execution environment are CLI-only and do not appear in runtime adjustment. These include Timezone, ASCII, real or Demo source mode, Language, the `ccusage` executable, query timeout, and Provider execution environment. Dashboard Timezone, ASCII, and source mode still apply uniformly to the Summary and every Pane and cannot be overridden by a Pane. Actual rendering, Full Details, or Full Command may expose these effective values for inspection, but the settings surface does not show read-only controls. Demo Size is a presentation scale within Demo mode and remains runtime-adjustable there.
+   **Exception:** Settings that normally remain stable during a session, require open-ended string input, change the entire data lifecycle, or belong to the execution environment are CLI-only and do not appear in runtime adjustment. These include ASCII, real or Demo source mode, Language, the `ccusage` executable, query timeout, and Provider execution environment. Dashboard ASCII and source mode still apply uniformly to the Summary and every Pane and cannot be overridden by a Pane. Actual rendering, Full Details, or Full Command may expose these effective values for inspection, but the settings surface does not show read-only controls. Demo Size is a presentation scale within Demo mode and remains runtime-adjustable there.
 
 2. **Runtime-adjustable configuration uses explicit modes; exceptional execution intent uses flags.**
 
@@ -145,7 +144,7 @@ This document records the stable product concepts and design constraints of `ccu
 
    Quick and Advanced are divided by usage frequency rather than an internal distinction between data and appearance. Quick covers Data Scope, analysis, and primary presentation in common analytical workflows. Advanced contains infrequent, precise, or conditional controls. Both operate on the same immediate configuration, and contextually meaningless options are omitted rather than shown disabled.
 
-   Standalone uses exactly two rows: current runtime status plus effective settings, then the active Quick or Advanced actions. Dashboard-global adjustment has one Dashboard-wide page for Theme, Style, Header, Summary, and Layout; it has no Advanced page or Pane-specific actions. Dashboard Pane adjustment begins with the same two chart rows as Standalone, followed by Dashboard-management rows for content/lifecycle, position/focus, and logical size ratios. `a` switches only the chart action row; Dashboard management remains available on either page. Enter or Escape finishes ordinary adjustment without rolling back changes. There is no clickable Finish target. On narrow terminals, complete low-priority action units are omitted and `…(+N)` reports the exact number still available by keyboard, while page identity, the `a` switch, and Enter/Escape guidance remain visible.
+   Standalone uses exactly two rows: current runtime status plus effective settings, then the active Quick or Advanced actions. Dashboard-global adjustment has one Dashboard-wide page for Theme, Style, Header, Summary, and Layout; it has no Advanced page or Pane-specific actions. A Dashboard Pane in chart view begins with the same two chart rows as Standalone, followed by Dashboard-management rows for content/lifecycle, position/focus, and logical size ratios. `a` switches only the chart action row; Dashboard management remains available on either page. A Pane text view is instead a read-only inspection context: it keeps only its reading/copy/view controls visible; lifecycle operations such as `r` and Space are not hidden-but-active commands; and chart adjustment and Dashboard management remain suppressed while text is shown. Enter, Escape, and the inactivity timeout finish adjustment by restoring ordinary chart browsing for the Dashboard and every Pane, without rolling back already-effective changes. The inactivity timeout belongs only to an active adjustment session, not to ordinary browse-mode text inspection. There is no clickable Finish target. On narrow terminals, complete low-priority action units are omitted and `…(+N)` reports the exact number still available by keyboard, while page identity, the `a` switch, and Enter/Escape guidance remain visible.
 
 4. **Finite choices preserve and truthfully display any valid startup value.**
 
@@ -255,7 +254,7 @@ This document records the stable product concepts and design constraints of `ccu
 
 1. **Effective configuration must be reproducible as a command.**
 
-   Copying Dashboard expands the actual Layout, Weights, Panes, and global settings. Copying a Pane produces an executable Standalone command and materializes Dashboard Timezone and the applicable Interval. Compact commands omit defaults; full commands state effective configuration explicitly.
+   Copying Dashboard expands the actual Layout, Weights, Panes, and global settings. Copying a Pane produces an executable Standalone command and materializes the applicable Dashboard Interval. Compact commands omit defaults; full commands state effective configuration explicitly.
 
 2. **A Preset is a complete initial template; runtime layout selection is geometry-only.**
 

@@ -4,7 +4,7 @@
 
 [![PyPI](https://img.shields.io/pypi/v/ccusage-viz.svg)](https://pypi.org/project/ccusage-viz/) [![Python](https://img.shields.io/pypi/pyversions/ccusage-viz.svg)](https://pypi.org/project/ccusage-viz/) [![License: GPL v3](https://img.shields.io/badge/License-GPL%20v3-blue.svg)](LICENSE) [![CI](https://github.com/Cookie-HOO/ccusage-viz/actions/workflows/ci.yml/badge.svg)](https://github.com/Cookie-HOO/ccusage-viz/actions/workflows/ci.yml)
 
-> **Alpha · 0.1.2** — interfaces may change before 1.0. See the [roadmap](ROADMAP.md) for planned work.
+> **Alpha · 0.1.3** — interfaces may change before 1.0. See the [roadmap](ROADMAP.md) for planned work.
 
 `ccusage-viz` is an independent, unofficial terminal visualizer for
 [`ccusage`](https://github.com/ryoppippi/ccusage) token data. It turns
@@ -207,6 +207,18 @@ means unobserved rather than zero usage. The marker is a line at every density; 
 at full and compact density when space allows. Ranking and list presentations do not show it.
 
 ![Monitor view: observed token throughput window](docs/assets/readme/standalone-monitor-throughput.png)
+
+Use cumulative bars to inspect retained Monitor token increments across the local
+calendar day, rather than TPM or reconstructed historical activity:
+
+```bash
+ccuv monitor --style cumulative-bars
+```
+
+Press `w` to switch between Today and Yesterday, and `g` to switch hourly and
+half-hour buckets. Unobserved periods remain distinct from observed zero values.
+
+![Monitor view: cumulative token bars by local hour](docs/assets/readme/standalone-monitor-cumulative-bars.png)
 
 The grouped view ranks the selected dimension within the observed window.
 

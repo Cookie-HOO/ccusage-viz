@@ -36,7 +36,6 @@
    | ASCII | 外壳和所有 Pane 统一使用基础字符并禁用颜色 |
    | 真实或 Demo 数据源模式 | Summary 和所有 Pane 使用同一种数据源模式 |
    | Demo Size | Demo Summary 和所有 Pane 使用同一量级 |
-   | Timezone | Summary 和所有 Pane 使用相同的自然日边界与时间标签 |
    | Refresh Interval | 驱动 Summary 和所有历史 Pane；Pane 不拥有 Watch 或局部刷新 |
    | Sampling Interval | 驱动所有 Monitor Pane；Pane 不拥有局部采样周期 |
 
@@ -47,7 +46,7 @@
    | Theme、Style、Density、Legend | 每个 Pane 独立定义图表呈现；Theme 不继承 Dashboard Theme |
    | 图表专属设置 | 只属于对应 Pane |
 
-   Pane 配置和 Pane 片段不得包含 Demo Mode 或 Demo Size。Standalone 仍独立拥有自己的 Demo 设置、Timezone、Interval、刷新和暂停行为。每个 Pane 都必须可以独立解释；复制为 Standalone 时再物化 Dashboard 拥有的必要上下文。
+   Pane 配置和 Pane 片段不得包含 Demo Mode 或 Demo Size。Standalone 仍独立拥有自己的 Demo 设置、Interval、刷新和暂停行为。每个 Pane 都必须可以独立解释；复制为 Standalone 时再物化 Dashboard 拥有的必要上下文。
 
 2. **进程上下文不是 Pane 配置。**
 
@@ -57,7 +56,7 @@
 
 1. **时间与 Filters 共同定义 Data Scope。**
 
-   时间范围、时区，以及 Agent、Model、Project Filters 决定图表和 Summary 使用的数据集合。同一维度内按 OR 组合，不同维度之间按 AND 组合。各维度候选仅由时间范围和时区决定，不相互收窄。
+   时间范围以及 Agent、Model、Project Filters 决定图表和 Summary 使用的数据集合。同一维度内按 OR 组合，不同维度之间按 AND 组合。各维度候选仅由时间范围决定，不相互收窄。
 
 2. **By、Top 和 Other 不改变 Data Scope。**
 
@@ -69,9 +68,9 @@
 
 4. **滚动与固定日期模式保持不同承诺。**
 
-   Period 定义随所选 Timezone 中自然日推进的滚动范围。Day 表示包含今天的尾随窗口；Month、Quarter、Year 包含指定数量的自然日历周期，并从最早周期边界持续到今天。因此，`14d` 表示今天及此前 13 天，`1mo`、`1q`、`1y` 分别表示本月至今、本季度至今和本年至今。不需要自然周期对齐的尾随跨度始终可以换算成 Day 表达。
+   Period 定义随运行 ccuv 的机器本地自然日推进的滚动范围。Day 表示包含今天的尾随窗口；Month、Quarter、Year 包含指定数量的自然日历周期，并从最早周期边界持续到今天。因此，`14d` 表示今天及此前 13 天，`1mo`、`1q`、`1y` 分别表示本月至今、本季度至今和本年至今。不需要自然周期对齐的尾随跨度始终可以换算成 Day 表达。
 
-   提供 Since 或 Until 即进入固定日期模式；单独 Until 非法，单独 Since 在启动时根据所选 Timezone 将结束日期解析为当天。所有固定日期视图都明确展示解析后的起止日期，单独 Since 也不使用特殊的 Since-to-date 标题。固定边界在会话中不再推进：若范围包含启动当日，当日累计值仍可变化；跨过所选 Timezone 的午夜后，范围继续停留在原日期并成为完整历史范围。Granularity 独立于日期模式，默认 Day，并可在不改变范围的情况下调整。
+   提供 Since 或 Until 即进入固定日期模式；单独 Until 非法，单独 Since 在启动时根据机器本地当天解析结束日期。所有固定日期视图都明确展示解析后的起止日期，单独 Since 也不使用特殊的 Since-to-date 标题。固定边界在会话中不再推进：若范围包含启动当日，当日累计值仍可变化；跨过本地午夜后，范围继续停留在原日期并成为完整历史范围。Granularity 独立于日期模式，默认 Day，并可在不改变范围的情况下调整。
 
 5. **历史 Ranking 与观测型 Monitor Ranking 只共享视觉语法。**
 
@@ -133,7 +132,7 @@
 
    用户可以通过 CLI 给定初始配置，也可以使用默认命令进入 TUI 后再可视化调整。运行时入口只覆盖会话中可能反复比较或改变的产品设置；调整必须立即反映当前有效状态，并可通过复制命令复现。
 
-   **例外：**会话中通常不会改变、需要开放字符串输入、改变整个数据生命周期，或属于执行环境的设置只在 CLI 中提供，不出现在运行时调整中，包括 Timezone、ASCII、真实或 Demo 数据源模式、Language、`ccusage` 可执行文件、查询超时和 Provider 执行环境。Dashboard 的 Timezone、ASCII 和数据源模式仍统一作用于 Summary 和所有 Pane，Pane 不可覆盖。运行时界面可以通过实际渲染、Full Details 或 Full Command 体现这些有效值，但不提供只读设置项。Demo Size 是数据源模式内部的显示量级，在 Demo 模式中仍可运行时调整。
+   **例外：**会话中通常不会改变、需要开放字符串输入、改变整个数据生命周期，或属于执行环境的设置只在 CLI 中提供，不出现在运行时调整中，包括 ASCII、真实或 Demo 数据源模式、Language、`ccusage` 可执行文件、查询超时和 Provider 执行环境。Dashboard 的 ASCII 和数据源模式仍统一作用于 Summary 和所有 Pane，Pane 不可覆盖。运行时界面可以通过实际渲染、Full Details 或 Full Command 体现这些有效值，但不提供只读设置项。Demo Size 是数据源模式内部的显示量级，在 Demo 模式中仍可运行时调整。
 
 2. **运行时可调整配置使用显式模式，例外执行意图使用 Flag。**
 
@@ -145,7 +144,7 @@
 
    Quick 与 Advanced 按使用频率划分，而不是按数据与外观的内部分类划分。Quick 覆盖常见分析流程中的 Data Scope、分析方式与主要呈现；Advanced 放置低频、精细或条件性控制。两者操作同一份即时配置，当前上下文无意义的选项应省略，而不是禁用后继续展示。
 
-   Standalone 只使用两行：第一行展示运行状态与当前生效设置，第二行展示当前 Quick 或 Advanced 操作。Dashboard 全局调整只有一个 Dashboard 级页面，用于 Theme、Style、Header、Summary 与 Layout；不提供 Advanced 页面或 Pane 专属操作。Dashboard Pane 调整先使用与 Standalone 相同的两行图表区域，再提供内容/生命周期、位置/焦点和逻辑尺寸比例等 Dashboard 管理操作。`a` 只切换图表操作行；Dashboard 管理操作在任一页面都可用。普通调整中 Enter 与 Escape 都保留已生效修改并退出。不提供可点击的“完成”。窄终端按完整操作单元隐藏低优先级项，并用 `…(+N)` 精确提示仍可通过键盘使用的操作数量；页面身份、`a` 切换与 Enter/Escape 提示始终保留。
+   Standalone 只使用两行：第一行展示运行状态与当前生效设置，第二行展示当前 Quick 或 Advanced 操作。Dashboard 全局调整只有一个 Dashboard 级页面，用于 Theme、Style、Header、Summary 与 Layout；不提供 Advanced 页面或 Pane 专属操作。Dashboard Pane 处于图表视图时，先使用与 Standalone 相同的两行图表区域，再提供内容/生命周期、位置/焦点和逻辑尺寸比例等 Dashboard 管理操作。`a` 只切换图表操作行；Dashboard 管理操作在任一页面都可用。Pane 文字视图则是只读检查上下文：只保留阅读、复制与切换视图操作，`r` 和 Space 等生命周期操作不是隐藏但仍可用的命令，并在显示文字期间暂停图表调整与 Dashboard 管理。Enter、Escape 和无操作超时都会结束调整，将 Dashboard 与所有 Pane 恢复为普通图表浏览，同时保留已生效修改；该无操作超时只属于活跃的调整会话，不适用于普通浏览模式的文字检查视图。不提供可点击的“完成”。窄终端按完整操作单元隐藏低优先级项，并用 `…(+N)` 精确提示仍可通过键盘使用的操作数量；页面身份、`a` 切换与 Enter/Escape 提示始终保留。
 
 4. **有限档位保留并如实显示合法启动值。**
 
@@ -255,7 +254,7 @@
 
 1. **有效配置必须可以通过命令复现。**
 
-   复制 Dashboard 时展开实际 Layout、Weights、Panes 和全局设置；复制 Pane 时生成可执行的 Standalone 命令并物化 Dashboard Timezone 与适用的 Interval。紧凑命令省略默认值，完整命令显式列出有效配置。
+   复制 Dashboard 时展开实际 Layout、Weights、Panes 和全局设置；复制 Pane 时生成可执行的 Standalone 命令并物化适用的 Dashboard Interval。紧凑命令省略默认值，完整命令显式列出有效配置。
 
 2. **Preset 是完整启动模板；运行时布局选择只改变几何。**
 

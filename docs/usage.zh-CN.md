@@ -89,10 +89,9 @@ ccuv dashboard wide --demo
 
 | 参数 | 可接受值 | 默认值 | 适用范围 | 行为 |
 | --- | --- | --- | --- | --- |
-| `--period PERIOD` | 正整数加 `d`、`mo`、`q` 或 `y`，如 `14d`、`13mo`、`1q` | Timeline/Stack/Ranking：`14d`；Calendar：`365d` | 历史路由 | 以所选时区的今天结束的滚动范围。 |
+| `--period PERIOD` | 正整数加 `d`、`mo`、`q` 或 `y`，如 `14d`、`13mo`、`1q` | Timeline/Stack/Ranking：`14d`；Calendar：`365d` | 历史路由 | 以运行 ccuv 的机器本地当天结束的滚动范围。 |
 | `--since YYYY-MM-DD` | ISO 日期 | 未设置 | 历史路由 | 固定或开放范围的起始日期。 |
 | `--until YYYY-MM-DD` | ISO 日期 | 未设置 | 历史路由 | 固定范围的结束日期；需要 `--since`。 |
-| `--timezone IANA_ZONE` | 有效 IANA 时区，如 `Asia/Shanghai` | 本地时区 | 历史路由 | 解析“今天”和相对边界。 |
 | `--agent VALUE` | 可重复文本 | 无 | 历史路由与 Monitor | 按完整 Agent 值筛选。 |
 | `--model VALUE` | 可重复文本 | 无 | 历史路由与 Monitor | 按完整模型值筛选。 |
 | `--project VALUE` | 可重复文本 | 无 | 历史路由与 Monitor | 按完整安全项目标签筛选。 |
@@ -137,7 +136,6 @@ token，并在完整筛选后项目池的每个 token 前缀树分支中，消�
 | `--until` 没有 `--since` | 结束日期需要起始日期。 |
 | `--since` 晚于 `--until` | 日期顺序无效。 |
 | 未来的 `--until` | 历史数据不能在未来结束。 |
-| 无效时区 | `--timezone` 必须是已安装的 IANA 时区名称。 |
 | `--interval` 与 `--no-watch` | 单次运行没有调度间隔。 |
 | 历史 `--interval` 小于 `2` | 历史监听最小间隔是两秒。 |
 
@@ -358,7 +356,6 @@ ccuv dashboard \
 | 参数 | 值/默认值 | Host 所有的行为 |
 | --- | --- | --- |
 | `--demo [SIZE]`、`--lang`、`--ccusage-bin`、`--query-timeout` | 与独立图表语义相同；裸 Demo 是 `medium`；timeout 默认 `30` | 所有 Pane 的 Provider/进程/输入配置；`--query-timeout` 是隐藏高级配置。 |
-| `--timezone IANA_ZONE` | 未给出时为本地时区 | Host Pane 的历史时间解释。 |
 | `--ascii` | 关闭 | Host 和 Pane 的 ASCII 渲染；与显式 Pane `--theme` 冲突。 |
 | `--theme THEME` | `classic` | Dashboard 外壳主题，区别于每个 Pane 的图表主题。 |
 | `--grid ROWSxCOLUMNS` | 仅自定义构造 | 所选 Pane 数量的逻辑网格。 |
@@ -384,7 +381,7 @@ Pane 片段只能包含图表命令（`timeline`、`calendar`、`stack`、`ranki
 不得包含如下 Host/生命周期参数：
 
 ```text
---interval --no-watch --watch --timezone --ascii --demo --lang
+--interval --no-watch --watch --ascii --demo --lang
 --ccusage-bin --query-timeout --pane --grid --refresh-interval
 --sampling-interval --header-style --header-summary --header-interval
 --help --version -h
@@ -405,17 +402,19 @@ Dashboard Header 刻意运行未筛选、全 Agent 的聚合查询；它不会�
 | 按键 | 行为 |
 | --- | --- |
 | `Ctrl-C` | 退出。 |
-| `r` | 刷新历史查询，或立即请求一个 Monitor 样本。 |
-| `h` | 显示/隐藏仅当前会话的控制栏。 |
+| `r` | 仅在图表视图刷新历史查询或立即请求一个 Monitor 样本；非图表文字视图中无操作。 |
+| `h` / `H` | 图表视图中显示/隐藏仅当前会话的控制栏；文字视图中小写 `h` 跳到首行，`H` 无操作。 |
+| `e` | 非图表文字视图中跳到末行。 |
+| `Up` / `Down` | 非图表文字视图中逐渲染行滚动。 |
 | `v` | 依次切换图表、紧凑命令、完整命令、Markdown 表格、JSON，再回到图表。 |
 | `y` | 从非图表文本视图复制当前命令/数据。 |
-| `Space` | 暂停/恢复调度。 |
+| `Space` | 仅在图表视图暂停/恢复调度；非图表文字视图中无操作。 |
 | `m` | 仅在图表视图打开调整。 |
 | `s` / `d` / `l` | 在支持的调整器中分别控制样式/密度/图例。 |
 
 紧凑命令视图省略默认值和私有项目路径。完整命令视图包含实际生效的设置，包括私有项目路径、
 选定的二进制路径和 query timeout。复制不等于持久化：程序不会自动写入配置。运行时调整仅在当前
-进程存活；若要复用，请自行保存复制出的命令。
+进程存活；若要复用，请自行保存复制出的命令。滚动只改变可见视口；`y` 始终复制完整、未滚动的命令或数据载荷。
 
 ### 快捷键约定
 
@@ -436,7 +435,7 @@ Timeline、Calendar、Stack 和 Ranking 在图表视图按 `m` 打开调整器�
 **Quick** 和 **Advanced** 页之间切换；`Enter`/换行提交当前候选配置；`Esc` 取消调整器。
 仅视觉修改会立即更新预览；影响数据的修改会在提交后的配置刷新中使用。
 
-调整模式在连续 **3 分钟**内没有键盘或鼠标交互时会自动结束：独立图表回到普通预览，Dashboard 回到浏览模式。已在调整器中生效的修改保留其正常关闭语义；打开的筛选草稿会像按 `Esc` 一样丢弃。Dashboard 的布局和 Pane 类型子选择器同样会取消并返回浏览模式。
+调整模式在连续 **3 分钟**内没有键盘或鼠标交互时会自动结束。按 Enter、`Esc` 或发生该超时后，独立图表都会回到图表视图；Dashboard 则回到普通浏览模式，并将 Dashboard 主体和所有 Pane 都恢复为图表视图。已在调整器中生效的修改保留其正常关闭语义；打开的筛选草稿会像按 `Esc` 一样丢弃。Dashboard 的布局和 Pane 类型子选择器同样会取消并返回浏览模式。
 
 | 图表 | Quick 页 | Advanced 页 |
 | --- | --- | --- |
@@ -499,17 +498,19 @@ Dashboard 有独立的导航和归属规则。浏览模式中：
 
 | 按键 | 行为 |
 | --- | --- |
-| `r` | 刷新全部 Pane。 |
+| `r` | 仅在图表浏览模式刷新全部 Pane；完整命令视图中无操作。 |
 | `s` | 调整第一个 Pane。 |
 | 鼠标点击 | 调整被点击的 Pane。 |
 | `g` | 打开全局 Dashboard 调整。 |
-| `h` | 切换 Dashboard 控制栏。 |
+| `h` / `H` | 图表浏览模式中切换 Dashboard 控制栏；完整命令视图中小写 `h` 跳到首行，`H` 无操作。 |
+| `e`、`Up` / `Down` | 完整 Dashboard 命令视图中跳到末行或逐渲染行滚动。 |
 | `v` | 显示完整 Dashboard 命令。 |
 | `y` | 从命令视图复制。 |
-| `Space` | 暂停/恢复 Dashboard 调度。 |
+| `Space` | 仅在图表浏览模式暂停/恢复 Dashboard 调度；完整命令视图中无操作。 |
 | `Ctrl-C` | 退出。 |
 
-调整 Pane 时，`v` 切换其视图；`r` 替换；`N` 在前插入；`n` 在后插入；当 Pane 多于一个时 `x`
+调整 Pane 时，`v` 切换其视图。非图表 Pane 文字视图中，`Up`/`Down` 逐行滚动，`h` 跳到首行，`e`
+跳到末行；Pane 通知保持固定。始终显示的控制栏只保留阅读、复制和视图切换操作，且仅在文字溢出时提示滚动；`r` 和 `Space` 在此无操作，显示文字时不提供图表 Quick/Advanced 控制和 Dashboard Pane 管理。按 Enter、`Esc` 或发生无操作超时会结束调整，并将所有 Pane 恢复为图表视图。图表视图中，`r` 替换；`N` 在前插入；`n` 在后插入；当 Pane 多于一个时 `x`
 删除；`[`/`]` 重排；`Tab` 切到下一个 Pane。`{`/`}` 调整逻辑列份额；`_`/`=` 调整逻辑行份额。
 聚焦 Pane 的快捷键使用上面的历史/Monitor 图表控制，包含仅在项目分组时可用的 Advanced `A` 和 `P`；
 但 Monitor 没有 `i`，因为采样属于 Dashboard Host。全局 Dashboard 调整中，`t/T` 调整外壳主题，`s` 调整外壳样式，`h` 调整 Header

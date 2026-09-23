@@ -154,7 +154,7 @@ Plotext 使用进程级全局状态，因此其渲染位于串行 adapter 之后
 
 `minimal` 保留身份、图表和紧凑运行状态；`compact` 增加当前筛选 Scope 总量和有效 Filter 维度数；`full` 增加适用的周期比较和 Host 提供的运行审计。Controls 与影响正确理解的 Notice 不依赖 Density。Dashboard 在解析每个 Pane 自身几何后，为其格式化有界局部 Notice 区；Notice 不做全局聚合或去重，也不能占用其他 Pane 的行。
 
-时间、时区以及 Agent/Model/Project Filters 共同定义一个图表 Summary Scope。筛选先于 Summary 计算；By、Top、Other 是后续投影，不改变 Summary 总量或比较值。Ranking 在隐藏 Other 时把 `Top N · 占总量 X%` 元数据放入标题；显示 Other 时图表覆盖完整筛选 Scope，因此省略占比。Dashboard Header Summary 是拥有未筛选数据与 Coverage 的独立 owner，不是 Pane 状态投影。
+基于运行 ccuv 的机器本地自然日的时间范围，以及 Agent/Model/Project Filters 共同定义一个图表 Summary Scope。筛选先于 Summary 计算；By、Top、Other 是后续投影，不改变 Summary 总量或比较值。Ranking 在隐藏 Other 时把 `Top N · 占总量 X%` 元数据放入标题；显示 Other 时图表覆盖完整筛选 Scope，因此省略占比。Dashboard Header Summary 是拥有未筛选数据与 Coverage 的独立 owner，不是 Pane 状态投影。
 
 固定范围——包括启动时解析结束日期的单独 Since——会保留两个解析后的边界，且不推断范围外的比较 Coverage。对于滚动范围，Historical Component 拥有已接受事实、比较 Coverage、缺失区间、补充请求 pending/error 状态和同 generation 合并。持续 Host 先把适用但未覆盖的比较渲染为 `??`，再只调度缺失区间；相邻缺口可以合并，彼此分离的基线保持独立物理请求。成功但为空的已覆盖区间是数值零。补充请求失败时保留 `??` 并添加局部 Notice。Historical no-Watch 把所需比较 Coverage 纳入初始原子请求。
 

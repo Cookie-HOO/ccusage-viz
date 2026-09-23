@@ -4,7 +4,7 @@
 
 [![PyPI](https://img.shields.io/pypi/v/ccusage-viz.svg)](https://pypi.org/project/ccusage-viz/) [![Python](https://img.shields.io/pypi/pyversions/ccusage-viz.svg)](https://pypi.org/project/ccusage-viz/) [![License: GPL v3](https://img.shields.io/badge/License-GPL%20v3-blue.svg)](LICENSE) [![CI](https://github.com/Cookie-HOO/ccusage-viz/actions/workflows/ci.yml/badge.svg)](https://github.com/Cookie-HOO/ccusage-viz/actions/workflows/ci.yml)
 
-> **Alpha · 0.1.2** — 在 1.0 前接口仍可能变化。规划请见[路线图](ROADMAP.md)。
+> **Alpha · 0.1.3** — 在 1.0 前接口仍可能变化。规划请见[路线图](ROADMAP.md)。
 
 `ccusage-viz` 是面向 [`ccusage`](https://github.com/ryoppippi/ccusage) Token
 数据的独立、非官方终端可视化工具。它把 `ccusage` 命令输出转换为交互式终端图表，
@@ -187,6 +187,16 @@ ccuv monitor
 空间允许时，full 和 compact 密度会显示文字标签。ranking 和 list 视图不显示该标记。
 
 ![Monitor 视图：观测到的 Token 吞吐量窗口](docs/assets/readme/standalone-monitor-throughput.png)
+
+使用累计柱状图可查看本次 Monitor 在本地自然日内保留的 Token 增量，而非 TPM 或重建的历史活动：
+
+```bash
+ccuv monitor --style cumulative-bars
+```
+
+按 `w` 在今天和昨天之间切换，按 `g` 在每小时和半小时桶之间切换。未观测时段会与已观测的零值明确区分。
+
+![Monitor 视图：按本地小时累计的 Token 柱](docs/assets/readme/standalone-monitor-cumulative-bars.png)
 
 分组视图按所选维度在观测窗口内排名。
 

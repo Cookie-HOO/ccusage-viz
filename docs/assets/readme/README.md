@@ -25,6 +25,7 @@ these exact names and paths.
 | `standalone-timeline-14d.png` | 14-day Timeline trend | `ccuv timeline` |
 | `standalone-timeline-13mo.png` | 13-month Timeline trend | `ccuv timeline --period 13mo` |
 | `standalone-monitor-throughput.png` | Observed Monitor throughput window | `ccuv monitor` |
+| `standalone-monitor-cumulative-bars.png` | Monitor local-day cumulative token distribution | `ccuv monitor --style cumulative-bars` |
 | `standalone-monitor-ranking.png` | Monitor grouped ranking | `ccuv monitor --by project` |
 | `standalone-monitor-list.png` | Monitor process/list detail | `ccuv monitor` |
 
