@@ -9,6 +9,7 @@ import pytest
 
 import ccusage_viz.tui as tui_module
 import ccusage_viz.tui_input as tui_input_module
+from ccusage_viz.animation import animation_spec
 from ccusage_viz.bootstrap import build_query_runtime
 from ccusage_viz.cli import _to_options, build_parser
 from ccusage_viz.cli import parse_pane_fragment as parse_dashboard_pane
@@ -30,7 +31,7 @@ from ccusage_viz.historical_render import RenderedChart
 from ccusage_viz.i18n import load_translator
 from ccusage_viz.lifecycle import FixedIntervalScheduler, LifecycleOperation
 from ccusage_viz.monitor_component import MonitorComponent
-from ccusage_viz.options import Filters, TimelineConfig
+from ccusage_viz.options import AnimationPaneConfig, Filters, TimelineConfig
 from ccusage_viz.query.models import QueryTrigger
 from ccusage_viz.terminal import Terminal
 from ccusage_viz.tui import (
@@ -331,6 +332,37 @@ def test_dashboard_panes_have_no_details_state() -> None:
     )
 
     assert not hasattr(pane, "show_details")
+
+
+def test_dashboard_animation_pane_is_render_only() -> None:
+    parser = build_parser(load_translator("en"))
+    options = _to_options(parser.parse_args(["dashboard", "--pane", "animate rain"]))
+
+    pane = _new_pane(options, AnimationPaneConfig(animation_spec("rain")))
+
+    assert isinstance(pane, tui_module.TuiAnimationPane)
+    assert pane.session.spec.style == "rain"
+    assert not hasattr(pane, "component")
+    assert not hasattr(pane, "scheduler")
+    assert not hasattr(pane, "lifecycle")
+
+
+def test_dashboard_animation_panes_keep_independent_session_state() -> None:
+    parser = build_parser(load_translator("en"))
+    options = _to_options(
+        parser.parse_args(["dashboard", "--pane", "animate rain", "--pane", "animate rain"])
+    )
+
+    first = _new_pane(options, options.panes[0])
+    second = _new_pane(options, options.panes[1])
+    assert isinstance(first, tui_module.TuiAnimationPane)
+    assert isinstance(second, tui_module.TuiAnimationPane)
+
+    first.session.set_theme("vivid", 1.0)
+    first.session.set_playback_requested(False, 1.0)
+
+    assert second.session.theme == "classic"
+    assert second.session.playback_requested
 
 
 def test_dashboard_panes_host_chart_components_without_legacy_runners() -> None:

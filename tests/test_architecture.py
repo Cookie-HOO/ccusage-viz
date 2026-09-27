@@ -205,11 +205,15 @@ def test_historical_component_owns_incremental_comparison_state() -> None:
 
 def test_dashboard_panes_do_not_mirror_component_business_state() -> None:
     tree = ast.parse((PACKAGE_ROOT / "tui.py").read_text())
-    pane = next(
-        node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "TuiPane"
+    panes = tuple(
+        node
+        for node in tree.body
+        if isinstance(node, ast.ClassDef) and node.name in {"TuiChartPane", "TuiAnimationPane"}
     )
+    assert {pane.name for pane in panes} == {"TuiChartPane", "TuiAnimationPane"}
     fields = {
         target.id
+        for pane in panes
         for statement in pane.body
         if isinstance(statement, ast.AnnAssign)
         and isinstance((target := statement.target), ast.Name)
