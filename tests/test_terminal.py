@@ -175,6 +175,21 @@ def test_monitor_accepts_40_by_10_and_rejects_either_smaller_dimension() -> None
         assert caught.value.values["minimum_height"] == 10
 
 
+def test_animation_accepts_any_terminal_size() -> None:
+    terminal = inspect_terminal("animate", stream=Stream(True), size=os.terminal_size((1, 1)))
+
+    assert (terminal.width, terminal.height) == (1, 1)
+
+
+def test_animation_dumb_terminal_requires_explicit_ascii(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TERM", "dumb")
+    with pytest.raises(UsageError, match="error.arguments"):
+        inspect_terminal("animate", stream=Stream(True), size=os.terminal_size((1, 1)))
+
+    terminal = inspect_terminal("animate", stream=Stream(True), size=os.terminal_size((1, 1)), ascii=True)
+    assert terminal.ascii is True
+
+
 def test_no_color_environment_is_ignored(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("NO_COLOR", "1")
     terminal = inspect_terminal("timeline", stream=Stream(True), size=os.terminal_size((80, 24)))

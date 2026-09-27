@@ -16,7 +16,7 @@ from ccusage_viz.cli import (
 from ccusage_viz.dashboard import DASHBOARD_PRESETS
 from ccusage_viz.errors import UsageError
 from ccusage_viz.i18n import load_translator
-from ccusage_viz.options import DEFAULT_STYLES
+from ccusage_viz.options import DEFAULT_STYLES, AnimationLaunch
 from ccusage_viz.render.palette import COLOR_SCHEMES
 
 
@@ -35,6 +35,10 @@ def test_subcommand_help_is_localized(
         parser.parse_args([command, "--help"])
     assert caught.value.code == 0
     assert description in capsys.readouterr().out
+
+
+def test_default_command_injection_preserves_animate() -> None:
+    assert _inject_default_command(["animate", "rain"]) == ["animate", "rain"]
 
 
 def test_route_probe_identifies_only_help_and_version() -> None:
@@ -101,6 +105,24 @@ def test_project_aggregation_defaults_to_name_and_accepts_exact(command: str) ->
     )
     with pytest.raises(UsageError):
         parser.parse_args([command, "--project-aggregation", "agent"])
+
+
+def test_animate_defaults_to_rain_and_rejects_chart_options() -> None:
+    parser = build_parser(load_translator("en"))
+    options = _to_options(parser.parse_args(["animate"]))
+
+    assert isinstance(options, AnimationLaunch)
+    assert options.animation.style == "rain"
+    with pytest.raises(UsageError) as caught:
+        parser.parse_args(["animate", "--density", "compact"])
+    assert caught.value.key == "error.arguments"
+
+
+def test_animate_invalid_style_fails_during_option_materialization() -> None:
+    parser = build_parser(load_translator("en"))
+
+    with pytest.raises(UsageError):
+        _to_options(parser.parse_args(["animate", "snow"]))
 
 
 def test_dashboard_has_no_global_density_option() -> None:
@@ -195,7 +217,7 @@ def test_root_help_lists_localized_subcommand_summaries(
     output = capsys.readouterr().out
     assert "将每日 Token 用量绘制为折线图" in output
     assert "将累计 Token 用量绘制为排名" in output
-    assert "animate" not in output
+    assert "animate" in output
 
 
 def namespace(**overrides: object) -> Namespace:

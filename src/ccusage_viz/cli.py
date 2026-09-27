@@ -10,6 +10,7 @@ from enum import StrEnum
 from typing import Any, Never, cast
 
 from ccusage_viz import __version__
+from ccusage_viz.animation import animation_spec
 from ccusage_viz.application import run
 from ccusage_viz.dashboard import DASHBOARD_PRESETS
 from ccusage_viz.dashboard_layout import (
@@ -35,6 +36,8 @@ from ccusage_viz.options import (
     OTHER_MODES,
     PROJECT_AGGREGATIONS,
     WEEKDAY_MODES,
+    AnimationLaunch,
+    AnimationRoute,
     CalendarConfig,
     ChartPresentation,
     DashboardHostConfig,
@@ -58,7 +61,7 @@ from ccusage_viz.options import (
 )
 from ccusage_viz.render.palette import COLOR_SCHEMES
 
-_COMMANDS = ("timeline", "calendar", "stack", "ranking", "monitor", "dashboard")
+_COMMANDS = ("timeline", "calendar", "stack", "ranking", "monitor", "dashboard", "animate")
 _TUI_COMMANDS = ("timeline", "calendar", "stack", "ranking", "monitor")
 _DURATION_PATTERN = re.compile(r"(?P<value>[1-9][0-9]*)(?P<unit>[mh])$")
 _PANE_FORBIDDEN_OPTIONS = frozenset(
@@ -392,6 +395,12 @@ def build_parser(tr: Translator) -> argparse.ArgumentParser:
     )
     _add_tui(tui, tr)
 
+    animate = subparsers.add_parser(
+        "animate", help="Run a terminal animation", description="Run a terminal animation"
+    )
+    animate.add_argument("style", nargs="?", default="rain", metavar="STYLE")
+    animate.add_argument("--ascii", action="store_true", help=tr.text("help.ascii"))
+
     return parser
 
 
@@ -568,6 +577,13 @@ def _to_options(
     namespace: argparse.Namespace, *, explicit: frozenset[str] = frozenset()
 ) -> LaunchConfig:
     command = namespace.command or "timeline"
+    if command == "animate":
+        return AnimationLaunch(
+            ProcessConfig(),
+            StandaloneHostConfig(ascii=namespace.ascii),
+            animation_spec(namespace.style),
+            explicit,
+        )
     process = ProcessConfig(
         ccusage_bin=namespace.ccusage_bin,
         query_timeout=namespace.query_timeout,
@@ -697,11 +713,11 @@ def _explicit_fields(argv: list[str]) -> frozenset[str]:
 
 
 def _route(options: LaunchConfig) -> LaunchRoute:
-    return (
-        DashboardRoute(options)
-        if isinstance(options, DashboardLaunch)
-        else StandaloneRoute(options)
-    )
+    if isinstance(options, DashboardLaunch):
+        return DashboardRoute(options)
+    if isinstance(options, AnimationLaunch):
+        return AnimationRoute(options)
+    return StandaloneRoute(options)
 
 
 def _validate_configuration(options: LaunchConfig) -> None:
