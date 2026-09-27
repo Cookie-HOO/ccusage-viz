@@ -141,6 +141,25 @@ def test_monitor_distribution_reprojects_accepted_samples_without_rebaseline() -
     assert component.observer.previous is not None
 
 
+def test_monitor_component_exposes_only_the_accepted_interval_total_delta() -> None:
+    component = MonitorComponent(options(), registry=build_chart_registry())
+    wall = datetime(2026, 9, 19, 12, 0, tzinfo=UTC)
+
+    assert component.accepted_total_token_delta is None
+
+    assert component.accept(completion(component, (record(100),)), now=0, wall=wall)
+    assert component.accepted_total_token_delta is None
+
+    assert component.accept(completion(component, (record(160),)), now=10, wall=wall)
+    assert component.accepted_total_token_delta == 60
+
+    assert component.accept(completion(component, (record(160),)), now=20, wall=wall)
+    assert component.accepted_total_token_delta == 0
+
+    component.pause()
+    assert component.accepted_total_token_delta is None
+
+
 def test_monitor_component_accepts_cumulative_samples_and_projects_timeline() -> None:
     started_at = datetime(2026, 9, 19, 11, 59, tzinfo=UTC)
     component = MonitorComponent(
