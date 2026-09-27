@@ -132,6 +132,13 @@ class MonitorComponent:
         self.rank_changes = RefreshRanks()
 
     @property
+    def accepted_total_token_delta(self) -> float | None:
+        """Return the latest accepted Monitor interval's aggregate token delta."""
+
+        interval = self.observer.current_interval
+        return interval.total if interval is not None else None
+
+    @property
     def deltas(self) -> dict[Hashable, float]:
         return self.value_changes.current
 
