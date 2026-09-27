@@ -39,6 +39,7 @@ from ccusage_viz.tui import (
     _adjustment_footer,
     _adjustment_key_supported,
     _adjustment_target,
+    _append_monitor_attachment,
     _choose_layout_shortcut,
     _choose_pane_type,
     _dashboard_title_line,
@@ -63,6 +64,7 @@ from ccusage_viz.tui import (
     _replace_pane,
     _set_header_theme,
     _text_view_footer,
+    _update_monitor_attachment_activity,
     compose_panes,
     pane_at,
     pane_rects,
@@ -363,6 +365,61 @@ def test_dashboard_animation_panes_keep_independent_session_state() -> None:
 
     assert second.session.theme == "classic"
     assert second.session.playback_requested
+
+
+def test_dashboard_monitor_attachment_tracks_only_accepted_activity() -> None:
+    class Component:
+        accepted_total_token_delta = 4
+
+    attachment = tui_module.new_animation_session(animation_spec("rain"), theme="classic")
+    attachment.set_visible(True, 0.0)
+    attachment.set_viable(True, 0.0)
+
+    _update_monitor_attachment_activity(Component(), attachment, now=1.0)
+    assert attachment.playback_requested
+
+    Component.accepted_total_token_delta = None
+    _update_monitor_attachment_activity(Component(), attachment, now=2.0)
+    assert not attachment.playback_requested
+
+
+def test_dashboard_monitor_attachment_hides_outside_ranking_and_list() -> None:
+    parser = build_parser(load_translator("en"))
+    options = _to_options(
+        parser.parse_args(["dashboard", "--pane", "monitor --style ranking"])
+    )
+    pane = _new_pane(options, options.panes[0], "pane:monitor")
+    assert isinstance(pane, tui_module.TuiChartPane)
+    assert pane.attachment is not None
+
+    body = _append_monitor_attachment(
+        pane,
+        "chart",
+        terminal=Terminal(80, 24, False, True),
+        reserved_rows=0,
+        now=1.0,
+        translator=load_translator("en"),
+    )
+    assert body != "chart"
+    assert pane.attachment.visible
+
+    candidate = pane.component.candidate
+    pane.component.candidate = replace(
+        candidate,
+        chart=replace(candidate.chart, presentation=replace(candidate.chart.presentation, style="bars")),
+    )
+    assert (
+        _append_monitor_attachment(
+            pane,
+            "chart",
+            terminal=Terminal(80, 24, False, True),
+            reserved_rows=0,
+            now=2.0,
+            translator=load_translator("en"),
+        )
+        == "chart"
+    )
+    assert not pane.attachment.visible
 
 
 def test_dashboard_panes_host_chart_components_without_legacy_runners() -> None:

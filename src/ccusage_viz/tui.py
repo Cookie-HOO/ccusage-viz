@@ -12,7 +12,12 @@ from threading import Event
 from ccusage_viz.acquisition import historical_provider_id, historical_query_intent
 from ccusage_viz.adjustment_timeout import AdjustmentIdleTimer, AdjustmentTimeout
 from ccusage_viz.animate import cycle_animation_style
-from ccusage_viz.animation import AnimationRenderer, AnimationSessionState, new_animation_session
+from ccusage_viz.animation import (
+    AnimationRenderer,
+    AnimationSessionState,
+    animation_spec,
+    new_animation_session,
+)
 from ccusage_viz.bootstrap import build_chart_registry, build_query_runtime
 from ccusage_viz.command_copy import (
     copy_command,
@@ -170,6 +175,8 @@ class TuiChartPane:
     values_initialized: bool = False
     previous_ranks: dict[Hashable, int] = field(default_factory=dict)
     rank_deltas: dict[Hashable, int] = field(default_factory=dict)
+    attachment: AnimationSessionState | None = None
+    attachment_renderer: AnimationRenderer | None = None
 
     @property
     def interval(self) -> float:
@@ -776,10 +783,20 @@ def _new_pane(
             registry=registry,
         )
     now = time.monotonic()
+    attachment = None
+    attachment_renderer = None
+    if isinstance(component, MonitorComponent):
+        attachment = new_animation_session(
+            animation_spec("rain"), theme=options.chart.presentation.theme
+        )
+        attachment.set_playback_requested(False, now)
+        attachment_renderer = AnimationRenderer()
     return TuiChartPane(
         component,
         FixedIntervalScheduler(options.host.interval, now=now),
         LifecycleOperation(chart_owner_id),
+        attachment=attachment,
+        attachment_renderer=attachment_renderer,
     )
 
 
@@ -1069,6 +1086,58 @@ def _pane_render(pane: TuiPane, translator: Translator, terminal: Terminal) -> P
     return candidate
 
 
+def _update_monitor_attachment_activity(
+    component: MonitorComponent, attachment: AnimationSessionState, *, now: float
+) -> None:
+    """Apply only an accepted monitor interval to its local attachment."""
+    delta = component.accepted_total_token_delta
+    attachment.set_playback_requested((delta or 0) > 0, now)
+
+
+def _append_monitor_attachment(
+    pane: TuiChartPane,
+    body: str,
+    *,
+    terminal: Terminal,
+    reserved_rows: int,
+    now: float,
+    translator: Translator,
+) -> str:
+    """Append a pane-local rain attachment below viable ranking/list monitors."""
+    if not isinstance(pane.component, MonitorComponent):
+        return body
+    attachment = pane.attachment
+    renderer = pane.attachment_renderer
+    config = _pane_display_options(pane)
+    if (
+        attachment is None
+        or renderer is None
+        or not isinstance(config.chart, MonitorConfig)
+        or config.chart.presentation.style not in {"ranking", "list"}
+    ):
+        if attachment is not None:
+            attachment.set_visible(False, now)
+        return body
+    residual_height = terminal.height - len(body.rstrip("\r\n").splitlines()) - reserved_rows
+    if residual_height < attachment.spec.minimum_rows:
+        attachment.set_visible(False, now)
+        return body
+    attachment.set_visible(True, now)
+    result = renderer.render(
+        attachment,
+        width=terminal.width,
+        height=residual_height,
+        color=terminal.color,
+        ascii=terminal.ascii,
+        now=now,
+        translator=translator,
+    )
+    if not result.viable:
+        attachment.set_visible(False, now)
+        return body
+    return "\n".join((*((body,) if body else ()), *result.rows))
+
+
 def _local_pane_content(
     chart: str,
     notices: tuple[str, ...],
@@ -1195,6 +1264,7 @@ def _pane_adjustment_actions(
     translator: Translator,
     *,
     chart: object | None = None,
+    attachment_available: bool = False,
 ) -> tuple[AdjustmentAction, ...]:
     actions = (
         (*_PANE_QUICK_ACTIONS[command], *_COMMON_PANE_QUICK_ACTIONS)
@@ -1217,6 +1287,8 @@ def _pane_adjustment_actions(
         and page == "quick"
     ):
         visible = (("w", "window"), ("g", "granularity"), *visible[1:])
+    if attachment_available and page == "advanced":
+        visible = (*visible, ("t/T", "animation_theme"), ("s", "animation_style"))
     return _localized_actions(visible, translator)
 
 
@@ -1329,11 +1401,18 @@ def _adjustment_footer(
     width: int,
     *,
     chart: object | None = None,
+    attachment_available: bool = False,
 ) -> tuple[str, ...]:
     shared = adjustment_rows(
         state,
         translator.text(f"status.tui_adjust_{page}"),
-        _pane_adjustment_actions(command, page, translator, chart=chart),
+        _pane_adjustment_actions(
+            command,
+            page,
+            translator,
+            chart=chart,
+            attachment_available=attachment_available,
+        ),
         width=width,
         color=False,
         switch_action=translator.text(
@@ -1947,6 +2026,10 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                             _refresh_deltas(pane, component.ranking_values())
                             _refresh_ranks(pane, component.ranking_keys())
                     if accepted:
+                        if pane.attachment is not None and isinstance(component, MonitorComponent):
+                            _update_monitor_attachment_activity(
+                                component, pane.attachment, now=observed_at
+                            )
                         pane.lifecycle.complete(operation, generation=loaded.generation)
                         last_successful_update = component.accepted_at
                         changed = True
@@ -1983,11 +2066,20 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
 
     def animation_deadline() -> float | None:
         deadlines = (
-            pane.session.next_deadline
+            deadline
             for pane in panes
-            if isinstance(pane, TuiAnimationPane) and pane.body_view == "chart"
+            for deadline in (
+                (pane.session.next_deadline,)
+                if isinstance(pane, TuiAnimationPane) and pane.body_view == "chart"
+                else (pane.attachment.next_deadline,)
+                if isinstance(pane, TuiChartPane)
+                and pane.body_view == "chart"
+                and pane.attachment is not None
+                else ()
+            )
+            if deadline is not None
         )
-        return min((deadline for deadline in deadlines if deadline is not None), default=None)
+        return min(deadlines, default=None)
 
     def full_dashboard_command() -> str:
         return format_full_dashboard_command(
@@ -2042,6 +2134,12 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 translator,
                 width,
                 chart=_pane_display_options(pane).chart,
+                attachment_available=(
+                    adjustment_page == "advanced"
+                    and isinstance(_pane_display_options(pane).chart, MonitorConfig)
+                    and _pane_display_options(pane).chart.presentation.style in {"ranking", "list"}
+                    and pane.attachment is not None
+                ),
             )
         if adjustment_mode == "global":
             state = translator.text(
@@ -2205,8 +2303,20 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     translator=translator,
                     color_scheme=color_scheme,
                 )
+                chart = (
+                    _append_monitor_attachment(
+                        pane,
+                        rendered.chart,
+                        terminal=terminal,
+                        reserved_rows=len(local_notices),
+                        now=time.monotonic(),
+                        translator=translator,
+                    )
+                    if isinstance(pane, TuiChartPane) and pane.body_view == "chart"
+                    else rendered.chart
+                )
                 pane_content = _local_pane_content(
-                    rendered.chart,
+                    chart,
                     local_notices,
                     height=interior_height,
                     offset=pane.text_offsets.get(pane.body_view, 0),
@@ -2605,6 +2715,26 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                 and _project_grouping_available(_pane_display_options(pane).chart)
                             ):
                                 pane.component.cycle_project_label_context()
+                            elif (
+                                adjustment_page == "advanced"
+                                and pane.attachment is not None
+                                and isinstance(_pane_display_options(pane).chart, MonitorConfig)
+                                and _pane_display_options(pane).chart.presentation.style
+                                in {"ranking", "list"}
+                                and key in {"t", "T", "s"}
+                            ):
+                                now = time.monotonic()
+                                if key == "s":
+                                    cycle_animation_style(pane.attachment, step=1, now=now)
+                                else:
+                                    pane.attachment.set_theme(
+                                        _cycle(
+                                            COLOR_SCHEMES,
+                                            pane.attachment.theme,
+                                            1 if key == "t" else -1,
+                                        ),
+                                        now,
+                                    )
                             elif _adjustment_key_supported(
                                 _pane_display_options(pane).chart.kind,
                                 adjustment_page,
@@ -2785,6 +2915,8 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                             item.lifecycle.pause()
                             if isinstance(item.component, MonitorComponent):
                                 item.component.pause()
+                            if item.attachment is not None:
+                                item.attachment.set_host_paused(True, now)
                         for item in panes:
                             if isinstance(item, TuiAnimationPane):
                                 item.session.set_host_paused(True, now)
@@ -2801,6 +2933,8 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                             item.scheduler.resume(now=now)
                             if isinstance(item.component, MonitorComponent):
                                 item.component.resume(now=now, wall=wall)
+                            if item.attachment is not None:
+                                item.attachment.set_host_paused(False, now)
                             _clear_changes(item)
                             refresh(index, trigger=LifecycleTrigger.RESUME)
                 elif key == "g" and body_view == "chart":
