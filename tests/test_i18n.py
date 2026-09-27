@@ -29,6 +29,8 @@ def test_catalogs_have_the_same_keys_and_placeholders() -> None:
     assert ZH_MESSAGES["label.monitor_distribution_unobserved"] == "未观测"
     assert EN_MESSAGES["animation.compact"] == "{style} · expand terminal to play"
     assert ZH_MESSAGES["animation.projection_failed"] == "{style} · 动画不可用"
+    assert EN_MESSAGES["status.monitor_attachment_settings"] == " · ANIMATION {style} · THEME {theme}"
+    assert ZH_MESSAGES["status.monitor_attachment_settings"] == " · 雨幕 {style} · 主题 {theme}"
 
 
 @pytest.mark.parametrize(
