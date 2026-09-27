@@ -8,10 +8,20 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from term_animate.api import select_effect
-from term_animate.models import EffectCategory
+from term_animate.api import project_curated, select_effect
+from term_animate.models import (
+    EffectCategory,
+    LogicalState,
+    StyledRow,
+    TerminalCapabilities,
+    ThemeTokens,
+    Viewport,
+)
 
 from ccusage_viz.errors import UsageError
+from ccusage_viz.formatting import clip_width
+from ccusage_viz.i18n import Translator
+from ccusage_viz.render.palette import get_color_scheme
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,6 +92,16 @@ class AnimationClock:
 
 
 @dataclass(slots=True)
+class AnimationRenderResult:
+    """The rows and optional repaint deadline produced by one projection."""
+
+    rows: tuple[str, ...]
+    next_deadline: float | None
+    viable: bool
+    error: str | None = None
+
+
+@dataclass(slots=True)
 class AnimationSessionState:
     """Per-instance, in-memory animation state owned by a ccuv host."""
 
@@ -125,6 +145,157 @@ class AnimationSessionState:
         else:
             self.clock.freeze(now)
             self.next_deadline = None
+
+
+def _xterm_rgb(color: int) -> tuple[int, int, int]:
+    """Convert a ccuv xterm palette entry to an RGB terminal color."""
+
+    if not 0 <= color <= 255:
+        raise ValueError(f"xterm color must be between 0 and 255: {color}")
+    basic = (
+        (0, 0, 0),
+        (128, 0, 0),
+        (0, 128, 0),
+        (128, 128, 0),
+        (0, 0, 128),
+        (128, 0, 128),
+        (0, 128, 128),
+        (192, 192, 192),
+        (128, 128, 128),
+        (255, 0, 0),
+        (0, 255, 0),
+        (255, 255, 0),
+        (0, 0, 255),
+        (255, 0, 255),
+        (0, 255, 255),
+        (255, 255, 255),
+    )
+    if color < 16:
+        return basic[color]
+    if color < 232:
+        value = color - 16
+        red, remainder = divmod(value, 36)
+        green, blue = divmod(remainder, 6)
+        return (
+            55 + 40 * red if red else 0,
+            55 + 40 * green if green else 0,
+            55 + 40 * blue if blue else 0,
+        )
+    gray = 8 + 10 * (color - 232)
+    return gray, gray, gray
+
+
+def animation_theme_tokens(theme: str) -> ThemeTokens:
+    """Map ccuv's semantic xterm palette to term-animate theme tokens."""
+
+    scheme = get_color_scheme(theme)
+    return ThemeTokens(
+        background=(0, 0, 0),
+        foreground=_xterm_rgb(scheme.other),
+        accent=_xterm_rgb(scheme.highlight),
+        secondary_accent=_xterm_rgb(scheme.cache_creation),
+        artwork=_xterm_rgb(scheme.categorical[0]),
+        muted=_xterm_rgb(scheme.other),
+    )
+
+
+def _styled_row_text(row: StyledRow, *, color: bool, width: int) -> str:
+    """Convert a projected row into a clipped ANSI or plain ccuv terminal row."""
+
+    parts: list[str] = []
+    for cell in row.cells:
+        if not color:
+            parts.append(cell.text)
+            continue
+        codes: list[str] = []
+        if cell.foreground is not None:
+            codes.append(f"38;2;{cell.foreground[0]};{cell.foreground[1]};{cell.foreground[2]}")
+        if cell.background is not None:
+            codes.append(f"48;2;{cell.background[0]};{cell.background[1]};{cell.background[2]}")
+        parts.append((f"\x1b[{';'.join(codes)}m" if codes else "") + cell.text + ("\x1b[0m" if codes else ""))
+    return clip_width("".join(parts), width)
+
+
+def _fallback_row(translator: Translator, key: str, style: str) -> str:
+    """Use translated copy when supplied, retaining a safe no-catalog default."""
+
+    try:
+        return translator.text(key, style=style)
+    except KeyError:
+        return f"{style} · {'expand terminal to play' if key.endswith('compact') else 'animation unavailable'}"
+
+
+class AnimationRenderer:
+    """Project term-animate frames without exposing its terminal host behavior."""
+
+    def render(
+        self,
+        session: AnimationSessionState,
+        *,
+        width: int,
+        height: int,
+        color: bool,
+        ascii: bool,
+        now: float,
+        translator: Translator,
+    ) -> AnimationRenderResult:
+        if width < session.spec.minimum_columns or height < session.spec.minimum_rows:
+            session.set_viable(False, now)
+            return AnimationRenderResult(
+                (clip_width(_fallback_row(translator, "animation.compact", session.spec.style), width),),
+                None,
+                False,
+            )
+
+        session.set_viable(True, now)
+        viewport = Viewport(columns=width, rows=height)
+        capabilities = TerminalCapabilities(
+            unicode=not ascii, ascii_only=ascii, color="truecolor" if color else "none"
+        )
+        try:
+            if session.spec.style == "rain":
+                frame = project_curated(
+                    EffectCategory(session.spec.category),
+                    session.spec.style,
+                    viewport=viewport,
+                    capabilities=capabilities,
+                    theme=animation_theme_tokens(session.theme),
+                    monotonic_seconds=session.clock.elapsed(now),
+                    wall_time=virtual_wall_time(session, now),
+                    logical_state=(
+                        LogicalState.ACTIVE if session.clock.playing else LogicalState.IDLE
+                    ),
+                )
+            else:
+                frame = project_curated(
+                    EffectCategory(session.spec.category),
+                    session.spec.style,
+                    viewport=viewport,
+                    capabilities=capabilities,
+                    theme=animation_theme_tokens(session.theme),
+                    monotonic_seconds=session.clock.elapsed(now),
+                    wall_time=virtual_wall_time(session, now),
+                )
+        except Exception:
+            session.next_deadline = None
+            return AnimationRenderResult(
+                (
+                    clip_width(
+                        _fallback_row(translator, "animation.projection_failed", session.spec.style), width
+                    ),
+                ),
+                None,
+                True,
+                "projection_failed",
+            )
+
+        deadline = frame.next_deadline_seconds if session.clock.playing else None
+        session.next_deadline = deadline
+        return AnimationRenderResult(
+            tuple(_styled_row_text(row, color=color, width=width) for row in frame.rows),
+            deadline,
+            True,
+        )
 
 
 def new_animation_session(spec: AnimationSpec, *, theme: str) -> AnimationSessionState:
