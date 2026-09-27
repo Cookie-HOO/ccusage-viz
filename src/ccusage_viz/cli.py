@@ -396,7 +396,7 @@ def build_parser(tr: Translator) -> argparse.ArgumentParser:
     _add_tui(tui, tr)
 
     animate = subparsers.add_parser(
-        "animate", help="Run a terminal animation", description="Run a terminal animation"
+        "animate", help=tr.text("help.animate"), description=tr.text("help.animate")
     )
     animate.add_argument("style", nargs="?", default="rain", metavar="STYLE")
     animate.add_argument("--ascii", action="store_true", help=tr.text("help.ascii"))
