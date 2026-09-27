@@ -149,8 +149,16 @@ class StandaloneHostConfig:
 
 
 @dataclass(frozen=True, slots=True)
-class PaneConfig:
+class ChartPaneConfig:
     chart: ChartConfig
+
+
+@dataclass(frozen=True, slots=True)
+class AnimationPaneConfig:
+    animation: AnimationSpec
+
+
+PaneConfig: TypeAlias = ChartPaneConfig | AnimationPaneConfig
 
 
 @dataclass(frozen=True, slots=True)

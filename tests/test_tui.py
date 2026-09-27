@@ -18,7 +18,7 @@ from ccusage_viz.command_copy import (
     format_full_command,
     format_full_dashboard_command,
 )
-from ccusage_viz.configuration import standalone_from_pane
+from ccusage_viz.configuration import standalone_from_chart_pane
 from ccusage_viz.core.time import DateRange
 from ccusage_viz.coverage import DateCoverage, DateInterval
 from ccusage_viz.deltas import RefreshRanks
@@ -107,6 +107,19 @@ def test_dashboard_commands_use_local_date_context_and_reject_timezone() -> None
     with pytest.raises(UsageError) as caught:
         parser.parse_args(["dashboard", "--timezone", "UTC"])
     assert caught.value.key == "error.arguments"
+
+
+def test_full_dashboard_command_preserves_animation_pane_style() -> None:
+    parser = build_parser(load_translator("en"))
+    dashboard = _to_options(
+        parser.parse_args(["dashboard", "--pane", "timeline", "--pane", "animate rain"])
+    )
+
+    command = format_full_dashboard_command(dashboard)
+    reparsed = _to_options(parser.parse_args(shlex.split(command)[1:]))
+
+    assert "animate rain" in command
+    assert reparsed.panes[1] == dashboard.panes[1]
 
 
 def test_dashboard_layout_weights_round_trip_through_full_command() -> None:
@@ -213,13 +226,13 @@ def test_dashboard_pane_copy_materializes_canonical_standalone_interval() -> Non
     monitor = parse_dashboard_pane("monitor --by model", host=base)
 
     assert format_dashboard_pane_command(
-        standalone_from_pane(base, timeline), refresh_interval=30
+        standalone_from_chart_pane(base, timeline), refresh_interval=30
     ) == ("ccuv timeline --period 7d --interval 30 --density compact")
     assert format_dashboard_pane_command(
-        standalone_from_pane(base, stack), refresh_interval=30
+        standalone_from_chart_pane(base, stack), refresh_interval=30
     ) == ("ccuv stack --interval 30 --density compact")
     assert format_dashboard_pane_command(
-        standalone_from_pane(base, monitor), refresh_interval=30, sampling_interval=15
+        standalone_from_chart_pane(base, monitor), refresh_interval=30, sampling_interval=15
     ) == ("ccuv monitor --by model --density compact")
 
 
@@ -236,7 +249,7 @@ def test_dashboard_pane_command_views_wrap_without_affecting_copy_payload() -> N
             ]
         )
     )
-    pane = _new_pane(standalone_from_pane(dashboard, dashboard.panes[0]), "pane:command")
+    pane = _new_pane(standalone_from_chart_pane(dashboard, dashboard.panes[0]), "pane:command")
     terminal = Terminal(24, 16, False, True)
     active = pane.component.candidate
 
@@ -313,7 +326,7 @@ def test_dashboard_panes_have_no_details_state() -> None:
     parser = build_parser(load_translator("en"))
     options = _to_options(parser.parse_args(["dashboard", "--demo"]))
     pane = _new_pane(
-        standalone_from_pane(options, parse_dashboard_pane("timeline", host=options)),
+        standalone_from_chart_pane(options, parse_dashboard_pane("timeline", host=options)),
         "pane:test",
     )
 
@@ -325,11 +338,11 @@ def test_dashboard_panes_host_chart_components_without_legacy_runners() -> None:
     options = _to_options(parser.parse_args(["dashboard", "--demo"]))
 
     historical = _new_pane(
-        standalone_from_pane(options, parse_dashboard_pane("timeline", host=options)),
+        standalone_from_chart_pane(options, parse_dashboard_pane("timeline", host=options)),
         "pane:historical",
     )
     monitor = _new_pane(
-        standalone_from_pane(options, parse_dashboard_pane("monitor", host=options)),
+        standalone_from_chart_pane(options, parse_dashboard_pane("monitor", host=options)),
         "pane:monitor",
     )
 
@@ -1085,7 +1098,8 @@ def test_dashboard_pane_render_retains_notices_for_each_source_pane() -> None:
         summary_notices=(Notice("notice.summary_excludes_session_agent", {"agent": "Codex"}),),
     )
     panes = [
-        _new_pane(standalone_from_pane(options, ranking), f"pane:{index}") for index in range(2)
+        _new_pane(standalone_from_chart_pane(options, ranking), f"pane:{index}")
+        for index in range(2)
     ]
     for pane in panes:
         assert pane.component is not None
@@ -1114,7 +1128,7 @@ def test_dashboard_monitor_marks_only_data_candidate_panes(
     parser = build_parser(load_translator("en"))
     options = _to_options(parser.parse_args(["dashboard", "--demo"]))
     monitor = _new_pane(
-        standalone_from_pane(
+        standalone_from_chart_pane(
             options,
             parse_dashboard_pane("monitor --by model --style ranking", host=options),
         ),
@@ -1154,7 +1168,7 @@ def test_dashboard_monitor_forwards_component_changes_to_chart_renderer(
     parser = build_parser(load_translator("en"))
     options = _to_options(parser.parse_args(["dashboard", "--demo"]))
     monitor = _new_pane(
-        standalone_from_pane(
+        standalone_from_chart_pane(
             options,
             parse_dashboard_pane("monitor --by model --style ranking", host=options),
         ),
@@ -1190,7 +1204,7 @@ def test_dashboard_historical_pane_normalizes_titles_like_standalone(
     parser = build_parser(load_translator("en"))
     options = _to_options(parser.parse_args(["dashboard", "--demo"]))
     pane = _new_pane(
-        standalone_from_pane(options, parse_dashboard_pane("timeline", host=options)),
+        standalone_from_chart_pane(options, parse_dashboard_pane("timeline", host=options)),
         "pane:timeline",
     )
     assert isinstance(pane.component, HistoricalChartComponent)
@@ -1213,7 +1227,7 @@ def test_dashboard_monitor_and_error_panes_do_not_contribute_chart_notices() -> 
     parser = build_parser(load_translator("en"))
     options = _to_options(parser.parse_args(["dashboard", "--demo"]))
     monitor = _new_pane(
-        standalone_from_pane(options, parse_dashboard_pane("monitor", host=options)),
+        standalone_from_chart_pane(options, parse_dashboard_pane("monitor", host=options)),
         "pane:monitor",
     )
     monitor.component.fail(RuntimeError("pane failed"), generation=monitor.component.generation)
@@ -1230,7 +1244,7 @@ def test_dashboard_pane_preserves_accepted_chart_for_transient_unified_daily_err
     parser = build_parser(load_translator("en"))
     options = _to_options(parser.parse_args(["dashboard", "--demo"]))
     pane = _new_pane(
-        standalone_from_pane(options, parse_dashboard_pane("timeline", host=options)),
+        standalone_from_chart_pane(options, parse_dashboard_pane("timeline", host=options)),
         "pane:timeline",
     )
     assert isinstance(pane.component, HistoricalChartComponent)
@@ -1260,7 +1274,7 @@ def test_dashboard_pane_uses_safe_placeholder_for_initial_transient_error() -> N
     parser = build_parser(load_translator("en"))
     options = _to_options(parser.parse_args(["dashboard", "--demo"]))
     pane = _new_pane(
-        standalone_from_pane(options, parse_dashboard_pane("timeline", host=options)),
+        standalone_from_chart_pane(options, parse_dashboard_pane("timeline", host=options)),
         "pane:timeline",
     )
     assert isinstance(pane.component, HistoricalChartComponent)
@@ -1286,7 +1300,7 @@ def test_dashboard_pane_localizes_schema_errors() -> None:
     parser = build_parser(load_translator("en"))
     options = _to_options(parser.parse_args(["dashboard", "--demo"]))
     monitor = _new_pane(
-        standalone_from_pane(options, parse_dashboard_pane("monitor", host=options)),
+        standalone_from_chart_pane(options, parse_dashboard_pane("monitor", host=options)),
         "pane:monitor",
     )
     monitor.component.fail(
@@ -1307,7 +1321,7 @@ def test_dashboard_pane_retains_last_render_for_localized_renderer_warnings(
     parser = build_parser(load_translator("en"))
     options = _to_options(parser.parse_args(["dashboard", "--demo"]))
     pane = _new_pane(
-        standalone_from_pane(options, parse_dashboard_pane("stack", host=options)),
+        standalone_from_chart_pane(options, parse_dashboard_pane("stack", host=options)),
         "pane:stack",
     )
     assert pane.component is not None
@@ -1352,7 +1366,7 @@ def test_query_affecting_adjustments_are_explicit() -> None:
 def test_dashboard_pane_adjustment_state_changes_with_page() -> None:
     parser = build_parser(load_translator("en"))
     options = _to_options(parser.parse_args(["dashboard", "--demo"]))
-    pane = _new_pane(standalone_from_pane(options, options.panes[0]), "pane:test")
+    pane = _new_pane(standalone_from_chart_pane(options, options.panes[0]), "pane:test")
     translator = load_translator("en")
 
     quick = _pane_adjustment_state(pane, "quick", translator)
@@ -1369,7 +1383,7 @@ def test_project_aggregation_is_advanced_only_for_project_panes(command: str) ->
     parser = build_parser(load_translator("en"))
     dashboard = _to_options(parser.parse_args(["dashboard", "--pane", f"{command} --by project"]))
     project_pane = _new_pane(
-        standalone_from_pane(dashboard, dashboard.panes[0]), f"pane:{command}:project"
+        standalone_from_chart_pane(dashboard, dashboard.panes[0]), f"pane:{command}:project"
     )
     chart = project_pane.component.candidate.chart
     translator = load_translator("en")
@@ -1392,7 +1406,7 @@ def test_project_aggregation_is_advanced_only_for_project_panes(command: str) ->
 def test_calendar_advanced_adjustment_uses_the_shared_filter_control() -> None:
     parser = build_parser(load_translator("en"))
     options = _to_options(parser.parse_args(["dashboard", "--pane", "calendar"]))
-    pane = _new_pane(standalone_from_pane(options, options.panes[0]), "pane:calendar")
+    pane = _new_pane(standalone_from_chart_pane(options, options.panes[0]), "pane:calendar")
     translator = load_translator("en")
 
     assert _pane_adjustment_state(pane, "advanced", translator) == "running"

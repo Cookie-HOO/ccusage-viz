@@ -8,6 +8,7 @@ from shutil import which
 from ccusage_viz.formatting import char_width, display_width
 from ccusage_viz.options import (
     COMMAND_DEFAULT_PERIODS,
+    AnimationPaneConfig,
     DashboardLaunch,
     MonitorConfig,
     PaneConfig,
@@ -145,17 +146,17 @@ def format_full_dashboard_command(
 ) -> str:
     host = options.host
     args = ["ccuv", "dashboard"]
-    from ccusage_viz.configuration import standalone_from_pane
+    from ccusage_viz.configuration import standalone_from_chart_pane
 
     for pane_config in panes or options.panes:
-        args.extend(
-            (
-                "--pane",
-                shlex.join(
-                    _chart_args(standalone_from_pane(options, pane_config), full=True, pane=True)
-                ),
+        fragment = (
+            f"animate {pane_config.animation.style}"
+            if isinstance(pane_config, AnimationPaneConfig)
+            else shlex.join(
+                _chart_args(standalone_from_chart_pane(options, pane_config), full=True, pane=True)
             )
         )
+        args.extend(("--pane", fragment))
     if layout is not None:
         args.extend(("--layout", layout))
     elif grid is not None:

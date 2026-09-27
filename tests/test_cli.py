@@ -16,7 +16,12 @@ from ccusage_viz.cli import (
 from ccusage_viz.dashboard import DASHBOARD_PRESETS
 from ccusage_viz.errors import UsageError
 from ccusage_viz.i18n import load_translator
-from ccusage_viz.options import DEFAULT_STYLES, AnimationLaunch
+from ccusage_viz.options import (
+    DEFAULT_STYLES,
+    AnimationLaunch,
+    AnimationPaneConfig,
+    ChartPaneConfig,
+)
 from ccusage_viz.render.palette import COLOR_SCHEMES
 
 
@@ -132,6 +137,20 @@ def test_animate_invalid_style_fails_during_option_materialization() -> None:
 
     with pytest.raises(UsageError):
         _to_options(parser.parse_args(["animate", "snow"]))
+
+
+def test_dashboard_accepts_explicit_animation_pane_and_rejects_bare_animate() -> None:
+    parser = build_parser(load_translator("en"))
+    options = _to_options(
+        parser.parse_args(["dashboard", "--pane", "timeline", "--pane", "animate rain"])
+    )
+
+    assert isinstance(options.panes[1], AnimationPaneConfig)
+    assert options.panes[1].animation.style == "rain"
+    for fragment in ("animate", "animate rain extra", "animate snow"):
+        with pytest.raises(UsageError) as caught:
+            _to_options(parser.parse_args(["dashboard", "--pane", fragment]))
+        assert caught.value.key == "error.tui_panel"
 
 
 def test_dashboard_has_no_global_density_option() -> None:
@@ -449,6 +468,7 @@ def test_bare_dashboard_is_equivalent_to_wide_preset() -> None:
     assert bare.host.grid == "2x2"
     assert bare.host.refresh_interval == 60
     assert bare.host.sampling_interval == 15
+    assert all(isinstance(pane, ChartPaneConfig) for pane in bare.panes)
     assert tuple(pane.chart.kind for pane in bare.panes) == (
         "timeline",
         "stack",

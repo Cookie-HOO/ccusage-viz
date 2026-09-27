@@ -37,8 +37,10 @@ from ccusage_viz.options import (
     PROJECT_AGGREGATIONS,
     WEEKDAY_MODES,
     AnimationLaunch,
+    AnimationPaneConfig,
     AnimationRoute,
     CalendarConfig,
+    ChartPaneConfig,
     ChartPresentation,
     DashboardHostConfig,
     DashboardLaunch,
@@ -543,7 +545,16 @@ def parse_pane_fragment(fragment: str, *, host: DashboardLaunch | None = None) -
         tokens = shlex.split(fragment)
     except ValueError as exc:
         raise UsageError("error.tui_panel", value=fragment) from exc
-    if not tokens or tokens[0] not in _TUI_COMMANDS:
+    if not tokens:
+        raise UsageError("error.tui_panel", value=fragment)
+    if tokens[0] == "animate":
+        if len(tokens) != 2:
+            raise UsageError("error.tui_panel", value=fragment)
+        try:
+            return AnimationPaneConfig(animation_spec(tokens[1]))
+        except UsageError as exc:
+            raise UsageError("error.tui_panel", value=fragment) from exc
+    if tokens[0] not in _TUI_COMMANDS:
         raise UsageError("error.tui_panel", value=fragment)
     if any(
         token.split("=", 1)[0] in _PANE_FORBIDDEN_OPTIONS
@@ -570,7 +581,7 @@ def parse_pane_fragment(fragment: str, *, host: DashboardLaunch | None = None) -
         )
     except UsageError as exc:
         raise UsageError("error.tui_panel", value=fragment) from exc
-    return PaneConfig(chart)
+    return ChartPaneConfig(chart)
 
 
 def _to_options(
