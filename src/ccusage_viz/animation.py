@@ -212,17 +212,16 @@ def _styled_row_text(row: StyledRow, *, color: bool, width: int) -> str:
             codes.append(f"38;2;{cell.foreground[0]};{cell.foreground[1]};{cell.foreground[2]}")
         if cell.background is not None:
             codes.append(f"48;2;{cell.background[0]};{cell.background[1]};{cell.background[2]}")
-        parts.append((f"\x1b[{';'.join(codes)}m" if codes else "") + cell.text + ("\x1b[0m" if codes else ""))
+        parts.append(
+            (f"\x1b[{';'.join(codes)}m" if codes else "") + cell.text + ("\x1b[0m" if codes else "")
+        )
     return clip_width("".join(parts), width)
 
 
 def _fallback_row(translator: Translator, key: str, style: str) -> str:
-    """Use translated copy when supplied, retaining a safe no-catalog default."""
+    """Return the ccuv-owned localized compact or projection-failure row."""
 
-    try:
-        return translator.text(key, style=style)
-    except KeyError:
-        return f"{style} · {'expand terminal to play' if key.endswith('compact') else 'animation unavailable'}"
+    return translator.text(key, style=style)
 
 
 class AnimationRenderer:
@@ -242,7 +241,11 @@ class AnimationRenderer:
         if width < session.spec.minimum_columns or height < session.spec.minimum_rows:
             session.set_viable(False, now)
             return AnimationRenderResult(
-                (clip_width(_fallback_row(translator, "animation.compact", session.spec.style), width),),
+                (
+                    clip_width(
+                        _fallback_row(translator, "animation.compact", session.spec.style), width
+                    ),
+                ),
                 None,
                 False,
             )
@@ -281,7 +284,10 @@ class AnimationRenderer:
             return AnimationRenderResult(
                 (
                     clip_width(
-                        _fallback_row(translator, "animation.projection_failed", session.spec.style), width
+                        _fallback_row(
+                            translator, "animation.projection_failed", session.spec.style
+                        ),
+                        width,
                     ),
                 ),
                 None,

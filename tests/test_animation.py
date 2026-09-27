@@ -1,8 +1,11 @@
+from contextlib import nullcontext
 from datetime import timedelta
 
 import pytest
 from term_animate.models import ProjectedFrame, StyledCell, StyledRow
 
+import ccusage_viz.animate as animate_module
+from ccusage_viz.animate import _wait_seconds, cycle_animation_style
 from ccusage_viz.animation import (
     AnimationClock,
     AnimationRenderer,
@@ -15,6 +18,8 @@ from ccusage_viz.animation import (
 from ccusage_viz.errors import UsageError
 from ccusage_viz.formatting import display_width
 from ccusage_viz.i18n import load_translator
+from ccusage_viz.options import AnimationLaunch, ProcessConfig, StandaloneHostConfig
+from ccusage_viz.terminal import Terminal
 
 
 @pytest.fixture
@@ -102,9 +107,7 @@ def test_small_viewport_never_projects_or_schedules(monkeypatch, translator) -> 
 
 
 def test_color_disabled_adapter_emits_plain_rows(monkeypatch, translator) -> None:
-    frame = ProjectedFrame(
-        (StyledRow((StyledCell("x", foreground=(1, 2, 3)),)),), 0, 9.0, "full"
-    )
+    frame = ProjectedFrame((StyledRow((StyledCell("x", foreground=(1, 2, 3)),)),), 0, 9.0, "full")
     monkeypatch.setattr("ccusage_viz.animation.project_curated", lambda *args, **kwargs: frame)
     session = new_animation_session(animation_spec("rain"), theme="classic")
 
@@ -142,9 +145,138 @@ def test_xterm_rgb_rejects_out_of_range_palette_entries() -> None:
         _xterm_rgb(256)
 
 
+def test_style_cycle_preserves_theme_and_elapsed_time() -> None:
+    session = new_animation_session(animation_spec("rain"), theme="classic")
+    session.set_viable(True, 1.0)
+
+    cycle_animation_style(session, step=1, now=3.0)
+
+    assert session.spec.style == "analog-clock"
+    assert session.theme == "classic"
+    assert session.clock.elapsed(4.0) == 3.0
+
+
+@pytest.fixture
+def animation_launch() -> AnimationLaunch:
+    return AnimationLaunch(ProcessConfig(), StandaloneHostConfig(), animation_spec("rain"))
+
+
+@pytest.mark.parametrize("exit_key", ("q", "\x1b", "\x03"))
+def test_standalone_host_exits_for_owned_exit_keys(
+    monkeypatch, translator, animation_launch, exit_key
+) -> None:
+    finished = []
+    monkeypatch.setattr(animate_module, "input_mode", nullcontext)
+    monkeypatch.setattr(animate_module, "read_adjustment_event", lambda _timeout: exit_key)
+    monkeypatch.setattr(
+        animate_module, "_terminal", lambda _options: Terminal(80, 24, False, False)
+    )
+    monkeypatch.setattr(animate_module.FramePainter, "finish", lambda _self: finished.append(True))
+
+    assert animate_module.run_animation(animation_launch, translator) == 0
+    assert finished == [True]
+
+
+def test_standalone_host_space_pauses_and_resumes(monkeypatch, translator, animation_launch) -> None:
+    session = new_animation_session(animation_spec("rain"), theme="classic")
+    recorded_states: list[bool] = []
+    events = iter((" ", " ", "q"))
+
+    monkeypatch.setattr(animate_module, "input_mode", nullcontext)
+    monkeypatch.setattr(animate_module, "new_animation_session", lambda *_args, **_kwargs: session)
+    monkeypatch.setattr(animate_module, "read_adjustment_event", lambda _timeout: next(events))
+    monkeypatch.setattr(
+        animate_module, "_terminal", lambda _options: Terminal(80, 24, False, False)
+    )
+    monkeypatch.setattr(
+        animate_module,
+        "_paint_animation",
+        lambda _screen, rendered_session, *_args, **_kwargs: recorded_states.append(
+            rendered_session.playback_requested
+        ),
+    )
+
+    assert animate_module.run_animation(animation_launch, translator) == 0
+    assert any(
+        before and not after for before, after in zip(recorded_states, recorded_states[1:], strict=False)
+    )
+    assert any(
+        not before and after for before, after in zip(recorded_states, recorded_states[1:], strict=False)
+    )
+
+
+def test_standalone_host_adjustment_handles_quick_controls(monkeypatch, translator, animation_launch) -> None:
+    session = new_animation_session(animation_spec("rain"), theme="classic")
+    events = iter(("m", "t", "s", "\r", "q"))
+
+    monkeypatch.setattr(animate_module, "input_mode", nullcontext)
+    monkeypatch.setattr(animate_module, "new_animation_session", lambda *_args, **_kwargs: session)
+    monkeypatch.setattr(animate_module, "read_adjustment_event", lambda _timeout: next(events))
+    monkeypatch.setattr(
+        animate_module, "_terminal", lambda _options: Terminal(80, 24, False, False)
+    )
+    monkeypatch.setattr(animate_module, "_paint_animation", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(animate_module.FramePainter, "paint", lambda *_args, **_kwargs: None)
+
+    assert animate_module.run_animation(animation_launch, translator) == 0
+    assert session.theme == "vivid"
+    assert session.spec.style == "analog-clock"
+
+
+def test_standalone_host_advanced_adjustment_ignores_animation_controls(
+    monkeypatch, translator, animation_launch
+) -> None:
+    session = new_animation_session(animation_spec("rain"), theme="classic")
+    events = iter(("m", "a", "t", "s", "\r", "q"))
+
+    monkeypatch.setattr(animate_module, "input_mode", nullcontext)
+    monkeypatch.setattr(animate_module, "new_animation_session", lambda *_args, **_kwargs: session)
+    monkeypatch.setattr(animate_module, "read_adjustment_event", lambda _timeout: next(events))
+    monkeypatch.setattr(
+        animate_module, "_terminal", lambda _options: Terminal(80, 24, False, False)
+    )
+    monkeypatch.setattr(animate_module, "_paint_animation", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(animate_module.FramePainter, "paint", lambda *_args, **_kwargs: None)
+
+    assert animate_module.run_animation(animation_launch, translator) == 0
+    assert session.theme == "classic"
+    assert session.spec.style == "rain"
+
+
+def test_terminal_keeps_color_when_ascii_is_requested(monkeypatch, animation_launch) -> None:
+    options = AnimationLaunch(
+        animation_launch.process,
+        StandaloneHostConfig(ascii=True),
+        animation_launch.animation,
+    )
+    monkeypatch.setattr(animate_module, "get_terminal_size", lambda: (80, 24))
+    calls: list[dict[str, object]] = []
+
+    def inspect(*_args, **kwargs) -> Terminal:
+        calls.append(kwargs)
+        return Terminal(80, 24, True, kwargs["ascii"])
+
+    monkeypatch.setattr(animate_module, "inspect_terminal", inspect)
+
+    terminal = animate_module._terminal(options)
+
+    assert terminal.color
+    assert terminal.ascii
+    assert "no_color" not in calls[0]
+
+
+def test_frame_wait_is_bounded_and_deadline_aware() -> None:
+    session = new_animation_session(animation_spec("rain"), theme="classic")
+    assert _wait_seconds(session, 1.0) == 0.05
+    session.next_deadline = 1.02
+    assert _wait_seconds(session, 1.0) == pytest.approx(0.02)
+    assert _wait_seconds(session, 2.0) == 0.0
+
+
 def test_projection_failure_returns_unscheduled_fallback(monkeypatch, translator) -> None:
     monkeypatch.setattr(
-        "ccusage_viz.animation.project_curated", lambda *args, **kwargs: (_ for _ in ()).throw(ValueError())
+        "ccusage_viz.animation.project_curated",
+        lambda *args, **kwargs: (_ for _ in ()).throw(ValueError()),
     )
     session = new_animation_session(animation_spec("rain"), theme="classic")
 

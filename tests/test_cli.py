@@ -107,6 +107,15 @@ def test_project_aggregation_defaults_to_name_and_accepts_exact(command: str) ->
         parser.parse_args([command, "--project-aggregation", "agent"])
 
 
+def test_animate_help_is_localized(capsys: pytest.CaptureFixture[str]) -> None:
+    parser = build_parser(load_translator("zh"))
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["animate", "--help"])
+
+    assert "运行不依赖数据提供方的终端动画" in capsys.readouterr().out
+
+
 def test_animate_defaults_to_rain_and_rejects_chart_options() -> None:
     parser = build_parser(load_translator("en"))
     options = _to_options(parser.parse_args(["animate"]))
