@@ -1,15 +1,25 @@
 from datetime import timedelta
 
 import pytest
+from term_animate.models import ProjectedFrame, StyledCell, StyledRow
 
 from ccusage_viz.animation import (
     AnimationClock,
+    AnimationRenderer,
+    _xterm_rgb,
     animation_spec,
     animation_style_choices,
     new_animation_session,
     virtual_wall_time,
 )
 from ccusage_viz.errors import UsageError
+from ccusage_viz.formatting import display_width
+from ccusage_viz.i18n import load_translator
+
+
+@pytest.fixture
+def translator():
+    return load_translator("en")
 
 
 def test_catalog_is_explicit_and_stable() -> None:
@@ -75,3 +85,73 @@ def test_style_change_preserves_elapsed_time() -> None:
     session.set_style(animation_spec("mole-cat"), 3.0)
     assert session.spec.style == "mole-cat"
     assert session.clock.elapsed(4.0) == 3.0
+
+
+def test_small_viewport_never_projects_or_schedules(monkeypatch, translator) -> None:
+    session = new_animation_session(animation_spec("rain"), theme="classic")
+    monkeypatch.setattr("ccusage_viz.animation.project_curated", pytest.fail)
+
+    result = AnimationRenderer().render(
+        session, width=1, height=1, color=False, ascii=True, now=1.0, translator=translator
+    )
+
+    assert result.next_deadline is None
+    assert not session.clock.playing
+    assert result.rows[0]
+    assert "\x1b[" not in result.rows[0]
+
+
+def test_color_disabled_adapter_emits_plain_rows(monkeypatch, translator) -> None:
+    frame = ProjectedFrame(
+        (StyledRow((StyledCell("x", foreground=(1, 2, 3)),)),), 0, 9.0, "full"
+    )
+    monkeypatch.setattr("ccusage_viz.animation.project_curated", lambda *args, **kwargs: frame)
+    session = new_animation_session(animation_spec("rain"), theme="classic")
+
+    result = AnimationRenderer().render(
+        session, width=80, height=24, color=False, ascii=False, now=1.0, translator=translator
+    )
+
+    assert result.rows == ("x",)
+    assert result.next_deadline is not None
+
+
+def test_colored_rows_are_ansi_styled_and_width_safe(monkeypatch, translator) -> None:
+    frame = ProjectedFrame(
+        (StyledRow((StyledCell("你x", foreground=(1, 2, 3), background=(4, 5, 6)),)),),
+        0,
+        9.0,
+        "full",
+    )
+    monkeypatch.setattr("ccusage_viz.animation.project_curated", lambda *args, **kwargs: frame)
+    session = new_animation_session(animation_spec("rain"), theme="classic")
+
+    result = AnimationRenderer().render(
+        session, width=60, height=24, color=True, ascii=False, now=1.0, translator=translator
+    )
+
+    assert result.rows[0].startswith("\x1b[38;2;1;2;3;48;2;4;5;6m")
+    assert result.rows[0].endswith("\x1b[0m")
+    assert display_width(result.rows[0]) == 3
+
+
+def test_xterm_rgb_rejects_out_of_range_palette_entries() -> None:
+    with pytest.raises(ValueError):
+        _xterm_rgb(-1)
+    with pytest.raises(ValueError):
+        _xterm_rgb(256)
+
+
+def test_projection_failure_returns_unscheduled_fallback(monkeypatch, translator) -> None:
+    monkeypatch.setattr(
+        "ccusage_viz.animation.project_curated", lambda *args, **kwargs: (_ for _ in ()).throw(ValueError())
+    )
+    session = new_animation_session(animation_spec("rain"), theme="classic")
+
+    result = AnimationRenderer().render(
+        session, width=80, height=24, color=False, ascii=False, now=1.0, translator=translator
+    )
+
+    assert result.next_deadline is None
+    assert result.error == "projection_failed"
+    assert session.next_deadline is None
