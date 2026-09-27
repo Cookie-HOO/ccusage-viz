@@ -5,7 +5,7 @@ from dataclasses import fields, replace
 from pathlib import Path
 
 from ccusage_viz.bootstrap import build_chart_registry
-from ccusage_viz.configuration import default_pane, standalone_from_pane
+from ccusage_viz.configuration import default_pane, standalone_from_chart_pane
 from ccusage_viz.options import (
     DENSITIES,
     ChartPresentation,
@@ -66,7 +66,7 @@ def test_density_contract_is_three_state_and_pane_owned() -> None:
     pane = default_pane("timeline", dashboard=dashboard)
 
     assert pane.chart.presentation.density == "compact"
-    assert standalone_from_pane(dashboard, pane).chart.presentation == pane.chart.presentation
+    assert standalone_from_chart_pane(dashboard, pane).chart.presentation == pane.chart.presentation
 
 
 def test_dashboard_globals_do_not_rewrite_pane_presentation() -> None:
@@ -84,7 +84,7 @@ def test_dashboard_globals_do_not_rewrite_pane_presentation() -> None:
     )
     pane = replace(pane, chart=replace(pane.chart, presentation=presentation))
 
-    assert standalone_from_pane(dashboard, pane).chart.presentation == presentation
+    assert standalone_from_chart_pane(dashboard, pane).chart.presentation == presentation
 
 
 def test_query_package_does_not_import_host_or_presentation_layers() -> None:

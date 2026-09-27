@@ -4,10 +4,10 @@ from dataclasses import replace
 
 from ccusage_viz.options import (
     CalendarConfig,
+    ChartPaneConfig,
     ChartPresentation,
     DashboardLaunch,
     MonitorConfig,
-    PaneConfig,
     RankingConfig,
     StackConfig,
     StandaloneHostConfig,
@@ -17,7 +17,7 @@ from ccusage_viz.options import (
 )
 
 
-def default_pane(kind: str, *, dashboard: DashboardLaunch) -> PaneConfig:
+def default_pane(kind: str, *, dashboard: DashboardLaunch) -> ChartPaneConfig:
     """Create a default Pane without interpreting command-line syntax."""
     presentation = ChartPresentation(
         style={
@@ -43,10 +43,12 @@ def default_pane(kind: str, *, dashboard: DashboardLaunch) -> PaneConfig:
             chart = RankingConfig("ranking", date_range, presentation=presentation)
         else:
             raise ValueError(f"unknown chart kind: {kind}")
-    return PaneConfig(chart)
+    return ChartPaneConfig(chart)
 
 
-def standalone_from_pane(dashboard: DashboardLaunch, pane: PaneConfig) -> StandaloneLaunch:
+def standalone_from_chart_pane(
+    dashboard: DashboardLaunch, pane: ChartPaneConfig
+) -> StandaloneLaunch:
     """Materialize Dashboard-owned Host context for one reusable chart payload."""
     interval = (
         dashboard.host.sampling_interval

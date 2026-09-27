@@ -90,10 +90,10 @@ from ccusage_viz.monitor_component import (
 from ccusage_viz.options import (
     DASHBOARD_STYLES,
     HEADER_SUMMARIES,
+    ChartPaneConfig,
     ChartPresentation,
     DashboardLaunch,
     MonitorConfig,
-    PaneConfig,
     RankingConfig,
     StackConfig,
     StandaloneHostConfig,
@@ -1036,12 +1036,12 @@ def _cycle(values: tuple[str, ...], current: str, step: int) -> str:
 
 
 def _new_pane_options(command: str, base: DashboardLaunch) -> StandaloneLaunch:
-    from ccusage_viz.configuration import default_pane, standalone_from_pane
+    from ccusage_viz.configuration import default_pane, standalone_from_chart_pane
 
     pane = default_pane(command, dashboard=base)
     if command == "monitor":
         pane = replace(pane, chart=replace(pane.chart, by="model", top=3))
-    return standalone_from_pane(base, pane)
+    return standalone_from_chart_pane(base, pane)
 
 
 _PANE_QUICK_ACTIONS = {
@@ -1478,17 +1478,19 @@ def _choose_pane_type(
 
 
 def run_tui(options: DashboardLaunch, translator: Translator) -> int:
-    from ccusage_viz.configuration import standalone_from_pane
+    from ccusage_viz.configuration import standalone_from_chart_pane
 
     runtime = build_query_runtime()
-    panes = [
-        _new_pane(
-            standalone_from_pane(options, pane),
-            f"dashboard:pane:{index}",
-            runtime,
+    panes = []
+    for index, pane_config in enumerate(options.panes):
+        assert isinstance(pane_config, ChartPaneConfig)
+        panes.append(
+            _new_pane(
+                standalone_from_chart_pane(options, pane_config),
+                f"dashboard:pane:{index}",
+                runtime,
+            )
         )
-        for index, pane in enumerate(options.panes)
-    ]
     next_pane_id = len(panes)
     header = _new_header(options, runtime)
     executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix="ccusage-viz-tui")
@@ -1908,7 +1910,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
     def full_dashboard_command() -> str:
         return format_full_dashboard_command(
             replace(options, host=replace(options.host, theme=dashboard_theme)),
-            tuple(PaneConfig(_pane_options(pane).chart) for pane in panes),
+            tuple(ChartPaneConfig(_pane_options(pane).chart) for pane in panes),
             grid=active_grid,
             layout=active_layout,
             column_weights=column_weights,
