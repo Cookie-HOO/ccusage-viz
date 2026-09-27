@@ -295,7 +295,12 @@ class AnimationRenderer:
                 "projection_failed",
             )
 
-        deadline = frame.next_deadline_seconds if session.clock.playing else None
+        elapsed = session.clock.elapsed(now)
+        deadline = (
+            now + max(0.0, frame.next_deadline_seconds - elapsed)
+            if session.clock.playing and frame.next_deadline_seconds is not None
+            else None
+        )
         session.next_deadline = deadline
         return AnimationRenderResult(
             tuple(_styled_row_text(row, color=color, width=width) for row in frame.rows),

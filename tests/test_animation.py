@@ -116,7 +116,22 @@ def test_color_disabled_adapter_emits_plain_rows(monkeypatch, translator) -> Non
     )
 
     assert result.rows == ("x",)
-    assert result.next_deadline is not None
+    assert result.next_deadline == 10.0
+    assert session.next_deadline == 10.0
+
+
+def test_projection_deadline_is_translated_to_host_monotonic_time(monkeypatch, translator) -> None:
+    frame = ProjectedFrame((StyledRow((StyledCell("x"),)),), 0, 4.0, "full")
+    monkeypatch.setattr("ccusage_viz.animation.project_curated", lambda *args, **kwargs: frame)
+    session = new_animation_session(animation_spec("rain"), theme="classic")
+    session.set_viable(True, 10.0)
+
+    result = AnimationRenderer().render(
+        session, width=80, height=24, color=False, ascii=False, now=12.0, translator=translator
+    )
+
+    assert result.next_deadline == 14.0
+    assert session.next_deadline == 14.0
 
 
 def test_colored_rows_are_ansi_styled_and_width_safe(monkeypatch, translator) -> None:
