@@ -1,15 +1,19 @@
 from __future__ import annotations
 
+import sys
 from dataclasses import replace
 from datetime import date
+from types import SimpleNamespace
 
 import pytest
 
 import ccusage_viz.application as application
+from ccusage_viz.animation import animation_spec
 from ccusage_viz.core.time import DateRange
 from ccusage_viz.errors import UsageError
 from ccusage_viz.i18n import load_translator
 from ccusage_viz.options import (
+    AnimationLaunch,
     ChartPresentation,
     ProcessConfig,
     StandaloneHostConfig,
@@ -36,6 +40,10 @@ def options(**changes: object) -> StandaloneLaunch:
         ),
     )
     return replace(base, **changes)
+
+
+def animation_options() -> AnimationLaunch:
+    return AnimationLaunch(ProcessConfig(), StandaloneHostConfig(), animation_spec("rain"))
 
 
 def test_preflight_rejects_noninteractive_streams_before_dependency_check(
@@ -73,6 +81,19 @@ def test_preflight_requires_explicit_ascii_for_dumb_terminal(
         with pytest.raises(UsageError, match="error.arguments"):
             application.run(options(), load_translator("en"))
         assert dependency_calls == []
+
+
+def test_animation_route_skips_provider_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(application, "interactive_streams", lambda: True)
+    monkeypatch.delenv("TERM", raising=False)
+    monkeypatch.setattr(application, "ensure_provider_dependencies", pytest.fail)
+    monkeypatch.setitem(
+        sys.modules,
+        "ccusage_viz.animate",
+        SimpleNamespace(run_animation=lambda _options, _translator: 0),
+    )
+
+    assert application.run(animation_options(), load_translator("en")) == 0
 
 
 def test_historical_modes_share_one_lifecycle_runner(monkeypatch: pytest.MonkeyPatch) -> None:

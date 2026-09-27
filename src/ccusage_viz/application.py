@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import os
 import sys
+from importlib import import_module
 
 from ccusage_viz.bootstrap import build_provider_registry
 from ccusage_viz.dependency import ensure_provider_dependencies
 from ccusage_viz.errors import UsageError
 from ccusage_viz.i18n import Translator
-from ccusage_viz.options import DashboardLaunch, LaunchConfig
+from ccusage_viz.options import AnimationLaunch, DashboardLaunch, LaunchConfig
 
 
 def _preflight_runtime(options: LaunchConfig) -> None:
@@ -21,6 +22,9 @@ def _preflight_runtime(options: LaunchConfig) -> None:
 
 def run(options: LaunchConfig, translator: Translator) -> int:
     _preflight_runtime(options)
+    if isinstance(options, AnimationLaunch):
+        run_animation = import_module("ccusage_viz.animate").run_animation
+        return run_animation(options, translator)
     ensure_provider_dependencies(options, build_provider_registry(), translator)
     if isinstance(options, DashboardLaunch):
         from ccusage_viz.tui import run_tui
