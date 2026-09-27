@@ -48,6 +48,7 @@ ccuv calendar --demo
 ccuv stack --demo --cache split
 ccuv ranking --demo --by project
 ccuv monitor --demo --by model
+ccuv animate rain
 ccuv dashboard wide --demo
 ```
 
@@ -59,6 +60,7 @@ ccuv dashboard wide --demo
 | `ranking` | Historical date range | One standalone chart | Which Agent, model, or project used the most tokens? |
 | `monitor` | Rolling observation window | One standalone chart | What throughput has this process observed since it started? |
 | `dashboard` | Host-wide cadence plus independent panes | Multi-pane Dashboard | How do several configured charts compare at once? |
+| `animate` | No usage data | One standalone animation | Show a local terminal animation without querying a provider. |
 
 Historical routes query a date range. `monitor` instead samples repeated
 cumulative snapshots while the current process runs; it cannot reconstruct
@@ -67,6 +69,51 @@ Dashboard is a separate multi-pane host built from the same chart components,
 not a wrapper around a standalone chart.
 
 <!-- guide:shared-standalone-options -->
+
+## Animation
+
+`animate` is provider-free: it does not install, invoke, or query `ccusage`.
+It defaults to rain and exposes a deliberately fixed catalog rather than every
+animation available in the underlying library:
+
+```bash
+ccuv animate                 # defaults to rain
+ccuv animate mole-cat
+ccuv animate campy-cat
+ccuv animate rain
+ccuv animate analog-clock
+ccuv animate digital-clock
+```
+
+The standalone host owns all input. `q`, Escape, and Ctrl-C exit; Space pauses
+or resumes; `m` opens the adjustment view; quick `t`/`T` cycles the ccuv theme
+and `s` cycles the five supported styles. `a` switches between quick and
+advanced adjustment pages; the first advanced page has no animation-only
+settings. The underlying animation library never receives keyboard input.
+
+Animations use the current terminal color capability and honor `--ascii`.
+When the available viewport is too small, ccuv shows a compact static hint
+instead of failing, then resumes normal projection after a resize. Animation
+state is in memory only: each standalone host, Dashboard animation Pane, and
+Monitor attachment has independent theme/style/playback state, and all state is
+discarded when ccuv exits.
+
+A Dashboard Pane must name its style explicitly; bare `animate` is invalid:
+
+```bash
+ccuv dashboard --pane "timeline --period 7d" --pane "animate rain"
+```
+
+Dashboard presets do not add animation Panes automatically.
+
+For `monitor` styles `ranking` and `list`, ccuv attaches rain below the chart
+when residual terminal space is available. It starts frozen and plays only
+when the latest **accepted** Monitor interval has a strictly positive aggregate
+token delta. A zero delta freezes it immediately; baseline/rebaseline,
+pending, error, and discarded samples do not advance it. In the Monitor
+advanced adjustment view for those two styles only, `t`/`T` changes the
+attachment theme and `s` changes its supported style. Other Monitor styles do
+not expose or consume those attachment controls.
 
 ## Shared standalone CLI reference
 
