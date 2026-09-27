@@ -11,6 +11,8 @@ from threading import Event
 
 from ccusage_viz.acquisition import historical_provider_id, historical_query_intent
 from ccusage_viz.adjustment_timeout import AdjustmentIdleTimer, AdjustmentTimeout
+from ccusage_viz.animate import cycle_animation_style
+from ccusage_viz.animation import AnimationRenderer, AnimationSessionState, new_animation_session
 from ccusage_viz.bootstrap import build_chart_registry, build_query_runtime
 from ccusage_viz.command_copy import (
     copy_command,
@@ -90,10 +92,12 @@ from ccusage_viz.monitor_component import (
 from ccusage_viz.options import (
     DASHBOARD_STYLES,
     HEADER_SUMMARIES,
+    AnimationPaneConfig,
     ChartPaneConfig,
     ChartPresentation,
     DashboardLaunch,
     MonitorConfig,
+    PaneConfig,
     RankingConfig,
     StackConfig,
     StandaloneHostConfig,
@@ -149,7 +153,7 @@ PaneFuture = Future[HistoricalOutcome] | Future[MonitorOutcome] | Future[Monitor
 
 
 @dataclass(slots=True)
-class TuiPane:
+class TuiChartPane:
     component: HistoricalChartComponent | MonitorComponent
     scheduler: FixedIntervalScheduler
     lifecycle: LifecycleOperation[PaneFuture]
@@ -172,12 +176,27 @@ class TuiPane:
         return _pane_options(self).host.interval
 
 
-def _pane_options(pane: TuiPane) -> StandaloneLaunch:
+@dataclass(slots=True)
+class TuiAnimationPane:
+    """A render-only dashboard pane; it owns no provider or lifecycle runtime."""
+
+    session: AnimationSessionState
+    renderer: AnimationRenderer
+    body_view: BodyView = "chart"
+    text_offsets: dict[BodyView, int] = field(default_factory=dict)
+    text_line_counts: dict[BodyView, int] = field(default_factory=dict)
+    text_visible_rows: dict[BodyView, int] = field(default_factory=dict)
+
+
+TuiPane = TuiChartPane | TuiAnimationPane
+
+
+def _pane_options(pane: TuiChartPane) -> StandaloneLaunch:
     component = pane.component
     return component.accepted_options or component.candidate
 
 
-def _pane_display_options(pane: TuiPane) -> StandaloneLaunch:
+def _pane_display_options(pane: TuiChartPane) -> StandaloneLaunch:
     component = pane.component
     if isinstance(component, HistoricalChartComponent) and getattr(component, "is_pending", False):
         return component.candidate
@@ -407,6 +426,14 @@ def _practical_grid(pane_count: int) -> str:
     return f"{rows}x{columns}"
 
 
+def _shutdown_pane(pane: TuiPane) -> None:
+    """Release chart-only resources while leaving render-only panes untouched."""
+    if isinstance(pane, TuiAnimationPane):
+        return
+    pane.scheduler.shutdown()
+    pane.lifecycle.shutdown()
+
+
 def _replace_pane(
     panes: list[TuiPane],
     index: int,
@@ -417,8 +444,7 @@ def _replace_pane(
     displaced = panes[index]
     panes[index] = replacement
     start(index)
-    displaced.scheduler.shutdown()
-    displaced.lifecycle.shutdown()
+    _shutdown_pane(displaced)
 
 
 def _insert_pane(
@@ -704,31 +730,56 @@ def _compose_resolved_panes(
 
 
 def _new_pane(
-    options: StandaloneLaunch,
-    owner_id: str,
+    options: StandaloneLaunch | DashboardLaunch,
+    pane_config_or_owner: PaneConfig | str,
+    owner_id: str | QueryRuntime | None = None,
     runtime: QueryRuntime | None = None,
 ) -> TuiPane:
+    """Construct a query-backed chart pane or an isolated animation pane."""
+    if isinstance(options, DashboardLaunch):
+        if not isinstance(pane_config_or_owner, (ChartPaneConfig, AnimationPaneConfig)):
+            raise TypeError("dashboard pane configuration is required")
+        pane_config = pane_config_or_owner
+        if isinstance(pane_config, AnimationPaneConfig):
+            return TuiAnimationPane(
+                new_animation_session(pane_config.animation, theme=options.host.theme),
+                AnimationRenderer(),
+            )
+        if not isinstance(owner_id, str):
+            raise TypeError("dashboard chart pane owner id is required")
+        from ccusage_viz.configuration import standalone_from_chart_pane
+
+        return _new_pane(
+            standalone_from_chart_pane(options, pane_config), owner_id, runtime=runtime
+        )
+    if not isinstance(pane_config_or_owner, str):
+        raise TypeError("chart pane owner id is required")
+    if isinstance(owner_id, QueryRuntime):
+        runtime = owner_id
+    elif owner_id is not None:
+        raise TypeError("chart pane runtime is required")
+    chart_owner_id = pane_config_or_owner
     registry = build_chart_registry()
     component: HistoricalChartComponent | MonitorComponent
     if isinstance(options.chart, MonitorConfig):
         component = MonitorComponent(
             options,
-            owner_id=owner_id,
+            owner_id=chart_owner_id,
             runtime=runtime,
             registry=registry,
         )
     else:
         component = HistoricalChartComponent(
             options,
-            owner_id=owner_id,
+            owner_id=chart_owner_id,
             runtime=runtime,
             registry=registry,
         )
     now = time.monotonic()
-    return TuiPane(
+    return TuiChartPane(
         component,
         FixedIntervalScheduler(options.host.interval, now=now),
-        LifecycleOperation(owner_id),
+        LifecycleOperation(chart_owner_id),
     )
 
 
@@ -782,7 +833,7 @@ def _await_monitor_warmup(
         return MonitorWarmupOutcome(generation, tuple(completions), exc)
 
 
-def _refresh_deltas(pane: TuiPane, values: dict[Hashable, float]) -> None:
+def _refresh_deltas(pane: TuiChartPane, values: dict[Hashable, float]) -> None:
     tracker = RefreshDeltas(
         pane.previous_values,
         pane.deltas,
@@ -794,14 +845,14 @@ def _refresh_deltas(pane: TuiPane, values: dict[Hashable, float]) -> None:
     pane.values_initialized = tracker.initialized
 
 
-def _refresh_ranks(pane: TuiPane, ordered_keys: tuple[Hashable, ...]) -> None:
+def _refresh_ranks(pane: TuiChartPane, ordered_keys: tuple[Hashable, ...]) -> None:
     tracker = RefreshRanks(pane.previous_ranks, pane.rank_deltas)
     tracker.accept(ordered_keys)
     pane.previous_ranks = tracker.previous
     pane.rank_deltas = tracker.current
 
 
-def _clear_changes(pane: TuiPane) -> None:
+def _clear_changes(pane: TuiChartPane) -> None:
     pane.previous_values.clear()
     pane.deltas.clear()
     pane.values_initialized = False
@@ -815,7 +866,7 @@ class PaneRender:
     notices: tuple[str, ...] = ()
 
 
-def _pane_copy_payload(pane: TuiPane, translator: Translator, terminal: Terminal) -> str:
+def _pane_copy_payload(pane: TuiChartPane, translator: Translator, terminal: Terminal) -> str:
     """Return the focused non-chart pane view's complete clipboard payload."""
     active = _pane_options(pane)
     view = body_view_copy_kind(pane.body_view)
@@ -851,6 +902,19 @@ def _pane_copy_payload(pane: TuiPane, translator: Translator, terminal: Terminal
 
 
 def _pane_render(pane: TuiPane, translator: Translator, terminal: Terminal) -> PaneRender:
+    if isinstance(pane, TuiAnimationPane):
+        if pane.body_view != "chart":
+            return PaneRender("")
+        result = pane.renderer.render(
+            pane.session,
+            width=terminal.width,
+            height=terminal.height,
+            color=terminal.color,
+            ascii=terminal.ascii,
+            now=time.monotonic(),
+            translator=translator,
+        )
+        return PaneRender("\n".join(result.rows))
     active = _pane_display_options(pane)
     component = pane.component
     if pane.body_view == "command":
@@ -1295,7 +1359,7 @@ def _adjustment_footer(
     )
 
 
-def _pane_adjustment_state(pane: TuiPane, page: str, translator: Translator) -> str:
+def _pane_adjustment_state(pane: TuiChartPane, page: str, translator: Translator) -> str:
     chart = _pane_display_options(pane).chart
     if page == "quick":
         settings = (
@@ -1478,19 +1542,16 @@ def _choose_pane_type(
 
 
 def run_tui(options: DashboardLaunch, translator: Translator) -> int:
-    from ccusage_viz.configuration import standalone_from_chart_pane
-
     runtime = build_query_runtime()
-    panes = []
-    for index, pane_config in enumerate(options.panes):
-        assert isinstance(pane_config, ChartPaneConfig)
-        panes.append(
-            _new_pane(
-                standalone_from_chart_pane(options, pane_config),
-                f"dashboard:pane:{index}",
-                runtime,
-            )
+    panes = [
+        _new_pane(
+            options,
+            pane_config,
+            f"dashboard:pane:{index}" if isinstance(pane_config, ChartPaneConfig) else None,
+            runtime,
         )
+        for index, pane_config in enumerate(options.panes)
+    ]
     next_pane_id = len(panes)
     header = _new_header(options, runtime)
     executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix="ccusage-viz-tui")
@@ -1542,9 +1603,13 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             pane.body_view = "chart"
 
     def read_adjustment_event(decoder: InputDecoder) -> object:
+        timeout = 0.1
+        deadline = animation_deadline()
+        if deadline is not None:
+            timeout = min(timeout, max(0.0, deadline - time.monotonic()))
         if adjustment_timer is None:
-            return read_event(decoder, 0.1)
-        event = read_event(decoder, min(0.1, adjustment_timer.remaining()))
+            return read_event(decoder, timeout)
+        event = read_event(decoder, min(timeout, adjustment_timer.remaining()))
         if isinstance(event, (KeyEvent, MouseEvent)):
             adjustment_timer.record_input()
         elif event is None:
@@ -1558,7 +1623,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         return owner_id
 
     def start_pane_submission(
-        pane: TuiPane,
+        pane: TuiChartPane,
         operation: OperationToken,
     ) -> tuple[PaneFuture, Callable[[], None]]:
         component = pane.component
@@ -1621,6 +1686,8 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
 
     def start_pane(index: int, *, now: float) -> bool:
         pane = panes[index]
+        if not isinstance(pane, TuiChartPane):
+            return False
         try:
             return pane.lifecycle.start_ready(
                 now=now,
@@ -1629,7 +1696,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         except BaseException:
             return False
 
-    def pane_records(pane: TuiPane) -> tuple[UsageRecord, ...]:
+    def pane_records(pane: TuiChartPane) -> tuple[UsageRecord, ...]:
         component = pane.component
         if isinstance(component, MonitorComponent):
             return component.accepted_records
@@ -1638,7 +1705,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
     def start_new_pane(index: int) -> None:
         refresh(index, trigger=LifecycleTrigger.STARTUP)
 
-    def pane_includes_projects(pane: TuiPane) -> bool:
+    def pane_includes_projects(pane: TuiChartPane) -> bool:
         component = pane.component
         return (
             not isinstance(component, HistoricalChartComponent)
@@ -1654,6 +1721,8 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         data_affecting: bool = True,
     ) -> bool:
         pane = panes[index]
+        if not isinstance(pane, TuiChartPane):
+            return False
         component = pane.component
         if not isinstance(component, MonitorComponent) and data_affecting:
             current = component.candidate
@@ -1755,7 +1824,10 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
 
         active_operations = {
             lifecycle.active
-            for lifecycle in (header.lifecycle, *(pane.lifecycle for pane in panes))
+            for lifecycle in (
+                header.lifecycle,
+                *(pane.lifecycle for pane in panes if isinstance(pane, TuiChartPane)),
+            )
             if lifecycle.active is not None
         }
         if manual_refresh_operations - active_operations:
@@ -1785,6 +1857,8 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             retire_manual_refresh(operation)
             start_header(now=observed_at)
         for index, pane in enumerate(panes):
+            if not isinstance(pane, TuiChartPane):
+                continue
             completed_pane = pane.lifecycle.take_completed(lambda future: future.done())
             if completed_pane is None:
                 continue
@@ -1907,10 +1981,23 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             start_pane(index, now=observed_at)
         return changed
 
+    def animation_deadline() -> float | None:
+        deadlines = (
+            pane.session.next_deadline
+            for pane in panes
+            if isinstance(pane, TuiAnimationPane) and pane.body_view == "chart"
+        )
+        return min((deadline for deadline in deadlines if deadline is not None), default=None)
+
     def full_dashboard_command() -> str:
         return format_full_dashboard_command(
             replace(options, host=replace(options.host, theme=dashboard_theme)),
-            tuple(ChartPaneConfig(_pane_options(pane).chart) for pane in panes),
+            tuple(
+                ChartPaneConfig(_pane_options(pane).chart)
+                if isinstance(pane, TuiChartPane)
+                else AnimationPaneConfig(pane.session.spec)
+                for pane in panes
+            ),
             grid=active_grid,
             layout=active_layout,
             column_weights=column_weights,
@@ -1932,6 +2019,10 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             return tuple(rows)
         if adjustment_mode == "pane" and focused is not None:
             pane = panes[focused]
+            if isinstance(pane, TuiAnimationPane):
+                if adjustment_page == "advanced":
+                    return (clip_width("a quick · Enter finish", width),)
+                return (clip_width("Space pause · t/T theme · s style · a advanced · Enter finish", width),)
             if pane.body_view != "chart":
                 return _text_view_footer(
                     pane.body_view,
@@ -2023,7 +2114,15 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         layout = grid_geometry(size.columns, size.lines, header_rows, 0)
         rect = layout.pane(index)
         framed = frame_style != "none" or index == focused
-        pane_options = _pane_display_options(panes[index])
+        pane = panes[index]
+        if isinstance(pane, TuiAnimationPane):
+            return Terminal(
+                max(1, rect.width - 2 if framed else rect.width),
+                max(1, rect.height - 2 if framed else rect.height),
+                pane.session.theme != "no-color",
+                options.host.ascii,
+            )
+        pane_options = _pane_display_options(pane)
         return Terminal(
             max(1, rect.width - 2 if framed else rect.width),
             max(1, rect.height - 2 if framed else rect.height),
@@ -2075,15 +2174,25 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 # The active frame-less pane gets a selection ring, so reserve its
                 # interior too; its content is never overwritten by the indicator.
                 framed = frame_style != "none" or index == focused
-                pane_options = _pane_display_options(pane)
                 interior_width = max(1, cell_width - 2 if framed else cell_width)
                 interior_height = max(1, cell_height - 2 if framed else cell_height)
-                terminal = Terminal(
-                    interior_width,
-                    interior_height,
-                    pane_options.chart.presentation.theme != "no-color",
-                    pane_options.host.ascii,
-                )
+                if isinstance(pane, TuiAnimationPane):
+                    terminal = Terminal(
+                        interior_width,
+                        interior_height,
+                        pane.session.theme != "no-color",
+                        options.host.ascii,
+                    )
+                    color_scheme = pane.session.theme
+                else:
+                    pane_options = _pane_display_options(pane)
+                    terminal = Terminal(
+                        interior_width,
+                        interior_height,
+                        pane_options.chart.presentation.theme != "no-color",
+                        pane_options.host.ascii,
+                    )
+                    color_scheme = pane_options.chart.presentation.theme
                 if chooser_overlay is not None and chooser_overlay[0] == index:
                     rendered_panes.append(chooser_overlay[1])
                     continue
@@ -2094,7 +2203,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     color=terminal.color,
                     ascii=terminal.ascii,
                     translator=translator,
-                    color_scheme=pane_options.chart.presentation.theme,
+                    color_scheme=color_scheme,
                 )
                 pane_content = _local_pane_content(
                     rendered.chart,
@@ -2201,9 +2310,10 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 if header_style != "hidden" and header.scheduler.due(now=now):
                     refresh_header(trigger=LifecycleTrigger.PERIODIC)
                 for index, pane in enumerate(panes):
-                    if pane.scheduler.due(now=now):
+                    if isinstance(pane, TuiChartPane) and pane.scheduler.due(now=now):
                         refresh(index, trigger=LifecycleTrigger.PERIODIC)
-                if changed:
+                deadline = animation_deadline()
+                if changed or (deadline is not None and now >= deadline):
                     paint()
                 try:
                     event = read_adjustment_event(decoder)
@@ -2282,6 +2392,25 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         continue
                     assert focused is not None
                     pane = panes[focused]
+                    if isinstance(pane, TuiAnimationPane):
+                        now = time.monotonic()
+                        if key == " ":
+                            pane.session.set_playback_requested(
+                                not pane.session.playback_requested, now
+                            )
+                        elif key == "a":
+                            adjustment_page = (
+                                "advanced" if adjustment_page == "quick" else "quick"
+                            )
+                        elif adjustment_page == "quick" and key in {"t", "T"}:
+                            pane.session.set_theme(
+                                _cycle(COLOR_SCHEMES, pane.session.theme, 1 if key == "t" else -1),
+                                now,
+                            )
+                        elif adjustment_page == "quick" and key == "s":
+                            cycle_animation_style(pane.session, step=1, now=now)
+                        paint()
+                        continue
                     if pane.body_view != "chart":
                         if key in {"\x1b[A", "\x1b[B", "h", "e"}:
                             offset = next_text_offset(
@@ -2311,6 +2440,8 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         paint()
                         continue
                     else:
+                        if not isinstance(pane, TuiChartPane):
+                            raise AssertionError("chart adjustment requires a chart pane")
                         next_focused = _adjustment_target(focused, key, len(panes))
                         if next_focused != focused:
                             focused = next_focused
@@ -2318,6 +2449,8 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         else:
                             assert focused is not None
                             pane = panes[focused]
+                            if not isinstance(pane, TuiChartPane):
+                                raise AssertionError("chart adjustment lost its chart pane")
                             if key == "a":
                                 adjustment_page = (
                                     "advanced" if adjustment_page == "quick" else "quick"
@@ -2463,8 +2596,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                 focused += 1
                             elif key == "x" and len(panes) > 1:
                                 removed = panes.pop(focused)
-                                removed.scheduler.shutdown()
-                                removed.lifecycle.shutdown()
+                                _shutdown_pane(removed)
                                 active_grid = _grid_for_pane_count(active_grid, len(panes))
                                 focused = min(focused, len(panes) - 1)
                             elif (
@@ -2608,9 +2740,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                             trigger=LifecycleTrigger.MANUAL,
                             replace_active=True,
                         ):
-                            operation = panes[index].lifecycle.active
-                            if operation is not None:
-                                manual_refresh_operations.add(operation)
+                            pane = panes[index]
+                            if isinstance(pane, TuiChartPane) and pane.lifecycle.active is not None:
+                                manual_refresh_operations.add(pane.lifecycle.active)
                     if refresh_header(
                         trigger=LifecycleTrigger.MANUAL,
                         replace_active=True,
@@ -2631,22 +2763,40 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 elif key == "\t":
                     continue
                 elif body_view == "chart" and key == " ":
-                    paused = all(item.lifecycle.paused for item in panes)
+                    if adjustment_mode == "pane" and focused is not None:
+                        pane = panes[focused]
+                        if isinstance(pane, TuiAnimationPane):
+                            pane.session.set_playback_requested(
+                                not pane.session.playback_requested, time.monotonic()
+                            )
+                            paint()
+                            continue
+                    chart_panes = [item for item in panes if isinstance(item, TuiChartPane)]
+                    animation_panes = [item for item in panes if isinstance(item, TuiAnimationPane)]
+                    paused = all(item.lifecycle.paused for item in chart_panes) and all(
+                        item.session.host_paused for item in animation_panes
+                    )
                     now = time.monotonic()
                     if not paused:
                         header.scheduler.pause()
                         header.lifecycle.pause()
-                        for item in panes:
+                        for item in chart_panes:
                             item.scheduler.pause()
                             item.lifecycle.pause()
                             if isinstance(item.component, MonitorComponent):
                                 item.component.pause()
+                        for item in panes:
+                            if isinstance(item, TuiAnimationPane):
+                                item.session.set_host_paused(True, now)
                     else:
                         wall = datetime.now().astimezone()
                         header.lifecycle.resume()
                         header.scheduler.resume(now=now)
                         refresh_header(trigger=LifecycleTrigger.RESUME)
                         for index, item in enumerate(panes):
+                            if not isinstance(item, TuiChartPane):
+                                item.session.set_host_paused(False, now)
+                                continue
                             item.lifecycle.resume()
                             item.scheduler.resume(now=now)
                             if isinstance(item.component, MonitorComponent):
@@ -2670,8 +2820,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         return 0
     finally:
         for pane in panes:
-            pane.scheduler.shutdown()
-            pane.lifecycle.shutdown()
+            _shutdown_pane(pane)
         header.scheduler.shutdown()
         header.lifecycle.shutdown()
         runtime.cancel()
