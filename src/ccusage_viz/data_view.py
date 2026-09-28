@@ -170,7 +170,13 @@ def _merge_group_indices(keys: Iterable[object]) -> dict[object, int]:
         {
             key
             for key in keys
-            if isinstance(key, tuple) and len(key) > 1 and key[:2] == ("project", "name")
+            if isinstance(key, tuple)
+            and len(key) > 1
+            and key[:2]
+            in {
+                ("project", "name"),
+                ("project", "path"),
+            }
         },
         key=repr,
     )

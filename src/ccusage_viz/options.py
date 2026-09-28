@@ -207,6 +207,7 @@ class AnimationLaunch:
     host: StandaloneHostConfig
     animation: AnimationSpec
     explicit: frozenset[str] = frozenset()
+    gallery: bool = False
 
     def was_explicit(self, field: str) -> bool:
         return field in self.explicit

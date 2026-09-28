@@ -10,7 +10,7 @@ from enum import StrEnum
 from typing import Any, Never, cast
 
 from ccusage_viz import __version__
-from ccusage_viz.animation import animation_spec
+from ccusage_viz.animation import animation_spec, default_animation_spec
 from ccusage_viz.application import run
 from ccusage_viz.dashboard import DASHBOARD_PRESETS
 from ccusage_viz.dashboard_layout import (
@@ -400,7 +400,8 @@ def build_parser(tr: Translator) -> argparse.ArgumentParser:
     animate = subparsers.add_parser(
         "animate", help=tr.text("help.animate"), description=tr.text("help.animate")
     )
-    animate.add_argument("style", nargs="?", default="rain", metavar="STYLE")
+    animate.add_argument("style", nargs="?", metavar="STYLE")
+    animate.add_argument("--gallery", action="store_true", help=tr.text("help.animate_gallery"))
     animate.add_argument("--ascii", action="store_true", help=tr.text("help.ascii"))
 
     return parser
@@ -551,7 +552,7 @@ def parse_pane_fragment(fragment: str, *, host: DashboardLaunch | None = None) -
         if len(tokens) != 2:
             raise UsageError("error.tui_panel", value=fragment)
         try:
-            return AnimationPaneConfig(animation_spec(tokens[1]))
+            return AnimationPaneConfig(animation_spec(tokens[1], target="pane"))
         except UsageError as exc:
             raise UsageError("error.tui_panel", value=fragment) from exc
     if tokens[0] not in _TUI_COMMANDS:
@@ -592,8 +593,11 @@ def _to_options(
         return AnimationLaunch(
             ProcessConfig(),
             StandaloneHostConfig(ascii=namespace.ascii),
-            animation_spec(namespace.style),
+            default_animation_spec("standalone")
+            if namespace.style is None
+            else animation_spec(namespace.style, target="standalone"),
             explicit,
+            gallery=namespace.gallery,
         )
     process = ProcessConfig(
         ccusage_bin=namespace.ccusage_bin,
@@ -609,7 +613,7 @@ def _to_options(
                     "error.arguments",
                     detail="dashboard options require a preset or at least one --pane",
                 )
-            preset_name = "wide"
+            preset_name = "wide-clock"
         if preset_name is not None and namespace.grid is not None:
             raise UsageError(
                 "error.arguments",
@@ -639,7 +643,15 @@ def _to_options(
                 raise UsageError("error.tui_grid", value=configured_layout)
         bands = layout_bands(layout or grid, len(fragments))
         column_weights = tuple(namespace.column_weights) or None
-        row_weights = tuple(namespace.row_weights) or None
+        preset_row_weights = (
+            preset.row_weights
+            if preset is not None
+            and "row_weights" not in explicit
+            and preset.row_weights is not None
+            and len(preset.row_weights) == bands.rows
+            else None
+        )
+        row_weights = tuple(namespace.row_weights) or preset_row_weights
         for axis, weights, expected in (
             ("column", column_weights, bands.columns),
             ("row", row_weights, bands.rows),

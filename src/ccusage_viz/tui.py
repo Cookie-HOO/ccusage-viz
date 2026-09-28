@@ -15,7 +15,9 @@ from ccusage_viz.animate import cycle_animation_style
 from ccusage_viz.animation import (
     AnimationRenderer,
     AnimationSessionState,
-    animation_spec,
+    cycle_monitor_attachment,
+    default_animation_spec,
+    last_activity_label,
     new_animation_session,
 )
 from ccusage_viz.bootstrap import build_chart_registry, build_query_runtime
@@ -120,7 +122,13 @@ from ccusage_viz.render.filters import active_filter_summary
 from ccusage_viz.render.palette import COLOR_SCHEMES, get_color_scheme
 from ccusage_viz.render.summary import render_summary
 from ccusage_viz.terminal import FramePainter, Terminal, compose_frame
-from ccusage_viz.terminal_ui import AdjustmentAction, adjustment_rows
+from ccusage_viz.terminal_ui import (
+    AdjustmentAction,
+    TransientFeedback,
+    adjustment_rows,
+    controls_line,
+    feedback_lines,
+)
 from ccusage_viz.terminal_ui import notice_lines as format_notice_lines
 from ccusage_viz.text_viewport import (
     next_text_offset,
@@ -129,7 +137,7 @@ from ccusage_viz.text_viewport import (
 )
 from ccusage_viz.tui_input import InputDecoder, KeyEvent, MouseEvent, read_event, tui_input_mode
 
-_PANE_COMMANDS = ("timeline", "calendar", "stack", "ranking", "monitor")
+_PANE_COMMANDS = ("timeline", "calendar", "stack", "ranking", "monitor", "animate")
 
 
 @dataclass(frozen=True, slots=True)
@@ -177,6 +185,7 @@ class TuiChartPane:
     rank_deltas: dict[Hashable, int] = field(default_factory=dict)
     attachment: AnimationSessionState | None = None
     attachment_renderer: AnimationRenderer | None = None
+    attachment_enabled: bool = False
 
     @property
     def interval(self) -> float:
@@ -786,10 +795,10 @@ def _new_pane(
     attachment = None
     attachment_renderer = None
     if isinstance(component, MonitorComponent):
-        attachment = new_animation_session(
-            animation_spec("rain"), theme=options.chart.presentation.theme
-        )
+        attachment = new_animation_session(default_animation_spec("monitor"), theme="classic")
         attachment.set_playback_requested(False, now)
+        attachment.set_idle_animation_requested(True, now)
+        attachment.set_visible(False, now)
         attachment_renderer = AnimationRenderer()
     return TuiChartPane(
         component,
@@ -1087,11 +1096,20 @@ def _pane_render(pane: TuiPane, translator: Translator, terminal: Terminal) -> P
 
 
 def _update_monitor_attachment_activity(
-    component: MonitorComponent, attachment: AnimationSessionState, *, now: float
+    component: MonitorComponent,
+    attachment: AnimationSessionState,
+    *,
+    now: float,
+    wall: datetime,
+    translator: Translator,
 ) -> None:
-    """Apply only an accepted monitor interval to its local attachment."""
+    """Apply an accepted monitor interval and retain its last active wall time."""
+
     delta = component.accepted_total_token_delta
-    attachment.set_playback_requested((delta or 0) > 0, now)
+    active = (delta or 0) > 0
+    attachment.set_playback_requested(active, now)
+    if active:
+        attachment.activity_label = last_activity_label(translator, wall)
 
 
 def _append_monitor_attachment(
@@ -1110,16 +1128,21 @@ def _append_monitor_attachment(
     renderer = pane.attachment_renderer
     config = _pane_display_options(pane)
     if (
-        attachment is None
+        not pane.attachment_enabled
+        or attachment is None
         or renderer is None
         or not isinstance(config.chart, MonitorConfig)
         or config.chart.presentation.style not in {"ranking", "list"}
+        or (
+            getattr(pane.component, "accepted_total_token_delta", None) is None
+            and attachment.activity_label is None
+        )
     ):
         if attachment is not None:
             attachment.set_visible(False, now)
         return body
     residual_height = terminal.height - len(body.rstrip("\r\n").splitlines()) - reserved_rows
-    if residual_height < attachment.spec.minimum_rows:
+    if residual_height < 1:
         attachment.set_visible(False, now)
         return body
     attachment.set_visible(True, now)
@@ -1210,6 +1233,12 @@ _PANE_CONTENT_ACTIONS = (
     ("n", "insert_after"),
     ("x", "delete"),
 )
+_ANIMATION_PANE_CONTENT_ACTIONS = (
+    ("r", "replace"),
+    ("N", "insert_before"),
+    ("n", "insert_after"),
+    ("x", "delete"),
+)
 _PANE_POSITION_ACTIONS = (
     ("[", "previous"),
     ("]", "next"),
@@ -1288,7 +1317,7 @@ def _pane_adjustment_actions(
     ):
         visible = (("w", "window"), ("g", "granularity"), *visible[1:])
     if attachment_available and page == "advanced":
-        visible = (*visible, ("t/T", "animation_theme"), ("s", "animation_style"))
+        visible = (*visible, ("t/T", "animation_theme"), ("s/S", "animation_style"))
     return _localized_actions(visible, translator)
 
 
@@ -1370,6 +1399,59 @@ def _pane_content_actions(body_view: BodyView) -> tuple[tuple[str, str], ...]:
     return (*_PANE_CONTENT_ACTIONS, ("y", "copy"))
 
 
+def _animation_adjustment_footer(
+    pane: TuiAnimationPane,
+    page: str,
+    translator: Translator,
+    width: int,
+) -> tuple[str, ...]:
+    actions = (
+        (
+            AdjustmentAction("Space", translator.text("adjustment.pause"), 0),
+            AdjustmentAction("t/T", translator.text("adjustment.animation_theme"), 1),
+            AdjustmentAction("s/S", translator.text("adjustment.animation_style"), 2),
+        )
+        if page == "quick"
+        else ()
+    )
+    shared = adjustment_rows(
+        translator.text(
+            "status.animation",
+            style=pane.session.spec.display_name,
+            theme=pane.session.theme,
+            state=translator.text(
+                "status.animation_running"
+                if pane.session.clock.playing
+                else "status.animation_paused"
+            ),
+        ),
+        translator.text(f"adjustment.page_{page}"),
+        actions,
+        width=width,
+        color=False,
+        switch_action=translator.text(
+            "adjustment.switch_advanced" if page == "quick" else "adjustment.switch_quick"
+        ),
+        finish_action=translator.text("adjustment.finish"),
+    )
+    return (
+        *shared,
+        clip_width(translator.text("status.tui_pane_management_divider"), width),
+        _management_row(
+            translator.text("status.tui_pane_content"),
+            _ANIMATION_PANE_CONTENT_ACTIONS,
+            translator,
+            width,
+        ),
+        _management_row(
+            translator.text("status.tui_pane_position"),
+            _PANE_POSITION_ACTIONS,
+            translator,
+            width,
+        ),
+    )
+
+
 def _management_row(
     label: str,
     actions: tuple[tuple[str, str], ...],
@@ -1416,9 +1498,9 @@ def _adjustment_footer(
         width=width,
         color=False,
         switch_action=translator.text(
-            "status.tui_switch_advanced" if page == "quick" else "status.tui_switch_quick"
+            "adjustment.switch_advanced" if page == "quick" else "adjustment.switch_quick"
         ),
-        finish_action=translator.text("status.tui_finish_keys"),
+        finish_action=translator.text("adjustment.finish"),
     )
     return (
         *shared,
@@ -1475,6 +1557,18 @@ def _pane_adjustment_state(pane: TuiChartPane, page: str, translator: Translator
                     )
                 )
             advanced.append(f"Legend {chart.presentation.legend}")
+            if chart.presentation.style in {"ranking", "list"} and pane.attachment is not None:
+                advanced.append(
+                    translator.text(
+                        "status.monitor_attachment_settings",
+                        style=(
+                            pane.attachment.spec.display_name
+                            if pane.attachment_enabled
+                            else translator.text("label.animation_none")
+                        ),
+                        theme=pane.attachment.theme,
+                    ).lstrip(" ·")
+                )
         settings = " · ".join(advanced)
     if not settings:
         return translator.text("status.tui_running")
@@ -1597,7 +1691,8 @@ def _choose_pane_type(
     index = 0
     while True:
         choices = "\n".join(
-            f"{'›' if item == _PANE_COMMANDS[index] else ' '} {item.title()}"
+            f"{'›' if item == _PANE_COMMANDS[index] else ' '} "
+            f"{translator.text(f'label.pane_{item}')}"
             for item in _PANE_COMMANDS
         )
         title = translator.text(f"status.tui_{action}_title")
@@ -1654,8 +1749,8 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
     dashboard_text_line_count = 0
     dashboard_text_visible_rows = 0
     chooser_overlay: tuple[int, str] | None = None
-    copied_status: str | None = None
-    pane_copy_status: str | None = None
+    copy_feedback = TransientFeedback()
+    dashboard_paused = False
     manual_refresh_operations: set[OperationToken] = set()
 
     last_successful_update: datetime | None = None
@@ -1663,20 +1758,12 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
     screen = FramePainter(sys.stdout)
 
     def end_adjustment() -> None:
-        nonlocal \
-            adjustment_mode, \
-            adjustment_timer, \
-            focused, \
-            grid_draft, \
-            grid_error, \
-            pane_copy_status, \
-            body_view
+        nonlocal adjustment_mode, adjustment_timer, focused, grid_draft, grid_error, body_view
         adjustment_mode = None
         adjustment_timer = None
         focused = None
         grid_draft = None
         grid_error = None
-        pane_copy_status = None
         body_view = "chart"
         for pane in panes:
             pane.body_view = "chart"
@@ -1686,6 +1773,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         deadline = animation_deadline()
         if deadline is not None:
             timeout = min(timeout, max(0.0, deadline - time.monotonic()))
+        remaining = copy_feedback.remaining(now=time.monotonic())
+        if remaining is not None:
+            timeout = min(timeout, remaining)
         if adjustment_timer is None:
             return read_event(decoder, timeout)
         event = read_event(decoder, min(timeout, adjustment_timer.remaining()))
@@ -2028,7 +2118,11 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     if accepted:
                         if pane.attachment is not None and isinstance(component, MonitorComponent):
                             _update_monitor_attachment_activity(
-                                component, pane.attachment, now=observed_at
+                                component,
+                                pane.attachment,
+                                now=observed_at,
+                                wall=datetime.now().astimezone(),
+                                translator=translator,
                             )
                         pane.lifecycle.complete(operation, generation=loaded.generation)
                         last_successful_update = component.accepted_at
@@ -2112,9 +2206,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         if adjustment_mode == "pane" and focused is not None:
             pane = panes[focused]
             if isinstance(pane, TuiAnimationPane):
-                if adjustment_page == "advanced":
-                    return (clip_width("a quick · Enter finish", width),)
-                return (clip_width("Space pause · t/T theme · s style · a advanced · Enter finish", width),)
+                return _animation_adjustment_footer(pane, adjustment_page, translator, width)
             if pane.body_view != "chart":
                 return _text_view_footer(
                     pane.body_view,
@@ -2124,8 +2216,6 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     visible_rows=pane.text_visible_rows.get(pane.body_view, 0),
                 )
             state = grid_error or _pane_adjustment_state(pane, adjustment_page, translator)
-            if pane_copy_status is not None and grid_error is None:
-                state = f"{pane_copy_status} · {state}"
             return _adjustment_footer(
                 state,
                 _pane_display_options(pane).chart.kind,
@@ -2164,16 +2254,31 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         if browse_controls_hidden:
             return ()
         context = grid_error or translator.text(
-            f"status.tui_{body_view.replace('-', '_')}_controls"
+            f"status.tui_{body_view.replace('-', '_')}_controls",
+            action=translator.text("status.resume" if dashboard_paused else "status.pause"),
         )
-        if copied_status is not None:
-            context = f"{copied_status} · {context}"
         return (clip_width(context, width),)
 
     def notices() -> tuple[str, ...]:
-        if manual_refresh_operations:
-            return (translator.text("status.tui_refreshing"),)
-        return ()
+        paused = (
+            (
+                controls_line(
+                    translator.text("status.dashboard_paused"),
+                    width=get_terminal_size().columns,
+                    color=dashboard_theme != "no-color",
+                ),
+            )
+            if dashboard_paused
+            else ()
+        )
+        feedback = feedback_lines(
+            copy_feedback,
+            width=get_terminal_size().columns,
+            color=dashboard_theme != "no-color",
+            now=time.monotonic(),
+        )
+        manual = (translator.text("status.tui_refreshing"),) if manual_refresh_operations else ()
+        return (*manual, *paused, *feedback)
 
     def grid_geometry(
         size_columns: int,
@@ -2398,6 +2503,8 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             chooser_overlay = None
 
     def create_pane(command: str) -> TuiPane:
+        if command == "animate":
+            return _new_pane(options, AnimationPaneConfig(default_animation_spec("pane")))
         return _new_pane(
             _new_pane_options(command, options),
             allocate_pane_owner_id(),
@@ -2423,7 +2530,10 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     if isinstance(pane, TuiChartPane) and pane.scheduler.due(now=now):
                         refresh(index, trigger=LifecycleTrigger.PERIODIC)
                 deadline = animation_deadline()
-                if changed or (deadline is not None and now >= deadline):
+                feedback_expired = (
+                    copy_feedback.message is not None and now >= copy_feedback.expires_at
+                )
+                if changed or feedback_expired or (deadline is not None and now >= deadline):
                     paint()
                 try:
                     event = read_adjustment_event(decoder)
@@ -2505,23 +2615,31 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     if isinstance(pane, TuiAnimationPane):
                         now = time.monotonic()
                         if key == " ":
-                            pane.session.set_playback_requested(
-                                not pane.session.playback_requested, now
+                            pane.session.set_host_paused(
+                                not pane.session.host_paused,
+                                now,
+                                pause_label=translator.text("status.animation_paused"),
                             )
                         elif key == "a":
-                            adjustment_page = (
-                                "advanced" if adjustment_page == "quick" else "quick"
-                            )
+                            adjustment_page = "advanced" if adjustment_page == "quick" else "quick"
                         elif adjustment_page == "quick" and key in {"t", "T"}:
                             pane.session.set_theme(
                                 _cycle(COLOR_SCHEMES, pane.session.theme, 1 if key == "t" else -1),
                                 now,
                             )
-                        elif adjustment_page == "quick" and key == "s":
-                            cycle_animation_style(pane.session, step=1, now=now)
-                        paint()
-                        continue
-                    if pane.body_view != "chart":
+                        elif adjustment_page == "quick" and key in {"s", "S"}:
+                            cycle_animation_style(
+                                pane.session,
+                                target="pane",
+                                step=1 if key == "s" else -1,
+                                now=now,
+                            )
+                        else:
+                            now = None
+                        if now is not None:
+                            paint()
+                            continue
+                    if isinstance(pane, TuiChartPane) and pane.body_view != "chart":
                         if key in {"\x1b[A", "\x1b[B", "h", "e"}:
                             offset = next_text_offset(
                                 key,
@@ -2533,251 +2651,248 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                             pane.text_offsets[pane.body_view] = offset
                         elif key in {"v", "V"}:
                             pane.body_view = next_body_view(pane.body_view)
-                            pane_copy_status = None
                         elif key in {"y", "Y"} and body_view_copy_kind(pane.body_view) is not None:
                             copy_kind = body_view_copy_kind(pane.body_view)
                             assert copy_kind is not None
                             copied = copy_command(
                                 _pane_copy_payload(pane, translator, pane_terminal(focused))
                             )
-                            pane_copy_status = translator.text(
-                                "status.command_copied"
-                                if copied and copy_kind in {"command", "full-command"}
-                                else "status.data_copied"
-                                if copied
-                                else "status.command_copy_failed"
+                            copy_feedback.show(
+                                translator.text(
+                                    "status.command_copied"
+                                    if copied and copy_kind in {"command", "full-command"}
+                                    else "status.data_copied"
+                                    if copied
+                                    else "status.command_copy_failed"
+                                )
                             )
                         paint()
                         continue
-                    else:
-                        if not isinstance(pane, TuiChartPane):
-                            raise AssertionError("chart adjustment requires a chart pane")
-                        next_focused = _adjustment_target(focused, key, len(panes))
-                        if next_focused != focused:
-                            focused = next_focused
-                            pane_copy_status = None
+                    next_focused = _adjustment_target(focused, key, len(panes))
+                    if next_focused != focused:
+                        focused = next_focused
+                        paint()
+                        continue
+                    if key == "r":
+                        try:
+                            choice = choose_pane_type("replace", focused)
+                        except AdjustmentTimeout:
+                            end_adjustment()
+                            paint()
+                            continue
+                        if choice is not None:
+                            _replace_pane(
+                                panes,
+                                focused,
+                                create_pane(choice),
+                                start=start_new_pane,
+                            )
+                        paint()
+                        continue
+                    if key in {"N", "n"}:
+                        action = "insert_before" if key == "N" else "insert_after"
+                        try:
+                            choice = choose_pane_type(action, focused)
+                        except AdjustmentTimeout:
+                            end_adjustment()
+                            paint()
+                            continue
+                        if choice is not None:
+                            insert_at = focused if key == "N" else focused + 1
+                            active_grid = _grid_for_pane_count(active_grid, len(panes) + 1)
+                            _insert_pane(
+                                panes,
+                                insert_at,
+                                create_pane(choice),
+                                start=start_new_pane,
+                            )
+                            focused = insert_at
+                        paint()
+                        continue
+                    if key in {"{", "}", "J", "K"}:
+                        size = get_terminal_size()
+                        header_rows = len(
+                            _header_lines(
+                                header,
+                                header_style,
+                                translator,
+                                Terminal(
+                                    size.columns,
+                                    4,
+                                    dashboard_theme != "no-color",
+                                    options.host.ascii,
+                                ),
+                                last_successful_update,
+                            )
+                        )
+                        layout = grid_geometry(size.columns, size.lines, header_rows, 0)
+                        slot = layout.topology.slot(focused)
+                        if key in {"{", "}"}:
+                            assert column_weights is not None
+                            column_weights = adjust_weight(
+                                column_weights, slot.column, 1 if key == "}" else -1
+                            )
                         else:
-                            assert focused is not None
-                            pane = panes[focused]
-                            if not isinstance(pane, TuiChartPane):
-                                raise AssertionError("chart adjustment lost its chart pane")
-                            if key == "a":
-                                adjustment_page = (
-                                    "advanced" if adjustment_page == "quick" else "quick"
-                                )
-                            elif adjustment_page == "advanced" and key == "f":
-                                component = pane.component
-                                base = component.candidate
-                                size = get_terminal_size()
-                                editor_width = size.columns
-                                editor_height = size.lines
+                            assert row_weights is not None
+                            row_weights = adjust_weight(
+                                row_weights, slot.row, 1 if key == "K" else -1
+                            )
+                        paint()
+                        continue
+                    if key == "[" and focused > 0:
+                        panes[focused - 1], panes[focused] = panes[focused], panes[focused - 1]
+                        focused -= 1
+                        paint()
+                        continue
+                    if key == "]" and focused < len(panes) - 1:
+                        panes[focused], panes[focused + 1] = panes[focused + 1], panes[focused]
+                        focused += 1
+                        paint()
+                        continue
+                    if key == "x" and len(panes) > 1:
+                        removed = panes.pop(focused)
+                        _shutdown_pane(removed)
+                        active_grid = _grid_for_pane_count(active_grid, len(panes))
+                        focused = min(focused, len(panes) - 1)
+                        paint()
+                        continue
+                    if not isinstance(pane, TuiChartPane):
+                        paint()
+                        continue
+                    if key == "a":
+                        adjustment_page = "advanced" if adjustment_page == "quick" else "quick"
+                    elif adjustment_page == "advanced" and key == "f":
+                        component = pane.component
+                        base = component.candidate
+                        size = get_terminal_size()
+                        editor_width = size.columns
+                        editor_height = size.lines
 
-                                def paint_filter_editor(
-                                    body: str,
-                                    editor_controls: str,
-                                    *,
-                                    height: int = editor_height,
-                                ) -> None:
-                                    screen.paint(
-                                        compose_frame(
-                                            body,
-                                            translator.text("status.tui_adjust_history"),
-                                            editor_controls,
-                                            height=height,
-                                        )
-                                    )
+                        def paint_filter_editor(
+                            body: str,
+                            editor_controls: str,
+                            *,
+                            height: int = editor_height,
+                        ) -> None:
+                            screen.paint(
+                                compose_frame(
+                                    body,
+                                    translator.text("status.tui_adjust_history"),
+                                    editor_controls,
+                                    height=height,
+                                )
+                            )
 
-                                def read_filter_key() -> str | None:
-                                    editor_event = read_adjustment_event(decoder)
-                                    return (
-                                        editor_event.value
-                                        if isinstance(editor_event, KeyEvent)
-                                        else None
-                                    )
+                        def read_filter_key() -> str | None:
+                            editor_event = read_adjustment_event(decoder)
+                            return (
+                                editor_event.value if isinstance(editor_event, KeyEvent) else None
+                            )
 
-                                try:
-                                    edited = run_filter_editor(
-                                        base.chart.filters,
-                                        discover_filter_choices(
-                                            pane_records(pane),
-                                            base.chart.filters,
-                                            include_projects=pane_includes_projects(pane),
-                                        ),
-                                        translator,
-                                        width=editor_width,
-                                        paint=paint_filter_editor,
-                                        read_key=read_filter_key,
-                                    )
-                                except AdjustmentTimeout:
-                                    end_adjustment()
-                                    paint()
-                                    continue
-                                if edited is not None and edited != base.chart.filters:
-                                    _clear_changes(pane)
-                                    component.configure(
-                                        replace_chart_filters(base, edited),
-                                        data_affecting=True,
-                                    )
-                                    refresh(
-                                        focused,
-                                        trigger=LifecycleTrigger.CONFIGURATION,
-                                        data_affecting=False,
-                                    )
-                            elif key == "v":
-                                pane.body_view = next_body_view(pane.body_view)
-                                pane_copy_status = None
-                            elif key == "r":
-                                try:
-                                    choice = choose_pane_type("replace", focused)
-                                except AdjustmentTimeout:
-                                    end_adjustment()
-                                    paint()
-                                    continue
-                                if choice is not None:
-                                    replacement = create_pane(choice)
-                                    _replace_pane(
-                                        panes,
-                                        focused,
-                                        replacement,
-                                        start=start_new_pane,
-                                    )
-                            elif key in {"N", "n"}:
-                                action = "insert_before" if key == "N" else "insert_after"
-                                try:
-                                    choice = choose_pane_type(action, focused)
-                                except AdjustmentTimeout:
-                                    end_adjustment()
-                                    paint()
-                                    continue
-                                if choice is not None:
-                                    insert_at = focused if key == "N" else focused + 1
-                                    inserted = create_pane(choice)
-                                    active_grid = _grid_for_pane_count(active_grid, len(panes) + 1)
-                                    _insert_pane(
-                                        panes,
-                                        insert_at,
-                                        inserted,
-                                        start=start_new_pane,
-                                    )
-                                    focused = insert_at
-                            elif key in {"{", "}", "J", "K"}:
-                                size = get_terminal_size()
-                                header_rows = len(
-                                    _header_lines(
-                                        header,
-                                        header_style,
-                                        translator,
-                                        Terminal(
-                                            size.columns,
-                                            4,
-                                            dashboard_theme != "no-color",
-                                            options.host.ascii,
-                                        ),
-                                        last_successful_update,
+                        try:
+                            edited = run_filter_editor(
+                                base.chart.filters,
+                                discover_filter_choices(
+                                    pane_records(pane),
+                                    base.chart.filters,
+                                    include_projects=pane_includes_projects(pane),
+                                ),
+                                translator,
+                                width=editor_width,
+                                paint=paint_filter_editor,
+                                read_key=read_filter_key,
+                            )
+                        except AdjustmentTimeout:
+                            end_adjustment()
+                            paint()
+                            continue
+                        if edited is not None and edited != base.chart.filters:
+                            _clear_changes(pane)
+                            component.configure(
+                                replace_chart_filters(base, edited),
+                                data_affecting=True,
+                            )
+                            refresh(
+                                focused,
+                                trigger=LifecycleTrigger.CONFIGURATION,
+                                data_affecting=False,
+                            )
+                    elif key == "v":
+                        pane.body_view = next_body_view(pane.body_view)
+                    elif (
+                        adjustment_page == "advanced"
+                        and key == "P"
+                        and _project_grouping_available(_pane_display_options(pane).chart)
+                    ):
+                        pane.component.cycle_project_label_context()
+                    elif (
+                        adjustment_page == "advanced"
+                        and pane.attachment is not None
+                        and isinstance(_pane_display_options(pane).chart, MonitorConfig)
+                        and _pane_display_options(pane).chart.presentation.style
+                        in {"ranking", "list"}
+                        and key in {"t", "T", "s", "S"}
+                    ):
+                        now = time.monotonic()
+                        if key in {"s", "S"}:
+                            pane.attachment_enabled = cycle_monitor_attachment(
+                                pane.attachment,
+                                enabled=pane.attachment_enabled,
+                                step=1 if key == "s" else -1,
+                                now=now,
+                            )
+                        else:
+                            pane.attachment.set_theme(
+                                _cycle(
+                                    COLOR_SCHEMES,
+                                    pane.attachment.theme,
+                                    1 if key == "t" else -1,
+                                ),
+                                now,
+                            )
+                    elif _adjustment_key_supported(
+                        _pane_display_options(pane).chart.kind,
+                        adjustment_page,
+                        key,
+                        chart=_pane_display_options(pane).chart,
+                    ):
+                        component = pane.component
+                        base = component.candidate
+                        updated = adjust_standalone(base, key)
+                        if updated != base:
+                            _clear_changes(pane)
+                            data_affecting = (
+                                historical_replacement_required(base, updated)
+                                if isinstance(component, HistoricalChartComponent)
+                                else (
+                                    isinstance(base.chart, MonitorConfig)
+                                    and isinstance(updated.chart, MonitorConfig)
+                                    and (
+                                        base.chart.by != updated.chart.by
+                                        or base.chart.filters != updated.chart.filters
                                     )
                                 )
-                                layout = grid_geometry(size.columns, size.lines, header_rows, 0)
-                                slot = layout.topology.slot(focused)
-                                if key in {"{", "}"}:
-                                    assert column_weights is not None
-                                    column_weights = adjust_weight(
-                                        column_weights,
-                                        slot.column,
-                                        1 if key == "}" else -1,
-                                    )
-                                else:
-                                    assert row_weights is not None
-                                    row_weights = adjust_weight(
-                                        row_weights,
-                                        slot.row,
-                                        1 if key == "K" else -1,
-                                    )
-                            elif key == "[" and focused > 0:
-                                panes[focused - 1], panes[focused] = (
-                                    panes[focused],
-                                    panes[focused - 1],
+                            )
+                            component.configure(updated, data_affecting=data_affecting)
+                            if updated.host.interval != base.host.interval:
+                                pane.scheduler.rebuild(
+                                    updated.host.interval,
+                                    now=time.monotonic(),
                                 )
-                                focused -= 1
-                            elif key == "]" and focused < len(panes) - 1:
-                                panes[focused], panes[focused + 1] = (
-                                    panes[focused + 1],
-                                    panes[focused],
+                            if data_affecting:
+                                refresh(
+                                    focused,
+                                    trigger=LifecycleTrigger.CONFIGURATION,
                                 )
-                                focused += 1
-                            elif key == "x" and len(panes) > 1:
-                                removed = panes.pop(focused)
-                                _shutdown_pane(removed)
-                                active_grid = _grid_for_pane_count(active_grid, len(panes))
-                                focused = min(focused, len(panes) - 1)
                             elif (
-                                adjustment_page == "advanced"
-                                and key == "P"
-                                and _project_grouping_available(_pane_display_options(pane).chart)
+                                isinstance(component, HistoricalChartComponent)
+                                and component.missing_comparison_coverage().intervals
                             ):
-                                pane.component.cycle_project_label_context()
-                            elif (
-                                adjustment_page == "advanced"
-                                and pane.attachment is not None
-                                and isinstance(_pane_display_options(pane).chart, MonitorConfig)
-                                and _pane_display_options(pane).chart.presentation.style
-                                in {"ranking", "list"}
-                                and key in {"t", "T", "s"}
-                            ):
-                                now = time.monotonic()
-                                if key == "s":
-                                    cycle_animation_style(pane.attachment, step=1, now=now)
-                                else:
-                                    pane.attachment.set_theme(
-                                        _cycle(
-                                            COLOR_SCHEMES,
-                                            pane.attachment.theme,
-                                            1 if key == "t" else -1,
-                                        ),
-                                        now,
-                                    )
-                            elif _adjustment_key_supported(
-                                _pane_display_options(pane).chart.kind,
-                                adjustment_page,
-                                key,
-                                chart=_pane_display_options(pane).chart,
-                            ):
-                                component = pane.component
-                                base = component.candidate
-                                updated = adjust_standalone(base, key)
-                                if updated != base:
-                                    _clear_changes(pane)
-                                    data_affecting = (
-                                        historical_replacement_required(base, updated)
-                                        if isinstance(component, HistoricalChartComponent)
-                                        else (
-                                            isinstance(base.chart, MonitorConfig)
-                                            and isinstance(updated.chart, MonitorConfig)
-                                            and (
-                                                base.chart.by != updated.chart.by
-                                                or base.chart.filters != updated.chart.filters
-                                            )
-                                        )
-                                    )
-                                    component.configure(updated, data_affecting=data_affecting)
-                                    if updated.host.interval != base.host.interval:
-                                        pane.scheduler.rebuild(
-                                            updated.host.interval,
-                                            now=time.monotonic(),
-                                        )
-                                    if data_affecting:
-                                        refresh(
-                                            focused,
-                                            trigger=LifecycleTrigger.CONFIGURATION,
-                                        )
-                                    elif (
-                                        isinstance(component, HistoricalChartComponent)
-                                        and component.missing_comparison_coverage().intervals
-                                    ):
-                                        refresh(
-                                            focused,
-                                            trigger=LifecycleTrigger.CONFIGURATION,
-                                            data_affecting=False,
-                                        )
+                                refresh(
+                                    focused,
+                                    trigger=LifecycleTrigger.CONFIGURATION,
+                                    data_affecting=False,
+                                )
                     paint()
                     continue
                 if adjustment_mode == "global":
@@ -2883,12 +2998,13 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     paint(force=True)
                 elif key in {"v", "V"}:
                     body_view = next_dashboard_body_view(body_view)
-                    copied_status = None
                 elif key in {"y", "Y"} and body_view != "chart":
-                    copied_status = translator.text(
-                        "status.command_copied"
-                        if copy_command(full_dashboard_command())
-                        else "status.command_copy_failed"
+                    copy_feedback.show(
+                        translator.text(
+                            "status.command_copied"
+                            if copy_command(full_dashboard_command())
+                            else "status.command_copy_failed"
+                        )
                     )
                 elif key == "\t":
                     continue
@@ -2896,8 +3012,11 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     if adjustment_mode == "pane" and focused is not None:
                         pane = panes[focused]
                         if isinstance(pane, TuiAnimationPane):
-                            pane.session.set_playback_requested(
-                                not pane.session.playback_requested, time.monotonic()
+                            now = time.monotonic()
+                            pane.session.set_host_paused(
+                                not pane.session.host_paused,
+                                now,
+                                pause_label=translator.text("status.animation_paused"),
                             )
                             paint()
                             continue
@@ -2907,6 +3026,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         item.session.host_paused for item in animation_panes
                     )
                     now = time.monotonic()
+                    dashboard_paused = not paused
                     if not paused:
                         header.scheduler.pause()
                         header.lifecycle.pause()
@@ -2916,10 +3036,18 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                             if isinstance(item.component, MonitorComponent):
                                 item.component.pause()
                             if item.attachment is not None:
-                                item.attachment.set_host_paused(True, now)
+                                item.attachment.set_host_paused(
+                                    True,
+                                    now,
+                                    pause_label=translator.text("status.animation_paused"),
+                                )
                         for item in panes:
                             if isinstance(item, TuiAnimationPane):
-                                item.session.set_host_paused(True, now)
+                                item.session.set_host_paused(
+                                    True,
+                                    now,
+                                    pause_label=translator.text("status.animation_paused"),
+                                )
                     else:
                         wall = datetime.now().astimezone()
                         header.lifecycle.resume()

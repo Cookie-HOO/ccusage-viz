@@ -55,6 +55,44 @@ def dimmed(text: str, *, color: bool) -> str:
     return f"\x1b[2m{text}\x1b[0m" if color else text
 
 
+@dataclass(slots=True)
+class TransientFeedback:
+    """A short-lived informational row that requests repaint at expiry."""
+
+    message: str | None = None
+    expires_at: float = 0.0
+
+    def show(self, message: str, *, now: float | None = None) -> None:
+        self.message = message
+        self.expires_at = (time.monotonic() if now is None else now) + 3.0
+
+    def current(self, *, now: float | None = None) -> str | None:
+        if (
+            self.message is not None
+            and (time.monotonic() if now is None else now) >= self.expires_at
+        ):
+            self.message = None
+        return self.message
+
+    def remaining(self, *, now: float | None = None) -> float | None:
+        if self.current(now=now) is None:
+            return None
+        reference = time.monotonic() if now is None else now
+        return max(0.0, self.expires_at - reference)
+
+
+def feedback_lines(
+    feedback: TransientFeedback,
+    *,
+    width: int,
+    color: bool,
+    now: float | None = None,
+) -> tuple[str, ...]:
+    """Render a neutral feedback row without warning affordances."""
+    message = feedback.current(now=now)
+    return () if message is None else (controls_line(message, width=width, color=color),)
+
+
 def notice_lines(
     notices: tuple[str, ...],
     *,

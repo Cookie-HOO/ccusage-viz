@@ -207,7 +207,7 @@ def parse_codex_sessions(data: object) -> tuple[UsageRecord, ...]:
         row = _object(item, path)
         identity = codex_project_identity(row, path)
         project = (
-            make_project_ref("codex", *identity)
+            make_project_ref("codex", *identity, path_backed=True)
             if identity is not None
             else make_project_ref("codex", "unassigned-codex", "Unassigned Codex")
         )

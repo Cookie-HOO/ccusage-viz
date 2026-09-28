@@ -220,6 +220,16 @@ def test_project_agent_observation_warns_without_contributing_records() -> None:
                 "agents": [
                     {
                         "agent": "pi",
+                        "project": "relative/project",
+                        "inputTokens": 2,
+                        "outputTokens": 3,
+                        "cacheReadTokens": 5,
+                        "cacheCreationTokens": 7,
+                        "totalTokens": 20,
+                    },
+                    {
+                        "agent": "dsh",
+                        "project": "/Users/me/Projects/demo",
                         "inputTokens": 2,
                         "outputTokens": 3,
                         "cacheReadTokens": 5,

@@ -25,8 +25,6 @@ from ccusage_viz.processing.monitor import (
     ObservedTPM,
     _copy_observer,
     monitor_counters,
-    monitor_key_sort_key,
-    monitor_rank_keys,
 )
 from ccusage_viz.project_identity import (
     ExactProjectDisplayKey,
@@ -81,6 +79,7 @@ class MonitorComponent:
         "error",
         "generation",
         "last_elapsed",
+        "last_positive_activity",
         "monitor_started_at",
         "observer",
         "owner_id",
@@ -124,6 +123,7 @@ class MonitorComponent:
         self.accepted_at: datetime | None = None
         self.refreshed_at: float | None = None
         self.last_elapsed: float | None = None
+        self.last_positive_activity: dict[tuple[str, MonitorKey], datetime] = {}
         self.monitor_started_at = monitor_started_at
         self.error: BaseException | None = None
         self.rebaseline_pending = False
@@ -216,10 +216,20 @@ class MonitorComponent:
             self.observer.update_y_axis(max(values.values(), default=0.0))
         else:
             self.observer.add(counters, now, wall)
-            values = self.observer.current_values()
+            interval = self.observer.current_interval
+            if interval is not None:
+                dimension = self._monitor_config(self.candidate).by
+                if dimension is not None:
+                    for key, value in self.observer.current_sources(interval).items():
+                        if value > 0:
+                            self.last_positive_activity[dimension, key] = wall
+            projection = self.observer.current_projection(
+                activity_by_source=self._activity_for_current_dimension()
+            )
+            values = projection.values
             if values:
                 self.value_changes.accept(values)
-                self.rank_changes.accept(monitor_rank_keys(values))
+                self.rank_changes.accept(key for key in projection.ordered_keys if key != "Other")
             else:
                 self.clear_changes()
             self.observer.update_y_axis(max(values.values(), default=0.0))
@@ -258,6 +268,7 @@ class MonitorComponent:
         preview.accepted_at = self.accepted_at
         preview.refreshed_at = self.refreshed_at
         preview.last_elapsed = self.last_elapsed
+        preview.last_positive_activity = dict(self.last_positive_activity)
         preview.render_revision = self.render_revision
         preview.display_query_pending = self._data_configuration_changed(
             self.accepted_options, options
@@ -347,6 +358,16 @@ class MonitorComponent:
             observed_current=self._current_entries(),
         )
 
+    def _activity_for_current_dimension(self) -> dict[MonitorKey, datetime]:
+        dimension = self._monitor_config(self._active_options()).by
+        if dimension is None:
+            return {}
+        return {
+            key: activity
+            for (recorded_dimension, key), activity in self.last_positive_activity.items()
+            if recorded_dimension == dimension
+        }
+
     def ranking_model(
         self,
         *,
@@ -354,12 +375,11 @@ class MonitorComponent:
         count: int = 32,
         wall: datetime | None = None,
     ) -> RankingModel:
-        values = self.current_values(now, wall=wall)
+        projection = self.observer.current_projection(
+            activity_by_source=self._activity_for_current_dimension()
+        )
         entries = tuple(
-            self._observed_entry(name, value)
-            for name, value in sorted(
-                values.items(), key=lambda item: (-item[1], monitor_key_sort_key(item[0]))
-            )
+            self._observed_entry(name, projection.values[name]) for name in projection.ordered_keys
         )
         return RankingModel(
             (),

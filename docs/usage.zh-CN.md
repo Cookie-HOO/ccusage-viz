@@ -62,6 +62,46 @@ ccuv dashboard wide --demo
 启动前的吞吐历史。独立图表占满终端。Dashboard 是单独的多 Pane Host，复用相同的图表组件，
 而不是独立图表的包装器。
 
+## 动画
+
+`animate` 不依赖 Provider：它不会安装、调用或查询 `ccusage`。它默认播放 rain，并在运行时从已安装的
+`term-animate` curated catalog 发现动画。参数使用库稳定的 effect ID，因此新发布且允许当前 Host 使用的
+动画不需要 ccuv 再维护第二份动画清单：
+
+```bash
+ccuv animate                 # 默认 rain
+ccuv animate mole-cat
+ccuv animate snow
+ccuv animate night-sky
+ccuv animate lightning
+ccuv animate meteor-shower
+```
+
+独立 Host 完全拥有输入：`q`、Escape、Ctrl-C 退出；Space 暂停或恢复；`m` 打开调整视图；
+高频页的 `t`/`T` 切换 ccuv 主题，`s` 循环当前发现的独立动画。`a` 在高频和高级页间切换；
+第一个高级页没有动画专属设置。底层动画库不会接收键盘输入。
+
+动画使用当前终端的颜色能力并遵守 `--ascii`。ccuv 会把可用 viewport 直接交给 term-animate，
+由其投影逻辑保证画面有边界。动画状态仅在内存中保留：独立 Host、Dashboard 动画 Pane 和 Monitor
+附件都有独立的主题、样式与播放状态，退出 ccuv 后全部丢弃。
+
+Dashboard Pane 必须显式给出样式，裸 `animate` 无效：
+
+```bash
+ccuv dashboard --pane "timeline --period 7d" --pane "animate rain"
+```
+
+Dashboard preset 不会自动添加动画 Pane；但 Dashboard 的面板选择器可以加入默认 rain 的动画 Pane，
+其快捷调整页会循环当前所有符合条件的 catalog 动画。
+
+对于 `monitor` 的 `ranking` 与 `list` 样式，附件默认关闭。在高级调整页中按 `s` 可启用第一个
+Monitor-eligible 效果；随后 `s`/`S` 会循环 term-animate 声明的所有效果，最后进入 ccuv 本地的`无`。
+启用后的附件使用 `classic` 动画库主题，独立于 Monitor 图表主题。Monitor 建立可比较的已接受 interval 前，
+附件不会显示；之后仅当最近一次**已接受** interval 的总 Token 增量严格大于零时播放。零增量会让支持状态的
+场景显示 idle；基线/重新基线、pending、error 和丢弃的样本都不会推进它。`t`/`T` 调整保存的附件主题。
+`无`只移除该 Monitor 附件；它不是独立 `animate` 或 Dashboard 动画 Pane 的样式。其他 Monitor 样式不会展示
+或消费这些附件控制。
+
 <!-- guide:shared-standalone-options -->
 
 ## 独立图表共用 CLI 参数
@@ -313,12 +353,15 @@ ccuv dashboard wide --demo
 | 预设 | Pane 组成 | 网格/布局 | Dashboard 样式 |
 | --- | --- | --- | --- |
 | `wide` | Timeline、Stack、Ranking、按模型分组的 Monitor | `2x2` | `framed` |
+| `wide-clock` | 数字时钟，然后是标准 wide 的 Timeline、Stack、Ranking 和模型 Monitor Pane | 带短首行的 `spotlight-wide` `2x2` | `framed` |
 | `spotlight-wide` | Timeline、Stack、Ranking | 带 `spotlight-wide` 的 `2x2` | `framed` |
 | `spotlight-wide2` | Timeline、Stack、Ranking、按模型分组的 Monitor | 带 `spotlight-wide2` 的 `2x2` | `framed` |
 | `narrow` | 14 天 Timeline、项目 Ranking、模型 Monitor | `3x1` | `framed` |
+| `narrow-clock` | 数字时钟，然后是 narrow 的 Timeline、项目 Ranking 和模型 Monitor Pane | 带短首行的 `4x1` | `framed` |
 | `all` | 两个 Timeline、Calendar、Ranking、两个 Stack 与四个 Monitor 变体 | `5x2` | `split` |
 
-默认 `wide` Pane 使用 `compact` 密度，并刻意采用不同图表主题/样式。`spotlight-wide` 让第一个 Pane
+默认 `wide` Pane 使用 `compact` 密度，并刻意采用不同图表主题/样式。`wide-clock` 与 `narrow-clock`
+是时钟预设：数字时钟是完整的动画 Pane，而不是 Dashboard Header。`spotlight-wide` 让第一个 Pane
 占据前导宽区域；`spotlight-wide2` 让前两个 Pane 占据连续的宽行。
 
 预设是启动模板，不是 `--grid` 的取值。重复 `--pane` 会追加到预设 Pane 后；需要时 Host 会扩展预设

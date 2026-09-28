@@ -4,6 +4,7 @@ from argparse import Namespace
 import pytest
 
 from ccusage_viz import __version__
+from ccusage_viz.animation import animation_style_choices
 from ccusage_viz.cli import (
     ShortCircuitKind,
     _explicit_fields,
@@ -40,6 +41,19 @@ def test_subcommand_help_is_localized(
         parser.parse_args([command, "--help"])
     assert caught.value.code == 0
     assert description in capsys.readouterr().out
+
+
+def test_animate_gallery_preserves_positional_initial_style() -> None:
+    parser = build_parser(load_translator("en"))
+
+    default = _to_options(parser.parse_args(["animate", "--gallery"]))
+    clock = _to_options(parser.parse_args(["animate", "digital-clock", "--gallery"]))
+
+    assert isinstance(default, AnimationLaunch)
+    assert default.gallery
+    assert default.animation.style == animation_style_choices("standalone")[0]
+    assert clock.gallery
+    assert clock.animation.style == "digital-clock"
 
 
 def test_default_command_injection_preserves_animate() -> None:
@@ -121,12 +135,12 @@ def test_animate_help_is_localized(capsys: pytest.CaptureFixture[str]) -> None:
     assert "运行不依赖数据提供方的终端动画" in capsys.readouterr().out
 
 
-def test_animate_defaults_to_rain_and_rejects_chart_options() -> None:
+def test_animate_defaults_to_first_discovered_style_and_rejects_chart_options() -> None:
     parser = build_parser(load_translator("en"))
     options = _to_options(parser.parse_args(["animate"]))
 
     assert isinstance(options, AnimationLaunch)
-    assert options.animation.style == "rain"
+    assert options.animation.style == animation_style_choices("standalone")[0]
     with pytest.raises(UsageError) as caught:
         parser.parse_args(["animate", "--density", "compact"])
     assert caught.value.key == "error.arguments"
@@ -135,8 +149,10 @@ def test_animate_defaults_to_rain_and_rejects_chart_options() -> None:
 def test_animate_invalid_style_fails_during_option_materialization() -> None:
     parser = build_parser(load_translator("en"))
 
+    options = _to_options(parser.parse_args(["animate", "snow"]))
+    assert options.animation.style == "snow"
     with pytest.raises(UsageError):
-        _to_options(parser.parse_args(["animate", "snow"]))
+        _to_options(parser.parse_args(["animate", "not-an-animation"]))
 
 
 def test_dashboard_accepts_explicit_animation_pane_and_rejects_bare_animate() -> None:
@@ -147,7 +163,13 @@ def test_dashboard_accepts_explicit_animation_pane_and_rejects_bare_animate() ->
 
     assert isinstance(options.panes[1], AnimationPaneConfig)
     assert options.panes[1].animation.style == "rain"
-    for fragment in ("animate", "animate rain extra", "animate snow"):
+    assert (
+        _to_options(parser.parse_args(["dashboard", "--pane", "animate snow"]))
+        .panes[0]
+        .animation.style
+        == "snow"
+    )
+    for fragment in ("animate", "animate rain extra", "animate not-an-animation"):
         with pytest.raises(UsageError) as caught:
             _to_options(parser.parse_args(["dashboard", "--pane", fragment]))
         assert caught.value.key == "error.tui_panel"
@@ -458,18 +480,21 @@ def test_dashboard_rejects_non_positive_or_non_finite_timeout(timeout: str) -> N
     assert caught.value.key == "error.arguments"
 
 
-def test_bare_dashboard_is_equivalent_to_wide_preset() -> None:
+def test_bare_dashboard_is_equivalent_to_wide_clock_preset() -> None:
     parser = build_parser(load_translator("en"))
 
     bare = _to_options(parser.parse_args(["dashboard"]))
-    wide = _to_options(parser.parse_args(["dashboard", "wide"]))
+    wide_clock = _to_options(parser.parse_args(["dashboard", "wide-clock"]))
 
-    assert bare == wide
+    assert bare == wide_clock
     assert bare.host.grid == "2x2"
     assert bare.host.refresh_interval == 60
     assert bare.host.sampling_interval == 15
-    assert all(isinstance(pane, ChartPaneConfig) for pane in bare.panes)
-    assert tuple(pane.chart.kind for pane in bare.panes) == (
+    assert isinstance(bare.panes[0], AnimationPaneConfig)
+    assert bare.panes[0].animation.style == "digital-clock"
+    assert tuple(
+        pane.chart.kind for pane in bare.panes[1:] if isinstance(pane, ChartPaneConfig)
+    ) == (
         "timeline",
         "stack",
         "ranking",
@@ -655,6 +680,7 @@ def test_dashboard_rejects_invalid_layout_weights(
     "arguments",
     [
         ["dashboard", "spotlight-wide", "--grid", "2x2"],
+        ["dashboard", "wide-clock", "--layout", "auto"],
         ["dashboard", "spotlight-wide2", "--layout", "auto"],
         ["dashboard", "--pane", "timeline", "--grid", "1x1", "--layout", "auto"],
     ],
@@ -668,6 +694,35 @@ def test_dashboard_rejects_conflicting_preset_grid_and_layout(
         _to_options(parser.parse_args(arguments))
 
     assert caught.value.key == "error.arguments"
+
+
+def test_dashboard_narrow_clock_reuses_narrow_panes_with_short_clock_row() -> None:
+    parser = build_parser(load_translator("en"))
+
+    narrow = _to_options(parser.parse_args(["dashboard", "narrow"]))
+    narrow_clock = _to_options(parser.parse_args(["dashboard", "narrow-clock"]))
+
+    assert isinstance(narrow_clock.panes[0], AnimationPaneConfig)
+    assert narrow_clock.panes[0].animation.style == "digital-clock"
+    assert narrow_clock.panes[1:] == narrow.panes
+    assert narrow_clock.host.grid == "4x1"
+    assert narrow_clock.host.row_weights == (6, 14, 14, 12)
+    assert narrow_clock.host.style == "framed"
+
+
+def test_dashboard_wide_clock_reuses_wide_panes_below_short_clock_row() -> None:
+    parser = build_parser(load_translator("en"))
+
+    wide = _to_options(parser.parse_args(["dashboard", "wide"]))
+    wide_clock = _to_options(parser.parse_args(["dashboard", "wide-clock"]))
+
+    assert isinstance(wide_clock.panes[0], AnimationPaneConfig)
+    assert wide_clock.panes[0].animation.style == "digital-clock"
+    assert wide_clock.panes[1:] == wide.panes
+    assert wide_clock.host.grid == "2x2"
+    assert wide_clock.host.layout == "spotlight-wide"
+    assert wide_clock.host.row_weights == (6, 14, 14)
+    assert wide_clock.host.style == "framed"
 
 
 def test_dashboard_narrow_and_all_presets_expand_to_concrete_state() -> None:

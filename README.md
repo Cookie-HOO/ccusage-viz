@@ -4,7 +4,7 @@
 
 [![PyPI](https://img.shields.io/pypi/v/ccusage-viz.svg)](https://pypi.org/project/ccusage-viz/) [![Python](https://img.shields.io/pypi/pyversions/ccusage-viz.svg)](https://pypi.org/project/ccusage-viz/) [![License: GPL v3](https://img.shields.io/badge/License-GPL%20v3-blue.svg)](LICENSE) [![CI](https://github.com/Cookie-HOO/ccusage-viz/actions/workflows/ci.yml/badge.svg)](https://github.com/Cookie-HOO/ccusage-viz/actions/workflows/ci.yml)
 
-> **Alpha · 0.1.3** — interfaces may change before 1.0. See the [roadmap](ROADMAP.md) for planned work.
+> **Alpha · 0.2.0** — interfaces may change before 1.0. See the [roadmap](ROADMAP.md) for current direction.
 
 `ccusage-viz` is an independent, unofficial terminal visualizer for
 [`ccusage`](https://github.com/ryoppippi/ccusage) token data. It turns
@@ -39,125 +39,46 @@ pricing, balances, quotas, allowances, or other non-token account analytics.
 
 ## Dashboard presets
 
-`dashboard` composes independently configured charts in one terminal. Start
-with the default overview:
+`dashboard` composes independently configured charts in one terminal. The default
+preset is `wide-clock`:
 
 ```bash
-ccuv dashboard wide
+ccuv dashboard
 ```
 
-### `wide` (default)
-
-```bash
-ccuv dashboard wide
-```
-
-A balanced 2×2 overview of Timeline, Stack, Ranking, and Monitor panes.
-
-![Wide Dashboard preset: balanced 2×2 overview](docs/assets/readme/dashboard-wide.png)
-
-### `narrow`
-
-```bash
-ccuv dashboard narrow
-```
-
-A compact, vertically focused layout for a narrower terminal.
-
-![Narrow Dashboard preset: vertically focused compact layout](docs/assets/readme/dashboard-narrow.png)
-
-### `all`
-
-```bash
-ccuv dashboard all
-```
-
-A broad gallery that keeps several representative pane forms visible at once.
-
-![All Dashboard preset: broad gallery of representative panes](docs/assets/readme/dashboard-all.png)
-
-### `spotlight-wide`
-
-```bash
-ccuv dashboard spotlight-wide
-```
-
-Timeline receives the leading full-width row; the remaining panes follow below.
-
-![Spotlight-wide Dashboard preset: Timeline leads in a full-width row](docs/assets/readme/dashboard-spotlight-wide.png)
-
-### `spotlight-wide2`
-
-```bash
-ccuv dashboard spotlight-wide2
-```
-
-Timeline and Stack receive consecutive full-width rows before the smaller panes.
-
-![Spotlight-wide2 Dashboard preset: Timeline and Stack lead in consecutive full-width rows](docs/assets/readme/dashboard-spotlight-wide2.png)
+| Preset | Command | Layout | Preview |
+| --- | --- | --- | --- |
+| 【Recommended—wide terminal】 `wide-clock` **(default)** | `ccuv dashboard wide-clock` | Best for an all-purpose overview with a live clock. Clock + balanced 2×2. | <img src="docs/assets/readme/dashboard-wide-clock.png" alt="Preview" width="180"> |
+| 【Recommended—sidebar】 `narrow-clock` | `ccuv dashboard narrow-clock` | Best for a sidebar with a live clock. Clock + vertical 4×1. | <img src="docs/assets/readme/dashboard-narrow-clock.png" alt="Preview" width="180"> |
+| `wide` | `ccuv dashboard wide` | Best for a balanced data-only overview. Balanced 2×2. | <img src="docs/assets/readme/dashboard-wide.png" alt="Preview" width="180"> |
+| `narrow` | `ccuv dashboard narrow` | Best for a compact, narrow-terminal overview. Vertical focus. | <img src="docs/assets/readme/dashboard-narrow.png" alt="Preview" width="180"> |
+| `all` | `ccuv dashboard all` | Best for comparing many pane types at once. Broad gallery. | <img src="docs/assets/readme/dashboard-all.png" alt="Preview" width="180"> |
+| `spotlight-wide` | `ccuv dashboard spotlight-wide` | Best for prioritizing Timeline trends. Timeline-led. | <img src="docs/assets/readme/dashboard-spotlight-wide.png" alt="Preview" width="180"> |
+| `spotlight-wide2` | `ccuv dashboard spotlight-wide2` | Best for prioritizing Timeline and Stack together. Timeline + Stack-led. | <img src="docs/assets/readme/dashboard-spotlight-wide2.png" alt="Preview" width="180"> |
 
 > [!TIP]
 > Dashboard coordinates pane queries: identical in-flight provider requests are
 > shared, avoiding duplicate work while multiple panes refresh.
 
-## When to use a standalone chart
+## Standalone views
 
 Choose a standalone view when you need to focus on one question rather than an
 overview composed from multiple panes.
 
-### Timeline
-
-Use Timeline for daily token trends, grouped by model, agent, or project:
-
-```bash
-ccuv timeline
-```
-
-The 14-day view makes recent daily movement easy to compare.
-
-![Timeline view: 14-day daily token trend](docs/assets/readme/standalone-timeline-14d.png)
-
-The 13-month view makes longer-term changes visible at a coarser scale.
-
-![Timeline view: 13-month long-range trend](docs/assets/readme/standalone-timeline-13mo.png)
-
-### Calendar
-
-Use Calendar to scan a longer period for active days, streaks, and concentrated
-usage:
-
-```bash
-ccuv calendar
-```
-
-![Calendar view: contribution heatmap with activity intensity](docs/assets/readme/standalone-calendar.png)
-
-### Stack
-
-Use Stack to compare input, output, and cache-token composition over time:
-
-```bash
-ccuv stack --cache split
-```
-
-This view emphasizes the overall composition of token types.
-
-![Stack view: token composition over time](docs/assets/readme/standalone-stack-composition.png)
-
-This variation separates cache reads from cache creation.
-
-![Stack view: cache reads versus cache creation](docs/assets/readme/standalone-stack-cache-split.png)
-
-### Ranking
-
-Use Ranking to find the projects, models, or agents with the most tokens in a
-range:
-
-```bash
-ccuv ranking --by project
-```
-
-![Ranking view: projects ordered by total tokens](docs/assets/readme/standalone-ranking.png)
+| Category | View | Command | Use it for | Preview |
+| --- | --- | --- | --- | --- |
+| Trends `timeline` | Timeline — 14 days | `ccuv timeline` | Recent daily token trends grouped by model, agent, or project. | <img src="docs/assets/readme/standalone-timeline-14d.png" alt="Preview" width="180"> |
+| Trends `timeline` | Timeline — 13 months | `ccuv timeline --period 13mo` | Longer-term changes at a coarser scale. | <img src="docs/assets/readme/standalone-timeline-13mo.png" alt="Preview" width="180"> |
+| Activity heatmap `calendar` | Calendar | `ccuv calendar` | Active days, streaks, and concentrated usage over a longer period. | <img src="docs/assets/readme/standalone-calendar.png" alt="Preview" width="180"> |
+| Token composition `stack` | Stack — composition | `ccuv stack` | Overall input, output, and cache-token composition over time. | <img src="docs/assets/readme/standalone-stack-composition.png" alt="Preview" width="180"> |
+| Token composition `stack` | Stack — cache split | `ccuv stack --cache split` | Cache reads versus cache creation over time. | <img src="docs/assets/readme/standalone-stack-cache-split.png" alt="Preview" width="180"> |
+| Historical ranking `ranking` | Ranking | `ccuv ranking --by project` | Projects, models, or agents with the most tokens in a range. | <img src="docs/assets/readme/standalone-ranking.png" alt="Preview" width="180"> |
+| Terminal animations `animate` | Animation gallery | `ccuv animate --gallery` | Provider-free presentation-only animations; optionally specify a style, for example `ccuv animate digital-clock --gallery`. Space pauses or resumes playback; `m` opens local style and theme controls. | <img src="docs/assets/readme/standalone-animation-gallery.gif" alt="Preview" width="180"> |
+| Usage monitoring `monitor` | Monitor — throughput | `ccuv monitor` | Process-local throughput from repeated cumulative snapshots, not reconstructed hourly history. The observation begins after its sampling baseline; Timeline marks the invocation start while visible. | <img src="docs/assets/readme/standalone-monitor-throughput.png" alt="Preview" width="180"> |
+| Usage monitoring `monitor` | Monitor — cumulative bars | `ccuv monitor --style cumulative-bars` | Retained local-day token increments. Press `w` for Today/Yesterday and `g` for hourly/half-hour buckets; unobserved periods remain distinct from observed zero values. | <img src="docs/assets/readme/standalone-monitor-cumulative-bars.png" alt="Preview" width="180"> |
+| Usage monitoring `monitor` | Monitor — grouped ranking | `ccuv monitor --by project` | The selected dimension ranked within its observed window. | <img src="docs/assets/readme/standalone-monitor-ranking.png" alt="Preview" width="180"> |
+| Usage monitoring `monitor` | Monitor — list | `ccuv monitor` | Process and item detail alongside the observation. | <img src="docs/assets/readme/standalone-monitor-list.png" alt="Preview" width="180"> |
+| Usage monitoring `monitor` | Monitor animation attachment | In Monitor `ranking` or `list`: press `m`, then `s` | Optional animation below the data. Disabled by default; `s`/`S` cycles eligible effects and ccuv-local `none`, while `t`/`T` changes only its theme. It waits for a comparable accepted interval and never causes another usage query. | <img src="docs/assets/readme/standalone-monitor-animation.gif" alt="Preview" width="180"> |
 
 > [!TIP]
 > Project Ranking uses conservative **Name** aggregation by default: an unambiguous
@@ -165,68 +86,6 @@ ccuv ranking --by project
 > show the safe source rows before aggregation, and equal non-empty `merge_group`
 > values identify the rows summed into one chart project. Use
 > `--project-aggregation exact` to disable cross-Agent aggregation.
-
-### Project attribution coverage
-
-The compatibility baseline below was verified on macOS with **ccusage 20.0.23**.
-“Token totals” means ccusage reports the agent in unified usage data. “Historical
-project attribution” requires a stable, real project identity for each record.
-
-| Agent | Token totals | Historical project attribution | Agent version | ccusage version | Evidence |
-| --- | --- | --- | --- | --- | --- |
-| Claude Code | Verified | Verified | 2.1.278 | 20.0.23 | `claude daily --instances --json` provides project records. |
-| Codex | Verified | Verified | 0.139.0 | 20.0.23 | Uses ccusage `cwd`/project fields when present; otherwise resolves only matching local `session_meta.cwd` metadata. |
-| OpenCode | Verified | Unsupported (verified) | 1.17.20 | 20.0.23 | Real session output has no project identity field. |
-| Antigravity | Verified | Unsupported (verified) | 2.0.10 | 20.0.23 | Real `projectPath` values were the generic constant `Antigravity`, not workspaces. |
-
-Historical project views with OpenCode, Antigravity, or another unsupported agent
-show a warning and do not manufacture project rows; that agent's project usage
-may therefore be absent or incomplete. Default **Name** project aggregation only
-combines an unambiguous Claude–Codex pair; it never merges projects within one
-Agent and may use private parent segments only to disambiguate a shared basename.
-It does not prove those records came from one checkout. Use **Exact** project
-aggregation to keep every source identity separate.
-
-To move an agent to **Verified**, include in the same change a sanitized,
-non-empty real-data fixture, parser/provider coverage, project-ranking end-to-end
-validation, reconciliation with unified daily token totals, and the exact tested
-agent plus ccusage version.
-
-### Monitor
-
-Use Monitor for process-local throughput observed from repeated cumulative
-snapshots—not reconstructed hourly history:
-
-```bash
-ccuv monitor
-```
-
-An observed throughput window starts after a sampling baseline is established. Timeline views mark
-this Monitor invocation's start while it remains in the visible window, so time before the mark
-means unobserved rather than zero usage. The marker is a line at every density; its label is shown
-at full and compact density when space allows. Ranking and list presentations do not show it.
-
-![Monitor view: observed token throughput window](docs/assets/readme/standalone-monitor-throughput.png)
-
-Use cumulative bars to inspect retained Monitor token increments across the local
-calendar day, rather than TPM or reconstructed historical activity:
-
-```bash
-ccuv monitor --style cumulative-bars
-```
-
-Press `w` to switch between Today and Yesterday, and `g` to switch hourly and
-half-hour buckets. Unobserved periods remain distinct from observed zero values.
-
-![Monitor view: cumulative token bars by local hour](docs/assets/readme/standalone-monitor-cumulative-bars.png)
-
-The grouped view ranks the selected dimension within the observed window.
-
-![Monitor view: grouped ranking](docs/assets/readme/standalone-monitor-ranking.png)
-
-The list view provides process and item detail alongside the observation.
-
-![Monitor view: process and list detail](docs/assets/readme/standalone-monitor-list.png)
 
 > [!TIP]
 > Need several focused charts together? Compose standalone chart commands into a
@@ -306,6 +165,12 @@ Ctrl-C, or EOF cancels it. Demo mode, redirected/noninteractive runs, and custom
 `--ccusage-bin` runs never prompt or install automatically. Install
 [`ccusage`](https://github.com/ryoppippi/ccusage) manually when npm is
 unavailable.
+
+> [!TIP]
+> The published `ccusage` package does not include DeepSeek Harness (DSH)
+> statistics. The unofficial [`oksure/ccusage` DSH branch](https://github.com/oksure/ccusage/tree/contrib/dsh-usage-adapter)
+> adds `ccusage dsh` reports; it may drift from upstream. ccuv has no DSH
+> collector of its own.
 
 ## Further reading
 

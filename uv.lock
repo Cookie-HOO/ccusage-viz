@@ -32,7 +32,7 @@ wheels = [
 
 [[package]]
 name = "ccusage-viz"
-version = "0.1.3"
+version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "plotext" },
@@ -49,7 +49,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "plotext", specifier = ">=6.1,<7" },
-    { name = "term-animate", editable = "../term-animate" },
+    { name = "term-animate", specifier = ">=0.1.0,<0.2.0" },
 ]
 
 [package.metadata.requires-dev]
@@ -305,25 +305,15 @@ wheels = [
 [[package]]
 name = "term-animate"
 version = "0.1.0"
-source = { editable = "../term-animate" }
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cairosvg" },
     { name = "pillow" },
     { name = "wcwidth" },
 ]
-
-[package.metadata]
-requires-dist = [
-    { name = "cairosvg", specifier = ">=2.7,<3" },
-    { name = "pillow", specifier = ">=11,<12" },
-    { name = "wcwidth", specifier = ">=0.2.13,<0.3" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "pytest", specifier = ">=8.4,<9" },
-    { name = "ruff", specifier = ">=0.13,<0.14" },
-    { name = "ty", specifier = ">=0.0.1a20,<0.1" },
+sdist = { url = "https://files.pythonhosted.org/packages/1b/b5/64da50c9650ea96bdcbf03d257fbc35b6acd0506895f2c9ee7b8149b6e05/term_animate-0.1.0.tar.gz", hash = "sha256:e578a77f8975c4a1ea43f175ee707562759c16c1128e8f4ac835fc0d2d3a3389", size = 78713, upload-time = "2026-09-28T06:53:53.446Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/50/fc/dff58fe048a88c043c56a3b793f212cc5013117885283d6e878e4baaab51/term_animate-0.1.0-py3-none-any.whl", hash = "sha256:d95fdd199950aebb91d9b9b4bd58a8083e84b6bf57af6ba796fa6f2a33d939f1", size = 89542, upload-time = "2026-09-28T06:53:52.208Z" },
 ]
 
 [[package]]

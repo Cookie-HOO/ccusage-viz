@@ -2,14 +2,14 @@ import shlex
 import threading
 from contextlib import nullcontext
 from dataclasses import replace
-from datetime import date
+from datetime import UTC, date, datetime
 from io import StringIO
 
 import pytest
 
 import ccusage_viz.tui as tui_module
 import ccusage_viz.tui_input as tui_input_module
-from ccusage_viz.animation import animation_spec
+from ccusage_viz.animation import animation_spec, animation_style_choices
 from ccusage_viz.bootstrap import build_query_runtime
 from ccusage_viz.cli import _to_options, build_parser
 from ccusage_viz.cli import parse_pane_fragment as parse_dashboard_pane
@@ -31,7 +31,13 @@ from ccusage_viz.historical_render import RenderedChart
 from ccusage_viz.i18n import load_translator
 from ccusage_viz.lifecycle import FixedIntervalScheduler, LifecycleOperation
 from ccusage_viz.monitor_component import MonitorComponent
-from ccusage_viz.options import AnimationPaneConfig, Filters, TimelineConfig
+from ccusage_viz.options import (
+    AnimationPaneConfig,
+    ChartPaneConfig,
+    Filters,
+    MonitorConfig,
+    TimelineConfig,
+)
 from ccusage_viz.query.models import QueryTrigger
 from ccusage_viz.terminal import Terminal
 from ccusage_viz.tui import (
@@ -74,25 +80,30 @@ from ccusage_viz.tui import (
 from ccusage_viz.tui_input import InputDecoder, KeyEvent, MouseEvent
 
 
-def test_dashboard_defaults_to_a_filled_four_pane_dashboard() -> None:
+def test_dashboard_defaults_to_wide_clock() -> None:
     parser = build_parser(load_translator("en"))
     options = _to_options(parser.parse_args(["dashboard"]))
     assert "dashboard" == "dashboard"
-    assert tuple(pane.chart.kind for pane in options.panes) == (
+    assert isinstance(options.panes[0], AnimationPaneConfig)
+    assert options.panes[0].animation.style == "digital-clock"
+    chart_panes = tuple(pane for pane in options.panes if isinstance(pane, ChartPaneConfig))
+    assert tuple(pane.chart.kind for pane in chart_panes) == (
         "timeline",
         "stack",
         "ranking",
         "monitor",
     )
-    assert options.panes[-1].chart.by == "model"
+    assert chart_panes[-1].chart.by == "model"
     assert options.host.refresh_interval == 60.0
     assert options.host.sampling_interval == 15.0
     assert options.host.grid == "2x2"
+    assert options.host.layout == "spotlight-wide"
+    assert options.host.row_weights == (6, 14, 14)
     assert options.host.header_style == "panel"
     assert options.host.header_summary == "day"
     assert options.host.header_interval == 60.0
     assert options.host.style == "framed"
-    assert all(pane.chart.presentation.density == "compact" for pane in options.panes)
+    assert all(pane.chart.presentation.density == "compact" for pane in chart_panes)
 
 
 def test_dashboard_commands_use_local_date_context_and_reject_timezone() -> None:
@@ -177,12 +188,12 @@ def test_full_dashboard_command_serializes_runtime_layout_weight_overrides() -> 
     full = format_full_dashboard_command(
         dashboard,
         column_weights=(2, 1),
-        row_weights=(3, 1),
+        row_weights=(3, 2, 1),
     )
     reparsed = _to_options(parser.parse_args(shlex.split(full)[1:]))
 
     assert reparsed.host.column_weights == (16, 8)
-    assert reparsed.host.row_weights == (18, 6)
+    assert reparsed.host.row_weights == (12, 8, 4)
 
 
 def test_full_dashboard_command_includes_private_and_runtime_configuration() -> None:
@@ -367,6 +378,18 @@ def test_dashboard_animation_panes_keep_independent_session_state() -> None:
     assert second.session.playback_requested
 
 
+def test_dashboard_monitor_attachment_starts_disabled() -> None:
+    parser = build_parser(load_translator("en"))
+    options = _to_options(parser.parse_args(["dashboard", "--pane", "monitor --by model"]))
+    pane = _new_pane(options, options.panes[0], "dashboard:pane:0", build_query_runtime())
+
+    assert pane.attachment is not None
+    assert pane.attachment.spec.style == animation_style_choices("monitor")[0]
+    assert pane.attachment.theme == "classic"
+    assert not pane.attachment_enabled
+    assert not pane.attachment.visible
+
+
 def test_dashboard_monitor_attachment_tracks_only_accepted_activity() -> None:
     class Component:
         accepted_total_token_delta = 4
@@ -375,19 +398,39 @@ def test_dashboard_monitor_attachment_tracks_only_accepted_activity() -> None:
     attachment.set_visible(True, 0.0)
     attachment.set_viable(True, 0.0)
 
-    _update_monitor_attachment_activity(Component(), attachment, now=1.0)
+    _update_monitor_attachment_activity(
+        Component(),
+        attachment,
+        now=1.0,
+        wall=datetime(2026, 9, 28, tzinfo=UTC),
+        translator=load_translator("en"),
+    )
     assert attachment.playback_requested
 
     Component.accepted_total_token_delta = None
-    _update_monitor_attachment_activity(Component(), attachment, now=2.0)
+    _update_monitor_attachment_activity(
+        Component(),
+        attachment,
+        now=2.0,
+        wall=datetime(2026, 9, 28, 6, 42, 10, tzinfo=UTC),
+        translator=load_translator("en"),
+    )
     assert not attachment.playback_requested
+    assert attachment.activity_label == "last activity detected: 00:00:00"
+
+    _update_monitor_attachment_activity(
+        Component(),
+        attachment,
+        now=3.0,
+        wall=datetime(2026, 9, 28, 6, 43, 0, tzinfo=UTC),
+        translator=load_translator("en"),
+    )
+    assert attachment.activity_label == "last activity detected: 00:00:00"
 
 
 def test_dashboard_monitor_attachment_hides_outside_ranking_and_list() -> None:
     parser = build_parser(load_translator("en"))
-    options = _to_options(
-        parser.parse_args(["dashboard", "--pane", "monitor --style ranking"])
-    )
+    options = _to_options(parser.parse_args(["dashboard", "--pane", "monitor --style ranking"]))
     pane = _new_pane(options, options.panes[0], "pane:monitor")
     assert isinstance(pane, tui_module.TuiChartPane)
     assert pane.attachment is not None
@@ -400,13 +443,39 @@ def test_dashboard_monitor_attachment_hides_outside_ranking_and_list() -> None:
         now=1.0,
         translator=load_translator("en"),
     )
+    assert body == "chart"
+    assert not pane.attachment.visible
+
+    pane.component.observer.current_interval = type("Interval", (), {"total": 0})()
+    body = _append_monitor_attachment(
+        pane,
+        "chart",
+        terminal=Terminal(80, 24, False, True),
+        reserved_rows=0,
+        now=2.0,
+        translator=load_translator("en"),
+    )
+    assert body == "chart"
+    assert not pane.attachment.visible
+
+    pane.attachment_enabled = True
+    body = _append_monitor_attachment(
+        pane,
+        "chart",
+        terminal=Terminal(80, 24, False, True),
+        reserved_rows=0,
+        now=3.0,
+        translator=load_translator("en"),
+    )
     assert body != "chart"
     assert pane.attachment.visible
 
     candidate = pane.component.candidate
     pane.component.candidate = replace(
         candidate,
-        chart=replace(candidate.chart, presentation=replace(candidate.chart.presentation, style="bars")),
+        chart=replace(
+            candidate.chart, presentation=replace(candidate.chart.presentation, style="bars")
+        ),
     )
     assert (
         _append_monitor_attachment(
@@ -458,13 +527,12 @@ def test_dashboard_pause_cancels_automatic_panes_and_manual_refresh_remains_allo
         parser.parse_args(
             [
                 "dashboard",
+                "wide",
                 "--demo",
                 "--header-style",
                 "hidden",
                 "--header-summary",
                 "none",
-                "--pane",
-                "timeline",
             ]
         )
     )
@@ -555,16 +623,21 @@ def test_dashboard_pause_cancels_automatic_panes_and_manual_refresh_remains_allo
     expected_submissions = [(QueryTrigger.STARTUP, 0)]
     if not text_view:
         expected_submissions.append((QueryTrigger.REFRESH, 0))
-    assert [
-        (event[1], event[2]) for event in events if event[0] == "submit"
-    ] == expected_submissions
+    historical_pane_count = sum(
+        isinstance(pane, ChartPaneConfig) and pane.chart.kind != "monitor" for pane in options.panes
+    )
+    assert [(event[1], event[2]) for event in events if event[0] == "submit"] == (
+        expected_submissions[:1] * historical_pane_count
+        + expected_submissions[1:] * historical_pane_count
+    )
     painted_text = "\n".join("\n".join(event[1].rows) for event in events if event[0] == "paint")
     assert (not text_view) == ("refresh requested" in painted_text)
-    assert len(submissions) == len(expected_submissions)
-    assert submissions[0].cancelled.is_set()
+    assert (not text_view) == ("paused" in painted_text)
+    assert len(submissions) == len(expected_submissions) * historical_pane_count
+    assert all(submission.cancelled.is_set() for submission in submissions)
     assert not any(event[0] == "fail" for event in events)
-    assert events[-3:] == [
-        ("submission-cancel", 0),
+    assert events[-(historical_pane_count + 2) :] == [
+        *(("submission-cancel", 0),) * historical_pane_count,
         ("runtime-cancel",),
         ("finish",),
     ]
@@ -695,7 +768,8 @@ def test_dashboard_manual_refresh_notice_clears_after_its_final_completion(
     refreshing = [frame.rows for frame in frames if "refresh requested · in progress" in frame.rows]
     assert refreshing
     notice_row = refreshing[-1].index("refresh requested · in progress")
-    assert "r refresh all" in refreshing[-1][notice_row + 1]
+    assert "paused" in refreshing[-1][notice_row + 1]
+    assert "r refresh all" in refreshing[-1][notice_row + 2]
     assert "refresh requested · in progress" not in frames[-1].rows
 
 
@@ -707,6 +781,7 @@ def test_dashboard_layout_editor_is_visible_transactional_and_returns_to_global(
         parser.parse_args(
             [
                 "dashboard",
+                "wide",
                 "--demo",
                 "--header-style",
                 "hidden",
@@ -1454,8 +1529,9 @@ def test_query_affecting_adjustments_are_explicit() -> None:
 
 def test_dashboard_pane_adjustment_state_changes_with_page() -> None:
     parser = build_parser(load_translator("en"))
-    options = _to_options(parser.parse_args(["dashboard", "--demo"]))
-    pane = _new_pane(standalone_from_chart_pane(options, options.panes[0]), "pane:test")
+    options = _to_options(parser.parse_args(["dashboard", "wide", "--demo"]))
+    first_chart_pane = next(pane for pane in options.panes if isinstance(pane, ChartPaneConfig))
+    pane = _new_pane(standalone_from_chart_pane(options, first_chart_pane), "pane:test")
     translator = load_translator("en")
 
     quick = _pane_adjustment_state(pane, "quick", translator)
@@ -1500,6 +1576,57 @@ def test_calendar_advanced_adjustment_uses_the_shared_filter_control() -> None:
 
     assert _pane_adjustment_state(pane, "advanced", translator) == "running"
     assert _adjustment_controls("calendar", "advanced", translator) == "f filters"
+
+
+def test_dashboard_monitor_advanced_state_shows_attachment_settings() -> None:
+    parser = build_parser(load_translator("en"))
+    options = _to_options(parser.parse_args(["dashboard", "--pane", "monitor --style ranking"]))
+    pane = _new_pane(standalone_from_chart_pane(options, options.panes[0]), "pane:monitor")
+    assert pane.attachment is not None
+    pane.attachment.set_theme("dracula", 0.0)
+
+    assert "ANIMATION none · THEME dracula" in _pane_adjustment_state(
+        pane, "advanced", load_translator("en")
+    )
+    pane.attachment_enabled = True
+    english = _pane_adjustment_state(pane, "advanced", load_translator("en"))
+    chinese = _pane_adjustment_state(pane, "advanced", load_translator("zh"))
+
+    style = animation_style_choices("monitor")[0]
+    display_name = animation_spec(style, target="monitor").display_name
+    assert f"ANIMATION {display_name} · THEME dracula" in english
+    assert f"动画 {display_name} · 主题 dracula" in chinese
+    pane.attachment_enabled = False
+    assert "ANIMATION none · THEME dracula" in _pane_adjustment_state(
+        pane, "advanced", load_translator("en")
+    )
+    assert "ANIMATION" not in _pane_adjustment_state(pane, "quick", load_translator("en"))
+
+
+def test_animation_pane_footer_exposes_dashboard_management_without_view() -> None:
+    parser = build_parser(load_translator("en"))
+    options = _to_options(parser.parse_args(["dashboard", "--pane", "animate rain"]))
+    pane = _new_pane(options, options.panes[0])
+    assert isinstance(pane, tui_module.TuiAnimationPane)
+
+    quick = tui_module._animation_adjustment_footer(pane, "quick", load_translator("en"), 120)
+    advanced = tui_module._animation_adjustment_footer(pane, "advanced", load_translator("en"), 120)
+    chinese = tui_module._animation_adjustment_footer(pane, "quick", load_translator("zh"), 120)
+
+    assert "Space pause/resume" in quick[1]
+    assert "s/S style" in quick[1]
+    assert "r replace" in quick[3]
+    assert "N insert before" in quick[3]
+    assert "n insert after" in quick[3]
+    assert "x delete" in quick[3]
+    assert "v view" not in quick[3]
+    assert "y copy" not in quick[3]
+    assert "Tab next pane" in quick[4]
+    assert "{ / } width" in quick[4]
+    assert "J / K height" in quick[4]
+    assert quick[2:] == advanced[2:]
+    assert "r 替换" in chinese[3]
+    assert "v 视图" not in chinese[3]
 
 
 def test_tui_adjustment_footer_separates_dashboard_management() -> None:
@@ -1548,6 +1675,35 @@ def test_tui_adjustment_footer_separates_dashboard_management() -> None:
     assert "Tab next pane" in quick_rows[4]
     assert quick_rows[2:] == advanced_rows[2:]
     assert "[Finish]" not in "\n".join(quick_rows)
+    chinese_advanced = _adjustment_footer(
+        "当前状态：运行中", "timeline", "advanced", "chart", load_translator("zh"), 80
+    )
+    assert "a 快捷" in chinese_advanced[1]
+
+
+def test_monitor_attachment_adjustment_actions_are_localized() -> None:
+    ranking = MonitorConfig("monitor", DateRange(date(2026, 1, 1), date(2026, 1, 14)), by="model")
+    ranking = replace(ranking, presentation=replace(ranking.presentation, style="ranking"))
+
+    for language, expected in (
+        ("en", ("t/T animation theme", "s/S animation style")),
+        ("zh", ("t/T 动画主题", "s/S 动画样式")),
+    ):
+        actions = tui_module._pane_adjustment_actions(
+            "monitor",
+            "advanced",
+            load_translator(language),
+            chart=ranking,
+            attachment_available=True,
+        )
+        assert tuple(action.text for action in actions[-2:]) == expected
+
+    assert not any(
+        "animation" in action.text
+        for action in tui_module._pane_adjustment_actions(
+            "monitor", "quick", load_translator("en"), chart=ranking, attachment_available=True
+        )
+    )
 
 
 def test_tui_text_footer_is_minimal_and_only_advertises_overflow() -> None:
@@ -1905,7 +2061,7 @@ def test_pane_chooser_wraps_backward_and_escape_cancels(
         "read_event",
         lambda active, timeout: active.next(now=1.0),
     )
-    assert _choose_pane_type(Screen(), load_translator("en"), decoder, height=20) == "monitor"
+    assert _choose_pane_type(Screen(), load_translator("en"), decoder, height=20) == "animate"
 
     cancelled = InputDecoder()
     cancelled.feed("\x1b")
@@ -1948,6 +2104,28 @@ def test_pane_chooser_uses_operation_specific_copy(
         "Replace pane",
         "j/k select · Enter replace · Esc cancel",
     )
+
+
+def test_pane_chooser_localizes_names_and_includes_animation() -> None:
+    painted: list[tuple[str, str, str]] = []
+
+    assert (
+        _choose_pane_type(
+            object(),
+            load_translator("zh"),
+            InputDecoder(),
+            height=20,
+            paint_choices=lambda choices, title, controls: painted.append(
+                (choices, title, controls)
+            ),
+            read_input=lambda: KeyEvent("\x1b"),
+        )
+        is None
+    )
+
+    assert "时间趋势 (Timeline)" in painted[0][0]
+    assert "监控 (Monitor)" in painted[0][0]
+    assert "动画 (Animation)" in painted[0][0]
 
 
 def test_tui_input_decodes_keys_and_fragmented_mouse_press() -> None:
@@ -2114,10 +2292,12 @@ def test_insert_pane_uses_list_index_and_starts_only_new_pane() -> None:
     ("key", "expected"),
     (("J", (11, 13)), ("K", (13, 11))),
 )
+@pytest.mark.parametrize("first_pane", ("ranking", "animate rain"))
 def test_dashboard_pane_height_keys_adjust_only_shared_row_weights(
     monkeypatch: pytest.MonkeyPatch,
     key: str,
     expected: tuple[int, int],
+    first_pane: str,
 ) -> None:
     parser = build_parser(load_translator("en"))
     options = _to_options(
@@ -2132,7 +2312,7 @@ def test_dashboard_pane_height_keys_adjust_only_shared_row_weights(
                 "--header-summary",
                 "none",
                 "--pane",
-                "ranking",
+                first_pane,
                 "--pane",
                 "timeline",
             ]
@@ -2224,9 +2404,16 @@ def test_dashboard_pane_height_keys_adjust_only_shared_row_weights(
 
     assert copied
     assert f"--row-weight {expected[0]} --row-weight {expected[1]}" in copied[-1]
-    assert "--top 10" in copied[-1]
-    assert "command" in rendered_views
-    assert rendered_views[-2:] == ["chart", "chart"]
+    if first_pane == "ranking":
+        assert "--top 10" in copied[-1]
+    else:
+        assert "--pane 'animate rain'" in copied[-1]
+    if first_pane == "ranking":
+        assert "command" in rendered_views
+        assert rendered_views[-2:] == ["chart", "chart"]
+    else:
+        assert rendered_views
+        assert all(view == "chart" for view in rendered_views)
 
 
 def test_dashboard_pane_adjustment_preserves_chart_top_shortcuts() -> None:

@@ -1,4 +1,4 @@
-"""Host-neutral term-animate catalog and session state.
+"""Host-neutral term-animate discovery, projection, and session state.
 
 This module deliberately owns no terminal I/O, input, scheduling, or provider work.
 """
@@ -7,62 +7,90 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import Literal
 
-from term_animate.api import project_curated, select_effect
-from term_animate.models import (
-    EffectCategory,
-    LogicalState,
-    StyledRow,
-    TerminalCapabilities,
-    ThemeTokens,
-    Viewport,
-)
+from term_animate.api import curated_catalog, project
+from term_animate.catalog import embedding_targets
+from term_animate.models import Effect, LogicalState, StyledRow, TerminalCapabilities, Viewport
 
 from ccusage_viz.errors import UsageError
 from ccusage_viz.formatting import clip_width
 from ccusage_viz.i18n import Translator
-from ccusage_viz.render.palette import get_color_scheme
+
+AnimationTarget = Literal["standalone", "pane", "monitor"]
 
 
 @dataclass(frozen=True, slots=True)
 class AnimationSpec:
-    """The immutable configuration for one explicitly supported animation."""
+    """One host-selectable animation from the installed term-animate catalog."""
 
     style: str
     display_name: str
-    category: str
-    minimum_columns: int
-    minimum_rows: int
+    effect: Effect
 
 
-_ANIMATION_SPECS = (
-    AnimationSpec("mole-cat", "Mole Cat", "animal", 40, 4),
-    AnimationSpec("campy-cat", "Campy Cat", "animal", 48, 18),
-    AnimationSpec("rain", "Rain", "nature", 60, 10),
-    AnimationSpec("analog-clock", "Analog Clock", "time", 30, 13),
-    AnimationSpec("digital-clock", "Digital Clock", "time", 40, 6),
-)
-_SPECS_BY_STYLE = {spec.style: spec for spec in _ANIMATION_SPECS}
+def _animation_specs(target: AnimationTarget) -> tuple[AnimationSpec, ...]:
+    """Discover target-eligible animations in the library's curated order."""
+
+    return tuple(
+        AnimationSpec(effect.id, effect.name, effect)
+        for effect in curated_catalog().effects()
+        if effect.category is not None
+        and effect.style is not None
+        and target in embedding_targets(effect)
+    )
 
 
-def animation_style_choices() -> tuple[str, ...]:
-    """Return the fixed public catalog in display and cycling order."""
+def animation_style_choices(target: AnimationTarget = "standalone") -> tuple[str, ...]:
+    """Return the currently installed catalog choices for one ccuv host."""
 
-    return tuple(spec.style for spec in _ANIMATION_SPECS)
+    return tuple(spec.style for spec in _animation_specs(target))
 
 
-def animation_spec(style: str) -> AnimationSpec:
-    """Return an allowed animation after verifying its host-neutral library mapping."""
+def animation_spec(style: str, *, target: AnimationTarget = "standalone") -> AnimationSpec:
+    """Return a target-eligible animation by its catalog-wide unique effect id."""
 
+    specs = _animation_specs(target)
     try:
-        spec = _SPECS_BY_STYLE[style]
-    except KeyError as exc:
+        return next(spec for spec in specs if spec.style == style)
+    except StopIteration as exc:
         raise UsageError(
             "error.arguments",
-            detail=f"animation style must be one of: {', '.join(animation_style_choices())}",
+            detail=f"animation style must be one of: {', '.join(spec.style for spec in specs)}",
         ) from exc
-    select_effect(EffectCategory(spec.category), spec.style)
-    return spec
+
+
+def default_animation_spec(target: AnimationTarget = "standalone") -> AnimationSpec:
+    """Return the first currently installed animation eligible for one host."""
+
+    styles = animation_style_choices(target)
+    if not styles:
+        raise UsageError("error.arguments", detail=f"no animations are available for {target}")
+    return animation_spec(styles[0], target=target)
+
+
+def last_activity_label(translator: Translator, wall: datetime) -> str:
+    """Format the wall-clock time of a Monitor attachment's last active interval."""
+
+    return translator.text("status.animation_last_activity", time=wall.strftime("%H:%M:%S"))
+
+
+def cycle_monitor_attachment(
+    session: AnimationSessionState, *, enabled: bool, step: int, now: float
+) -> bool:
+    """Cycle a Monitor attachment through catalog styles and its local none state."""
+
+    styles = animation_style_choices("monitor")
+    if not enabled:
+        session.set_style(animation_spec(styles[0 if step > 0 else -1], target="monitor"), now)
+        session.set_visible(True, now)
+        return True
+    index = styles.index(session.spec.style)
+    if (step > 0 and index == len(styles) - 1) or (step < 0 and index == 0):
+        session.set_visible(False, now)
+        return False
+    session.set_style(animation_spec(styles[index + step], target="monitor"), now)
+    return True
 
 
 @dataclass(slots=True)
@@ -110,7 +138,11 @@ class AnimationSessionState:
     clock: AnimationClock
     wall_origin: datetime
     playback_requested: bool = True
+    idle_animation_requested: bool = False
     host_paused: bool = False
+    traversal_frozen_at: float | None = None
+    pause_label: str | None = None
+    activity_label: str | None = None
     visible: bool = True
     viable: bool = False
     next_deadline: float | None = None
@@ -133,70 +165,43 @@ class AnimationSessionState:
 
     def set_playback_requested(self, requested: bool, now: float) -> None:
         self.playback_requested = requested
+        self.reconcile_traversal(now)
         self.reconcile_clock(now)
 
-    def set_host_paused(self, paused: bool, now: float) -> None:
-        self.host_paused = paused
+    def set_idle_animation_requested(self, requested: bool, now: float) -> None:
+        """Keep Monitor idle frames playing without treating them as active traffic."""
+
+        self.idle_animation_requested = requested
         self.reconcile_clock(now)
+
+    def reconcile_traversal(self, now: float) -> None:
+        """Freeze motion once while inactive or manually paused, retaining its position."""
+
+        if not self.playback_requested or self.host_paused:
+            if self.traversal_frozen_at is None:
+                self.traversal_frozen_at = self.clock.elapsed(now)
+        else:
+            self.traversal_frozen_at = None
+
+    def set_host_paused(self, paused: bool, now: float, *, pause_label: str | None = None) -> None:
+        self.host_paused = paused
+        self.pause_label = pause_label if paused else None
+        self.reconcile_traversal(now)
+        self.reconcile_clock(now)
+
+    def set_pause_label(self, pause_label: str | None) -> None:
+        self.pause_label = pause_label
 
     def reconcile_clock(self, now: float) -> None:
-        if self.playback_requested and not self.host_paused and self.visible and self.viable:
+        if (
+            (self.playback_requested or self.idle_animation_requested)
+            and self.visible
+            and self.viable
+        ):
             self.clock.resume(now)
         else:
             self.clock.freeze(now)
             self.next_deadline = None
-
-
-def _xterm_rgb(color: int) -> tuple[int, int, int]:
-    """Convert a ccuv xterm palette entry to an RGB terminal color."""
-
-    if not 0 <= color <= 255:
-        raise ValueError(f"xterm color must be between 0 and 255: {color}")
-    basic = (
-        (0, 0, 0),
-        (128, 0, 0),
-        (0, 128, 0),
-        (128, 128, 0),
-        (0, 0, 128),
-        (128, 0, 128),
-        (0, 128, 128),
-        (192, 192, 192),
-        (128, 128, 128),
-        (255, 0, 0),
-        (0, 255, 0),
-        (255, 255, 0),
-        (0, 0, 255),
-        (255, 0, 255),
-        (0, 255, 255),
-        (255, 255, 255),
-    )
-    if color < 16:
-        return basic[color]
-    if color < 232:
-        value = color - 16
-        red, remainder = divmod(value, 36)
-        green, blue = divmod(remainder, 6)
-        return (
-            55 + 40 * red if red else 0,
-            55 + 40 * green if green else 0,
-            55 + 40 * blue if blue else 0,
-        )
-    gray = 8 + 10 * (color - 232)
-    return gray, gray, gray
-
-
-def animation_theme_tokens(theme: str) -> ThemeTokens:
-    """Map ccuv's semantic xterm palette to term-animate theme tokens."""
-
-    scheme = get_color_scheme(theme)
-    return ThemeTokens(
-        background=(0, 0, 0),
-        foreground=_xterm_rgb(scheme.other),
-        accent=_xterm_rgb(scheme.highlight),
-        secondary_accent=_xterm_rgb(scheme.cache_creation),
-        artwork=_xterm_rgb(scheme.categorical[0]),
-        muted=_xterm_rgb(scheme.other),
-    )
 
 
 def _styled_row_text(row: StyledRow, *, color: bool, width: int) -> str:
@@ -219,7 +224,7 @@ def _styled_row_text(row: StyledRow, *, color: bool, width: int) -> str:
 
 
 def _fallback_row(translator: Translator, key: str, style: str) -> str:
-    """Return the ccuv-owned localized compact or projection-failure row."""
+    """Return the ccuv-owned localized projection-failure row."""
 
     return translator.text(key, style=style)
 
@@ -238,17 +243,9 @@ class AnimationRenderer:
         now: float,
         translator: Translator,
     ) -> AnimationRenderResult:
-        if width < session.spec.minimum_columns or height < session.spec.minimum_rows:
+        if width < 1 or height < 1:
             session.set_viable(False, now)
-            return AnimationRenderResult(
-                (
-                    clip_width(
-                        _fallback_row(translator, "animation.compact", session.spec.style), width
-                    ),
-                ),
-                None,
-                False,
-            )
+            return AnimationRenderResult((), None, False)
 
         session.set_viable(True, now)
         viewport = Viewport(columns=width, rows=height)
@@ -256,29 +253,28 @@ class AnimationRenderer:
             unicode=not ascii, ascii_only=ascii, color="truecolor" if color else "none"
         )
         try:
-            if session.spec.style == "rain":
-                frame = project_curated(
-                    EffectCategory(session.spec.category),
-                    session.spec.style,
-                    viewport=viewport,
-                    capabilities=capabilities,
-                    theme=animation_theme_tokens(session.theme),
-                    monotonic_seconds=session.clock.elapsed(now),
-                    wall_time=virtual_wall_time(session, now),
-                    logical_state=(
-                        LogicalState.ACTIVE if session.clock.playing else LogicalState.IDLE
-                    ),
+            frame = project(
+                session.spec.effect,
+                viewport=viewport,
+                capabilities=capabilities,
+                theme=session.theme,
+                monotonic_seconds=session.clock.elapsed(now),
+                traversal_monotonic_seconds=session.traversal_frozen_at,
+                wall_time=virtual_wall_time(session, now),
+                pause_label=session.pause_label
+                or (
+                    session.activity_label
+                    if not session.playback_requested and not session.host_paused
+                    else None
+                ),
+                logical_state=(
+                    LogicalState.ACTIVE
+                    if session.playback_requested and not session.host_paused
+                    else LogicalState.IDLE
                 )
-            else:
-                frame = project_curated(
-                    EffectCategory(session.spec.category),
-                    session.spec.style,
-                    viewport=viewport,
-                    capabilities=capabilities,
-                    theme=animation_theme_tokens(session.theme),
-                    monotonic_seconds=session.clock.elapsed(now),
-                    wall_time=virtual_wall_time(session, now),
-                )
+                if session.spec.effect.supports_state
+                else None,
+            )
         except Exception:
             session.next_deadline = None
             return AnimationRenderResult(

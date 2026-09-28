@@ -97,6 +97,15 @@ class ObservedBucket:
     values: dict[MonitorKey, float]
 
 
+@dataclass(frozen=True, slots=True)
+class CurrentMonitorProjection:
+    """The newest interval's visible values and their canonical sources."""
+
+    values: dict[MonitorKey, float]
+    sources: dict[MonitorKey, frozenset[MonitorKey]]
+    ordered_keys: tuple[MonitorKey, ...]
+
+
 class ObservedTPM:
     """Retain authoritative Total and Model deltas independently of the active view."""
 
@@ -641,19 +650,125 @@ class ObservedTPM:
             project_label_context=self.project_label_context,
         )
 
-    def current_values(self) -> dict[MonitorKey, float]:
-        """Project only the newest valid sample pair into the current display."""
+    def current_sources(self, interval: ObservedInterval) -> dict[MonitorKey, float]:
+        if self.by is None:
+            return {"Total": interval.total}
+        return dict(getattr(interval, f"{self.by}s"))
+
+    def current_projection(
+        self, *, activity_by_source: Mapping[MonitorKey, datetime] = {}
+    ) -> CurrentMonitorProjection:
+        """Project the newest interval with canonical source provenance.
+
+        ``activity_by_source`` is component-owned accepted-wall-time state.  It is
+        only used to resolve equal current values; raw interval deltas remain the
+        authoritative display values.
+        """
         interval = self.current_interval
         if interval is None:
-            return {}
-        values = self._values(interval)
+            return CurrentMonitorProjection({}, {}, ())
+
+        raw_values = self.current_sources(interval)
+        base_values: defaultdict[MonitorKey, float] = defaultdict(float)
+        base_sources: defaultdict[MonitorKey, set[MonitorKey]] = defaultdict(set)
+        if self.by == "project":
+            exact = tuple(
+                name
+                for source in (*self.rollups, *self.intervals)
+                for name in source.projects
+                if isinstance(name, ExactProjectDisplayKey)
+            )
+            displays = project_display_keys(
+                exact,
+                self.project_aggregation,
+                context=self.project_label_context,
+            )
+        else:
+            displays = {}
+
+        for source, value in raw_values.items():
+            if self.by == "project" and isinstance(source, ExactProjectDisplayKey):
+                visible: MonitorKey = displays[source]
+            elif self.by == "model" and self.model_selectors and isinstance(source, str):
+                visible = source if _matches_selector(source, self.model_selectors) else "Other"
+            else:
+                visible = source
+            base_values[visible] += value
+            base_sources[visible].add(source)
+
         if self.by in {None, "model"}:
-            values = {key: value / interval.seconds * 60 for key, value in values.items()}
-        return _top_other(
-            values,
-            self.top if self.by is not None else None,
-            totals=self._values(interval),
+            values = {key: value / interval.seconds * 60 for key, value in base_values.items()}
+        else:
+            values = dict(base_values)
+
+        def activity(key: MonitorKey) -> datetime | None:
+            return max(
+                (
+                    activity_by_source[source]
+                    for source in base_sources[key]
+                    if source in activity_by_source
+                ),
+                default=None,
+            )
+
+        def order(item: tuple[MonitorKey, float]) -> tuple[float, int, float, tuple[str, str, str]]:
+            key, value = item
+            last_active = activity(key)
+            return (
+                -value,
+                0 if last_active is not None else 1,
+                -last_active.timestamp() if last_active is not None else 0.0,
+                monitor_key_sort_key(key),
+            )
+
+        if self.by is None or self.top is None or len(values) <= self.top:
+            ordered_keys = tuple(key for key, _ in sorted(values.items(), key=order))
+            return CurrentMonitorProjection(
+                values,
+                {key: frozenset(sources) for key, sources in base_sources.items()},
+                ordered_keys,
+            )
+
+        ordered_base = sorted(values.items(), key=order)
+        kept = {key for key, _ in ordered_base[: self.top]}
+        projected_values = {key: values[key] for key in kept}
+        projected_sources = {key: set(base_sources[key]) for key in kept}
+        omitted_values = [value for key, value in values.items() if key not in kept]
+        if omitted_values:
+            projected_values["Other"] = sum(omitted_values)
+            projected_sources["Other"] = set().union(
+                *(base_sources[key] for key in values if key not in kept)
+            )
+        ordered_keys = tuple(
+            key
+            for key, _ in sorted(
+                projected_values.items(),
+                key=lambda item: (
+                    -item[1],
+                    0
+                    if any(source in activity_by_source for source in projected_sources[item[0]])
+                    else 1,
+                    -max(
+                        (
+                            activity_by_source[source].timestamp()
+                            for source in projected_sources[item[0]]
+                            if source in activity_by_source
+                        ),
+                        default=0.0,
+                    ),
+                    monitor_key_sort_key(item[0]),
+                ),
+            )
         )
+        return CurrentMonitorProjection(
+            projected_values,
+            {key: frozenset(sources) for key, sources in projected_sources.items()},
+            ordered_keys,
+        )
+
+    def current_values(self) -> dict[MonitorKey, float]:
+        """Project only the newest valid sample pair into the current display."""
+        return self.current_projection().values
 
     def rates(self, now: float) -> dict[MonitorKey, float]:
         cutoff = now - self.window_seconds
