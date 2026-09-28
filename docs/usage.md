@@ -48,6 +48,7 @@ ccuv calendar --demo
 ccuv stack --demo --cache split
 ccuv ranking --demo --by project
 ccuv monitor --demo --by model
+ccuv animate rain
 ccuv dashboard wide --demo
 ```
 
@@ -59,6 +60,7 @@ ccuv dashboard wide --demo
 | `ranking` | Historical date range | One standalone chart | Which Agent, model, or project used the most tokens? |
 | `monitor` | Rolling observation window | One standalone chart | What throughput has this process observed since it started? |
 | `dashboard` | Host-wide cadence plus independent panes | Multi-pane Dashboard | How do several configured charts compare at once? |
+| `animate` | No usage data | One standalone animation | Show a local terminal animation without querying a provider. |
 
 Historical routes query a date range. `monitor` instead samples repeated
 cumulative snapshots while the current process runs; it cannot reconstruct
@@ -67,6 +69,60 @@ Dashboard is a separate multi-pane host built from the same chart components,
 not a wrapper around a standalone chart.
 
 <!-- guide:shared-standalone-options -->
+
+## Animation
+
+`animate` is provider-free: it does not install, invoke, or query `ccusage`.
+It defaults to rain and discovers the installed `term-animate` curated catalog
+at runtime. The selector is the library's stable effect ID, so newly released
+host-eligible effects are available without ccuv maintaining a second catalog:
+
+```bash
+ccuv animate                 # defaults to rain
+ccuv animate mole-cat
+ccuv animate snow
+ccuv animate night-sky
+ccuv animate lightning
+ccuv animate meteor-shower
+```
+
+The standalone host owns all input. `q`, Escape, and Ctrl-C exit; Space pauses
+or resumes; `m` opens the adjustment view; quick `t`/`T` cycles the ccuv theme
+and `s` cycles the currently discovered standalone styles. `a` switches between
+quick and advanced adjustment pages; the first advanced page has no
+animation-only settings. The underlying animation library never receives
+keyboard input.
+
+Animations use the current terminal color capability and honor `--ascii`.
+ccuv passes the available viewport directly to term-animate, whose projection
+is responsible for bounded artwork. Animation state is in memory only: each
+standalone host, Dashboard animation Pane, and Monitor attachment has
+independent theme/style/playback state, and all state is discarded when ccuv
+exits.
+
+A Dashboard Pane must name its style explicitly; bare `animate` is invalid:
+
+```bash
+ccuv dashboard --pane "timeline --period 7d" --pane "animate rain"
+```
+
+Dashboard presets do not add animation Panes automatically, but the Dashboard pane
+chooser can add an Animation pane with the default rain style; the pane's quick
+controls cycle every currently eligible catalog effect.
+
+For `monitor` styles `ranking` and `list`, attachments are disabled by default.
+In the advanced adjustment view, press `s` to enable the first
+Monitor-eligible effect; `s`/`S` then cycles every effect declared by
+`term-animate`, followed by ccuv-local `none`. An enabled attachment starts
+with the `classic` library theme, independently of the Monitor chart theme.
+It stays hidden until the Monitor establishes a comparable accepted interval,
+then plays only when the latest **accepted** interval has a strictly positive
+aggregate token delta; a zero delta renders the eligible stateful scene idle.
+Baseline/rebaseline, pending, error, and discarded samples do not advance it.
+`t`/`T` changes the retained attachment theme. `none` removes only that
+Monitor attachment and does not exist as a standalone `animate` or Dashboard
+Animation-pane style. Other Monitor styles do not expose or consume these
+attachment controls.
 
 ## Shared standalone CLI reference
 
@@ -360,14 +416,18 @@ ccuv dashboard wide --demo
 | Preset | Pane composition | Grid/layout | Dashboard style |
 | --- | --- | --- | --- |
 | `wide` | Timeline, Stack, Ranking, Monitor grouped by model | `2x2` | `framed` |
+| `wide-clock` | Digital Clock, then the standard wide Timeline, Stack, Ranking, and model Monitor panes | `2x2` with `spotlight-wide` and a short first row | `framed` |
 | `spotlight-wide` | Timeline, Stack, Ranking | `2x2` with `spotlight-wide` | `framed` |
 | `spotlight-wide2` | Timeline, Stack, Ranking, Monitor grouped by model | `2x2` with `spotlight-wide2` | `framed` |
 | `narrow` | 14-day Timeline, project Ranking, model Monitor | `3x1` | `framed` |
+| `narrow-clock` | Digital Clock, then narrow Timeline, project Ranking, and model Monitor panes | `4x1` with a short first row | `framed` |
 | `all` | Two Timelines, Calendar, Ranking, two Stacks, and four Monitor variants | `5x2` | `split` |
 
 The default `wide` panes use compact density and deliberately use separate
-chart themes/styles. `spotlight-wide` gives its first pane the leading wide
-area; `spotlight-wide2` gives the first two panes consecutive wide rows.
+chart themes/styles. `wide-clock` and `narrow-clock` are the clock presets:
+their Digital Clock is a complete animation Pane, not a Dashboard header.
+`spotlight-wide` gives its first pane the leading wide area; `spotlight-wide2`
+gives the first two panes consecutive wide rows.
 
 Presets are startup templates. They are not values for `--grid`. Repeated
 `--pane` values append panes after a preset's panes, and the host expands a

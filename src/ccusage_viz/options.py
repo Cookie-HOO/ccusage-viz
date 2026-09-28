@@ -4,6 +4,7 @@ from dataclasses import dataclass, replace
 from datetime import date
 from typing import Literal, TypeAlias
 
+from ccusage_viz.animation import AnimationSpec
 from ccusage_viz.core.time import DateRange, local_today, natural_period_start
 from ccusage_viz.core.time import parse_period as parse_core_period
 from ccusage_viz.errors import UsageError
@@ -148,8 +149,16 @@ class StandaloneHostConfig:
 
 
 @dataclass(frozen=True, slots=True)
-class PaneConfig:
+class ChartPaneConfig:
     chart: ChartConfig
+
+
+@dataclass(frozen=True, slots=True)
+class AnimationPaneConfig:
+    animation: AnimationSpec
+
+
+PaneConfig: TypeAlias = ChartPaneConfig | AnimationPaneConfig
 
 
 @dataclass(frozen=True, slots=True)
@@ -192,7 +201,19 @@ class DashboardLaunch:
         return field in self.explicit
 
 
-LaunchConfig: TypeAlias = StandaloneLaunch | DashboardLaunch
+@dataclass(frozen=True, slots=True)
+class AnimationLaunch:
+    process: ProcessConfig
+    host: StandaloneHostConfig
+    animation: AnimationSpec
+    explicit: frozenset[str] = frozenset()
+    gallery: bool = False
+
+    def was_explicit(self, field: str) -> bool:
+        return field in self.explicit
+
+
+LaunchConfig: TypeAlias = StandaloneLaunch | DashboardLaunch | AnimationLaunch
 
 
 @dataclass(frozen=True, slots=True)
@@ -205,7 +226,12 @@ class DashboardRoute:
     launch: DashboardLaunch
 
 
-LaunchRoute: TypeAlias = StandaloneRoute | DashboardRoute
+@dataclass(frozen=True, slots=True)
+class AnimationRoute:
+    launch: AnimationLaunch
+
+
+LaunchRoute: TypeAlias = StandaloneRoute | DashboardRoute | AnimationRoute
 
 
 def chart_kind(chart: ChartConfig) -> str:

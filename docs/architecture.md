@@ -241,19 +241,15 @@ Each built-in chart has one Definition and can create any number of Components. 
 
 Theme and Style are declarative presentation capabilities. Theme provides semantic color roles and palettes. Style describes compatible visual grammar. Neither reads Provider data, changes Data Scope, starts queries, controls the TUI lifecycle, or writes to the terminal.
 
-## Future animation capability
+## Animation hosts
 
-Animation is a separate resource kind, not a Chart variant and not an implicit post-processing step for every chart.
+Animation is a separate resource kind, not a Chart variant and not an implicit post-processing step for every chart. ccuv discovers host-eligible effects from `term-animate`'s curated catalog at runtime and uses the catalog-wide effect ID as its selection key. The library declares where an effect may embed; ccuv applies that declaration separately for standalone animation, Dashboard animation Pane, and Monitor attachment hosts.
 
-A future Animation resource may:
+`term-animate` remains a pure projection dependency. ccuv owns terminal lifecycle, input, viewport allocation, session clocks, repaint deadlines, clipping, and cleanup, while named library themes remain library-owned. It passes active/idle state only to effects that declare state support. An animation Pane owns no Provider, query runtime, scheduler, or lifecycle operation.
 
-- run through the Standalone Host;
-- occupy a Dashboard Pane;
-- update frames without querying usage data.
+Monitor attachments are local to their Monitor Pane or standalone Monitor host and are disabled by default. Users enable one from the advanced ranking/list controls; it then renders after a comparable accepted interval is available and uses ccuv's accepted token-delta decision to choose active versus idle for effects that declare state support. Their repaint deadlines redraw the existing frame only; they never initiate a query. Enabled attachments begin with the `classic` theme; advanced controls cycle all library-declared Monitor effects and then ccuv-local `none`. This transient `none` state retains no catalog effect, creates no provider work, and is unavailable to standalone animation and Dashboard animation panes.
 
-Chart Components require Query and Result Processing; Animation Components do not. Both may eventually share Host, viewport, Frame, input, and Painter infrastructure, but no common hosted-component protocol is frozen until both real implementations exist.
-
-The current architecture keeps Route dispatch and Host/content composition extensible, but adds no unused Animation route case or resource discriminator. Animation schema, resource budget, frame cadence, and Dashboard Header integration remain outside the current design. Header branding, static logos, and animation are separate future design questions.
+Chart Components require Query and Result Processing; animation projection does not. The shared terminal Frame and Painter infrastructure composes their output without turning animation into a chart component or widening chart/provider dependencies.
 
 ## Dependency direction
 

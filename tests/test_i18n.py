@@ -12,6 +12,8 @@ def test_catalogs_have_the_same_keys_and_placeholders() -> None:
     assert ZH_MESSAGES["help.grid"] == "Pane 网格：ROWSxCOLUMNS"
     assert "spotlight-wide2" in EN_MESSAGES["help.dashboard_preset"]
     assert "spotlight-wide2" in ZH_MESSAGES["help.dashboard_preset"]
+    assert "wide-clock" in EN_MESSAGES["help.dashboard_preset"]
+    assert "wide-clock" in ZH_MESSAGES["help.dashboard_preset"]
     assert "spotlight-" + "tall" not in EN_MESSAGES["help.dashboard_preset"]
     assert "spotlight-" + "tall" not in ZH_MESSAGES["help.dashboard_preset"]
     assert "spotlight-monitor" not in EN_MESSAGES["help.dashboard_preset"]
@@ -27,6 +29,25 @@ def test_catalogs_have_the_same_keys_and_placeholders() -> None:
     assert ZH_MESSAGES["label.monitor_distribution_half-hour"] == "30分钟"
     assert EN_MESSAGES["label.monitor_distribution_unobserved"] == "not observed"
     assert ZH_MESSAGES["label.monitor_distribution_unobserved"] == "未观测"
+    assert EN_MESSAGES["animation.compact"] == "{style} · expand terminal to play"
+    assert ZH_MESSAGES["animation.projection_failed"] == "{style} · 动画不可用"
+    assert (
+        EN_MESSAGES["status.monitor_attachment_settings"] == " · ANIMATION {style} · THEME {theme}"
+    )
+    assert ZH_MESSAGES["status.monitor_attachment_settings"] == " · 动画 {style} · 主题 {theme}"
+    assert (
+        EN_MESSAGES["status.animation_gallery_controls"]
+        == "Space pause/resume · t/T selected theme"
+    )
+    assert ZH_MESSAGES["status.animation_gallery_controls"] == "Space 暂停/继续 · t/T 切换选中主题"
+    assert EN_MESSAGES["status.pause"] == "pause"
+    assert ZH_MESSAGES["status.resume"] == "继续"
+    assert EN_MESSAGES["status.paused"] == "paused"
+    assert ZH_MESSAGES["status.paused"] == "已暂停"
+    assert EN_MESSAGES["status.animation_paused"] == "paused"
+    assert ZH_MESSAGES["status.animation_paused"] == "已暂停"
+    assert EN_MESSAGES["status.dashboard_paused"] == "paused"
+    assert ZH_MESSAGES["status.dashboard_paused"] == "已暂停"
 
 
 @pytest.mark.parametrize(

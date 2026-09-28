@@ -6,6 +6,14 @@ from datetime import datetime, timedelta
 from shutil import get_terminal_size
 
 from ccusage_viz.adjustment_timeout import AdjustmentIdleTimer, AdjustmentTimeout
+from ccusage_viz.animation import (
+    AnimationRenderer,
+    AnimationSessionState,
+    cycle_monitor_attachment,
+    default_animation_spec,
+    last_activity_label,
+    new_animation_session,
+)
 from ccusage_viz.bootstrap import build_chart_registry, build_query_runtime
 from ccusage_viz.command_copy import (
     copy_command,
@@ -43,11 +51,14 @@ from ccusage_viz.options import (
 )
 from ccusage_viz.render.base import RenderAudit, RenderContext
 from ccusage_viz.render.filters import active_filter_summary
+from ccusage_viz.render.palette import COLOR_SCHEMES
 from ccusage_viz.terminal import FramePainter, Terminal, compose_frame, inspect_terminal
 from ccusage_viz.terminal_ui import (
     AdjustmentAction,
+    TransientFeedback,
     adjustment_rows,
     controls_line,
+    feedback_lines,
     input_mode,
     read_key,
 )
@@ -56,6 +67,23 @@ from ccusage_viz.text_viewport import (
     render_text_viewport,
     text_viewport_overflows,
 )
+
+
+def update_attachment_activity(
+    component: MonitorComponent,
+    attachment: AnimationSessionState,
+    *,
+    now: float,
+    wall: datetime,
+    translator: Translator,
+) -> None:
+    """Apply an accepted total-token delta and retain its last active wall time."""
+
+    delta = getattr(component, "accepted_total_token_delta", None)
+    active = (delta or 0) > 0
+    attachment.set_playback_requested(active, now)
+    if active:
+        attachment.activity_label = last_activity_label(translator, wall)
 
 
 def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
@@ -87,11 +115,20 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
     status = translator.text("status.loading")
     last_size: tuple[int, int] | None = None
     manual_refresh_operations: set[OperationToken] = set()
+    copy_feedback = TransientFeedback()
+    paused_notice = False
 
     def monitor_chart(config: StandaloneLaunch) -> MonitorConfig:
         if not isinstance(config.chart, MonitorConfig):
             raise TypeError("monitor runtime requires a monitor configuration")
         return config.chart
+
+    attachment = new_animation_session(default_animation_spec("monitor"), theme="classic")
+    attachment.set_playback_requested(False, started_at)
+    attachment.set_idle_animation_requested(True, started_at)
+    attachment.set_visible(False, started_at)
+    attachment_enabled = False
+    attachment_renderer = AnimationRenderer()
 
     def terminal_for(config: StandaloneLaunch) -> Terminal:
         return inspect_terminal(
@@ -162,9 +199,48 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
             wall=datetime.now().astimezone(),
         )
 
+    def attachment_body(
+        body: str,
+        config: StandaloneLaunch,
+        terminal: Terminal,
+        *,
+        reserved_rows: int,
+        now: float,
+    ) -> str:
+        """Append the local animation only below viable ranking/list content."""
+
+        chart = monitor_chart(config)
+        available = chart.presentation.style in {"ranking", "list"}
+        if (
+            not attachment_enabled
+            or not available
+            or (component.accepted_total_token_delta is None and attachment.activity_label is None)
+        ):
+            attachment.set_visible(False, now)
+            return body
+        residual_height = terminal.height - len(body.rstrip("\r\n").splitlines()) - reserved_rows
+        if residual_height < 1:
+            attachment.set_visible(False, now)
+            return body
+        attachment.set_visible(True, now)
+        result = attachment_renderer.render(
+            attachment,
+            width=terminal.width,
+            height=residual_height,
+            color=terminal.color,
+            ascii=terminal.ascii,
+            now=now,
+            translator=translator,
+        )
+        if not result.viable:
+            attachment.set_visible(False, now)
+            return body
+        return "\n".join((*((body,) if body else ()), *result.rows))
+
     def notices() -> tuple[str, ...]:
         active = lifecycle.active
         manual_refresh_operations.intersection_update({active} if active is not None else ())
+        paused = (translator.text("status.dashboard_paused"),) if paused_notice else ()
         manual = (translator.text("status.tui_refreshing"),) if manual_refresh_operations else ()
         recovery = (
             transient_query_recovery_lines(
@@ -173,7 +249,10 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
             if component.error is not None
             else None
         )
-        return (*manual, *(recovery or ()))
+        return (*paused, *manual, *(recovery or ()))
+
+    def feedback(terminal: Terminal, *, now: float) -> tuple[str, ...]:
+        return feedback_lines(copy_feedback, width=terminal.width, color=terminal.color, now=now)
 
     def paint(*, force: bool = False) -> None:
         nonlocal last_size
@@ -197,6 +276,7 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                         "data-table": "status.monitor_data_table_controls",
                         "data-json": "status.monitor_data_json_controls",
                     }[body_view],
+                    action=translator.text("status.resume" if lifecycle.paused else "status.pause"),
                     scroll=translator.text("status.text_scroll_keys")
                     if body_view != "chart" and overflowing
                     else "",
@@ -273,18 +353,39 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                     )
                 )
             formatted_notices = notices()
+            feedback_rows = feedback(terminal, now=now)
+            if body_view == "chart":
+                body = attachment_body(
+                    body,
+                    config,
+                    terminal,
+                    reserved_rows=1 + len(controls) + len(formatted_notices) + len(feedback_rows),
+                    now=now,
+                )
             if body_view != "chart":
                 viewport = render_text_viewport(
                     body,
                     offset=text_offsets.get(body_view, 0),
-                    visible_rows=terminal.height - 1 - len(controls) - len(formatted_notices),
+                    visible_rows=(
+                        terminal.height
+                        - 1
+                        - len(controls)
+                        - len(formatted_notices)
+                        - len(feedback_rows)
+                    ),
                 )
                 text_offsets[body_view] = viewport.offset
                 text_line_counts[body_view] = viewport.line_count
                 text_visible_rows[body_view] = viewport.visible_rows
                 body = viewport.body
             screen.paint(
-                compose_frame(body, status, controls, formatted_notices, height=terminal.height),
+                compose_frame(
+                    body,
+                    status,
+                    controls,
+                    (*formatted_notices, *feedback_rows),
+                    height=terminal.height,
+                ),
                 force=force,
             )
         except UsageError as exc:
@@ -305,6 +406,7 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
             )
 
     def pick_appearance() -> bool:
+        nonlocal attachment_enabled
         adjustment_page = "quick"
         data_affecting = False
         idle_timer = AdjustmentIdleTimer()
@@ -343,6 +445,12 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                     )
                     if chart.by == "project"
                     else (("f", "filter"), ("l", "legend"))
+                )
+                + (
+                    (("t/T", "animation_theme"), ("s/S", "animation_style"))
+                    if adjustment_page == "advanced"
+                    and chart.presentation.style in {"ranking", "list"}
+                    else ()
                 )
             )
             return tuple(
@@ -392,6 +500,19 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                 else {
                     "legend_position": translator.text(
                         f"label.legend_{chart.presentation.legend.replace('-', '_')}"
+                    ),
+                    "animation_settings": (
+                        translator.text(
+                            "status.monitor_attachment_settings",
+                            theme=attachment.theme,
+                            style=(
+                                attachment.spec.display_name
+                                if attachment_enabled
+                                else translator.text("label.animation_none")
+                            ),
+                        )
+                        if chart.presentation.style in {"ranking", "list"}
+                        else ""
                     ),
                     **(
                         {
@@ -491,6 +612,25 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
             ):
                 component.cycle_project_label_context()
             elif (
+                adjustment_page == "advanced"
+                and monitor_chart(component.candidate).presentation.style in {"ranking", "list"}
+                and key in {"t", "T", "s", "S"}
+            ):
+                now = time.monotonic()
+                if key in {"s", "S"}:
+                    attachment_enabled = cycle_monitor_attachment(
+                        attachment,
+                        enabled=attachment_enabled,
+                        step=1 if key == "s" else -1,
+                        now=now,
+                    )
+                else:
+                    step = 1 if key == "t" else -1
+                    theme_index = COLOR_SCHEMES.index(attachment.theme)
+                    attachment.set_theme(
+                        COLOR_SCHEMES[(theme_index + step) % len(COLOR_SCHEMES)], now
+                    )
+            elif (
                 adjustment_page == "quick"
                 and key in {"d", "s", "t", "T", "b", "w", "g", "i", "+", "=", "-", "_"}
                 or adjustment_page == "advanced"
@@ -577,6 +717,13 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                 if (size.columns, size.lines) != last_size:
                     paint(force=True)
                 now = time.monotonic()
+                feedback_expired = (
+                    copy_feedback.message is not None and now >= copy_feedback.expires_at
+                )
+                if feedback_expired or (
+                    attachment.next_deadline is not None and now >= attachment.next_deadline
+                ):
+                    paint()
                 if scheduler.due(now=now):
                     started = request(LifecycleTrigger.PERIODIC, now=now)
                     if started or component.error is not None:
@@ -596,6 +743,13 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                             wall=datetime.now().astimezone(),
                         )
                         if accepted:
+                            update_attachment_activity(
+                                component,
+                                attachment,
+                                now=time.monotonic(),
+                                wall=datetime.now().astimezone(),
+                                translator=translator,
+                            )
                             lifecycle.complete(
                                 operation,
                                 generation=submission.generation,
@@ -635,7 +789,8 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                     manual_refresh_operations.discard(operation)
                     paint()
                     start_ready(time.monotonic())
-                key = read_key(0.05)
+                remaining = copy_feedback.remaining(now=time.monotonic())
+                key = read_key(min(0.05, remaining) if remaining is not None else 0.05)
                 if key == "\x03":
                     raise KeyboardInterrupt
                 if body_view == "chart" and key == "r":
@@ -682,12 +837,14 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                         )
                     )
                     copied_successfully = copy_command(copied)
-                    status = translator.text(
-                        "status.command_copied"
-                        if copied_successfully and body_view in {"command", "full-command"}
-                        else "status.data_copied"
-                        if copied_successfully
-                        else "status.command_copy_failed"
+                    copy_feedback.show(
+                        translator.text(
+                            "status.command_copied"
+                            if copied_successfully and body_view in {"command", "full-command"}
+                            else "status.data_copied"
+                            if copied_successfully
+                            else "status.command_copy_failed"
+                        )
                     )
                     paint()
                 elif key in {"m", "M"} and body_view == "chart":
@@ -702,13 +859,20 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                     paint()
                 elif body_view == "chart" and key == " ":
                     resumed = False
+                    paused_notice = not lifecycle.paused
                     if not lifecycle.paused:
                         scheduler.pause()
                         lifecycle.pause()
                         component.pause()
+                        attachment.set_host_paused(
+                            True,
+                            time.monotonic(),
+                            pause_label=translator.text("status.animation_paused"),
+                        )
                     else:
                         now = time.monotonic()
                         lifecycle.resume()
+                        attachment.set_host_paused(False, now)
                         scheduler.resume(now=now)
                         component.resume(now=now, wall=datetime.now().astimezone())
                         resumed = request(LifecycleTrigger.RESUME, now=now)

@@ -5,7 +5,7 @@ from dataclasses import fields, replace
 from pathlib import Path
 
 from ccusage_viz.bootstrap import build_chart_registry
-from ccusage_viz.configuration import default_pane, standalone_from_pane
+from ccusage_viz.configuration import default_pane, standalone_from_chart_pane
 from ccusage_viz.options import (
     DENSITIES,
     ChartPresentation,
@@ -66,7 +66,7 @@ def test_density_contract_is_three_state_and_pane_owned() -> None:
     pane = default_pane("timeline", dashboard=dashboard)
 
     assert pane.chart.presentation.density == "compact"
-    assert standalone_from_pane(dashboard, pane).chart.presentation == pane.chart.presentation
+    assert standalone_from_chart_pane(dashboard, pane).chart.presentation == pane.chart.presentation
 
 
 def test_dashboard_globals_do_not_rewrite_pane_presentation() -> None:
@@ -84,7 +84,7 @@ def test_dashboard_globals_do_not_rewrite_pane_presentation() -> None:
     )
     pane = replace(pane, chart=replace(pane.chart, presentation=presentation))
 
-    assert standalone_from_pane(dashboard, pane).chart.presentation == presentation
+    assert standalone_from_chart_pane(dashboard, pane).chart.presentation == presentation
 
 
 def test_query_package_does_not_import_host_or_presentation_layers() -> None:
@@ -205,11 +205,15 @@ def test_historical_component_owns_incremental_comparison_state() -> None:
 
 def test_dashboard_panes_do_not_mirror_component_business_state() -> None:
     tree = ast.parse((PACKAGE_ROOT / "tui.py").read_text())
-    pane = next(
-        node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "TuiPane"
+    panes = tuple(
+        node
+        for node in tree.body
+        if isinstance(node, ast.ClassDef) and node.name in {"TuiChartPane", "TuiAnimationPane"}
     )
+    assert {pane.name for pane in panes} == {"TuiChartPane", "TuiAnimationPane"}
     fields = {
         target.id
+        for pane in panes
         for statement in pane.body
         if isinstance(statement, ast.AnnAssign)
         and isinstance((target := statement.target), ast.Name)

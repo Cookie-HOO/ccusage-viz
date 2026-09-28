@@ -11,6 +11,7 @@ class DashboardPreset:
     refresh_interval: float = 60.0
     sampling_interval: float = 15.0
     style: str = "split"
+    row_weights: tuple[int, ...] | None = None
 
 
 DEFAULT_DASHBOARD_PANELS = (
@@ -54,3 +55,17 @@ DASHBOARD_PRESETS = {
         style="split",
     ),
 }
+
+DASHBOARD_PRESETS["narrow-clock"] = DashboardPreset(
+    ("animate digital-clock", *DASHBOARD_PRESETS["narrow"].panels),
+    "4x1",
+    style="framed",
+    row_weights=(3, 7, 7, 6),
+)
+DASHBOARD_PRESETS["wide-clock"] = DashboardPreset(
+    ("animate digital-clock", *DASHBOARD_PRESETS["wide"].panels),
+    "2x2",
+    layout="spotlight-wide",
+    style="framed",
+    row_weights=(3, 7, 7),
+)

@@ -4,7 +4,7 @@
 
 [![PyPI](https://img.shields.io/pypi/v/ccusage-viz.svg)](https://pypi.org/project/ccusage-viz/) [![Python](https://img.shields.io/pypi/pyversions/ccusage-viz.svg)](https://pypi.org/project/ccusage-viz/) [![License: GPL v3](https://img.shields.io/badge/License-GPL%20v3-blue.svg)](LICENSE) [![CI](https://github.com/Cookie-HOO/ccusage-viz/actions/workflows/ci.yml/badge.svg)](https://github.com/Cookie-HOO/ccusage-viz/actions/workflows/ci.yml)
 
-> **Alpha · 0.1.3** — 在 1.0 前接口仍可能变化。规划请见[路线图](ROADMAP.md)。
+> **Alpha · 0.2.0** — 在 1.0 前接口仍可能变化。当前方向请见[路线图](ROADMAP.md)。
 
 `ccusage-viz` 是面向 [`ccusage`](https://github.com/ryoppippi/ccusage) Token
 数据的独立、非官方终端可视化工具。它把 `ccusage` 命令输出转换为交互式终端图表，
@@ -34,177 +34,48 @@ ccusage-viz 只关注 **Token 消耗** 与由 Token 消耗直接推导的指标�
 
 ## Dashboard 预设
 
-`dashboard` 将彼此独立配置的图表组合在同一终端中。先从默认总览开始：
+`dashboard` 将彼此独立配置的图表组合在同一终端中。默认预设为 `wide-clock`：
 
 ```bash
-ccuv dashboard wide
+ccuv dashboard
 ```
 
-### `wide`（默认）
-
-```bash
-ccuv dashboard wide
-```
-
-由 Timeline、Stack、Ranking 和 Monitor Pane 组成的均衡 2×2 总览。
-
-![wide Dashboard 预设：均衡的 2×2 总览](docs/assets/readme/dashboard-wide.png)
-
-### `narrow`
-
-```bash
-ccuv dashboard narrow
-```
-
-适合较窄终端的紧凑纵向聚焦布局。
-
-![narrow Dashboard 预设：纵向聚焦的紧凑布局](docs/assets/readme/dashboard-narrow.png)
-
-### `all`
-
-```bash
-ccuv dashboard all
-```
-
-同时展示多种代表性 Pane 形态的宽广画廊布局。
-
-![all Dashboard 预设：代表性 Pane 的宽广画廊](docs/assets/readme/dashboard-all.png)
-
-### `spotlight-wide`
-
-```bash
-ccuv dashboard spotlight-wide
-```
-
-Timeline 位于通栏首行，其余 Pane 位于下方。
-
-![spotlight-wide Dashboard 预设：Timeline 位于通栏首行](docs/assets/readme/dashboard-spotlight-wide.png)
-
-### `spotlight-wide2`
-
-```bash
-ccuv dashboard spotlight-wide2
-```
-
-Timeline 和 Stack 分别占据连续的通栏行，较小的 Pane 位于其后。
-
-![spotlight-wide2 Dashboard 预设：Timeline 和 Stack 占据连续通栏行](docs/assets/readme/dashboard-spotlight-wide2.png)
+| 预设 | 命令 | 布局 | 预览 |
+| --- | --- | --- | --- |
+| 【推荐-宽终端】 `wide-clock` **（默认）** | `ccuv dashboard wide-clock` | 推荐用于带实时时钟的通用总览。时钟 + 均衡 2×2。 | <img src="docs/assets/readme/dashboard-wide-clock.png" alt="预览" width="180"> |
+| 【推荐-侧边栏】 `narrow-clock` | `ccuv dashboard narrow-clock` | 推荐用于带实时时钟的侧边栏。时钟 + 纵向 4×1。 | <img src="docs/assets/readme/dashboard-narrow-clock.png" alt="预览" width="180"> |
+| `wide` | `ccuv dashboard wide` | 推荐用于只看数据的均衡总览。均衡 2×2。 | <img src="docs/assets/readme/dashboard-wide.png" alt="预览" width="180"> |
+| `narrow` | `ccuv dashboard narrow` | 推荐用于窄终端中的紧凑总览。纵向聚焦。 | <img src="docs/assets/readme/dashboard-narrow.png" alt="预览" width="180"> |
+| `all` | `ccuv dashboard all` | 推荐用于同时比较多种 Pane。宽广画廊。 | <img src="docs/assets/readme/dashboard-all.png" alt="预览" width="180"> |
+| `spotlight-wide` | `ccuv dashboard spotlight-wide` | 推荐用于优先关注 Timeline 趋势。Timeline 主导。 | <img src="docs/assets/readme/dashboard-spotlight-wide.png" alt="预览" width="180"> |
+| `spotlight-wide2` | `ccuv dashboard spotlight-wide2` | 推荐用于同时优先关注 Timeline 和 Stack。Timeline + Stack 主导。 | <img src="docs/assets/readme/dashboard-spotlight-wide2.png" alt="预览" width="180"> |
 
 > [!TIP]
 > Dashboard 会协调 Pane 查询：多个 Pane 刷新时，相同的进行中 Provider 请求会被共享，避免重复工作。
 
-## 什么时候使用独立图表
+## 独立视图
 
-当你需要聚焦于单一问题，而不是使用由多个 Pane 组成的总览时，请选择独立图表。
+当你需要聚焦于单一问题，而不是使用由多个 Pane 组成的总览时，请选择独立视图。
 
-### Timeline
-
-用 Timeline 按模型、Agent 或项目分组查看每日 Token 趋势：
-
-```bash
-ccuv timeline
-```
-
-14 天视图便于比较近期的每日变化。
-
-![Timeline 视图：14 天每日 Token 趋势](docs/assets/readme/standalone-timeline-14d.png)
-
-13 个月视图以更粗的时间尺度展现长期变化。
-
-![Timeline 视图：13 个月长期趋势](docs/assets/readme/standalone-timeline-13mo.png)
-
-### Calendar
-
-用 Calendar 在较长时间范围内查看活跃日期、连续天数和用量集中的位置：
-
-```bash
-ccuv calendar
-```
-
-![Calendar 视图：按活跃强度显示的贡献热力图](docs/assets/readme/standalone-calendar.png)
-
-### Stack
-
-用 Stack 比较输入、输出与缓存 Token 随时间的构成：
-
-```bash
-ccuv stack --cache split
-```
-
-此视图强调各类 Token 的总体构成。
-
-![Stack 视图：Token 构成随时间的变化](docs/assets/readme/standalone-stack-composition.png)
-
-这个变体将缓存读取与缓存创建分开显示。
-
-![Stack 视图：缓存读取与缓存创建对比](docs/assets/readme/standalone-stack-cache-split.png)
-
-### Ranking
-
-用 Ranking 找出指定范围内 Token 使用量最高的项目、模型或 Agent：
-
-```bash
-ccuv ranking --by project
-```
-
-![Ranking 视图：按总 Token 排列的项目](docs/assets/readme/standalone-ranking.png)
+| 分类 | 视图 | 命令 | 适用场景 | 预览 |
+| --- | --- | --- | --- | --- |
+| 趋势分析 `timeline` | Timeline — 14 天 | `ccuv timeline` | 按模型、Agent 或项目分组查看近期每日 Token 趋势。 | <img src="docs/assets/readme/standalone-timeline-14d.png" alt="预览" width="180"> |
+| 趋势分析 `timeline` | Timeline — 13 个月 | `ccuv timeline --period 13mo` | 以更粗的时间尺度查看长期变化。 | <img src="docs/assets/readme/standalone-timeline-13mo.png" alt="预览" width="180"> |
+| 活跃热力图 `calendar` | Calendar | `ccuv calendar` | 在较长范围内查看活跃日期、连续天数和用量集中的位置。 | <img src="docs/assets/readme/standalone-calendar.png" alt="预览" width="180"> |
+| 用量构成 `stack` | Stack — 构成 | `ccuv stack` | 查看输入、输出和缓存 Token 随时间的总体构成。 | <img src="docs/assets/readme/standalone-stack-composition.png" alt="预览" width="180"> |
+| 用量构成 `stack` | Stack — 缓存拆分 | `ccuv stack --cache split` | 比较缓存读取与缓存创建随时间的变化。 | <img src="docs/assets/readme/standalone-stack-cache-split.png" alt="预览" width="180"> |
+| 历史排名 `ranking` | Ranking | `ccuv ranking --by project` | 找出指定范围内 Token 使用量最高的项目、模型或 Agent。 | <img src="docs/assets/readme/standalone-ranking.png" alt="预览" width="180"> |
+| 终端动画 `animate` | 动画画廊 | `ccuv animate --gallery` | 无需 Provider 的纯呈现动画；可选指定初始样式，例如 `ccuv animate digital-clock --gallery`。Space 暂停或继续播放；`m` 打开本地样式和主题控制。 | <img src="docs/assets/readme/standalone-animation-gallery.gif" alt="预览" width="180"> |
+| 用量监控 `monitor` | Monitor — 吞吐量 | `ccuv monitor` | 通过重复累计快照观察进程内吞吐量，而非重建历史小时活动。采样基线建立后才开始观测；Timeline 会在可见时标记本次启动时刻。 | <img src="docs/assets/readme/standalone-monitor-throughput.png" alt="预览" width="180"> |
+| 用量监控 `monitor` | Monitor — 累计柱 | `ccuv monitor --style cumulative-bars` | 查看本地自然日内保留的 Token 增量。按 `w` 切换今天/昨天，按 `g` 切换每小时/半小时桶；未观测时段与已观测零值保持区分。 | <img src="docs/assets/readme/standalone-monitor-cumulative-bars.png" alt="预览" width="180"> |
+| 用量监控 `monitor` | Monitor — 分组 Ranking | `ccuv monitor --by project` | 在观测窗口内按所选维度排名。 | <img src="docs/assets/readme/standalone-monitor-ranking.png" alt="预览" width="180"> |
+| 用量监控 `monitor` | Monitor — 列表 | `ccuv monitor` | 在观测结果旁展示进程和条目详情。 | <img src="docs/assets/readme/standalone-monitor-list.png" alt="预览" width="180"> |
+| 用量监控 `monitor` | Monitor 动画附件 | 在 Monitor `ranking` 或 `list` 中：按 `m`，再按 `s` | 数据下方的可选动画，默认关闭。`s`/`S` 循环适用效果和 ccuv 本地的 `无`；`t`/`T` 仅调整附件主题。它会等待可比较的已接受 interval，且绝不会触发额外用量查询。 | <img src="docs/assets/readme/standalone-monitor-animation.gif" alt="预览" width="180"> |
 
 > [!TIP]
 > 项目 Ranking 默认使用保守的 **Name** 聚合：无歧义的 Claude–Codex 配对会成为一个图表项目。按 `v`
 > 打开数据视图，可看到聚合前的安全来源行；相同且非空的 `merge_group` 表示这些行会相加为同一个图表项目。
 > 使用 `--project-aggregation exact` 可关闭跨 Agent 聚合。
-
-### 项目归因覆盖范围
-
-下方兼容性基线在 macOS 上使用 **ccusage 20.0.23** 完成验证。“Token 总量”指 ccusage
-在统一用量数据中报告该 Agent；“历史项目归因”要求每条记录具有稳定、真实的项目身份。
-
-| Agent | Token 总量 | 历史项目归因 | Agent 版本 | ccusage 版本 | 依据 |
-| --- | --- | --- | --- | --- | --- |
-| Claude Code | 已验证 | 已验证 | 2.1.278 | 20.0.23 | `claude daily --instances --json` 提供项目记录。 |
-| Codex | 已验证 | 已验证 | 0.139.0 | 20.0.23 | 优先使用 ccusage 的 `cwd`/项目字段；缺失时仅读取匹配本地 `session_meta.cwd` 元数据。 |
-| OpenCode | 已验证 | 不支持（已验证） | 1.17.20 | 20.0.23 | 真实 session 输出没有项目身份字段。 |
-| Antigravity | 已验证 | 不支持（已验证） | 2.0.10 | 20.0.23 | 真实 `projectPath` 都是通用常量 `Antigravity`，不是工作目录。 |
-
-历史项目视图若发现 OpenCode、Antigravity 或其他不支持的 Agent，会给出警告，且不会虚构项目记录；
-因此该 Agent 的项目用量可能缺失或不完整。默认的 **Name** 项目聚合只会合并无歧义的 Claude–Codex
-配对，绝不会合并同一 Agent 内的项目；共享末级名称有歧义时可仅用私有父级片段消歧。它不表示这些记录
-来自同一个工作目录。使用 **Exact** 项目聚合可保留每个来源身份。
-
-要将某个 Agent 标为**已验证**，同一改动必须包含脱敏的非空真实数据 fixture、parser/provider 覆盖、
-项目 Ranking 端到端验证、与统一 daily Token 总量的核对，以及精确的 Agent 与 ccusage 测试版本。
-
-### Monitor
-
-用 Monitor 通过重复累计快照观察进程内吞吐量，而非重建历史小时活动：
-
-```bash
-ccuv monitor
-```
-
-观测吞吐量窗口会在建立采样基线后开始。时间线视图会在启动时刻仍位于可见窗口内时，标记
-本次 Monitor 运行的启动时刻；标记之前表示未观测，而非零用量。所有密度都会显示边界线；
-空间允许时，full 和 compact 密度会显示文字标签。ranking 和 list 视图不显示该标记。
-
-![Monitor 视图：观测到的 Token 吞吐量窗口](docs/assets/readme/standalone-monitor-throughput.png)
-
-使用累计柱状图可查看本次 Monitor 在本地自然日内保留的 Token 增量，而非 TPM 或重建的历史活动：
-
-```bash
-ccuv monitor --style cumulative-bars
-```
-
-按 `w` 在今天和昨天之间切换，按 `g` 在每小时和半小时桶之间切换。未观测时段会与已观测的零值明确区分。
-
-![Monitor 视图：按本地小时累计的 Token 柱](docs/assets/readme/standalone-monitor-cumulative-bars.png)
-
-分组视图按所选维度在观测窗口内排名。
-
-![Monitor 视图：分组排名](docs/assets/readme/standalone-monitor-ranking.png)
-
-列表视图会在观测结果旁展示进程和条目详情。
-
-![Monitor 视图：进程和列表详情](docs/assets/readme/standalone-monitor-list.png)
 
 > [!TIP]
 > 想将多个聚焦图表一同查看？可以把独立图表命令组合为自定义 Dashboard，并自行选择网格或命名布局。参阅[使用指南](docs/usage.zh-CN.md)。
@@ -278,6 +149,11 @@ npm install -g ccusage
 直接按空白的 **Enter** 或输入 `y`/`Y` 都会确认安装。输入其他文字、按 Ctrl-C 或发送 EOF
 都会取消。Demo、重定向/非交互运行以及自定义 `--ccusage-bin` 运行不会提示或自动安装。
 npm 不可用时，请手动安装 [`ccusage`](https://github.com/ryoppippi/ccusage)。
+
+> [!TIP]
+> 已发布的 `ccusage` 包不包含 DeepSeek Harness（DSH）统计。非官方
+> [`oksure/ccusage` 的 DSH 分支](https://github.com/oksure/ccusage/tree/contrib/dsh-usage-adapter)
+> 提供 `ccusage dsh` 报告，可能与上游产生偏差；ccuv 本身没有 DSH collector。
 
 ## 延伸阅读
 

@@ -91,14 +91,15 @@ def inspect_terminal(
     if os.environ.get("TERM") == "dumb" and not ascii:
         raise UsageError("error.arguments", detail="TERM=dumb requires explicit --ascii")
     actual = size or get_terminal_size()
-    minimum_width, minimum_height = MINIMUM_SIZES[command]
-    if actual.columns < minimum_width or actual.lines < minimum_height:
-        raise UsageError(
-            "error.terminal_size",
-            width=actual.columns,
-            height=actual.lines,
-            command=command,
-            minimum_width=minimum_width,
-            minimum_height=minimum_height,
-        )
+    if command in MINIMUM_SIZES:
+        minimum_width, minimum_height = MINIMUM_SIZES[command]
+        if actual.columns < minimum_width or actual.lines < minimum_height:
+            raise UsageError(
+                "error.terminal_size",
+                width=actual.columns,
+                height=actual.lines,
+                command=command,
+                minimum_width=minimum_width,
+                minimum_height=minimum_height,
+            )
     return Terminal(actual.columns, actual.lines, not no_color, ascii)

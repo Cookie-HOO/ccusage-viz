@@ -20,10 +20,12 @@ def usage(total: int) -> TokenUsage:
     return TokenUsage(total, total, 0, 0, 0)
 
 
-def record(total: int, *, models: dict[str, int] | None = None) -> UsageRecord:
+def record(
+    total: int, *, models: dict[str, int] | None = None, agent: str = "claude"
+) -> UsageRecord:
     return UsageRecord(
         date(2026, 9, 19),
-        "claude",
+        agent,
         usage(total),
         SourceKind.UNIFIED_DAILY,
         models=tuple(ModelBreakdown(name, usage(value)) for name, value in (models or {}).items()),
@@ -141,6 +143,25 @@ def test_monitor_distribution_reprojects_accepted_samples_without_rebaseline() -
     assert component.observer.previous is not None
 
 
+def test_monitor_component_exposes_only_the_accepted_interval_total_delta() -> None:
+    component = MonitorComponent(options(), registry=build_chart_registry())
+    wall = datetime(2026, 9, 19, 12, 0, tzinfo=UTC)
+
+    assert component.accepted_total_token_delta is None
+
+    assert component.accept(completion(component, (record(100),)), now=0, wall=wall)
+    assert component.accepted_total_token_delta is None
+
+    assert component.accept(completion(component, (record(160),)), now=10, wall=wall)
+    assert component.accepted_total_token_delta == 60
+
+    assert component.accept(completion(component, (record(160),)), now=20, wall=wall)
+    assert component.accepted_total_token_delta == 0
+
+    component.pause()
+    assert component.accepted_total_token_delta is None
+
+
 def test_monitor_component_accepts_cumulative_samples_and_projects_timeline() -> None:
     started_at = datetime(2026, 9, 19, 11, 59, tzinfo=UTC)
     component = MonitorComponent(
@@ -168,6 +189,84 @@ def test_monitor_component_accepts_cumulative_samples_and_projects_timeline() ->
     assert component.last_elapsed == 0.1
     assert component.accepted_records == (record(160),)
     assert component.error is None
+
+
+def test_monitor_ranking_keeps_recently_active_idle_models_first() -> None:
+    component = MonitorComponent(
+        options(by="model", style="ranking"), registry=build_chart_registry()
+    )
+    first = datetime(2026, 9, 19, 12, 0, tzinfo=UTC)
+    second = datetime(2026, 9, 19, 12, 0, 10, tzinfo=UTC)
+    third = datetime(2026, 9, 19, 12, 0, 20, tzinfo=UTC)
+    fourth = datetime(2026, 9, 19, 12, 0, 30, tzinfo=UTC)
+
+    assert component.accept(
+        completion(component, (record(0, models={"alpha": 0, "beta": 0}),)),
+        now=0,
+        wall=first,
+    )
+    assert component.accept(
+        completion(component, (record(10, models={"alpha": 10, "beta": 0}),)),
+        now=10,
+        wall=second,
+    )
+    assert component.accept(
+        completion(component, (record(20, models={"alpha": 10, "beta": 10}),)),
+        now=20,
+        wall=third,
+    )
+    assert component.accept(
+        completion(component, (record(20, models={"alpha": 10, "beta": 10}),)),
+        now=30,
+        wall=fourth,
+    )
+
+    entries = component.ranking_model(now=30, wall=fourth).observed_entries
+    assert [entry.key for entry in entries] == ["beta", "alpha"]
+
+
+def test_monitor_ranking_uses_recent_activity_for_agents() -> None:
+    component = MonitorComponent(
+        options(by="agent", style="ranking"), registry=build_chart_registry()
+    )
+    walls = tuple(datetime(2026, 9, 19, 12, 0, second, tzinfo=UTC) for second in (0, 10, 20, 30))
+    samples = (
+        (record(0, agent="alpha"), record(0, agent="beta")),
+        (record(10, agent="alpha"), record(0, agent="beta")),
+        (record(10, agent="alpha"), record(10, agent="beta")),
+        (record(10, agent="alpha"), record(10, agent="beta")),
+    )
+    for now, wall, records in zip((0, 10, 20, 30), walls, samples, strict=True):
+        assert component.accept(completion(component, records), now=now, wall=wall)
+
+    entries = component.ranking_model(now=30, wall=walls[-1]).observed_entries
+    assert [entry.key for entry in entries] == ["beta", "alpha"]
+
+
+def test_monitor_ranking_uses_recent_activity_for_projects() -> None:
+    component = MonitorComponent(
+        options(by="project", style="ranking", project_aggregation="exact"),
+        registry=build_chart_registry(),
+    )
+    walls = tuple(datetime(2026, 9, 19, 12, 0, second, tzinfo=UTC) for second in (0, 10, 20, 30))
+
+    def project(total: int, agent: str) -> UsageRecord:
+        return replace(
+            record(total, agent=agent),
+            project=ProjectRef(agent, f"/{agent}/project", "project"),
+        )
+
+    samples = (
+        (project(0, "alpha"), project(0, "beta")),
+        (project(10, "alpha"), project(0, "beta")),
+        (project(10, "alpha"), project(10, "beta")),
+        (project(10, "alpha"), project(10, "beta")),
+    )
+    for now, wall, records in zip((0, 10, 20, 30), walls, samples, strict=True):
+        assert component.accept(completion(component, records), now=now, wall=wall)
+
+    entries = component.ranking_model(now=30, wall=walls[-1]).observed_entries
+    assert [entry.agent for entry in entries] == ["beta", "alpha"]
 
 
 def test_monitor_list_uses_the_same_observed_ranking_model() -> None:

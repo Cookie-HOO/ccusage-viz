@@ -107,6 +107,7 @@ class ProjectRef:
     agent: str
     raw_id: str
     display_name: str
+    path_backed: bool = field(default=False, compare=False, hash=False)
 
     @property
     def key(self) -> tuple[str, str]:
