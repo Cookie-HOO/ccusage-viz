@@ -9,6 +9,7 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from shutil import get_terminal_size
 from threading import Event
+from typing import TypeAlias
 
 from ccusage_viz import __version__
 from ccusage_viz.acquisition import historical_provider_id, historical_query_intent
@@ -41,6 +42,7 @@ from ccusage_viz.animation_overlay import (
     AnimationOverlayRuntime,
     OverlayHistoryTableState,
     OverlayPlacement,
+    SourceMode,
     clip_overlay_placements,
     compose_overlay_row,
     format_execution_record,
@@ -246,6 +248,8 @@ class TuiAnimationPane:
 
 
 TuiPane = TuiChartPane | TuiAnimationPane
+HelpTreeNode: TypeAlias = tuple[str, tuple["HelpTreeNode", ...]]
+HelpTree: TypeAlias = tuple[HelpTreeNode, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -294,7 +298,7 @@ class OverlayEditorState:
     """Uncommitted source drafts displayed within one Dashboard animation pane."""
 
     pane_index: int
-    mode: str
+    mode: SourceMode
     text_draft: str
     command_draft: str
     text_cursor: int | None = None
@@ -312,7 +316,9 @@ class OverlayEditorState:
 
     @property
     def cursor(self) -> int:
-        return self.command_cursor if self.mode == "command" else self.text_cursor
+        cursor = self.command_cursor if self.mode == "command" else self.text_cursor
+        assert cursor is not None
+        return cursor
 
     @cursor.setter
     def cursor(self, value: int) -> None:
@@ -2647,6 +2653,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 pane is not None and isinstance(pane, TuiAnimationPane) == expected_animation
             )
             if compatible and isinstance(pane, TuiChartPane):
+                assert isinstance(pane_state.config, ChartPaneConfig)
                 compatible = type(_pane_display_options(pane).chart) is type(
                     pane_state.config.chart
                 )
@@ -2664,6 +2671,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     refresh_indexes.append((len(reconciled), True))
             pane.body_view = pane_state.body_view
             if isinstance(pane, TuiAnimationPane):
+                assert isinstance(pane_state.config, AnimationPaneConfig)
                 if pane.session.spec != pane_state.config.animation:
                     pane.session.set_style(pane_state.config.animation, now)
                 if pane.overlay.config != pane_state.config.overlay:
@@ -2805,7 +2813,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         def tree_node(
             prefix: str,
             value: str,
-            children: tuple[tuple[str, tuple[object, ...]], ...],
+            children: HelpTree,
             *,
             is_last: bool,
         ) -> tuple[str, ...]:
@@ -2823,15 +2831,13 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 )
             return tuple(rows)
 
-        def mode_node(
-            name: str, *, active: bool, enter: str, exit: str
-        ) -> tuple[str, tuple[object, ...]]:
+        def mode_node(name: str, *, active: bool, enter: str, exit: str) -> HelpTreeNode:
             return (
                 f"{active_icon if active else ''}{translator.text(name)}",
                 ((enter, ()), (exit, ())),
             )
 
-        def mode_pages() -> tuple[tuple[str, tuple[object, ...]], ...]:
+        def mode_pages() -> HelpTree:
             active_page = translator.text(f"status.tui_help_page_{page}")
             other_page = translator.text(
                 f"status.tui_help_page_{'advanced' if page == 'quick' else 'quick'}"
@@ -3108,13 +3114,16 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             mode == "pane" and focused is not None and isinstance(panes[focused], TuiAnimationPane)
         ):
             policy_children.append((translator.text("status.tui_help_animation_hint"), ()))
-        if (
-            mode == "pane"
-            and focused is not None
-            and isinstance(panes[focused], TuiChartPane)
-            and panes[focused].body_view == "chart"
-            and not isinstance(_pane_display_options(panes[focused]).chart, MonitorConfig)
-        ):
+        if mode == "pane" and focused is not None:
+            focused_pane = panes[focused]
+            show_summary_policy = (
+                isinstance(focused_pane, TuiChartPane)
+                and focused_pane.body_view == "chart"
+                and not isinstance(_pane_display_options(focused_pane).chart, MonitorConfig)
+            )
+        else:
+            show_summary_policy = False
+        if show_summary_policy:
             policy_children.extend(
                 (
                     (
@@ -3854,10 +3863,16 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         mode = overlay_editor.mode
                         draft = overlay_editor.draft
                         pane_index = overlay_editor.pane_index
-                        record_mutation(
-                            ("pane", pane_index, "overlay-source"),
-                            lambda: pane.overlay.apply_draft(mode, draft),
-                        )
+                        animation_pane = pane
+
+                        def apply_overlay_draft(
+                            pane: TuiAnimationPane = animation_pane,
+                            mode: SourceMode = mode,
+                            draft: str = draft,
+                        ) -> None:
+                            pane.overlay.apply_draft(mode, draft)
+
+                        record_mutation(("pane", pane_index, "overlay-source"), apply_overlay_draft)
                         overlay_editor = None
                     elif key in {"\n", "\x0b"}:
                         adjust_pane_weight(
@@ -4026,13 +4041,16 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         paint()
                         continue
                     assert focused is not None
-                    pane = panes[focused]
+                    focused_index = focused
+                    pane = panes[focused_index]
                     if isinstance(pane, TuiAnimationPane):
-                        now = time.monotonic()
+                        animation_pane = pane
+                        animation_now = time.monotonic()
+                        handled_animation_key = True
                         if key == " ":
                             pane.session.set_host_paused(
                                 not pane.session.host_paused,
-                                now,
+                                animation_now,
                                 pause_label=translator.text("status.animation_paused"),
                             )
                         elif key == "a":
@@ -4047,25 +4065,29 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         if adjustment_page == "quick" and key in {"p", "P"}:
                             pane.overlay.cycle_position(1 if key == "p" else -1)
                         elif adjustment_page == "quick" and key in {"t", "T"}:
-                            record_mutation(
-                                ("pane", focused, "theme"),
-                                lambda: pane.session.set_theme(
-                                    _cycle(
-                                        COLOR_SCHEMES, pane.session.theme, 1 if key == "t" else -1
-                                    ),
-                                    now,
-                                ),
-                            )
+
+                            def set_animation_theme(
+                                pane: TuiAnimationPane = animation_pane,
+                                now: float = animation_now,
+                                step: int = 1 if key == "t" else -1,
+                            ) -> None:
+                                pane.session.set_theme(
+                                    _cycle(COLOR_SCHEMES, pane.session.theme, step), now
+                                )
+
+                            record_mutation(("pane", focused_index, "theme"), set_animation_theme)
                         elif adjustment_page == "quick" and key in {"s", "S"}:
-                            record_mutation(
-                                ("pane", focused, "style"),
-                                lambda: cycle_animation_style(
-                                    pane.session,
-                                    target="pane",
-                                    step=1 if key == "s" else -1,
-                                    now=now,
-                                ),
-                            )
+
+                            def set_animation_style(
+                                pane: TuiAnimationPane = animation_pane,
+                                now: float = animation_now,
+                                step: int = 1 if key == "s" else -1,
+                            ) -> None:
+                                cycle_animation_style(
+                                    pane.session, target="pane", step=step, now=now
+                                )
+
+                            record_mutation(("pane", focused_index, "style"), set_animation_style)
                         elif adjustment_page == "advanced" and key == "\x1b[A":
                             pane.overlay.adjust_offset(dy=-1)
                         elif adjustment_page == "advanced" and key == "\x1b[B":
@@ -4077,22 +4099,28 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         elif adjustment_page == "advanced" and key == "0":
                             pane.overlay.reset_offset()
                         elif adjustment_page == "advanced" and key == "i":
+
+                            def cycle_overlay_interval(
+                                pane: TuiAnimationPane = animation_pane,
+                                now: float = animation_now,
+                            ) -> None:
+                                pane.overlay.cycle_interval(now=now)
+
                             record_mutation(
-                                ("pane", focused, "overlay-interval"),
-                                lambda: pane.overlay.cycle_interval(now=now),
+                                ("pane", focused_index, "overlay-interval"), cycle_overlay_interval
                             )
                         elif adjustment_page == "advanced" and key == "l":
-                            overlay_history = OverlayHistoryState(focused)
+                            overlay_history = OverlayHistoryState(focused_index)
                         elif adjustment_page == "advanced" and key == "e":
                             overlay_editor = OverlayEditorState(
-                                focused,
+                                focused_index,
                                 "command" if pane.overlay.config.command is not None else "text",
                                 pane.overlay.text_draft,
                                 pane.overlay.command_draft,
                             )
                         else:
-                            now = None
-                        if now is not None:
+                            handled_animation_key = False
+                        if handled_animation_key:
                             paint()
                             continue
                     if isinstance(pane, TuiChartPane) and pane.body_view != "chart":
@@ -4140,15 +4168,20 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                             paint()
                             continue
                         if choice is not None:
-                            record_mutation(
-                                ("pane", focused, "replace"),
-                                lambda: _replace_pane(
+                            choice_command = choice
+
+                            def replace_pane(
+                                pane_index: int = focused_index,
+                                command: str = choice_command,
+                            ) -> None:
+                                _replace_pane(
                                     panes,
-                                    focused,
-                                    create_pane(choice),
+                                    pane_index,
+                                    create_pane(command),
                                     start=start_new_pane,
-                                ),
-                            )
+                                )
+
+                            record_mutation(("pane", focused_index, "replace"), replace_pane)
                         paint()
                         continue
                     if key in {"N", "n"}:
@@ -4160,20 +4193,24 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                             paint()
                             continue
                         if choice is not None:
-                            insert_at = focused if key == "N" else focused + 1
+                            insert_at = focused_index if key == "N" else focused_index + 1
+                            choice_command = choice
 
-                            def insert() -> None:
+                            def insert(
+                                index: int = insert_at,
+                                command: str = choice_command,
+                            ) -> None:
                                 nonlocal active_grid, focused
                                 active_grid = _grid_for_pane_count(active_grid, len(panes) + 1)
                                 _insert_pane(
                                     panes,
-                                    insert_at,
-                                    create_pane(choice),
+                                    index,
+                                    create_pane(command),
                                     start=start_new_pane,
                                 )
-                                focused = insert_at
+                                focused = index
 
-                            record_mutation(("pane", focused, action), insert)
+                            record_mutation(("pane", focused_index, action), insert)
                         paint()
                         continue
                     if key in {"{", "}", "J", "K"}:
@@ -4184,36 +4221,36 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         )
                         paint()
                         continue
-                    if key == "[" and focused > 0:
+                    if key == "[" and focused_index > 0:
 
-                        def move_previous() -> None:
+                        def move_previous(index: int = focused_index) -> None:
                             nonlocal focused
-                            panes[focused - 1], panes[focused] = panes[focused], panes[focused - 1]
-                            focused -= 1
+                            panes[index - 1], panes[index] = panes[index], panes[index - 1]
+                            focused = index - 1
 
-                        record_mutation(("pane", focused, "previous"), move_previous)
+                        record_mutation(("pane", focused_index, "previous"), move_previous)
                         paint()
                         continue
-                    if key == "]" and focused < len(panes) - 1:
+                    if key == "]" and focused_index < len(panes) - 1:
 
-                        def move_next() -> None:
+                        def move_next(index: int = focused_index) -> None:
                             nonlocal focused
-                            panes[focused], panes[focused + 1] = panes[focused + 1], panes[focused]
-                            focused += 1
+                            panes[index], panes[index + 1] = panes[index + 1], panes[index]
+                            focused = index + 1
 
-                        record_mutation(("pane", focused, "next"), move_next)
+                        record_mutation(("pane", focused_index, "next"), move_next)
                         paint()
                         continue
                     if key == "x" and len(panes) > 1:
 
-                        def delete() -> None:
+                        def delete(index: int = focused_index) -> None:
                             nonlocal active_grid, focused
-                            removed = panes.pop(focused)
+                            removed = panes.pop(index)
                             _shutdown_pane(removed)
                             active_grid = _grid_for_pane_count(active_grid, len(panes))
-                            focused = min(focused, len(panes) - 1)
+                            focused = min(index, len(panes) - 1)
 
-                        record_mutation(("pane", focused, "delete"), delete)
+                        record_mutation(("pane", focused_index, "delete"), delete)
                         paint()
                         continue
                     if not isinstance(pane, TuiChartPane):
@@ -4321,30 +4358,33 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         in {"ranking", "list"}
                         and key in {"t", "T", "s", "S"}
                     ):
+                        chart_pane = pane
+                        attachment = chart_pane.attachment
+                        assert attachment is not None
 
-                        def adjust_attachment() -> None:
+                        def adjust_attachment(
+                            pane: TuiChartPane = chart_pane,
+                            attachment: AnimationSessionState = attachment,
+                            step: int = 1 if key in {"s", "t"} else -1,
+                            adjust_style: bool = key in {"s", "S"},
+                        ) -> None:
                             now = time.monotonic()
-                            if key in {"s", "S"}:
+                            if adjust_style:
                                 pane.attachment_enabled = cycle_monitor_attachment(
-                                    pane.attachment,
+                                    attachment,
                                     enabled=pane.attachment_enabled,
-                                    step=1 if key == "s" else -1,
+                                    step=step,
                                     now=now,
                                 )
                             else:
-                                pane.attachment.set_theme(
-                                    _cycle(
-                                        COLOR_SCHEMES,
-                                        pane.attachment.theme,
-                                        1 if key == "t" else -1,
-                                    ),
-                                    now,
+                                attachment.set_theme(
+                                    _cycle(COLOR_SCHEMES, attachment.theme, step), now
                                 )
 
                         record_mutation(
                             (
                                 "pane",
-                                focused,
+                                focused_index,
                                 "attachment-style" if key in {"s", "S"} else "attachment-theme",
                             ),
                             adjust_attachment,
