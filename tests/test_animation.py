@@ -866,7 +866,10 @@ def test_standalone_animation_paints_text_overlay_in_final_frame(translator) -> 
     finally:
         overlay.close()
 
-    assert "OVERLAY" in stream.getvalue()
+    output = stream.getvalue()
+    assert "OVERLAY" in output
+    assert output.startswith("\x1b[?2026h")
+    assert output.endswith("\x1b[?2026l")
 
 
 def test_frame_wait_is_bounded_and_deadline_aware() -> None:

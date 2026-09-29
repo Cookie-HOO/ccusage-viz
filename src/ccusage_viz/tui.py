@@ -153,7 +153,7 @@ from ccusage_viz.render.base import RenderAudit, RenderContext, styled_text
 from ccusage_viz.render.filters import active_filter_summary
 from ccusage_viz.render.palette import COLOR_SCHEMES, get_color_scheme
 from ccusage_viz.render.summary import render_summary
-from ccusage_viz.terminal import Frame, FramePainter, Terminal, compose_frame
+from ccusage_viz.terminal import Frame, FramePainter, Terminal, compose_frame, set_cursor_visible
 from ccusage_viz.terminal_ui import (
     AdjustmentAction,
     TransientFeedback,
@@ -2141,6 +2141,11 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
     last_size: tuple[int, int] | None = None
     screen = FramePainter(sys.stdout)
 
+    def set_screen_cursor_visible(visible: bool) -> None:
+        stream = getattr(screen, "stream", None)
+        if stream is not None:
+            set_cursor_visible(stream, visible)
+
     def end_adjustment() -> None:
         nonlocal adjustment_mode, adjustment_timer, focused, grid_draft, grid_error, body_view
         adjustment_mode = None
@@ -3506,7 +3511,11 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         nonlocal help_was_active, last_size, dashboard_text_offset, dashboard_text_line_count
         nonlocal dashboard_text_visible_rows
         size = get_terminal_size()
-        atomic = help_overlay is not None or help_was_active
+        atomic = (
+            help_overlay is not None
+            or help_was_active
+            or any(isinstance(pane, TuiAnimationPane) for pane in panes)
+        )
         if help_overlay is not None:
             last_size = (size.columns, size.lines)
             screen.paint(help_frame(size.columns, size.lines), force=force, atomic=atomic)
@@ -3792,6 +3801,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         return pane
 
     try:
+        set_screen_cursor_visible(False)
         with tui_input_mode() as decoder:
             for index in range(len(panes)):
                 refresh(index, trigger=LifecycleTrigger.STARTUP)
@@ -4677,3 +4687,4 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         runtime.cancel()
         executor.shutdown(wait=False, cancel_futures=True)
         screen.finish()
+        set_screen_cursor_visible(True)

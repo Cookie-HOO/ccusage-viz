@@ -532,8 +532,9 @@ def test_watch_paint_places_footer_last_without_refresh_newline(
         ("! warning one", "! warning two"),
     )
     assert capsys.readouterr().out == (
-        "\x1b[H\x1b[2Jstatus\nsummary\nchart\n"
-        "! warning one\n! warning two\nr refresh · m adjust · Space pause"
+        "\x1b[2J\x1b[1;1H\x1b[2Kstatus\x1b[2;1H\x1b[2Ksummary"
+        "\x1b[3;1H\x1b[2Kchart\x1b[4;1H\x1b[2K! warning one"
+        "\x1b[5;1H\x1b[2K! warning two\x1b[6;1H\x1b[2Kr refresh · m adjust · Space pause"
     )
 
 
@@ -541,14 +542,21 @@ def test_watch_paint_pads_controls_to_fixed_final_rows(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     _paint("chart", "status", ("adjustment", "controls"), ("warning",), height=6)
-    assert capsys.readouterr().out == "\x1b[H\x1b[2Jstatus\nchart\n\nwarning\nadjustment\ncontrols"
+    assert capsys.readouterr().out == (
+        "\x1b[2J\x1b[1;1H\x1b[2Kstatus\x1b[2;1H\x1b[2Kchart"
+        "\x1b[3;1H\x1b[2K\x1b[4;1H\x1b[2Kwarning"
+        "\x1b[5;1H\x1b[2Kadjustment\x1b[6;1H\x1b[2Kcontrols"
+    )
 
 
 def test_watch_paint_keeps_footer_visible_if_body_is_too_tall(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     _paint("one\ntwo\nthree\nfour", "status", "controls", ("warning",), height=5)
-    assert capsys.readouterr().out == "\x1b[H\x1b[2Jstatus\none\ntwo\nwarning\ncontrols"
+    assert capsys.readouterr().out == (
+        "\x1b[2J\x1b[1;1H\x1b[2Kstatus\x1b[2;1H\x1b[2Kone"
+        "\x1b[3;1H\x1b[2Ktwo\x1b[4;1H\x1b[2Kwarning\x1b[5;1H\x1b[2Kcontrols"
+    )
 
 
 @pytest.mark.parametrize(
