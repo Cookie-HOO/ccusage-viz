@@ -13,6 +13,7 @@ from ccusage_viz.project_identity import (
     exact_project_label,
     make_project_ref,
     merged_project_label,
+    normalized_absolute_project_path,
     project_display_names,
     project_groups,
     project_label,
@@ -53,6 +54,23 @@ def test_project_identity_is_agent_scoped() -> None:
     claude = make_project_ref("claude", "/work/app")
     codex = make_project_ref("codex", "/work/app")
     assert claude.key != codex.key
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    (
+        ("/work/./app/", "/work/app"),
+        ("/work/app/../other", "/work/app/../other"),
+        (r"C:\\Work\\App", "c:/work/app"),
+        (r"\\server\\share\\app", "//server/share/app"),
+        ("relative/app", None),
+        ("/Work/App", "/Work/App"),
+    ),
+)
+def test_normalized_absolute_project_path_is_pure_and_platform_aware(
+    value: str, expected: str | None
+) -> None:
+    assert normalized_absolute_project_path(value) == expected
 
 
 def test_opaque_claude_labels_strip_only_dynamically_shared_prefix() -> None:
@@ -388,7 +406,28 @@ def test_name_aggregation_normalizes_windows_codex_paths() -> None:
     assert groups[other.key].key == ("project", "exact", "codex", other.raw_id)
 
 
-def test_name_aggregation_leaves_other_agents_exact() -> None:
+def test_name_aggregation_merges_explicit_path_backed_agents() -> None:
+    claude = make_project_ref("claude", "-home-me-projects-app")
+    codex = make_project_ref("codex", "/work/app")
+    dsh = make_project_ref("dsh", "/work/app/", path_backed=True)
+
+    groups = project_groups((claude, codex, dsh), "name")
+
+    assert groups[claude.key] is groups[codex.key] is groups[dsh.key]
+    assert {member.agent for member in groups[claude.key].members} == {"claude", "codex", "dsh"}
+
+
+def test_name_aggregation_keeps_parent_and_child_paths_distinct() -> None:
+    parent = make_project_ref("codex", "/work/app")
+    child = make_project_ref("dsh", "/work/app/packages/api", path_backed=True)
+
+    groups = project_groups((parent, child), "name")
+
+    assert groups[parent.key].key == ("project", "exact", "codex", "/work/app")
+    assert groups[child.key].key == ("project", "exact", "dsh", "/work/app/packages/api")
+
+
+def test_name_aggregation_keeps_unrecognized_path_shaped_agents_exact() -> None:
     claude = make_project_ref("claude", "-home-me-projects-app")
     codex = make_project_ref("codex", "/work/app")
     other = make_project_ref("other", "/work/app")

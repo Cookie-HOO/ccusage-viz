@@ -4,19 +4,21 @@
 
 ## 产品边界与形态
 
-1. **产品只表达 Token 消耗及受支持的直接衍生指标。**
+1. **Token 分析只表达 Token 消耗及受支持的直接衍生指标。**
 
    只有数据源能够直接且可靠表达的 Token 指标才进入产品。目前唯一的速率指标是 TPM。费用、金额估算、调用或请求次数、配额、QPM、速率限制，以及从 Token 数量推测出的其他指标均不在产品范围内。
 
-2. **Standalone 和 Dashboard 是两种产品形态。**
+   不依赖 Provider 的动画、时钟及其仅在当前运行中存在的 Overlay 属于呈现资源，不属于 Token 分析。它们可以展示静态上下文、本地时间状态或受信任本地命令输出，但既不会创建 Token 指标，也不会查询 Provider。
 
-   每个交互式图表界面都是 TUI。Standalone 独立运行 Timeline、Calendar、Stack、Ranking 或 Monitor；Dashboard 在一个 TUI 中组织多张独立配置的图表。
+2. **Standalone 和 Dashboard 是两种 Host 形态。**
 
-3. **Pane 保留对应 Standalone 的数据与图表语义。**
+   每个交互式图表界面都是 TUI。Standalone 独立运行 Timeline、Calendar、Stack、Ranking 或 Monitor，也可承载不依赖 Provider 的 Animation；Dashboard 在一个 TUI 中组织独立配置的图表 Pane 与动画 Pane。Animation 是播放表面而非 Token 图表；它可以拥有声明式 Overlay 来源与仅在本次运行中存在的呈现状态。
 
-   Pane 是 Standalone 内容在 Dashboard 上下文中的超集，只增加焦点、位置、顺序和切换等组合能力。Dashboard 行为不得改变底层图表的时间或指标契约。
+3. **图表 Pane 保留对应 Standalone 的数据与图表语义。**
 
-   **例外：**Pane 的刷新与采样节奏由 Dashboard 统一拥有；复制为 Standalone 命令时再物化对应 Interval。
+   图表 Pane 是 Standalone 图表内容在 Dashboard 上下文中的超集，只增加焦点、位置、顺序和切换等组合能力。Dashboard 行为不得改变底层图表的时间或指标契约。
+
+   **例外：**Dashboard 拥有历史图表 Pane 的刷新节奏和 Monitor Pane 的采样节奏；复制为 Standalone 命令时再物化对应 Interval。动画 Pane 没有数据节奏或 Provider 生命周期，而是由其 Host 拥有播放时钟和重绘 deadline。
 
 ## 配置所有权
 
@@ -27,7 +29,7 @@
    | Dashboard 独立设置 | 作用范围 | Pane 行为 |
    | --- | --- | --- |
    | Layout、Weights、焦点、Pane 顺序 | Dashboard 几何与导航 | 不构成 Pane 配置 |
-   | 全局暂停、Controls | Dashboard 会话外壳 | Pane 不拥有局部暂停或 Controls 状态 |
+   | 全局暂停、Controls | Dashboard 会话外壳 | 图表 Pane 不拥有局部数据暂停或 Controls 状态；调整动画 Pane 时，该 Pane 拥有局部播放暂停 |
    | Dashboard Theme、Style | 外壳、Header 与 Summary | 不改变 Pane Theme 或图表 Style |
    | Header Style、Summary 周期 | Dashboard Header | 不改变 Pane Density、Scope 或 Granularity |
 
@@ -46,9 +48,13 @@
    | Theme、Style、Density、Legend | 每个 Pane 独立定义图表呈现；Theme 不继承 Dashboard Theme |
    | 图表专属设置 | 只属于对应 Pane |
 
-   Pane 配置和 Pane 片段不得包含 Demo Mode 或 Demo Size。Standalone 仍独立拥有自己的 Demo 设置、Interval、刷新和暂停行为。每个 Pane 都必须可以独立解释；复制为 Standalone 时再物化 Dashboard 拥有的必要上下文。
+   图表 Pane 片段不得包含 Dashboard 或 Host 拥有的生命周期设置，例如 Demo 模式、Watch/Interval、ASCII 或刷新节奏。动画 Pane 片段还可以包含声明式 Overlay 来源及其呈现设置。Standalone 仍独立拥有自己的 Demo 设置、Interval、刷新和暂停行为。每个 Pane 都必须可以独立解释；复制图表 Pane 为 Standalone 时再物化 Dashboard 拥有的必要上下文。
 
-2. **进程上下文不是 Pane 配置。**
+2. **命令 Overlay 是有界的受信任本地呈现工作。**
+
+   Overlay 恰有一个来源：静态文本或命令。命令 Overlay 通过本地 shell 运行，stdin 禁用，执行时间与输出有界，展示文本会被净化，命令结果历史只在本次运行中有界保留。它继承 ccuv 启动时可见的环境，因此命令及其执行环境属于受信任本地输入。其执行和重绘 deadline 是 Host 本地呈现工作：绝不会创建 Token 查询或改变 Provider 调度。
+
+3. **进程上下文不是 Pane 配置。**
 
    Language、`ccusage` 可执行文件、查询超时和 Provider 执行环境在进程内统一生效，但不构成 Pane 的可覆盖设置。
 
@@ -138,13 +144,13 @@
 
    对于可持久化、可复制，并由用户在运行时比较或调整的设置，即使当前只有两个状态，CLI 也使用带值参数明确表达模式。CLI、TUI、状态展示与复制命令共享同一组概念和规范值，使命令无需依赖默认值，也无需在 TUI 状态与正向或否定 Flag 之间转换。例如，Weekdays 与 Other 使用 `show | hide`，Stack Cache 使用 `combined | split`。Compact Command 可以省略默认模式；Full Command 必须显式列出全部有效模式。
 
-   **例外：**通常不出现、参数本身即可完整表达意图，且不属于普通运行时可调整设置的醒目能力选择或执行生命周期例外，可以保留为 Flag。当前例外是 ASCII 和 Historical no-Watch。模式统一不得为已经由 Density、Style 或 Layout 等上层设置完整控制的行为制造冗余开关。
+   **例外：**通常不出现、参数本身即可完整表达意图，且不属于普通运行时可调整设置的醒目能力选择或执行生命周期例外，可以保留为 Flag。当前例外是 ASCII 和 Historical no-Watch。已废弃的兼容 Flag 不属于当前产品表面：不会在用户文档中推广，也不会写入复制出的命令。模式统一不得为已经由 Density、Style 或 Layout 等上层设置完整控制的行为制造冗余开关。
 
 3. **能力通过 Quick 和 Advanced 渐进呈现。**
 
    Quick 与 Advanced 按使用频率划分，而不是按数据与外观的内部分类划分。Quick 覆盖常见分析流程中的 Data Scope、分析方式与主要呈现；Advanced 放置低频、精细或条件性控制。两者操作同一份即时配置，当前上下文无意义的选项应省略，而不是禁用后继续展示。
 
-   Standalone 只使用两行：第一行展示运行状态与当前生效设置，第二行展示当前 Quick 或 Advanced 操作。Dashboard 全局调整只有一个 Dashboard 级页面，用于 Theme、Style、Header、Summary 与 Layout；不提供 Advanced 页面或 Pane 专属操作。Dashboard Pane 处于图表视图时，先使用与 Standalone 相同的两行图表区域，再提供内容/生命周期、位置/焦点和逻辑尺寸比例等 Dashboard 管理操作。`a` 只切换图表操作行；Dashboard 管理操作在任一页面都可用。Pane 文字视图则是只读检查上下文：只保留阅读、复制与切换视图操作，`r` 和 Space 等生命周期操作不是隐藏但仍可用的命令，并在显示文字期间暂停图表调整与 Dashboard 管理。Enter、Escape 和无操作超时都会结束调整，将 Dashboard 与所有 Pane 恢复为普通图表浏览，同时保留已生效修改；该无操作超时只属于活跃的调整会话，不适用于普通浏览模式的文字检查视图。不提供可点击的“完成”。窄终端按完整操作单元隐藏低优先级项，并用 `…(+N)` 精确提示仍可通过键盘使用的操作数量；页面身份、`a` 切换与 Enter/Escape 提示始终保留。
+   Standalone 只使用两行：第一行展示运行状态与当前生效设置，第二行展示当前 Quick 或 Advanced 操作。Dashboard 全局调整只有一个 Dashboard 级页面，用于 Theme、Style、Header、Summary 与 Layout；不提供 Advanced 页面或 Pane 专属操作。Dashboard 图表 Pane 处于图表视图时，先使用与 Standalone 相同的两行图表区域，再提供内容/生命周期、位置/焦点和逻辑尺寸比例等 Dashboard 管理操作。动画 Pane 则提供自己的播放、主题/样式与 Overlay 控制，不继承图表数据控制。`a` 切换当前 Pane 适用的操作页；Dashboard 管理操作在任一页面都可用。图表 Pane 的文字视图是只读检查上下文：仅可导航、复制与切换视图；返回 Chart 视图前，生命周期、配置与 Dashboard 管理按键均不可用。Enter、Escape 和无操作超时都会结束调整，将 Dashboard 与所有 Pane 恢复为普通图表浏览，同时保留已生效修改；该无操作超时只属于活跃的调整会话，不适用于普通浏览模式的文字检查视图。不提供可点击的“完成”。窄终端按完整操作单元隐藏低优先级项，并用 `…(+N)` 精确提示仍可通过键盘使用的操作数量；页面身份、`a` 切换与 Enter/Escape 提示始终保留。
 
 4. **有限档位保留并如实显示合法启动值。**
 
@@ -156,7 +162,7 @@
 
    大部分设置在每次调整时立即提交；可见配置立即更新，能够从已接受事实推导的数据也立即重新计算。因此，普通设置界面中的 Enter 与 Escape 含义相同：都保留当前有效状态并离开界面。两者都不保存、放弃或回滚已经生效的修改。Layout 和 Weights 遵循同一规则。
 
-   **例外：**只有完成输入或选择后才能形成有效取值的操作使用隔离草稿，包括 Filter、数值 Grid、Pane Replace 与 Pane Add。Enter 提交完整且合法的草稿；Escape 只放弃当前子操作并返回父级调整。Dashboard 的 `z` 是即时生效的布局快捷方式选择：`wide`、`narrow`、`all` 和 `auto` 选择矩形快捷布局，三种 Spotlight 则选择非矩形拓扑。它只改变几何，保留现有 Pane 对象、顺序、焦点、已接受数据、配置、Monitor 历史和生命周期。`Z` 打开数值 Grid 草稿，只接受 `行x列`；从 `auto` 或 Spotlight 进入时，以可容纳现有 Pane 数量的最小实用双列网格开始。应用任一操作后，都为结果拓扑重建等权 Weights。Pane Replace 在原列表索引原子安装全新默认 Pane，并终止被替换 Pane 的生命周期。Pane Add 使用 `N` 在焦点 Pane 列表索引之前插入，使用 `n` 在其后插入。固定布局保留列数；插入需要更多容量时扩展行数，删除后只回收完全为空的末尾行。只有操作具有破坏性、难以恢复或后果不够清晰时才增加二次确认，普通可逆配置不需要确认。
+   **例外：**只有完成输入或选择后才能形成有效取值的操作使用隔离草稿，包括 Filter、Overlay 来源编辑、数值 Grid、Pane Replace 与 Pane Add。Enter 提交完整且合法的草稿；Escape 只放弃当前子操作并返回父级调整。Dashboard 的 `z` 打开布局选择器：`j`/`k` 或方向键选择 `wide`、`narrow`、`all`、`auto` 或 Spotlight 拓扑；Enter 确认，Escape 取消。确认后的选择只改变几何，保留现有 Pane 对象、顺序、焦点、已接受数据、配置、Monitor 历史和生命周期。`Z` 打开数值 Grid 草稿，只接受 `行x列`；从 `auto` 或 Spotlight 进入时，以可容纳现有 Pane 数量的最小实用双列网格开始。应用任一操作后，都为结果拓扑重建等权 Weights。Pane Replace 在原列表索引原子安装全新默认 Pane，并终止被替换 Pane 的生命周期。Pane Add 使用 `N` 在焦点 Pane 列表索引之前插入，使用 `n` 在其后插入。固定布局保留列数；插入需要更多容量时扩展行数，删除后只回收完全为空的末尾行。只有操作具有破坏性、难以恢复或后果不够清晰时才增加二次确认，普通可逆配置不需要确认。
 
 6. **已提交配置与展示数据必须描述同一状态。**
 
@@ -166,15 +172,19 @@
 
 7. **按键表达稳定概念，而不是通用大小写规则。**
 
-   `m` 始终表示修改当前图表：在 Standalone 中修改当前视图，在 Dashboard 浏览模式中修改当前 Pane；点击 Pane 会选择它并执行等价操作。大写 `G` 打开 Dashboard 全局设置，点击 Header 是等价入口。大写字母通常不反向循环对应小写选项。相关按键也可以分别代表同一概念下稳定且不同的类别：`p` 循环常用尾随周期，`P` 循环常用自然周期至今。界面必须标明当前类别，避免把自然周期误解为尾随时长。
+   `m` 表示修改当前视觉资源：在 Standalone 中修改当前图表或动画，在 Dashboard 浏览模式中修改已选 Pane。单击选择或准备 Pane；双击进入 Pane 调整。调整中双击另一 Pane 可转移焦点。`d` 打开 Dashboard 全局设置。大写字母通常不反向循环对应小写选项。相关按键也可以分别代表同一概念下稳定且不同的类别：`p` 循环常用尾随周期，`P` 循环常用自然周期至今。界面必须标明当前类别，避免把自然周期误解为尾随时长。
 
    **例外：**Theme 有较多且会增长的候选，保留 `t` 向前和 `T` 向后切换。`N` 与 `n` 是有意设计的语义对，分别在当前 Pane 列表索引之前或之后插入。其他普通字母操作只接受小写。
 
-8. **方向操作同时支持方向键与 `hjkl`。**
+8. **非文本编辑的方向操作同时支持方向键与 `hjkl`。**
 
-   任何提供上、下、左、右导航或调整的上下文，都必须分别接受 `k`、`j`、`h`、`l`，并执行完全相同的状态变化。界面提示可以根据空间合并表达两组按键，但不能让两种入口产生不同边界、循环或确认行为。
+   不属于文本编辑器的导航或调整界面，都必须分别接受 `k`、`j`、`h`、`l`，并执行完全相同的状态变化。界面提示可以根据空间合并表达两组按键，但不能让两种入口产生不同边界、循环或确认行为。文本编辑器保留自己的文字输入契约。
 
-9. **职责边界防止语义混乱，而不是禁止有价值的多入口。**
+9. **帮助是当前界面的上下文只读证据。**
+
+   帮助反映当前模式、页面、Pane 类型、对话框、编辑器和历史界面，而不是重复一份固定的全局按键表。它不修改配置、不创建工作，其内容必须与当前可用的控制保持一致。
+
+10. **职责边界防止语义混乱，而不是禁止有价值的多入口。**
 
    Standalone、Dashboard 和 Pane 共享术语、顺序、状态表达与调整行为，但一个操作只出现在目标明确的上下文中。多个入口可以表达同一意图，但必须产生相同结果。一个交互概念不得暗中改变另一个概念，例如调整 Granularity 不会改变 Period。
 
@@ -246,9 +256,9 @@
 
 7. **刷新包含结果所需的重新计算与重绘。**
 
-   `r` 始终刷新当前上下文；由刷新数据产生的排序、派生计算和完整重绘都是同一次操作的结果，不提供独立的重排或重绘命令。Dashboard 手动刷新向所有组件提供立即刷新机会，使绘制缓存失效并覆盖完整 Dashboard；继续执行同样的刷新与重绘后恢复固定 Tick。Resize 自动重算全部几何并清除旧区域，但不要求查询数据。完整重绘不等于无条件清屏。
+   `r` 始终刷新当前承载数据的上下文；由刷新数据产生的排序、派生计算和完整重绘都是同一次操作的结果，不提供独立的重排或重绘命令。Dashboard 手动刷新向 Header 和图表 Pane 提供立即刷新机会，使绘制缓存失效并覆盖完整 Dashboard；继续执行同样的刷新与重绘后恢复固定 Tick。Resize 自动重算全部几何并清除旧区域，但不要求查询数据。动画播放、Overlay 执行和 Monitor 附件重绘使用各自 Host 本地的 deadline，而不是这项数据刷新操作。完整重绘不等于无条件清屏。
 
-   **例外：**Pause 只停止周期 Tick；暂停期间不产生周期工作或积累 backlog，但手动刷新和用户修改配置后经防抖合并的一次性补齐仍可执行。此类补齐不会恢复周期调度。Monitor 建立基线、出现采样间隙、暂停/恢复、修改影响数据的配置或检测到计数器重置时，会清空独立的当前观测，直到形成下一组有效采样对；已保留的 Timeline 历史继续可用，不连续处仍显示为 Gap。Standalone Watch 与 Monitor 保留自己的刷新、暂停和 Interval 行为。
+   **例外：**Dashboard 浏览模式的暂停会停止周期数据 Tick，并暂停全部动画 Pane 的播放；暂停期间不产生周期工作或积累 backlog，但手动刷新和用户修改配置后经防抖合并的一次性补齐仍可执行。此类补齐不会恢复周期调度。调整动画 Pane 时，Space 则只控制该 Pane 的播放时钟。Monitor 建立基线、出现采样间隙、暂停/恢复、修改影响数据的配置或检测到计数器重置时，会清空独立的当前观测，直到形成下一组有效采样对；已保留的 Timeline 历史继续可用，不连续处仍显示为 Gap。Monitor 附件使用已接受的 delta 状态决定 active/idle 投影，其 idle 场景可以重绘，但不会推进 Token 观测或发起查询。Standalone Watch 与 Monitor 保留自己的刷新、暂停和 Interval 行为。
 
 ## 可复现性与文档边界
 
@@ -260,14 +270,18 @@
 
    Preset 提供完整的 Dashboard 基础状态，并可在启动命令中接受显式覆盖或追加 Pane；没有 Preset 时，除无参数 `dashboard` 外，必须显式提供 Pane。运行时 `z` 有意不应用 Preset 的内容模板：它保留当前 Pane 列表，只选择对应几何。复制命令展开实际 Pane 状态并保留当前布局，而不依赖来源 Preset 名称。
 
-3. **会话状态不进入可复现配置。**
+3. **仅在当前运行中存在的呈现状态不进入可复现配置。**
 
-   当前焦点、暂停状态、Controls 可见性、检查视图和临时错误属于运行会话，不应写入复制的命令。
+   当前焦点、暂停状态、Controls 可见性、检查视图、临时错误、动画播放、Overlay 偏移以及 Overlay 命令结果历史都属于运行会话，不应写入复制命令。声明式 Overlay 来源与显示设置可随其动画 Pane 被复制，但编辑器草稿不可复制。
 
-4. **设计哲学只记录稳定约束。**
+4. **撤销/重做是有界的会话导航，不是持久化。**
+
+   `u` 和 `U` 通过有界、仅当前会话存在的历史撤销、重做 Dashboard 配置修改；撤销后新的编辑会替换重做分支。历史只恢复由 Dashboard 状态表示的组合与设置，不会恢复 Overlay 来源草稿、Overlay 位置或偏移修改、命令记录、命令历史状态、Provider 结果或图表事实，也绝不会写入复制命令。
+
+5. **设计哲学只记录稳定约束。**
 
    完整 CLI 拼写、参数矩阵、快捷键表、Preset 内容和操作示例属于用户指南；组件接口、状态机和测试标准属于正式设计规格。新增功能应能归入本文原则；必须破例时，应明确写出例外及边界。
 
-5. **文档按认知深度分层，并在同一次维护中保持一致。**
+6. **文档按认知深度分层，并在同一次维护中保持一致。**
 
    README 通过自然语言和小型产品地图建立第一印象；架构文档定义已经实现的所有权与运行边界，设计哲学解释稳定原则与理由。正式设计规格保留决策和测试标准，Roadmap 只描述计划工作。英文与简体中文文档必须表达相同契约；术语、默认值或所有权发生变化时，应同步协调这些层级，而不是延后处理。

@@ -241,19 +241,31 @@ Provider 代码不导入图表或展示代码。图表代码不调用 Provider�
 
 Theme 与 Style 是声明式展示能力。Theme 提供语义颜色角色与调色板，Style 描述兼容的视觉语法。两者都不读取 Provider 数据、不改变 Data Scope、不发起查询、不控制 TUI 生命周期，也不写入终端。
 
-## 未来的 Animation 能力
+## Animation Host
 
-Animation 是独立资源类型，不是 Chart 变体，也不是所有图表默认经过的后处理阶段。
+Animation 是独立资源类型，不是 Chart 变体，也不是所有图表默认经过的后处理阶段。ccuv 在运行时从
+`term-animate` 的 curated catalog 发现当前 Host 可用的效果，并使用 catalog 全局唯一的 effect ID 作为选择键。
+库会声明效果可嵌入的位置；ccuv 分别为独立动画、Dashboard 动画 Pane 和 Monitor 附件应用这项声明。
 
-未来的 Animation 资源可以：
+`term-animate` 保持纯投影依赖。ccuv 负责终端生命周期、输入、viewport 分配、session 时钟、重绘 deadline、
+裁剪和清理，而具名主题仍由动画库负责。它只向声明支持状态的效果传递 active/idle。动画 Pane 不拥有 Provider、
+查询运行时、scheduler 或 lifecycle operation。
 
-- 通过 Standalone Host 运行；
-- 占用 Dashboard Pane；
-- 在不查询用量数据的情况下更新 Frame。
+Overlay 是 Host 本地拥有的呈现资源，归属独立动画 Host 或 Dashboard 动画 Pane，而不归属 Chart、Provider 或动画库。
+静态文本不需要调度；命令 Overlay 拥有自身的本地 shell 执行调度、有界结果历史和净化后的展示输出，其生命周期随 Host
+结束。Overlay 的重绘与命令 deadline 只能重绘已有 Host Frame，绝不会发起 Token 数据查询。
 
-Chart Component 需要 Query 与 Result Processing；Animation Component 不需要。两者未来可能共享 Host、viewport、Frame、input 和 Painter 基础设施，但应等两类真实实现都存在后，再提取共同 Hosted Component 协议。
+Monitor 附件只属于其所在的 Monitor Pane 或独立 Monitor Host，默认关闭。用户可在 ranking/list 视图的高级
+控制中启用；已有可比较的已接受 interval 后它才渲染，并用 ccuv 已接受的 Token 增量为声明支持状态的效果决定
+active 或 idle。附件 deadline 只重绘当前 Frame，绝不会发起查询。启用的附件使用 `classic` 主题；高级控制会循环
+全部动画库声明为 Monitor 可用的效果，随后进入 ccuv 本地的`无`。这个临时`无`状态不属于 catalog、不创建 provider
+工作，也不能用于独立动画或 Dashboard 动画 Pane。
 
-当前架构让 Route dispatch 与 Host/content composition 保持可扩展，但不添加无实现的 Animation route case 或资源 discriminator。Animation Schema、资源预算、帧节奏和 Dashboard Header 集成不属于当前设计。Header 品牌、静态 Logo 与动画仍是彼此独立的未来设计问题。
+Dashboard 的撤销/重做同样是 Dashboard Host 拥有的、有界且仅会话内存在的 UI 状态。它只记录 Dashboard 状态所表示的组合与设置，
+绝不记录 Provider 结果、Chart 事实或持久化配置，也不会恢复 Host 本地的 Overlay 草稿、位置或偏移修改、命令结果历史。
+
+Chart Component 需要 Query 与 Result Processing；动画投影不需要。两者共享终端 Frame 与 Painter 基础设施来组合输出，
+但 Animation 不会变成 Chart Component，也不会扩大 chart/provider 的依赖方向。
 
 ## 依赖方向
 

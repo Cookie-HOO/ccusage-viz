@@ -6,6 +6,38 @@
 - **次版本（`0.x.0`）**：`1.0` 前重大的新面向用户能力或数据源集成。
 - 在 `1.0` 前，公开接口仍可能在各个版本之间变化。
 
+## 0.2.1
+
+`0.2.1` 改进动画 Host 与 Dashboard 的交互体验，同时保持 Token 收集与语义不变：
+
+- 动画 catalog 与画廊集成现在跟随已安装的 `term-animate` catalog，其中包括新增的时钟动画；
+- 动画 Overlay 增加仅在当前运行中存在的静态上下文或受信任本地命令输出。内置时钟预设默认在右下角
+  使用反映本地时间的本地化状态命令；
+- 默认 Dashboard 预设改为 `wide-clock`，其前导 `spotlight-wide` Pane 使用模拟时钟；
+  `narrow-clock` 继续使用数字时钟；
+- Dashboard 新增有界、仅会话内存在的撤销/重做和上下文帮助，并完善浏览、Pane 调整和 Dashboard
+  调整模式中的按键与点击反馈；
+- Dashboard 的退出处理尝试修复会话卡住后只能通过 `Ctrl-C` 退出的问题。该缓解措施仍在观测中，
+  状态以已知问题条目为准。
+
+这些仅是呈现与交互改进：Overlay/动画 deadline 不会新增 Token 查询，不引入 collector，也不改变
+Token 派生指标的含义。
+
+## 0.2.0
+
+`0.2.0` 将终端动画作为一等呈现能力发布，同时保持 ccuv 的 Token 数据契约不变：
+
+- `ccuv animate` 提供无需 Provider 的独立动画；ccuv 自己的 `--gallery` 可比较当前可用样式，
+  不会委托给外部 CLI；
+- Dashboard 支持显式动画 Pane，并新增 `wide-clock` 和 `narrow-clock` 预设；两者都拥有独立的
+  时钟 Pane；
+- Monitor `ranking` 和 `list` 增加可选动画附件。默认关闭；仅在出现可比较的已接受 interval 后显示，
+  并只用已接受的 Token 增量为支持状态的效果判定活动；重绘 deadline 绝不会发起用量查询；
+- 面向路径身份的项目归因与 `ccusage` Provider 处理更加保守、可靠，并补齐了对应的数据视图覆盖；
+- 独立视图与 Dashboard 的终端交互和临时反馈行为得到改进。
+
+动画只改变呈现：不会引入 collector、不会改变 Token 语义，也不会添加 ccuv 原生的 DSH 数据源。
+
 ## 0.1.3
 
 `0.1.3` 改进 Alpha 阶段的交互与呈现契约：

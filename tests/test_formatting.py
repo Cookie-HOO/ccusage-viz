@@ -5,7 +5,9 @@ from ccusage_viz.formatting import (
     display_width,
     format_summary_tokens,
     format_tokens,
+    slice_width,
     truncate_width,
+    wrap_width,
 )
 
 
@@ -49,3 +51,19 @@ def test_width_clipping_preserves_ansi_sequences() -> None:
     clipped = clip_width(styled, 5)
     assert clipped == "\x1b[31m项目a\x1b[0m"
     assert display_width(clipped) == 5
+
+
+def test_slice_width_obeys_display_cell_boundaries_for_wide_and_ansi_text() -> None:
+    value = "ab界cd"
+
+    assert slice_width(value, 2, 2) == "界"
+    assert slice_width(value, 3, 3) == "cd"
+    assert slice_width(value, 2, 1) == ""
+    assert slice_width("\x1b[31mab界cd\x1b[0m", 3, 3) == "\x1b[31mcd\x1b[0m"
+    assert display_width(slice_width(value, 3, 3)) == 2
+
+
+def test_wrap_width_preserves_word_boundaries_and_wide_character_widths() -> None:
+    assert wrap_width("one two three", 7) == ("one two", "three")
+    assert wrap_width("项目项目项目", 4) == ("项目", "项目", "项目")
+    assert all(display_width(row) <= 4 for row in wrap_width("项目项目项目", 4))

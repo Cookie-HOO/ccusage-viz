@@ -76,10 +76,65 @@ def test_accepted_delta_controls_monitor_attachment_playback(
     attachment.set_visible(True, 0)
     attachment.set_viable(True, 0)
 
-    update_attachment_activity(Component(), attachment, now=1)
+    update_attachment_activity(
+        Component(),
+        attachment,
+        now=1,
+        wall=datetime(2026, 9, 28, tzinfo=UTC),
+        translator=load_translator("en"),
+    )
 
     assert attachment.playback_requested is expected_playing
     assert attachment.clock.playing is expected_playing
+
+
+def test_attachment_retains_last_active_time_when_activity_stops() -> None:
+    class Component:
+        accepted_total_token_delta = 4
+
+    attachment = new_animation_session(animation_spec("rain"), theme="no-color")
+    attachment.set_visible(True, 0)
+    attachment.set_viable(True, 0)
+    translator = load_translator("en")
+
+    update_attachment_activity(
+        Component(),
+        attachment,
+        now=1,
+        wall=datetime(2026, 9, 28, 6, 41, 0, tzinfo=UTC),
+        translator=translator,
+    )
+    Component.accepted_total_token_delta = 0
+    update_attachment_activity(
+        Component(),
+        attachment,
+        now=2,
+        wall=datetime(2026, 9, 28, 6, 42, 10, tzinfo=UTC),
+        translator=translator,
+    )
+
+    assert not attachment.playback_requested
+    assert attachment.activity_label == "last activity detected: 06:41:00"
+
+    update_attachment_activity(
+        Component(),
+        attachment,
+        now=3,
+        wall=datetime(2026, 9, 28, 6, 43, 0, tzinfo=UTC),
+        translator=translator,
+    )
+    assert attachment.activity_label == "last activity detected: 06:41:00"
+
+    Component.accepted_total_token_delta = 2
+    update_attachment_activity(
+        Component(),
+        attachment,
+        now=4,
+        wall=datetime(2026, 9, 28, 6, 44, 0, tzinfo=UTC),
+        translator=translator,
+    )
+    assert attachment.playback_requested
+    assert attachment.activity_label == "last activity detected: 06:44:00"
 
 
 def test_nice_y_max_uses_padded_decimal_one_two_five_bounds() -> None:

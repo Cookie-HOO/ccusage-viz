@@ -15,6 +15,7 @@ from ccusage_viz.codex_sessions import resolve_codex_session_cwds
 from ccusage_viz.coverage import DateCoverage, DateInterval
 from ccusage_viz.domain import Notice
 from ccusage_viz.errors import QueryError
+from ccusage_viz.project_identity import normalized_absolute_project_path
 from ccusage_viz.query.models import (
     DataResolution,
     PhysicalPlan,
@@ -269,8 +270,9 @@ class CcusageProvider:
                 sorted(
                     (
                         agent
-                        for agent in observed_agents
-                        if agent.casefold() not in _PROJECT_ATTRIBUTION_UNSUPPORTED_AGENTS
+                        for agent in _agents_without_absolute_project_path(data)
+                        if agent.casefold() not in _PROJECT_ATTRIBUTION_SUPPORTED_AGENTS
+                        and agent.casefold() not in _PROJECT_ATTRIBUTION_UNSUPPORTED_AGENTS
                     ),
                     key=str.casefold,
                 )
@@ -350,6 +352,23 @@ class CcusageProvider:
                 for query in plan.queries
             ),
         )
+
+
+def _agents_without_absolute_project_path(data: object) -> set[str]:
+    """Return observed non-Claude agents that lack an absolute project locator."""
+    if not isinstance(data, dict) or not isinstance(daily := data.get("daily"), list):
+        return set()
+    agents: set[str] = set()
+    for day in daily:
+        if not isinstance(day, dict) or not isinstance(rows := day.get("agents"), list):
+            continue
+        for row in rows:
+            if not isinstance(row, dict) or not isinstance(agent := row.get("agent"), str):
+                continue
+            project = row.get("project", row.get("cwd", row.get("projectPath")))
+            if not isinstance(project, str) or normalized_absolute_project_path(project) is None:
+                agents.add(agent)
+    return agents
 
 
 def _enrich_codex_project_rows(data: object) -> tuple[object, bool]:

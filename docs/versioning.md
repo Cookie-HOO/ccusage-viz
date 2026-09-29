@@ -6,6 +6,51 @@
 - **Minor (`0.x.0`)**: substantial new user-facing capabilities or source integrations before 1.0.
 - Before `1.0`, public interfaces may still change between releases.
 
+## 0.2.1
+
+`0.2.1` refines the animation-host and Dashboard interaction experience while
+keeping token collection and semantics unchanged:
+
+- animation catalog and gallery integration now follow the installed
+  `term-animate` catalog, including the added clock animation;
+- animation Overlays add run-local static context or trusted local command output.
+  The shipped clock presets use a localized local-time status command at
+  bottom-right by default;
+- the default Dashboard preset is `wide-clock`, with an Analog Clock in its
+  leading `spotlight-wide` Pane; `narrow-clock` retains its Digital Clock;
+- Dashboard gains bounded session-only undo/redo, contextual Help, and deliberate
+  keybinding and click-feedback refinements across Browse, Pane, and Dashboard
+  adjustment modes;
+- Dashboard shutdown handling now attempts to repair the case where a stalled
+  session could only be exited with `Ctrl-C`. The mitigation remains under
+  observation; the known-issues entry records its status.
+
+These are presentation and interaction changes only: Overlay/animation deadlines
+never introduce token queries, no collector is added, and no token-derived metric
+changes meaning.
+
+## 0.2.0
+
+`0.2.0` makes terminal animation a first-class presentation capability while
+keeping ccuv's token data contract unchanged:
+
+- `ccuv animate` runs a provider-free standalone animation, and ccuv-owned
+  `--gallery` browsing compares the available styles without delegating to an
+  external CLI;
+- Dashboard accepts explicit animation Panes and adds the `wide-clock` and
+  `narrow-clock` presets, each with an independently owned clock Pane;
+- Monitor `ranking` and `list` gain an opt-in animation attachment. It is
+  disabled by default, begins only after a comparable accepted interval, and
+  uses accepted token deltas only for state-aware activity; repaint deadlines
+  never issue usage queries;
+- project attribution and `ccusage` provider handling are more conservative
+  and reliable for path-backed identities, with matching data-view coverage;
+- terminal interaction and transient feedback behavior were refined across
+  standalone and Dashboard views.
+
+Animations are presentation-only: they do not add a collector, change token
+semantics, or introduce a ccuv-native DSH data source.
+
 ## 0.1.3
 
 `0.1.3` refines the Alpha interaction and presentation contracts:

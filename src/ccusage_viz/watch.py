@@ -57,8 +57,10 @@ from ccusage_viz.render.palette import COLOR_SCHEMES
 from ccusage_viz.terminal import FramePainter, Terminal, compose_frame, inspect_terminal
 from ccusage_viz.terminal_ui import (
     AdjustmentAction,
+    TransientFeedback,
     adjustment_rows,
     controls_line,
+    feedback_lines,
     input_mode,
     notice_lines,
     read_key,
@@ -534,6 +536,7 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
     last_size: tuple[int, int] | None = None
     base_status = translator.text("status.loading")
     manual_refresh_operations: set[OperationToken] = set()
+    copy_feedback = TransientFeedback()
 
     def historical_chart(config: StandaloneLaunch) -> HistoricalChartConfig:
         if isinstance(config.chart, MonitorConfig):
@@ -573,6 +576,9 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
         )
         return (*manual, *(recovery or ()))
 
+    def feedback(*, width: int, color: bool, now: float) -> tuple[str, ...]:
+        return feedback_lines(copy_feedback, width=width, color=color, now=now)
+
     def controls(*, overflowing: bool = False) -> str:
         if body_view == "chart" and controls_hidden:
             return ""
@@ -584,7 +590,9 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
             "data-json": "status.data_json_keys",
         }[body_view]
         keys = translator.text(
-            key, scroll=translator.text("status.text_scroll_keys") if overflowing else ""
+            key,
+            action=translator.text("status.resume" if lifecycle.paused else "status.pause"),
+            scroll=translator.text("status.text_scroll_keys") if overflowing else "",
         )
         if current.host.demo_size:
             keys = f"{keys} · {translator.text('status.demo_keys')}"
@@ -699,11 +707,14 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
             translator=translator,
             color_scheme=current.chart.presentation.theme,
         )
+        feedback_rows = feedback(width=size.columns, color=color, now=time.monotonic())
         if body_view != "chart":
             viewport = render_text_viewport(
                 body,
                 offset=text_offsets.get(body_view, 0),
-                visible_rows=size.lines - 1 - len(control_rows) - len(formatted_notices),
+                visible_rows=(
+                    size.lines - 1 - len(control_rows) - len(formatted_notices) - len(feedback_rows)
+                ),
             )
             text_offsets[body_view] = viewport.offset
             text_line_counts[body_view] = viewport.line_count
@@ -714,7 +725,7 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
                 body,
                 status(),
                 control_rows,
-                formatted_notices,
+                (*formatted_notices, *feedback_rows),
                 height=size.lines,
             ),
             force=force,
@@ -875,6 +886,8 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
                 if (size.columns, size.lines) != last_size:
                     paint(force=True)
                 now = time.monotonic()
+                if copy_feedback.message is not None and now >= copy_feedback.expires_at:
+                    paint()
                 if (
                     terminal_error is None
                     and scheduler.due(now=now)
@@ -967,7 +980,8 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
                     paint()
                     start_ready(time.monotonic())
 
-                key = read_key(0.05)
+                remaining = copy_feedback.remaining(now=time.monotonic())
+                key = read_key(min(0.05, remaining) if remaining is not None else 0.05)
                 if key == "\x03":
                     raise KeyboardInterrupt
                 if body_view == "chart" and key == "r":
@@ -1019,12 +1033,14 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
                         )
                     )
                     copied_successfully = copy_command(copied)
-                    base_status = translator.text(
-                        "status.command_copied"
-                        if copied_successfully and body_view in {"command", "full-command"}
-                        else "status.data_copied"
-                        if copied_successfully
-                        else "status.command_copy_failed"
+                    copy_feedback.show(
+                        translator.text(
+                            "status.command_copied"
+                            if copied_successfully and body_view in {"command", "full-command"}
+                            else "status.data_copied"
+                            if copied_successfully
+                            else "status.command_copy_failed"
+                        )
                     )
                     paint()
                 elif key in {"m", "M"} and body_view == "chart" and last_snapshot is not None:

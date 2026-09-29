@@ -6,7 +6,12 @@ import pytest
 from ccusage_viz.errors import UsageError
 from ccusage_viz.formatting import display_width
 from ccusage_viz.terminal import FramePainter, compose_frame, inspect_terminal
-from ccusage_viz.terminal_ui import AdjustmentAction, adjustment_rows
+from ccusage_viz.terminal_ui import (
+    AdjustmentAction,
+    TransientFeedback,
+    adjustment_rows,
+    feedback_lines,
+)
 
 
 class Stream(StringIO):
@@ -36,6 +41,18 @@ def test_compose_frame_places_notices_directly_above_controls() -> None:
     frame = compose_frame("chart", "status", "controls", ("warning",), height=6)
 
     assert frame.rows == ("status", "chart", "", "", "warning", "controls")
+
+
+def test_copy_feedback_is_neutral_width_safe_and_expires() -> None:
+    feedback = TransientFeedback()
+    feedback.show("command copied", now=10.0)
+
+    rows = feedback_lines(feedback, width=10, color=False, now=11.0)
+
+    assert rows == ("command co",)
+    assert feedback.remaining(now=12.0) == pytest.approx(1.0)
+    assert feedback_lines(feedback, width=80, color=False, now=13.0) == ()
+    assert feedback.remaining(now=13.0) is None
 
 
 def test_frame_painter_force_repaints_and_preserves_incremental_updates() -> None:
@@ -69,6 +86,19 @@ def test_frame_painter_updates_only_changed_animation_rows() -> None:
     painter.paint(compose_frame("active\nscene", "status", "controls", height=5))
 
     assert stream.getvalue() == "\x1b[2;1H\x1b[2Kactive"
+
+
+def test_frame_painter_can_wrap_differential_paint_atomically() -> None:
+    stream = Stream(True)
+    painter = FramePainter(stream)
+
+    painter.paint(compose_frame("idle", "status", "controls", height=4))
+    stream.seek(0)
+    stream.truncate(0)
+    painter.paint(compose_frame("active", "status", "controls", height=4), atomic=True)
+
+    assert stream.getvalue() == "\x1b[?2026h\x1b[2;1H\x1b[2Kactive\x1b[?2026l"
+    assert "\x1b[2J" not in stream.getvalue()
 
 
 def test_compose_frame_can_omit_status_row() -> None:
@@ -186,7 +216,9 @@ def test_animation_dumb_terminal_requires_explicit_ascii(monkeypatch: pytest.Mon
     with pytest.raises(UsageError, match="error.arguments"):
         inspect_terminal("animate", stream=Stream(True), size=os.terminal_size((1, 1)))
 
-    terminal = inspect_terminal("animate", stream=Stream(True), size=os.terminal_size((1, 1)), ascii=True)
+    terminal = inspect_terminal(
+        "animate", stream=Stream(True), size=os.terminal_size((1, 1)), ascii=True
+    )
     assert terminal.ascii is True
 
 

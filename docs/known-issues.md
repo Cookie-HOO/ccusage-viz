@@ -6,19 +6,20 @@ This page tracks known behavior in supported `ccusage-viz` and `ccusage`
 combinations. Update or remove an entry when the relevant upstream behavior
 changes.
 
-## Dashboard may become unresponsive after running for a while
+## 🟡 Dashboard unresponsiveness — mitigation implemented, under observation
 
-### Symptoms and scope
+### Status and scope
 
-After the Dashboard has been running for some time, keyboard input and refreshes
-may stop responding. The terminal may need to be closed and reopened before the
-Dashboard can be used again.
+`0.2.1` includes a shutdown-handling mitigation for the reported case where a
+stalled Dashboard could only be exited with `Ctrl-C`. The change is treated as
+**fixed under observation**, not as a verified permanent resolution: it requires
+continued real-session use before this entry can be removed.
 
-### Recovery
+### If it recurs
 
-Close the affected terminal, open a new terminal session, and start the Dashboard
-again. If possible, record how long it ran, the Dashboard layout, refresh or
-sampling intervals, and any sanitized output before reopening it.
+Use `Ctrl-C` to exit the affected session, then start Dashboard again. Please
+record how long it ran, the Dashboard layout, refresh or sampling intervals, and
+any sanitized output before restarting, and report the recurrence.
 
 ## Active Monitor observations can temporarily disappear and later resume
 

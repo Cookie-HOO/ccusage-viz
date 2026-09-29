@@ -2,14 +2,15 @@ import shlex
 import threading
 from contextlib import nullcontext
 from dataclasses import replace
-from datetime import date
+from datetime import UTC, date, datetime
 from io import StringIO
 
 import pytest
 
 import ccusage_viz.tui as tui_module
 import ccusage_viz.tui_input as tui_input_module
-from ccusage_viz.animation import animation_spec
+from ccusage_viz.animation import animation_spec, animation_style_choices
+from ccusage_viz.animation_overlay import OverlayConfig
 from ccusage_viz.bootstrap import build_query_runtime
 from ccusage_viz.cli import _to_options, build_parser
 from ccusage_viz.cli import parse_pane_fragment as parse_dashboard_pane
@@ -31,7 +32,7 @@ from ccusage_viz.historical_render import RenderedChart
 from ccusage_viz.i18n import load_translator
 from ccusage_viz.lifecycle import FixedIntervalScheduler, LifecycleOperation
 from ccusage_viz.monitor_component import MonitorComponent
-from ccusage_viz.options import AnimationPaneConfig, Filters, TimelineConfig
+from ccusage_viz.options import AnimationPaneConfig, Filters, MonitorConfig, TimelineConfig
 from ccusage_viz.query.models import QueryTrigger
 from ccusage_viz.terminal import Terminal
 from ccusage_viz.tui import (
@@ -39,6 +40,8 @@ from ccusage_viz.tui import (
     _adjustment_footer,
     _adjustment_key_supported,
     _adjustment_target,
+    _adjustment_target_page,
+    _animation_adjustment_target_page,
     _append_monitor_attachment,
     _choose_layout_shortcut,
     _choose_pane_type,
@@ -71,14 +74,16 @@ from ccusage_viz.tui import (
     parse_grid,
     resolve_panel_layout,
 )
-from ccusage_viz.tui_input import InputDecoder, KeyEvent, MouseEvent
+from ccusage_viz.tui_input import InputDecoder, KeyEvent, MouseEvent, PasteEvent
 
 
 def test_dashboard_defaults_to_a_filled_four_pane_dashboard() -> None:
     parser = build_parser(load_translator("en"))
     options = _to_options(parser.parse_args(["dashboard"]))
     assert "dashboard" == "dashboard"
-    assert tuple(pane.chart.kind for pane in options.panes) == (
+    assert isinstance(options.panes[0], AnimationPaneConfig)
+    assert options.panes[0].animation.style == "analog-clock"
+    assert tuple(pane.chart.kind for pane in options.panes[1:]) == (
         "timeline",
         "stack",
         "ranking",
@@ -92,7 +97,7 @@ def test_dashboard_defaults_to_a_filled_four_pane_dashboard() -> None:
     assert options.host.header_summary == "day"
     assert options.host.header_interval == 60.0
     assert options.host.style == "framed"
-    assert all(pane.chart.presentation.density == "compact" for pane in options.panes)
+    assert all(pane.chart.presentation.density == "compact" for pane in options.panes[1:])
 
 
 def test_dashboard_commands_use_local_date_context_and_reject_timezone() -> None:
@@ -102,6 +107,7 @@ def test_dashboard_commands_use_local_date_context_and_reject_timezone() -> None
     full = format_full_dashboard_command(dashboard)
     reparsed = _to_options(parser.parse_args(shlex.split(full)[1:]))
 
+    assert shlex.split(full)[:2] == ["ccuv", "dashboard"]
     assert "--timezone" not in full
     assert (
         _header_options(reparsed).chart.date_range.since
@@ -110,6 +116,21 @@ def test_dashboard_commands_use_local_date_context_and_reject_timezone() -> None
     with pytest.raises(UsageError) as caught:
         parser.parse_args(["dashboard", "--timezone", "UTC"])
     assert caught.value.key == "error.arguments"
+
+
+def test_full_dashboard_command_preserves_local_launcher_for_clock_overlay() -> None:
+    parser = build_parser(load_translator("en"))
+    dashboard = _to_options(parser.parse_args(["dashboard"]), launcher="ccuv-local")
+
+    command = format_full_dashboard_command(dashboard)
+    tokens = shlex.split(command)
+    reparsed = _to_options(parser.parse_args(tokens[1:]), launcher=tokens[0])
+
+    assert tokens[:2] == ["ccuv-local", "dashboard"]
+    assert "--overlay-command" in tokens[tokens.index("--pane") + 1]
+    assert reparsed.launcher == "ccuv-local"
+    assert isinstance(reparsed.panes[0], AnimationPaneConfig)
+    assert reparsed.panes[0].overlay.command == "ccuv-local text time-state --run"
 
 
 def test_full_dashboard_command_preserves_animation_pane_style() -> None:
@@ -177,12 +198,12 @@ def test_full_dashboard_command_serializes_runtime_layout_weight_overrides() -> 
     full = format_full_dashboard_command(
         dashboard,
         column_weights=(2, 1),
-        row_weights=(3, 1),
+        row_weights=(3, 1, 1),
     )
     reparsed = _to_options(parser.parse_args(shlex.split(full)[1:]))
 
     assert reparsed.host.column_weights == (16, 8)
-    assert reparsed.host.row_weights == (18, 6)
+    assert reparsed.host.row_weights == (15, 5, 5)
 
 
 def test_full_dashboard_command_includes_private_and_runtime_configuration() -> None:
@@ -316,7 +337,7 @@ def test_dashboard_monitor_default_does_not_change_explicit_or_standalone_total(
 
 def test_tui_adjustment_target_exists_only_during_adjustment() -> None:
     assert _adjustment_target(None, "\t", 4) is None
-    assert _adjustment_target(None, "s", 4) == 0
+    assert _adjustment_target(None, "m", 4) == 0
     assert _adjustment_target(0, "\t", 4) == 1
     assert _adjustment_target(3, "\t", 4) == 0
     assert _adjustment_target(2, "l", 4) == 2
@@ -349,6 +370,22 @@ def test_dashboard_animation_pane_is_render_only() -> None:
     assert not hasattr(pane, "lifecycle")
 
 
+def test_dashboard_animation_pane_renders_text_overlay() -> None:
+    parser = build_parser(load_translator("en"))
+    options = _to_options(parser.parse_args(["dashboard", "--pane", "animate rain"]))
+    pane = _new_pane(
+        options,
+        AnimationPaneConfig(animation_spec("rain"), OverlayConfig(text="OVERLAY")),
+    )
+
+    try:
+        rendered = _pane_render(pane, load_translator("en"), Terminal(40, 8, False, True))
+    finally:
+        pane.overlay.close()
+
+    assert "OVERLAY" in rendered.chart
+
+
 def test_dashboard_animation_panes_keep_independent_session_state() -> None:
     parser = build_parser(load_translator("en"))
     options = _to_options(
@@ -367,6 +404,18 @@ def test_dashboard_animation_panes_keep_independent_session_state() -> None:
     assert second.session.playback_requested
 
 
+def test_dashboard_monitor_attachment_starts_disabled() -> None:
+    parser = build_parser(load_translator("en"))
+    options = _to_options(parser.parse_args(["dashboard", "--pane", "monitor --by model"]))
+    pane = _new_pane(options, options.panes[0], "dashboard:pane:0", build_query_runtime())
+
+    assert pane.attachment is not None
+    assert pane.attachment.spec.style == animation_style_choices("monitor")[0]
+    assert pane.attachment.theme == "classic"
+    assert not pane.attachment_enabled
+    assert not pane.attachment.visible
+
+
 def test_dashboard_monitor_attachment_tracks_only_accepted_activity() -> None:
     class Component:
         accepted_total_token_delta = 4
@@ -375,19 +424,39 @@ def test_dashboard_monitor_attachment_tracks_only_accepted_activity() -> None:
     attachment.set_visible(True, 0.0)
     attachment.set_viable(True, 0.0)
 
-    _update_monitor_attachment_activity(Component(), attachment, now=1.0)
+    _update_monitor_attachment_activity(
+        Component(),
+        attachment,
+        now=1.0,
+        wall=datetime(2026, 9, 28, tzinfo=UTC),
+        translator=load_translator("en"),
+    )
     assert attachment.playback_requested
 
     Component.accepted_total_token_delta = None
-    _update_monitor_attachment_activity(Component(), attachment, now=2.0)
+    _update_monitor_attachment_activity(
+        Component(),
+        attachment,
+        now=2.0,
+        wall=datetime(2026, 9, 28, 6, 42, 10, tzinfo=UTC),
+        translator=load_translator("en"),
+    )
     assert not attachment.playback_requested
+    assert attachment.activity_label == "last activity detected: 00:00:00"
+
+    _update_monitor_attachment_activity(
+        Component(),
+        attachment,
+        now=3.0,
+        wall=datetime(2026, 9, 28, 6, 43, 0, tzinfo=UTC),
+        translator=load_translator("en"),
+    )
+    assert attachment.activity_label == "last activity detected: 00:00:00"
 
 
 def test_dashboard_monitor_attachment_hides_outside_ranking_and_list() -> None:
     parser = build_parser(load_translator("en"))
-    options = _to_options(
-        parser.parse_args(["dashboard", "--pane", "monitor --style ranking"])
-    )
+    options = _to_options(parser.parse_args(["dashboard", "--pane", "monitor --style ranking"]))
     pane = _new_pane(options, options.panes[0], "pane:monitor")
     assert isinstance(pane, tui_module.TuiChartPane)
     assert pane.attachment is not None
@@ -400,13 +469,39 @@ def test_dashboard_monitor_attachment_hides_outside_ranking_and_list() -> None:
         now=1.0,
         translator=load_translator("en"),
     )
+    assert body == "chart"
+    assert not pane.attachment.visible
+
+    pane.component.observer.current_interval = type("Interval", (), {"total": 0})()
+    body = _append_monitor_attachment(
+        pane,
+        "chart",
+        terminal=Terminal(80, 24, False, True),
+        reserved_rows=0,
+        now=2.0,
+        translator=load_translator("en"),
+    )
+    assert body == "chart"
+    assert not pane.attachment.visible
+
+    pane.attachment_enabled = True
+    body = _append_monitor_attachment(
+        pane,
+        "chart",
+        terminal=Terminal(80, 24, False, True),
+        reserved_rows=0,
+        now=3.0,
+        translator=load_translator("en"),
+    )
     assert body != "chart"
     assert pane.attachment.visible
 
     candidate = pane.component.candidate
     pane.component.candidate = replace(
         candidate,
-        chart=replace(candidate.chart, presentation=replace(candidate.chart.presentation, style="bars")),
+        chart=replace(
+            candidate.chart, presentation=replace(candidate.chart.presentation, style="bars")
+        ),
     )
     assert (
         _append_monitor_attachment(
@@ -560,6 +655,7 @@ def test_dashboard_pause_cancels_automatic_panes_and_manual_refresh_remains_allo
     ] == expected_submissions
     painted_text = "\n".join("\n".join(event[1].rows) for event in events if event[0] == "paint")
     assert (not text_view) == ("refresh requested" in painted_text)
+    assert (not text_view) == ("paused" in painted_text)
     assert len(submissions) == len(expected_submissions)
     assert submissions[0].cancelled.is_set()
     assert not any(event[0] == "fail" for event in events)
@@ -568,6 +664,192 @@ def test_dashboard_pause_cancels_automatic_panes_and_manual_refresh_remains_allo
         ("runtime-cancel",),
         ("finish",),
     ]
+
+
+@pytest.mark.parametrize(
+    (
+        "events_before_help",
+        "expected_current",
+        "expected_operation",
+        "expected_page",
+        "expects_text_navigation",
+        "ascii_mode",
+    ),
+    (
+        ((), "Browse mode", "Browse controls", None, False, False),
+        (("v",), "Browse mode", "Browse controls", None, True, False),
+        (("m",), "Pane adjustment", "Pane adjustment", "Quick", False, False),
+        (("m", "v"), "Pane adjustment", "Pane adjustment", "Quick", True, False),
+        (("m", "a"), "Pane adjustment", "Pane adjustment", "Advanced", False, False),
+        (("d",), "Dashboard adjustment", "Dashboard adjustment", None, False, False),
+        (("m",), "Pane adjustment", "Pane adjustment", "Quick", False, True),
+    ),
+)
+def test_dashboard_help_explains_each_mode_without_repeating_footer(
+    monkeypatch: pytest.MonkeyPatch,
+    events_before_help: tuple[str, ...],
+    expected_current: str,
+    expected_operation: str,
+    expected_page: str | None,
+    expects_text_navigation: bool,
+    ascii_mode: bool,
+) -> None:
+    parser = build_parser(load_translator("en"))
+    args = [
+        "dashboard",
+        "--demo",
+        "--header-style",
+        "hidden",
+        "--header-summary",
+        "none",
+        "--pane",
+        "timeline",
+    ]
+    if ascii_mode:
+        args.append("--ascii")
+    options = _to_options(parser.parse_args(args))
+    frames: list[object] = []
+
+    class Runtime:
+        def cancel(self) -> None:
+            pass
+
+    class Submission:
+        purpose = tui_module.HistoricalPurpose.PRIMARY
+        handle: "Submission"
+
+        def __init__(self, generation: int) -> None:
+            self.generation = generation
+            self.handle = self
+            self.cancelled = threading.Event()
+
+        def cancel(self) -> None:
+            self.cancelled.set()
+
+        def result(self) -> object:
+            self.cancelled.wait(1)
+            raise RuntimeError("cancelled startup query")
+
+    class Component:
+        def __init__(self, selected: object, **_kwargs: object) -> None:
+            self.candidate = selected
+            self.accepted_options = None
+            self.error = None
+            self.generation = 0
+            self.snapshot = None
+
+        def configure(self, selected: object, *, data_affecting: bool) -> None:
+            self.candidate = selected
+            if data_affecting:
+                self.generation += 1
+
+        def missing_comparison_coverage(self) -> DateCoverage:
+            return DateCoverage()
+
+        def submit(self, _trigger: QueryTrigger, **_kwargs: object) -> Submission:
+            return Submission(self.generation)
+
+        def fail(self, *_args: object, **_kwargs: object) -> bool:
+            return True
+
+    class Screen:
+        def __init__(self, _stream: object) -> None:
+            pass
+
+        def paint(self, frame: object, **_kwargs: object) -> None:
+            frames.append(frame)
+
+        def finish(self) -> None:
+            pass
+
+    keys = iter((*map(KeyEvent, events_before_help), KeyEvent("h"), KeyEvent("\x03")))
+    monkeypatch.setattr(tui_module, "build_query_runtime", Runtime)
+    monkeypatch.setattr(tui_module, "build_chart_registry", lambda: object())
+    monkeypatch.setattr(tui_module, "HistoricalChartComponent", Component)
+    monkeypatch.setattr(tui_module, "FramePainter", Screen)
+    monkeypatch.setattr(tui_module, "tui_input_mode", nullcontext)
+    monkeypatch.setattr(tui_module, "read_event", lambda _decoder, _timeout: next(keys))
+    monkeypatch.setattr(
+        tui_module, "get_terminal_size", lambda: __import__("os").terminal_size((160, 55))
+    )
+    monkeypatch.setattr(tui_module, "_pane_render", lambda *_args: tui_module.PaneRender("chart"))
+
+    assert tui_module.run_tui(options, load_translator("en")) == 0
+
+    help_text = "\n".join(
+        "\n".join(frame.rows) for frame in frames if "Dashboard help" in "\n".join(frame.rows)
+    )
+    assert expected_current in help_text
+    active_marker = "* " if ascii_mode else "● "
+    page_active_marker = "[x] " if ascii_mode else "● "
+    page_inactive_marker = "[ ] " if ascii_mode else "○ "
+    assert help_text.count(active_marker) >= 1
+    assert "Current Pane adjustment" not in help_text
+    assert expected_operation in help_text
+    assert "Modes · current:" not in help_text
+    assert "Global operations: u undo · U redo · h help" not in help_text
+    assert "MODES" in help_text
+    assert "CONTROLS" in help_text
+    assert "LIMITS" not in help_text
+    assert "STRATEGY" in help_text
+    assert "💡" not in help_text
+    assert "═" not in help_text
+    assert "—" not in help_text
+    assert "Dashboard undo/redo history is session-only" in help_text
+    expects_summary_computation = events_before_help in {("m",), ("m", "a")}
+    assert ("SUMMARY SCOPE [COMPUTATION LOGIC]" in help_text) is expects_summary_computation
+    assert ("COMPARISON WINDOWS [COMPUTATION LOGIC]" in help_text) is expects_summary_computation
+    if expects_summary_computation:
+        assert "Fixed --since/--until" in help_text
+        assert "Filters affect totals" in help_text
+        assert "Day: today" in help_text
+    if events_before_help in {(), ("v",)}:
+        assert "Query subprocesses run up to 2 at a time" in help_text
+    branch = "|- " if ascii_mode else "├─ "
+    assert branch in help_text
+    assert "Enter adjustment: m Pane / d Dashboard" in help_text
+    assert "Pane adjustment: selected Pane only" in help_text
+    assert "Finish: Enter/Esc" in help_text
+    assert "Dashboard adjustment: Dashboard-wide settings" in help_text
+    assert "Enter: d" in help_text
+    assert ("Text view" in help_text) is expects_text_navigation
+    assert ("y copy: copy the current view" in help_text) is expects_text_navigation
+    if expected_page is None:
+        assert f"{page_inactive_marker}Quick" not in help_text
+        assert f"{page_inactive_marker}Advanced" not in help_text
+    elif expects_text_navigation:
+        assert "Pane parameter adjustment" in help_text
+        assert "Structure adjustment" in help_text
+        assert "v view: change this Pane view" in help_text
+    else:
+        assert f"{page_active_marker}{expected_page}" in help_text
+        assert "Pane parameter adjustment" in help_text
+        assert "Structure adjustment" in help_text
+        assert "Global common" in help_text
+        assert "[Quick]" in help_text
+        assert "[Advanced]" in help_text
+        inactive_page = "Advanced" if expected_page == "Quick" else "Quick"
+        assert f"{page_inactive_marker}{inactive_page}" in help_text
+        for action in (
+            "p/P period",
+            "g granularity",
+            "d density",
+            "t/T theme",
+            "s/S style",
+            "o Other",
+            "l legend",
+            "k weekdays",
+            "f edit filters",
+        ):
+            assert action in help_text
+        assert "A project aggregation" not in help_text
+        assert "P project labels" not in help_text
+        assert "N / n insert: add a Pane before / after" in help_text
+        assert "[ / ] order: move this Pane earlier / later" in help_text
+        assert "x delete: remove this Pane" not in help_text
+        if ascii_mode:
+            assert "● " not in help_text
+            assert "○ " not in help_text
 
 
 def test_dashboard_manual_refresh_notice_clears_after_its_final_completion(
@@ -695,7 +977,8 @@ def test_dashboard_manual_refresh_notice_clears_after_its_final_completion(
     refreshing = [frame.rows for frame in frames if "refresh requested · in progress" in frame.rows]
     assert refreshing
     notice_row = refreshing[-1].index("refresh requested · in progress")
-    assert "r refresh all" in refreshing[-1][notice_row + 1]
+    assert "paused" in refreshing[-1][notice_row + 1]
+    assert "r refresh all" in refreshing[-1][notice_row + 2]
     assert "refresh requested · in progress" not in frames[-1].rows
 
 
@@ -765,12 +1048,14 @@ def test_dashboard_layout_editor_is_visible_transactional_and_returns_to_global(
 
     keys = iter(
         (
-            KeyEvent("g"),
+            KeyEvent("d"),
             KeyEvent("Z"),
-            *(KeyEvent("\x7f") for _ in range(3)),
             *(KeyEvent(char) for char in "1x1"),
             KeyEvent("\r"),
             *(KeyEvent("\x7f") for _ in range(3)),
+            *(KeyEvent(char) for char in "axbhuU"),
+            KeyEvent("\r"),
+            *(KeyEvent("\x7f") for _ in range(6)),
             *(KeyEvent(char) for char in "3x2"),
             KeyEvent("\r"),
             KeyEvent("Z"),
@@ -795,13 +1080,19 @@ def test_dashboard_layout_editor_is_visible_transactional_and_returns_to_global(
 
     assert tui_module.run_tui(options, load_translator("en")) == 0
     painted = ["\n".join(frame.rows) for frame in frames]
-    assert any("Set grid (ROWSxCOLUMNS): 2x2" in frame for frame in painted)
+    assert any("Set grid (ROWSxCOLUMNS): " in frame for frame in painted)
     assert any(
         "Set grid (ROWSxCOLUMNS): 1x1" in frame
-        and "Grid '1x1' cannot display all 4 panes." in frame
+        and "Grid '1x1' cannot display all 5 panes." in frame
         for frame in painted
     )
-    assert sum("Set grid (ROWSxCOLUMNS): 3x2" in frame for frame in painted) >= 2
+    assert any(
+        "Set grid (ROWSxCOLUMNS): axbhuU" in frame
+        and "Grid 'axbhuU' cannot display all 5 panes." in frame
+        for frame in painted
+    )
+    assert not any("Dashboard help" in frame for frame in painted)
+    assert any("Set grid (ROWSxCOLUMNS): 3x2" in frame for frame in painted)
     assert any("Current status: running · 3x2" in frame for frame in painted)
 
 
@@ -871,7 +1162,7 @@ def test_dashboard_pane_insert_chooser_renders_inside_focused_pane(
 
     keys = iter(
         (
-            KeyEvent("s"),
+            KeyEvent("m"),
             KeyEvent("n"),
             KeyEvent("\x1b"),
             KeyEvent("N"),
@@ -1146,7 +1437,7 @@ def test_dashboard_pane_filter_editor_commits_once_or_discards_without_refresh(
         def finish(self) -> None:
             events.append(("finish",))
 
-    keys = iter((KeyEvent("s"), KeyEvent("a"), KeyEvent("f"), KeyEvent("\x03")))
+    keys = iter((KeyEvent("m"), KeyEvent("a"), KeyEvent("f"), KeyEvent("\x03")))
     runtime = Runtime()
     monkeypatch.setattr(tui_module, "build_query_runtime", lambda: runtime)
     monkeypatch.setattr(tui_module, "build_chart_registry", lambda: object())
@@ -1455,7 +1746,7 @@ def test_query_affecting_adjustments_are_explicit() -> None:
 def test_dashboard_pane_adjustment_state_changes_with_page() -> None:
     parser = build_parser(load_translator("en"))
     options = _to_options(parser.parse_args(["dashboard", "--demo"]))
-    pane = _new_pane(standalone_from_chart_pane(options, options.panes[0]), "pane:test")
+    pane = _new_pane(standalone_from_chart_pane(options, options.panes[1]), "pane:test")
     translator = load_translator("en")
 
     quick = _pane_adjustment_state(pane, "quick", translator)
@@ -1492,6 +1783,50 @@ def test_project_aggregation_is_advanced_only_for_project_panes(command: str) ->
     assert not _adjustment_key_supported(command, "advanced", "A", chart=nonproject_chart)
 
 
+def test_dashboard_pane_adjustment_page_resolves_unambiguous_shortcuts() -> None:
+    chart = TimelineConfig("timeline", DateRange(date(2026, 1, 1), date(2026, 1, 14)))
+    project_chart = replace(chart, by="project")
+
+    assert _adjustment_target_page("timeline", "quick", "k", chart=chart) == "advanced"
+    assert _adjustment_target_page("timeline", "advanced", "g", chart=chart) == "quick"
+    assert _adjustment_target_page("timeline", "quick", "f", chart=chart) == "advanced"
+    assert _adjustment_target_page("timeline", "quick", "?", chart=chart) is None
+    assert _adjustment_target_page("timeline", "quick", "P", chart=project_chart) == "quick"
+    assert _adjustment_target_page("timeline", "advanced", "P", chart=project_chart) == "advanced"
+    assert _adjustment_target_page("timeline", "advanced", "P", chart=chart) == "quick"
+
+
+def test_dashboard_monitor_page_resolution_keeps_attachment_shortcuts_current() -> None:
+    chart = replace(
+        MonitorConfig("monitor", DateRange(date(2026, 1, 1), date(2026, 1, 14))),
+        presentation=replace(
+            MonitorConfig("monitor", DateRange(date(2026, 1, 1), date(2026, 1, 14))).presentation,
+            style="ranking",
+        ),
+    )
+
+    for key in ("t", "T", "s", "S"):
+        assert (
+            _adjustment_target_page("monitor", "quick", key, chart=chart, attachment_available=True)
+            == "quick"
+        )
+        assert (
+            _adjustment_target_page(
+                "monitor", "advanced", key, chart=chart, attachment_available=True
+            )
+            == "advanced"
+        )
+    assert _adjustment_target_page("monitor", "advanced", "t", chart=chart) == "quick"
+
+
+def test_dashboard_animation_pane_resolves_unambiguous_shortcuts() -> None:
+    assert _animation_adjustment_target_page("quick", "e") == "advanced"
+    assert _animation_adjustment_target_page("advanced", "t") == "quick"
+    assert _animation_adjustment_target_page("quick", "p") == "quick"
+    assert _animation_adjustment_target_page("advanced", "\x1b[A") == "advanced"
+    assert _animation_adjustment_target_page("quick", "?") is None
+
+
 def test_calendar_advanced_adjustment_uses_the_shared_filter_control() -> None:
     parser = build_parser(load_translator("en"))
     options = _to_options(parser.parse_args(["dashboard", "--pane", "calendar"]))
@@ -1499,7 +1834,178 @@ def test_calendar_advanced_adjustment_uses_the_shared_filter_control() -> None:
     translator = load_translator("en")
 
     assert _pane_adjustment_state(pane, "advanced", translator) == "running"
-    assert _adjustment_controls("calendar", "advanced", translator) == "f filters"
+    assert _adjustment_controls("calendar", "advanced", translator) == "f edit filters"
+
+
+def test_dashboard_monitor_advanced_state_shows_attachment_settings() -> None:
+    parser = build_parser(load_translator("en"))
+    options = _to_options(parser.parse_args(["dashboard", "--pane", "monitor --style ranking"]))
+    pane = _new_pane(standalone_from_chart_pane(options, options.panes[0]), "pane:monitor")
+    assert pane.attachment is not None
+    pane.attachment.set_theme("dracula", 0.0)
+
+    assert "ANIMATION none · THEME dracula" in _pane_adjustment_state(
+        pane, "advanced", load_translator("en")
+    )
+    pane.attachment_enabled = True
+    english = _pane_adjustment_state(pane, "advanced", load_translator("en"))
+    chinese = _pane_adjustment_state(pane, "advanced", load_translator("zh"))
+
+    style = animation_style_choices("monitor")[0]
+    display_name = animation_spec(style, target="monitor").display_name
+    assert f"ANIMATION {display_name} · THEME dracula" in english
+    assert f"动画 {display_name} · 主题 dracula" in chinese
+    pane.attachment_enabled = False
+    assert "ANIMATION none · THEME dracula" in _pane_adjustment_state(
+        pane, "advanced", load_translator("en")
+    )
+    assert "ANIMATION" not in _pane_adjustment_state(pane, "quick", load_translator("en"))
+
+
+def test_dashboard_overlay_editor_keeps_global_shortcuts_in_drafts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parser = build_parser(load_translator("en"))
+    options = _to_options(
+        parser.parse_args(
+            [
+                "dashboard",
+                "--demo",
+                "--header-style",
+                "hidden",
+                "--header-summary",
+                "none",
+                "--pane",
+                "animate rain",
+            ]
+        )
+    )
+    frames: list[object] = []
+    applied: list[tuple[str, str]] = []
+
+    class Runtime:
+        def cancel(self) -> None:
+            pass
+
+    class Screen:
+        def __init__(self, _stream: object) -> None:
+            pass
+
+        def paint(self, frame: object, **_kwargs: object) -> None:
+            frames.append(frame)
+
+        def finish(self) -> None:
+            pass
+
+    original_apply_draft = tui_module.AnimationOverlayRuntime.apply_draft
+
+    def capture_draft(self: object, mode: str, draft: str) -> None:
+        applied.append((mode, draft))
+        original_apply_draft(self, mode, draft)
+
+    keys = iter(
+        (
+            KeyEvent("m"),
+            KeyEvent("a"),
+            KeyEvent("e"),
+            KeyEvent("\x08"),
+            KeyEvent("h"),
+            KeyEvent("d"),
+            KeyEvent("\x7f"),
+            KeyEvent("{"),
+            KeyEvent("}"),
+            KeyEvent("\n"),
+            KeyEvent("\x0b"),
+            *map(KeyEvent, "hHuU"),
+            KeyEvent("\t"),
+            *map(KeyEvent, "hHuU"),
+            KeyEvent("\x15"),
+            KeyEvent("{"),
+            KeyEvent("}"),
+            KeyEvent("x"),
+            KeyEvent("\x01"),
+            KeyEvent("\x17"),
+            KeyEvent("Y"),
+            KeyEvent("\x02"),
+            KeyEvent("\x02"),
+            KeyEvent("Z"),
+            KeyEvent("\r"),
+            KeyEvent("\x03"),
+        )
+    )
+    monkeypatch.setattr(tui_module, "build_query_runtime", Runtime)
+    monkeypatch.setattr(tui_module, "FramePainter", Screen)
+    monkeypatch.setattr(tui_module, "tui_input_mode", nullcontext)
+    monkeypatch.setattr(tui_module, "read_event", lambda _decoder, _timeout: next(keys))
+    monkeypatch.setattr(
+        tui_module,
+        "get_terminal_size",
+        lambda: __import__("os").terminal_size((200, 30)),
+    )
+    monkeypatch.setattr(tui_module.AnimationOverlayRuntime, "apply_draft", capture_draft)
+
+    assert tui_module.run_tui(options, load_translator("en")) == 0
+    assert applied == [("command", "Z{}Yx")]
+    painted = "\n".join("\n".join(frame.rows) for frame in frames)
+    assert "Draft cleared" in painted
+    assert "DRAFT ·" in painted
+    assert "NAV ·" in painted
+    assert "OVERALL ·" in painted
+    assert "Ctrl-J / Ctrl-K pane height" in painted
+    assert "COMPLETE ·" not in painted
+    assert "Overlay editor help" in painted
+    assert "Dashboard help" not in painted
+    assert "TEXT MODE: edit literal content displayed directly" in painted
+    assert "COMMAND MODE: edit the shell command whose stdout is displayed" in painted
+    assert "NAVIGATION" in painted
+    assert "DRAFT" in painted
+    assert "COMPLETE" in painted
+    assert "DASHBOARD PANE" in painted
+    assert "Ctrl-J/Ctrl-K: decrease / increase pane height" in painted
+    assert "STRATEGY" not in painted
+    assert "Dashboard undo/redo history is session-only" not in painted
+    assert "Animation overlay commands time out after 30 seconds." not in painted
+
+
+def test_animation_pane_footer_exposes_dashboard_management_without_view() -> None:
+    parser = build_parser(load_translator("en"))
+    options = _to_options(parser.parse_args(["dashboard", "--pane", "animate rain"]))
+    pane = _new_pane(options, options.panes[0])
+    assert isinstance(pane, tui_module.TuiAnimationPane)
+
+    quick = tui_module._animation_adjustment_footer(pane, "quick", load_translator("en"), 120)
+    advanced = tui_module._animation_adjustment_footer(pane, "advanced", load_translator("en"), 120)
+    chinese = tui_module._animation_adjustment_footer(pane, "quick", load_translator("zh"), 120)
+
+    assert "Space pause/resume" in quick[1]
+    assert "p/P overlay position" in quick[1]
+    assert "r replace" in quick[3]
+    assert "N insert before" in quick[3]
+    assert "n insert after" in quick[3]
+    assert "x delete" in quick[3]
+    assert "v switch view" not in quick[3]
+    assert "y copy" not in quick[3]
+    assert "Tab select next" in quick[4]
+    assert "{ / } width" in quick[4]
+    assert "J / K height" in quick[4]
+    assert quick[2:] == advanced[2:]
+    assert "r 替换" in chinese[3]
+    assert "v 切换视图" not in chinese[3]
+    assert quick[2] == "━━ Dashboard Pane Management ━━"
+    assert chinese[2] == "━━ Dashboard 子图管理 ━━"
+    assert tui_module._pane_management_divider(load_translator("en"), 120, color=True) == (
+        "\x1b[1m━━ Dashboard Pane Management ━━\x1b[0m"
+    )
+    assert tui_module._pane_management_divider(load_translator("en"), 120, color=False) == (
+        "━━ Dashboard Pane Management ━━"
+    )
+    for language in ("en", "zh"):
+        assert all(
+            display_width(row) <= 24
+            for row in tui_module._animation_adjustment_footer(
+                pane, "quick", load_translator(language), 24, color=True
+            )
+        )
 
 
 def test_tui_adjustment_footer_separates_dashboard_management() -> None:
@@ -1518,7 +2024,7 @@ def test_tui_adjustment_footer_separates_dashboard_management() -> None:
     assert "v view" not in timeline_quick
     assert "k weekdays" in timeline_advanced
     assert "l legend" in timeline_advanced
-    assert "f filters" in timeline_advanced
+    assert "f edit filters" in timeline_advanced
     assert "A project aggregation" in timeline_advanced
     assert "c cache mode" in stack_advanced
     assert not _adjustment_key_supported("timeline", "quick", "k")
@@ -1542,12 +2048,41 @@ def test_tui_adjustment_footer_separates_dashboard_management() -> None:
     assert len(quick_rows) == 5
     assert "a Advanced" in quick_rows[1]
     assert "Enter/Esc finish" in quick_rows[1]
-    assert "Dashboard Pane" in quick_rows[2]
-    assert "v view" in quick_rows[3]
+    assert "Dashboard Pane Management" in quick_rows[2]
+    assert "v switch view" in quick_rows[3]
     assert "N insert before" in quick_rows[3]
-    assert "Tab next pane" in quick_rows[4]
+    assert "Tab select next" in quick_rows[4]
     assert quick_rows[2:] == advanced_rows[2:]
     assert "[Finish]" not in "\n".join(quick_rows)
+    chinese_advanced = _adjustment_footer(
+        "当前状态：运行中", "timeline", "advanced", "chart", load_translator("zh"), 80
+    )
+    assert "a 快捷" in chinese_advanced[1]
+
+
+def test_monitor_attachment_adjustment_actions_are_localized() -> None:
+    ranking = MonitorConfig("monitor", DateRange(date(2026, 1, 1), date(2026, 1, 14)), by="model")
+    ranking = replace(ranking, presentation=replace(ranking.presentation, style="ranking"))
+
+    for language, expected in (
+        ("en", ("t/T animation theme", "s/S animation style")),
+        ("zh", ("t/T 动画主题", "s/S 动画样式")),
+    ):
+        actions = tui_module._pane_adjustment_actions(
+            "monitor",
+            "advanced",
+            load_translator(language),
+            chart=ranking,
+            attachment_available=True,
+        )
+        assert tuple(action.text for action in actions[-2:]) == expected
+
+    assert not any(
+        "animation" in action.text
+        for action in tui_module._pane_adjustment_actions(
+            "monitor", "quick", load_translator("en"), chart=ranking, attachment_available=True
+        )
+    )
 
 
 def test_tui_text_footer_is_minimal_and_only_advertises_overflow() -> None:
@@ -1556,23 +2091,24 @@ def test_tui_text_footer_is_minimal_and_only_advertises_overflow() -> None:
     compact = _text_view_footer("data-table", translator, 120, line_count=2, visible_rows=2)[0]
     overflowing = _text_view_footer("data-table", translator, 120, line_count=3, visible_rows=2)[0]
 
-    assert compact == "y copy · v view"
-    assert "↑/↓ scroll · h top · e end" not in compact
-    assert overflowing == "↑/↓ scroll · h top · e end · y copy · v view"
+    assert compact == "y copy · v switch view"
+    assert "↑/↓ scroll · h go to top · e go to end" not in compact
+    assert overflowing == "↑/↓ scroll · Home top · e end · y copy · v switch view"
     assert "Quick" not in overflowing
     assert "replace" not in overflowing
     assert "next pane" not in overflowing
 
 
-def test_dashboard_title_centers_and_right_aligns_freshness() -> None:
-    line = _dashboard_title_line("Dashboard", "updated 12:34:56", 50)
-    assert len(line) == 50
+def test_dashboard_title_places_version_left_and_freshness_right() -> None:
+    line = _dashboard_title_line("Dashboard", "updated 12:34:56", 50, color=False)
+    assert display_width(line) == 50
+    assert line.startswith("v0.2.1")
     assert line.endswith("updated 12:34:56")
     assert line.index("Dashboard") == (50 - len("Dashboard")) // 2
 
-    narrow = _dashboard_title_line("仪表盘", "更新于 12:34:56", 18)
-    assert len(narrow.encode()) > 0
-    assert narrow.rstrip().endswith("…")
+    narrow = _dashboard_title_line("仪表盘", "更新于 12:34:56", 18, color=False)
+    assert display_width(narrow) == 18
+    assert narrow.startswith("v0.2.1")
 
 
 def test_tui_is_not_a_dashboard_compatibility_alias() -> None:
@@ -1891,6 +2427,28 @@ def test_pane_chooser_reuses_dashboard_decoder_and_ignores_mouse(
     )
 
 
+def test_pane_chooser_opens_help_without_losing_selection() -> None:
+    class Screen:
+        def paint(self, *args: object, **kwargs: object) -> None:
+            pass
+
+    selected: list[str] = []
+    events = iter((KeyEvent("h"), KeyEvent("\x1b[B"), KeyEvent("\r")))
+
+    assert (
+        _choose_pane_type(
+            Screen(),
+            load_translator("en"),
+            InputDecoder(),
+            height=20,
+            read_input=lambda: next(events),
+            on_help=selected.append,
+        )
+        == "calendar"
+    )
+    assert selected == ["timeline"]
+
+
 def test_pane_chooser_wraps_backward_and_escape_cancels(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1905,7 +2463,7 @@ def test_pane_chooser_wraps_backward_and_escape_cancels(
         "read_event",
         lambda active, timeout: active.next(now=1.0),
     )
-    assert _choose_pane_type(Screen(), load_translator("en"), decoder, height=20) == "monitor"
+    assert _choose_pane_type(Screen(), load_translator("en"), decoder, height=20) == "animate"
 
     cancelled = InputDecoder()
     cancelled.feed("\x1b")
@@ -1950,6 +2508,28 @@ def test_pane_chooser_uses_operation_specific_copy(
     )
 
 
+def test_pane_chooser_localizes_names_and_includes_animation() -> None:
+    painted: list[tuple[str, str, str]] = []
+
+    assert (
+        _choose_pane_type(
+            object(),
+            load_translator("zh"),
+            InputDecoder(),
+            height=20,
+            paint_choices=lambda choices, title, controls: painted.append(
+                (choices, title, controls)
+            ),
+            read_input=lambda: KeyEvent("\x1b"),
+        )
+        is None
+    )
+
+    assert "时间趋势 (Timeline)" in painted[0][0]
+    assert "监控 (Monitor)" in painted[0][0]
+    assert "动画 (Animation)" in painted[0][0]
+
+
 def test_tui_input_decodes_keys_and_fragmented_mouse_press() -> None:
     decoder = InputDecoder()
     decoder.feed("r")
@@ -1958,6 +2538,48 @@ def test_tui_input_decodes_keys_and_fragmented_mouse_press() -> None:
     assert decoder.next() is None
     decoder.feed(";5M")
     assert decoder.next() == MouseEvent(0, 20, 5, True, 0)
+
+
+def test_tui_input_preserves_return_ctrl_j_and_ctrl_k() -> None:
+    decoder = InputDecoder()
+    decoder.feed("\r\n\x0b")
+
+    assert decoder.next() == KeyEvent("\r")
+    assert decoder.next() == KeyEvent("\n")
+    assert decoder.next() == KeyEvent("\x0b")
+
+
+def test_tui_input_ignores_trackpad_wheel_reports() -> None:
+    decoder = InputDecoder()
+    decoder.feed("\x1b[<64;20;5M\x1b[<65;20;5M")
+
+    assert decoder.next() is None
+    assert decoder.buffer == ""
+
+
+def test_tui_input_drains_wheel_burst_before_next_key() -> None:
+    decoder = InputDecoder()
+    decoder.feed("\x1b[<64;20;5M" * 400 + "r")
+
+    assert decoder.next() == KeyEvent("r")
+    assert decoder.buffer == ""
+
+
+def test_tui_input_decodes_bracketed_paste_as_one_event() -> None:
+    decoder = InputDecoder()
+    decoder.feed("\x1b[200~echo one\n\x1b\x03\x1b[201~")
+
+    assert decoder.next() == PasteEvent("echo one\n\x1b\x03")
+    assert decoder.buffer == ""
+
+
+def test_tui_input_waits_for_fragmented_bracketed_paste() -> None:
+    decoder = InputDecoder()
+    decoder.feed("\x1b[200~echo")
+    assert decoder.next() is None
+
+    decoder.feed(" two\x1b[201~")
+    assert decoder.next() == PasteEvent("echo two")
 
 
 def test_tui_input_times_out_incomplete_mouse_report_and_recovers() -> None:
@@ -1976,7 +2598,6 @@ def test_tui_input_recovers_after_malformed_mouse_report(malformed: str) -> None
     decoder = InputDecoder()
     decoder.feed(malformed + "\x1b[<0;7;3M")
 
-    assert decoder.next() is None
     assert decoder.next() == MouseEvent(0, 7, 3, True, 0)
     assert decoder.buffer == ""
 
@@ -1985,7 +2606,6 @@ def test_tui_input_keeps_ordinary_key_after_malformed_mouse_report() -> None:
     decoder = InputDecoder()
     decoder.feed("\x1b[<0;;3Mq")
 
-    assert decoder.next() is None
     assert decoder.next() == KeyEvent("q")
 
 
@@ -2002,7 +2622,7 @@ def test_tui_input_mode_disables_mouse_and_restores_terminal_on_error(
         def fileno(self) -> int:
             return 7
 
-    previous = [0, 0, 0, termios.ISIG, 0, 0, 0]
+    previous = [termios.ICRNL, 0, 0, termios.ISIG, 0, 0, 0]
     attributes = list(previous)
     output = StringIO()
     tcset_calls: list[tuple[object, ...]] = []
@@ -2031,6 +2651,7 @@ def test_tui_input_mode_disables_mouse_and_restores_terminal_on_error(
     assert output.getvalue() == tui_input_module._MOUSE_ENABLE + tui_input_module._MOUSE_DISABLE
     assert setcbreak_fds == [7]
     assert tcset_calls[0][0:2] == (7, termios.TCSADRAIN)
+    assert tcset_calls[0][2][0] == previous[0] & ~termios.ICRNL
     assert tcset_calls[0][2][3] == previous[3] & ~termios.ISIG
     assert tcset_calls[-1] == (7, termios.TCSADRAIN, previous)
 
@@ -2114,10 +2735,12 @@ def test_insert_pane_uses_list_index_and_starts_only_new_pane() -> None:
     ("key", "expected"),
     (("J", (11, 13)), ("K", (13, 11))),
 )
+@pytest.mark.parametrize("first_pane", ("ranking", "animate rain"))
 def test_dashboard_pane_height_keys_adjust_only_shared_row_weights(
     monkeypatch: pytest.MonkeyPatch,
     key: str,
     expected: tuple[int, int],
+    first_pane: str,
 ) -> None:
     parser = build_parser(load_translator("en"))
     options = _to_options(
@@ -2132,7 +2755,7 @@ def test_dashboard_pane_height_keys_adjust_only_shared_row_weights(
                 "--header-summary",
                 "none",
                 "--pane",
-                "ranking",
+                first_pane,
                 "--pane",
                 "timeline",
             ]
@@ -2194,7 +2817,7 @@ def test_dashboard_pane_height_keys_adjust_only_shared_row_weights(
 
     keys = iter(
         (
-            KeyEvent("s"),
+            KeyEvent("m"),
             KeyEvent(key),
             KeyEvent("v"),
             KeyEvent("\x1b"),
@@ -2224,9 +2847,16 @@ def test_dashboard_pane_height_keys_adjust_only_shared_row_weights(
 
     assert copied
     assert f"--row-weight {expected[0]} --row-weight {expected[1]}" in copied[-1]
-    assert "--top 10" in copied[-1]
-    assert "command" in rendered_views
-    assert rendered_views[-2:] == ["chart", "chart"]
+    if first_pane == "ranking":
+        assert "--top 10" in copied[-1]
+    else:
+        assert "--pane 'animate rain'" in copied[-1]
+    if first_pane == "ranking":
+        assert "command" in rendered_views
+        assert rendered_views[-1:] == ["chart"]
+    else:
+        assert rendered_views
+        assert all(view == "chart" for view in rendered_views)
 
 
 def test_dashboard_pane_adjustment_preserves_chart_top_shortcuts() -> None:
@@ -2244,7 +2874,7 @@ def test_dashboard_pane_adjustment_preserves_chart_top_shortcuts() -> None:
 def test_pane_advanced_actions_exclude_dashboard_management() -> None:
     controls = _adjustment_controls("timeline", "advanced", load_translator("en"))
 
-    assert "f filters" in controls
+    assert "f edit filters" in controls
     assert "r replace" not in controls
     assert "N insert before" not in controls
     assert "n insert after" not in controls

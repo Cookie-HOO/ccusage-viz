@@ -5,6 +5,7 @@ from datetime import date
 from typing import Literal, TypeAlias
 
 from ccusage_viz.animation import AnimationSpec
+from ccusage_viz.animation_overlay import OverlayConfig
 from ccusage_viz.core.time import DateRange, local_today, natural_period_start
 from ccusage_viz.core.time import parse_period as parse_core_period
 from ccusage_viz.errors import UsageError
@@ -156,6 +157,7 @@ class ChartPaneConfig:
 @dataclass(frozen=True, slots=True)
 class AnimationPaneConfig:
     animation: AnimationSpec
+    overlay: OverlayConfig = OverlayConfig()
 
 
 PaneConfig: TypeAlias = ChartPaneConfig | AnimationPaneConfig
@@ -196,6 +198,7 @@ class DashboardLaunch:
     host: DashboardHostConfig
     panes: tuple[PaneConfig, ...]
     explicit: frozenset[str] = frozenset()
+    launcher: str = "ccuv"
 
     def was_explicit(self, field: str) -> bool:
         return field in self.explicit
@@ -207,6 +210,8 @@ class AnimationLaunch:
     host: StandaloneHostConfig
     animation: AnimationSpec
     explicit: frozenset[str] = frozenset()
+    gallery: bool = False
+    overlay: OverlayConfig = OverlayConfig()
 
     def was_explicit(self, field: str) -> bool:
         return field in self.explicit
@@ -267,10 +272,10 @@ def adjust_chart(chart: ChartConfig, key: str, *, demo: bool = False) -> ChartCo
                 density=_cycle(DENSITIES, chart.presentation.density, 1),
             ),
         )
-    if key == "s":
+    if key in {"s", "S"}:
         styles = compatible_styles(chart.kind, getattr(chart, "by", None))
         current = chart.presentation.style
-        style = _cycle(styles, current if current in styles else styles[0], 1)
+        style = _cycle(styles, current if current in styles else styles[0], 1 if key == "s" else -1)
         return replace(chart, presentation=replace(chart.presentation, style=style))
     if key in {"t", "T"}:
         from ccusage_viz.render.palette import COLOR_SCHEMES

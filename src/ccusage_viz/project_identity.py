@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import PurePath
+from re import match
 from typing import Literal, TypeAlias
 from unicodedata import normalize
 
@@ -28,11 +30,12 @@ class _OpaqueLabelCandidate:
 
 @dataclass(frozen=True, slots=True)
 class ExactProjectDisplayKey:
-    """Monitor-only exact identity with a separately stored safe display label."""
+    """Monitor-only exact identity with separately stored presentation metadata."""
 
     agent: str
     raw_id: str
     label: str = field(compare=False, hash=False)
+    path_backed: bool = field(default=False, compare=False, hash=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,11 +93,17 @@ def project_display_name(raw_id: str) -> str:
     return "Project"
 
 
-def make_project_ref(agent: str, raw_id: str, display_name: str | None = None) -> ProjectRef:
+def make_project_ref(
+    agent: str,
+    raw_id: str,
+    display_name: str | None = None,
+    *,
+    path_backed: bool = False,
+) -> ProjectRef:
     display = display_name or project_display_name(raw_id)
     if not _is_safe_display_name(display):
         display = project_display_name(display)
-    return ProjectRef(agent, raw_id, display)
+    return ProjectRef(agent, raw_id, display, path_backed)
 
 
 def _opaque_components(project: ProjectRef) -> tuple[str, ...] | None:
@@ -332,7 +341,10 @@ def exact_project_display_key(
 ) -> ExactProjectDisplayKey:
     """Return Monitor's exact identity with its safe project display label."""
     return ExactProjectDisplayKey(
-        project.agent, project.raw_id, exact_project_label(project, projects)
+        project.agent,
+        project.raw_id,
+        exact_project_label(project, projects),
+        project.path_backed,
     )
 
 
@@ -366,7 +378,7 @@ def project_display_keys(
     refs = tuple(
         make_project_ref(item.agent, item.raw_id)
         if item.agent == "claude" and item.raw_id.startswith("-") and item.label == "Project"
-        else ProjectRef(item.agent, item.raw_id, item.label)
+        else ProjectRef(item.agent, item.raw_id, item.label, item.path_backed)
         for item in exact
     )
     groups = project_groups(refs, aggregation, context=context)
@@ -422,9 +434,29 @@ def merged_project_label(
     )
 
 
+def normalized_absolute_project_path(raw_id: str) -> str | None:
+    """Return a filesystem-independent normalized absolute path comparison key."""
+    value = normalize("NFC", raw_id).replace("\\", "/")
+    windows = bool(match(r"^[A-Za-z]:/", value)) or value.startswith("//")
+    if not value.startswith("/") and not windows:
+        return None
+    prefix = "//" if value.startswith("//") else f"{value[:2].casefold()}/" if windows else "/"
+    remainder = value[3:] if windows and not value.startswith("//") else value[len(prefix) :]
+    parts: list[str] = []
+    for part in remainder.split("/"):
+        if not part or part == ".":
+            continue
+        parts.append(part.casefold() if windows else part)
+    return prefix + "/".join(parts)
+
+
 def _path_suffix_parts(raw_id: str) -> tuple[tuple[str, ...], ...]:
-    normalized = normalize("NFC", raw_id).replace("\\", "/").strip("/")
-    parts = tuple(part.casefold() for part in normalized.split("/") if part)
+    normalized = normalized_absolute_project_path(raw_id)
+    if normalized is None:
+        return ()
+    parts = tuple(
+        part.casefold() for part in normalized.replace("\\", "/").strip("/").split("/") if part
+    )
     return tuple(parts[index:] for index in range(len(parts) - 1, -1, -1))
 
 
@@ -432,8 +464,15 @@ def _path_suffix_aliases(raw_id: str) -> tuple[str, ...]:
     return tuple("-".join(parts) for parts in _path_suffix_parts(raw_id))
 
 
-def _codex_suffix_aliases(project: ProjectRef) -> tuple[str, ...]:
-    if project.agent != "codex" or "/" not in project.raw_id and "\\" not in project.raw_id:
+def _path_backed_project_key(project: ProjectRef) -> str | None:
+    """Return a normalized path key for sources that declare a project locator."""
+    if project.agent != "codex" and not project.path_backed:
+        return None
+    return normalized_absolute_project_path(project.raw_id)
+
+
+def _path_backed_suffix_aliases(project: ProjectRef) -> tuple[str, ...]:
+    if _path_backed_project_key(project) is None:
         return ()
     return _path_suffix_aliases(project.raw_id)
 
@@ -447,36 +486,44 @@ def _claude_suffix_aliases(project: ProjectRef) -> tuple[str, ...]:
     return tuple("-".join(parts[index:]) for index in range(len(parts) - 1, -1, -1))
 
 
-def _claude_codex_pairs(pool: tuple[ProjectRef, ...]) -> dict[tuple[str, str], str]:
-    """Return conservative one-to-one Claude/Codex display-group aliases."""
-    codex = tuple(project for project in pool if project.agent == "codex")
-    alias_counts: dict[str, int] = {}
-    aliases_by_codex: dict[tuple[str, str], tuple[str, ...]] = {}
-    paths_by_alias: dict[str, set[tuple[str, ...]]] = {}
-    for project in codex:
-        aliases = _codex_suffix_aliases(project)
-        aliases_by_codex[project.key] = aliases
-        if aliases:
-            for alias, parts in zip(aliases, _path_suffix_parts(project.raw_id), strict=True):
-                alias_counts[alias] = alias_counts.get(alias, 0) + 1
-                paths_by_alias.setdefault(alias, set()).add(parts)
+def _path_components(pool: tuple[ProjectRef, ...]) -> dict[str, tuple[ProjectRef, ...]]:
+    """Group only adapter-declared, lexically equal absolute project paths."""
+    grouped: dict[str, list[ProjectRef]] = defaultdict(list)
+    for project in pool:
+        if path := _path_backed_project_key(project):
+            grouped[path].append(project)
+    return {
+        path: tuple(sorted(members, key=lambda item: item.key)) for path, members in grouped.items()
+    }
 
-    selected: dict[str, ProjectRef] = {}
-    for project in codex:
+
+def _claude_path_pairs(
+    pool: tuple[ProjectRef, ...], components: dict[str, tuple[ProjectRef, ...]]
+) -> dict[tuple[str, str], str]:
+    """Return conservative one-to-one Claude/path-component group aliases."""
+    alias_components: dict[str, set[str]] = defaultdict(set)
+    paths_by_alias: dict[str, set[tuple[str, ...]]] = defaultdict(set)
+    for path, members in components.items():
+        aliases = _path_backed_suffix_aliases(members[0])
+        for alias, parts in zip(aliases, _path_suffix_parts(path), strict=True):
+            alias_components[alias].add(path)
+            paths_by_alias[alias].add(parts)
+
+    selected: dict[str, str] = {}
+    for path, members in components.items():
         alias = next(
             (
                 item
-                for item in aliases_by_codex[project.key]
-                if alias_counts[item] == 1 and len(paths_by_alias[item]) == 1
+                for item in _path_backed_suffix_aliases(members[0])
+                if len(alias_components[item]) == 1 and len(paths_by_alias[item]) == 1
             ),
             None,
         )
         if alias is not None:
-            selected[alias] = project
-
+            selected[alias] = path
     ambiguous_aliases = {alias for alias, paths in paths_by_alias.items() if len(paths) > 1}
     matches_by_claude: dict[tuple[str, str], tuple[str, ...]] = {}
-    claudes_by_alias: dict[str, list[ProjectRef]] = {}
+    claudes_by_alias: dict[str, list[ProjectRef]] = defaultdict(list)
     for project in pool:
         if project.agent != "claude":
             continue
@@ -486,14 +533,15 @@ def _claude_codex_pairs(pool: tuple[ProjectRef, ...]) -> dict[tuple[str, str], s
         matches = tuple(alias for alias in aliases if alias in selected)
         if len(matches) == 1:
             matches_by_claude[project.key] = matches
-            claudes_by_alias.setdefault(matches[0], []).append(project)
+            claudes_by_alias[matches[0]].append(project)
 
     pairs: dict[tuple[str, str], str] = {}
     for claude_key, (alias,) in matches_by_claude.items():
-        claudes = claudes_by_alias[alias]
-        if len(claudes) == 1:
-            pairs[claude_key] = alias
-            pairs[selected[alias].key] = alias
+        if len(claudes_by_alias[alias]) != 1:
+            continue
+        pairs[claude_key] = alias
+        for member in components[selected[alias]]:
+            pairs[member.key] = alias
     return pairs
 
 
@@ -511,13 +559,21 @@ def project_groups(
     """
     pool = unique_projects(projects)
     labels = project_display_names(pool, cache_shortened=cache_shortened, context=context)
-    pair_aliases = _claude_codex_pairs(pool) if aggregation == "name" else {}
+    components = _path_components(pool) if aggregation == "name" else {}
+    pair_aliases = _claude_path_pairs(pool, components) if aggregation == "name" else {}
+    component_keys = {
+        member.key: path for path, members in components.items() for member in members
+    }
     grouped: dict[ProjectGroupKey, list[ProjectRef]] = {}
     for project in pool:
         alias = pair_aliases.get(project.key)
+        component = component_keys.get(project.key)
+        shared_component = component is not None and len(components[component]) > 1
         key = (
             ("project", "name", alias)
             if alias is not None
+            else ("project", "path", component)
+            if shared_component
             else ("project", "exact", project.agent, project.raw_id)
         )
         grouped.setdefault(key, []).append(project)
@@ -525,7 +581,7 @@ def project_groups(
     result: dict[tuple[str, str], ProjectGroup] = {}
     for key, members in grouped.items():
         ordered = tuple(sorted(members, key=lambda item: item.key))
-        if key[1] == "name":
+        if key[1] in {"name", "path"}:
             label = merged_project_label(ordered, pool, labels=labels)
         else:
             label = exact_project_label(ordered[0], pool, labels=labels)

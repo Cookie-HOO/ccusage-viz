@@ -73,47 +73,100 @@ not a wrapper around a standalone chart.
 ## Animation
 
 `animate` is provider-free: it does not install, invoke, or query `ccusage`.
-It defaults to rain and exposes a deliberately fixed catalog rather than every
-animation available in the underlying library:
+It discovers the installed `term-animate` curated catalog at runtime and uses
+the library's stable effect IDs. The available styles therefore depend on the
+installed library and the target host; browse the current standalone catalog
+instead of relying on a fixed ccuv list:
 
 ```bash
-ccuv animate                 # defaults to rain
-ccuv animate mole-cat
-ccuv animate campy-cat
-ccuv animate rain
+ccuv animate                 # default eligible standalone style
+ccuv animate --gallery
 ccuv animate analog-clock
-ccuv animate digital-clock
 ```
 
-The standalone host owns all input. `q`, Escape, and Ctrl-C exit; Space pauses
-or resumes; `m` opens the adjustment view; quick `t`/`T` cycles the ccuv theme
-and `s` cycles the five supported styles. `a` switches between quick and
-advanced adjustment pages; the first advanced page has no animation-only
-settings. The underlying animation library never receives keyboard input.
+`--gallery` is a ccuv-owned two-column live gallery. An optional style chooses
+its initial card (for example, `ccuv animate analog-clock --gallery`); arrow
+keys and Page Up/Down move the selection, Space pauses or resumes projection,
+and `m` opens the local style/theme adjustment. Gallery mode cannot be combined
+with an overlay source or overlay display option.
+
+Outside the gallery, the standalone host owns all input. `q`, Escape, and
+Ctrl-C exit; Space pauses or resumes; `m` opens the adjustment view; quick
+`t`/`T` cycles the ccuv theme and `s`/`S` cycles the currently discovered
+standalone styles in either direction. `a` switches between quick and advanced
+adjustment pages. The underlying animation library never receives keyboard
+input.
 
 Animations use the current terminal color capability and honor `--ascii`.
-When the available viewport is too small, ccuv shows a compact static hint
-instead of failing, then resumes normal projection after a resize. Animation
-state is in memory only: each standalone host, Dashboard animation Pane, and
-Monitor attachment has independent theme/style/playback state, and all state is
-discarded when ccuv exits.
+ccuv passes the available viewport directly to term-animate, whose projection
+is responsible for bounded artwork. Animation state is in memory only: each
+standalone host, Dashboard animation Pane, and Monitor attachment has
+independent theme/style/playback state, and all state is discarded when ccuv
+exits.
 
-A Dashboard Pane must name its style explicitly; bare `animate` is invalid:
+### Animation overlays
+
+A standalone animation or explicit Dashboard Animation Pane can overlay one
+run-local source: static text or output from a local command. The sources are
+mutually exclusive:
 
 ```bash
-ccuv dashboard --pane "timeline --period 7d" --pane "animate rain"
+ccuv animate rain --overlay-text "Focus time"
+ccuv animate analog-clock --overlay-command "ccuv text time-state --run"
+ccuv animate rain --overlay-command "date" --overlay-interval 60
 ```
 
-Dashboard presets do not add animation Panes automatically.
+| Option | Default | Behavior |
+| --- | --- | --- |
+| `--overlay-text TEXT` | unset | Static text source. |
+| `--overlay-command COMMAND` | unset | Runs the command immediately and at the chosen interval. |
+| `--overlay-position POSITION` | `bottom-center` | One of `top-left`, `top-center`, `top-right`, `bottom-left`, `bottom-center`, or `bottom-right`. |
+| `--overlay-color COLOR` | `auto` | Auto or one of the accepted terminal foreground colors. |
+| `--overlay-interval SECONDS` | `60` | Refresh interval for command sources; it is finite and at least `5`. A supplied interval requires a command source. |
+| `--overlay-max-width COLUMNS` | `40` | Positive maximum display width. |
 
-For `monitor` styles `ranking` and `list`, ccuv attaches rain below the chart
-when residual terminal space is available. It starts frozen and plays only
-when the latest **accepted** Monitor interval has a strictly positive aggregate
-token delta. A zero delta freezes it immediately; baseline/rebaseline,
-pending, error, and discarded samples do not advance it. In the Monitor
-advanced adjustment view for those two styles only, `t`/`T` changes the
-attachment theme and `s` changes its supported style. Other Monitor styles do
-not expose or consume those attachment controls.
+Commands run through the local shell with stdin disabled. ccuv bounds and
+sanitizes their displayed output, applies a 30-second execution timeout, and
+keeps the most recent 20 command results for the current session. The editor,
+position/interval controls, Help, and command-history view are local to that
+animation host; Enter applies an editor draft and Escape cancels it. Nothing is
+persisted after ccuv exits.
+
+> [!WARNING]
+> `--overlay-command` executes user-supplied local code and inherits every
+environment variable visible to the `ccuv` process. Use only commands and
+execution environments you trust.
+
+`ccuv text time-state` prints a localized status for the current local time.
+`--describe` explains the time bands, and `--run` is the command source used by
+the shipped clock presets.
+
+A Dashboard animation Pane must name its style explicitly; bare `animate` is
+invalid. Its fragment accepts the same overlay options, and its state remains
+independent from other Panes:
+
+```bash
+ccuv dashboard --pane "timeline --period 7d" \
+  --pane "animate rain --overlay-text 'Focus time'"
+```
+
+The non-clock Dashboard presets do not add animation Panes automatically. The
+Dashboard pane chooser can add an Animation Pane with the default rain style;
+its quick controls cycle every currently eligible catalog effect.
+
+For `monitor` styles `ranking` and `list`, attachments are disabled by default.
+In the advanced adjustment view, press `s` to enable the first
+Monitor-eligible effect; `s`/`S` then cycles every effect declared by
+`term-animate`, followed by ccuv-local `none`. An enabled attachment starts
+with the `classic` library theme, independently of the Monitor chart theme.
+It stays hidden until the Monitor establishes a comparable accepted interval,
+then plays only when the latest **accepted** interval has a strictly positive
+aggregate token delta; a zero delta renders the eligible stateful scene idle.
+Baseline/rebaseline, pending, error, and discarded samples do not advance it.
+`t`/`T` changes the retained attachment theme. `none` removes only that
+Monitor attachment and does not exist as a standalone `animate` or Dashboard
+Animation-pane style. Other Monitor styles do not expose or consume these
+attachment controls.
 
 ## Shared standalone CLI reference
 
@@ -216,7 +269,7 @@ session, or pass `--no-watch` for a one-shot query.
   `normalized`.
 - Ranking styles are `bar`, `dot`, and `dots`.
 - Monitor styles are `bars`, `line`, `step`, `points`, `line-points`, `ranking`,
-  and `list`. A grouped Monitor cannot use `bars`.
+  `list`, and `cumulative-bars`. A grouped Monitor cannot use `bars`.
 
 Grouping happens after filters. For Timeline and Monitor, `--top` requires a
 `--by` dimension and defaults to `3` when grouping is selected without an
@@ -394,12 +447,13 @@ not shown because those styles already describe the current observation.
 
 ## Dashboard startup and composition
 
-Dashboard is the multi-pane host. A bare invocation starts the `wide` preset:
+Dashboard is the multi-pane host. A bare invocation starts the `wide-clock`
+preset; choose `wide` explicitly for the data-only overview:
 
 ```bash
 ccuv dashboard
 ccuv dashboard wide
-ccuv dashboard wide --demo
+ccuv dashboard wide-clock --demo
 ```
 
 ### Presets
@@ -407,14 +461,20 @@ ccuv dashboard wide --demo
 | Preset | Pane composition | Grid/layout | Dashboard style |
 | --- | --- | --- | --- |
 | `wide` | Timeline, Stack, Ranking, Monitor grouped by model | `2x2` | `framed` |
-| `spotlight-wide` | Timeline, Stack, Ranking | `2x2` with `spotlight-wide` | `framed` |
-| `spotlight-wide2` | Timeline, Stack, Ranking, Monitor grouped by model | `2x2` with `spotlight-wide2` | `framed` |
+| `wide-clock` | Analog Clock, then the standard wide Timeline, Stack, Ranking, and model Monitor panes | `spotlight-wide`; configured row ratio `9:13:12` | `framed` |
+| `spotlight-wide` | Timeline, Stack, Ranking | `spotlight-wide` topology | `framed` |
+| `spotlight-wide2` | Timeline, Stack, Ranking, Monitor grouped by model | `spotlight-wide2` topology: two full-width leading bands, then a two-column band | `framed` |
 | `narrow` | 14-day Timeline, project Ranking, model Monitor | `3x1` | `framed` |
+| `narrow-clock` | Digital Clock, then narrow Timeline, project Ranking, and model Monitor panes | `4x1`; configured row ratio `3:7:7:6` | `framed` |
 | `all` | Two Timelines, Calendar, Ranking, two Stacks, and four Monitor variants | `5x2` | `split` |
 
-The default `wide` panes use compact density and deliberately use separate
-chart themes/styles. `spotlight-wide` gives its first pane the leading wide
-area; `spotlight-wide2` gives the first two panes consecutive wide rows.
+The data-only `wide` panes use compact density and deliberately use separate
+chart themes/styles. `wide-clock` and `narrow-clock` are the clock presets: the
+former owns an Analog Clock Pane and the latter a Digital Clock Pane, never a
+Dashboard header. Both shipped clock Panes add the localized time-state overlay
+at bottom-right by default; it uses the current local wall time and can be
+adjusted during the session. `spotlight-wide` gives its first pane the leading
+wide area; `spotlight-wide2` gives the first two panes consecutive wide rows.
 
 Presets are startup templates. They are not values for `--grid`. Repeated
 `--pane` values append panes after a preset's panes, and the host expands a
@@ -477,9 +537,10 @@ A Dashboard host owns its layout, shell theme/style, headers, input loop, and
 cadences. A Pane owns chart selection, range/window, grouping, Top/Other,
 filters, chart theme/style/density, and chart-specific configuration.
 
-Pane fragments may contain only a chart command (`timeline`, `calendar`,
-`stack`, `ranking`, or `monitor`) plus chart settings. They must not include
-host/lifecycle options such as:
+Chart Pane fragments may contain only a chart command (`timeline`, `calendar`,
+`stack`, `ranking`, or `monitor`) plus chart settings. An Animation Pane fragment
+may additionally carry its overlay source and display settings. Neither may
+include host/lifecycle options such as:
 
 ```text
 --interval --no-watch --watch --ascii --demo --lang
@@ -527,9 +588,14 @@ unscrolled command or data payload.
 ### Shortcut conventions
 
 Adjustment shortcuts are scoped to the visible page or Dashboard management mode;
-the control footer always shows the active meaning. Lowercase keys are the usual
-direct actions for the current chart or page. `t/T` is the only directional pair:
-`t` cycles the theme forward and `T` cycles it backward.
+the control footer always shows the active meaning. In a Dashboard **chart Pane**
+adjustment, a chart-setting key available only on the other page automatically
+selects that page and applies it. The current page always wins for overlapping
+keys; this routing applies to Dashboard chart and Animation Panes only, not to
+standalone charts or animations, text views, Dashboard-global adjustment, or
+chooser/editor dialogs. Lowercase keys
+are the usual direct actions for the current chart or page. `t/T` is the only
+directional pair: `t` cycles the theme forward and `T` cycles it backward.
 
 Uppercase does not generally mean “reverse.” `A` and `P` are low-frequency,
 Advanced project-presentation controls that appear only while grouped by project:
@@ -540,13 +606,18 @@ they are direct actions despite appearing on the Advanced page.
 Historical `p/P` is a compatibility exception: `p` cycles trailing periods and
 `P` cycles natural periods. They are two period preset families, not a directional
 pair. It is intentionally documented separately from the `t/T` rule and does
-not change `P`'s Advanced project-label meaning.
+not change `P`'s Advanced project-label meaning. In a project-grouped Dashboard
+chart Pane, Quick `P` therefore remains the natural-period control while
+Advanced `P` remains project-label context. Eligible Monitor ranking/list
+attachments likewise keep `t/T` and `s/S` as chart theme/style controls on Quick
+and attachment theme/style controls on Advanced.
 
 ### Historical adjustment flow
 
 For Timeline, Calendar, Stack, and Ranking, press `m` in chart view. The
-picker previews changes, `a` switches **Quick** and **Advanced** pages, and
-`Enter`/newline commits the current candidate. `Esc` cancels the picker.
+picker previews changes, `a` explicitly switches **Quick** and **Advanced**
+pages, and `Enter`/newline commits the current candidate. `Esc` cancels the
+picker.
 Visual-only changes update the preview immediately; data-affecting changes are
 used by the subsequent configuration refresh after commit.
 
@@ -625,40 +696,60 @@ pretending to recreate prior observation history.
 
 ### Dashboard controls
 
-Dashboard has separate navigation and ownership rules. In browse mode:
+Dashboard has three modes: Browse, Pane adjustment, and Dashboard adjustment.
+Press `m` to adjust the selected Pane, or double-click a Pane to select and
+enter its adjustment directly. Press `d` for Dashboard-wide adjustment. In
+both adjustment modes, `Enter` or `Esc` finishes, and three minutes without
+keyboard or mouse input returns to Browse. A single click does not enter or
+switch Pane adjustment: when another Pane is selected, the first click is held
+so that a normal second click can form the required double-click.
+
+In Browse mode:
 
 | Key | Behavior |
 | --- | --- |
-| `r` | In chart browse mode, refresh all panes; it has no action in the full-command view. |
-| `s` | Adjust the first pane. |
-| Mouse click | Adjust the clicked pane. |
-| `g` | Open global Dashboard adjustment. |
-| `h` / `H` | In chart browse mode, toggle the Dashboard footer. In the full-command view, lowercase `h` goes to the first line; `H` has no action. |
-| `e`, `Up` / `Down` | In the full Dashboard command view, go to the final line or scroll one rendered line. |
-| `v` | Show the full Dashboard command. |
-| `y` | Copy from command view. |
-| `Space` | In chart browse mode, pause/resume Dashboard scheduling; it has no action in the full-command view. |
+| `r` | In chart view, refresh all Pane data and the header. |
+| `m` | Adjust the selected Pane. |
+| `d` | Adjust Dashboard-wide settings. |
+| `c` | In chart view, show or hide the control bar. |
+| `h` | Open contextual Help. |
+| `v` | Cycle chart, command, and data views. |
+| `y` | Copy the current non-chart view. |
+| `Space` | In chart view, pause or resume all Dashboard updates and animation Panes. |
+| `u` / `U` | Undo / redo Dashboard edits. |
 | `Ctrl-C` | Exit. |
 
-While adjusting a Pane, `v` cycles its view. In a non-chart pane text view,
-`Up`/`Down` scroll one line, `h` goes to the first line, and `e` goes to the
-final line; the pane's notices remain fixed. Its always-visible footer contains
-only reading, copying, and view-cycle actions, and only advertises scrolling
-when the text overflows. `r` and `Space` have no action there; chart
-Quick/Advanced controls and Dashboard pane management remain unavailable while
-text is shown. Enter, `Esc`, or the inactivity timeout exits adjustment and
-restores every Pane to chart view. In chart view, `r` replaces it; `N` inserts
-before; `n` inserts after; `x` deletes it when more than one Pane remains;
-`[`/`]` reorder it; and `Tab` moves focus to the next Pane. `{`/`}` adjust
-logical column shares; `_`/`=` adjust logical row shares. Focused Pane Quick
-keys are the historical/Monitor chart controls listed above, including the
-project-only Advanced `A` and `P` controls, except Monitor has no `i` because
-sampling belongs to the Dashboard host. Global Dashboard
-adjustment uses `t/T` for shell theme, `s` for shell style, `h` for header
-style, `u` for header summary, and `z` for layout. Pressing `z` opens the layout
-chooser: use `j`/`k` or arrow keys to select a compatible layout, then `Enter`
-to apply it or `Esc` to cancel. Fixed-capacity layouts that cannot fit the
-current Pane count remain listed as unavailable and are skipped by navigation.
+In a non-chart Dashboard view, `Up`/`Down` scroll one rendered line, `Home` or
+`h` goes to the first line, and `e` goes to the final line when applicable.
+`y` copies the complete underlying payload rather than only the visible
+viewport. Refreshing, pausing, and showing/hiding the control bar are chart-view
+operations.
+
+Pane adjustment keeps the chart-specific Quick/Advanced controls listed above.
+For a chart Pane, `v` changes its view; while a non-chart Pane view is active,
+reading, copying, and view-cycle controls remain available but chart settings,
+structure edits, refresh, and pause are unavailable. An Animation Pane instead
+uses `Space` for its own playback, `a` to switch pages, Quick `p`/`P` for overlay
+anchor, `t`/`T` for animation theme, and `s`/`S` for animation style. Its
+Advanced page uses arrow keys to move the overlay, `0` to reset that offset, `i`
+to cycle a command-overlay interval, `e` to edit its text or command draft, and
+`l` to view command history. In chart view, `r` replaces the Pane; `N`/`n`
+insert a Pane before/after; `x` deletes it when more than one Pane remains;
+`[`/`]` reorder it; `Tab` selects the next Pane; `{`/`}` adjust its logical
+column share; and `J`/`K` adjust its logical row share. Dashboard Monitor Panes
+do not expose `i`: sampling remains a Dashboard host setting.
+
+In Dashboard adjustment, `t`/`T` cycles shell theme, `s`/`S` cycles shell style,
+`H` cycles header presentation, and `p` cycles header summary period. `z` opens
+the layout chooser; use `j`/`k` or arrow keys to select a compatible layout,
+then `Enter` to apply or `Esc` to cancel. `Z` opens a grid draft: enter
+`ROWSxCOLUMNS`, use Backspace to edit, `Enter` to apply, or `Esc` to cancel.
+Choosing either a layout or grid clears custom logical row/column weights.
+
+Dashboard undo/redo is in-memory and session-only. It retains the latest 100
+edits; making a new edit after undo drops the redo branch. Help is contextual:
+it reflects the active mode, page, Pane type, and overlay editor/history state,
+so use `h` instead of relying on a fixed footer alone.
 
 <!-- guide:troubleshooting -->
 
@@ -673,7 +764,7 @@ current Pane count remain listed as unavailable and are skipped by navigation.
 | `--top` is rejected | Supply a positive value and a grouping dimension where required. |
 | `--ascii` and theme conflict | Omit the explicit `--theme`; for Dashboard, also omit explicit Pane themes. |
 | Dashboard command is rejected | Use a preset, or supply at least one quoted `--pane`; do not mix a preset with `--grid`, or `--layout` with a preset/grid. |
-| Pane fragment is rejected | Keep host/lifecycle options at Dashboard level; the fragment should only describe a chart. |
+| Pane fragment is rejected | Keep host/lifecycle options at Dashboard level. A Chart fragment describes a chart; an Animation fragment may additionally describe its Overlay. |
 | Monitor does not show old historical throughput | This is expected: it observes only snapshots gathered by the current process. |
 | Runtime adjustment disappeared after exit | This is expected: adjustments are session-local. Reuse a copied command by saving it yourself. |
 
