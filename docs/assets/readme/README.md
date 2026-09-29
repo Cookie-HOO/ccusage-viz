@@ -7,7 +7,7 @@ Chinese READMEs. Both landing pages use these exact names and paths.
 
 | File | Used for | Command represented |
 | --- | --- | --- |
-| `dashboard-wide-clock.png` | Default Dashboard: wide layout with a digital-clock Pane | `ccuv dashboard` / `ccuv dashboard wide-clock` |
+| `dashboard-wide-clock.png` | Default Dashboard: wide layout with an analog-clock Pane | `ccuv dashboard` / `ccuv dashboard wide-clock` |
 | `dashboard-narrow-clock.png` | Narrow Dashboard with a digital-clock Pane | `ccuv dashboard narrow-clock` |
 | `dashboard-wide.png` | Balanced 2×2 Dashboard overview | `ccuv dashboard wide` |
 | `dashboard-narrow.png` | Compact, vertically focused Dashboard | `ccuv dashboard narrow` |

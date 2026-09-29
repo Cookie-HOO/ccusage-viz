@@ -145,17 +145,33 @@ def format_full_dashboard_command(
     header_summary: str | None = None,
 ) -> str:
     host = options.host
-    args = ["ccuv", "dashboard"]
+    args = [options.launcher, "dashboard"]
     from ccusage_viz.configuration import standalone_from_chart_pane
 
     for pane_config in panes or options.panes:
-        fragment = (
-            f"animate {pane_config.animation.style}"
-            if isinstance(pane_config, AnimationPaneConfig)
-            else shlex.join(
+        if isinstance(pane_config, AnimationPaneConfig):
+            overlay = pane_config.overlay
+            fragment_args = ["animate", pane_config.animation.style]
+            if overlay.text is not None:
+                fragment_args.extend(("--overlay-text", overlay.text))
+            if overlay.command is not None:
+                fragment_args.extend(("--overlay-command", overlay.command))
+            if overlay.time_band:
+                fragment_args.append("--overlay-time-band")
+            if overlay.mode is not None:
+                if overlay.position != "bottom-center":
+                    fragment_args.extend(("--overlay-position", overlay.position))
+                if overlay.color != "auto":
+                    fragment_args.extend(("--overlay-color", overlay.color))
+                if overlay.command is not None and overlay.interval != 60:
+                    fragment_args.extend(("--overlay-interval", f"{overlay.interval:g}"))
+                if overlay.max_width != 40:
+                    fragment_args.extend(("--overlay-max-width", str(overlay.max_width)))
+            fragment = shlex.join(fragment_args)
+        else:
+            fragment = shlex.join(
                 _chart_args(standalone_from_chart_pane(options, pane_config), full=True, pane=True)
             )
-        )
         args.extend(("--pane", fragment))
     if layout is not None:
         args.extend(("--layout", layout))

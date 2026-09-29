@@ -46,6 +46,7 @@ ccuv calendar --demo
 ccuv stack --demo --cache split
 ccuv ranking --demo --by project
 ccuv monitor --demo --by model
+ccuv animate rain
 ccuv dashboard wide --demo
 ```
 
@@ -57,6 +58,7 @@ ccuv dashboard wide --demo
 | `ranking` | 历史日期范围 | 单个独立图表 | 哪个 Agent、模型或项目使用 Token 最多？ |
 | `monitor` | 滚动观测窗口 | 单个独立图表 | 当前进程观测到了什么吞吐量？ |
 | `dashboard` | Host 全局节奏与独立 Pane | 多 Pane Dashboard | 多个已配置图表如何并排比较？ |
+| `animate` | 无用量数据 | 单个独立动画 | 不查询 Provider 地展示本地终端动画。 |
 
 历史路由查询日期范围。`monitor` 则在当前进程运行期间重复采集累计快照；它不能重建
 启动前的吞吐历史。独立图表占满终端。Dashboard 是单独的多 Pane Host，复用相同的图表组件，
@@ -64,34 +66,65 @@ ccuv dashboard wide --demo
 
 ## 动画
 
-`animate` 不依赖 Provider：它不会安装、调用或查询 `ccusage`。它默认播放 rain，并在运行时从已安装的
-`term-animate` curated catalog 发现动画。参数使用库稳定的 effect ID，因此新发布且允许当前 Host 使用的
-动画不需要 ccuv 再维护第二份动画清单：
+`animate` 不依赖 Provider：它不会安装、调用或查询 `ccusage`。它在运行时从已安装的
+`term-animate` curated catalog 发现动画，并使用库稳定的 effect ID。可用样式取决于已安装的库及
+目标 Host；请浏览当前独立 Host 的 catalog，而不要依赖 ccuv 固定维护的一份样式清单：
 
 ```bash
-ccuv animate                 # 默认 rain
-ccuv animate mole-cat
-ccuv animate snow
-ccuv animate night-sky
-ccuv animate lightning
-ccuv animate meteor-shower
+ccuv animate                 # 默认的独立 Host 可用样式
+ccuv animate --gallery
+ccuv animate analog-clock
 ```
 
+`--gallery` 是 ccuv 自己提供的双列实时画廊。可选样式决定初始卡片（例如
+`ccuv animate analog-clock --gallery`）；方向键与 Page Up/Page Down 移动选择，Space
+暂停或恢复投影，`m` 打开本地样式/主题调整。画廊模式不能和 Overlay 来源或 Overlay 显示参数同时使用。
+
 独立 Host 完全拥有输入：`q`、Escape、Ctrl-C 退出；Space 暂停或恢复；`m` 打开调整视图；
-高频页的 `t`/`T` 切换 ccuv 主题，`s` 循环当前发现的独立动画。`a` 在高频和高级页间切换；
-第一个高级页没有动画专属设置。底层动画库不会接收键盘输入。
+Quick 页的 `t`/`T` 切换 ccuv 主题，`s`/`S` 双向循环当前发现的独立动画。`a` 在 Quick 和
+Advanced 页面之间切换。底层动画库不会接收键盘输入。
 
 动画使用当前终端的颜色能力并遵守 `--ascii`。ccuv 会把可用 viewport 直接交给 term-animate，
 由其投影逻辑保证画面有边界。动画状态仅在内存中保留：独立 Host、Dashboard 动画 Pane 和 Monitor
 附件都有独立的主题、样式与播放状态，退出 ccuv 后全部丢弃。
 
-Dashboard Pane 必须显式给出样式，裸 `animate` 无效：
+### 动画 Overlay
+
+独立动画或显式指定的 Dashboard 动画 Pane 可以叠加一项仅在当前运行中存在的来源：静态文本或本地命令输出。
+两种来源互斥：
 
 ```bash
-ccuv dashboard --pane "timeline --period 7d" --pane "animate rain"
+ccuv animate rain --overlay-text "Focus time"
+ccuv animate analog-clock --overlay-command "ccuv text time-state --run"
+ccuv animate rain --overlay-command "date" --overlay-interval 60
 ```
 
-Dashboard preset 不会自动添加动画 Pane；但 Dashboard 的面板选择器可以加入默认 rain 的动画 Pane，
+| 参数 | 默认值 | 行为 |
+| --- | --- | --- |
+| `--overlay-text TEXT` | 未设置 | 静态文本来源。 |
+| `--overlay-command COMMAND` | 未设置 | 立即运行命令，并按选定间隔再次运行。 |
+| `--overlay-position POSITION` | `bottom-center` | `top-left`、`top-center`、`top-right`、`bottom-left`、`bottom-center` 或 `bottom-right` 之一。 |
+| `--overlay-color COLOR` | `auto` | 自动颜色或已接受的终端前景色之一。 |
+| `--overlay-interval SECONDS` | `60` | 命令来源的刷新间隔；必须是有限且不小于 `5` 的数值。显式指定时必须同时提供命令来源。 |
+| `--overlay-max-width COLUMNS` | `40` | 正的最大显示宽度。 |
+
+命令通过本地 shell 运行，stdin 已禁用。ccuv 会限制并清理展示输出、设置 30 秒执行超时，并在当前会话保留最近
+20 条命令结果。编辑器、位置/间隔控制、帮助和命令历史视图都属于该动画 Host；Enter 应用编辑草稿，Escape 取消。
+退出 ccuv 后不会保留任何状态。
+
+> [!WARNING]
+> `--overlay-command` 会执行用户提供的本地代码，并继承 `ccuv` 进程可见的全部环境变量。只应使用你信任的命令和执行环境。
+
+`ccuv text time-state` 会输出反映当前本地时间的本地化状态。`--describe` 说明时段，`--run` 是内置时钟预设使用的命令来源。
+
+Dashboard 动画 Pane 必须显式给出样式，裸 `animate` 无效。Pane 片段支持相同的 Overlay 参数，且状态与其他 Pane 独立：
+
+```bash
+ccuv dashboard --pane "timeline --period 7d" \
+  --pane "animate rain --overlay-text 'Focus time'"
+```
+
+非时钟 Dashboard preset 不会自动添加动画 Pane；但 Dashboard 的面板选择器可以加入默认 rain 的动画 Pane，
 其快捷调整页会循环当前所有符合条件的 catalog 动画。
 
 对于 `monitor` 的 `ranking` 与 `list` 样式，附件默认关闭。在高级调整页中按 `s` 可启用第一个
@@ -189,8 +222,8 @@ token，并在完整筛选后项目池的每个 token 前缀树分支中，消�
 - Calendar 样式为 `relative` 和 `grid`。
 - Stack 样式为 `stacked`、`stacked-pattern`、`grouped`、`grouped-thin`、`normalized`。
 - Ranking 样式为 `bar`、`dot`、`dots`。
-- Monitor 样式为 `bars`、`line`、`step`、`points`、`line-points`、`ranking`、`list`。
-  分组 Monitor 不能使用 `bars`。
+- Monitor 样式为 `bars`、`line`、`step`、`points`、`line-points`、`ranking`、`list` 和
+  `cumulative-bars`。分组 Monitor 不能使用 `bars`。
 
 筛选发生在分组和 Top 选择之前。Timeline 和 Monitor 的 `--top` 需要 `--by` 维度，选择分组而
 没有显式 Top 时默认 `3`。Ranking 始终分组（默认 `--by project`），默认 `--top 10`。Top 必须是
@@ -340,12 +373,12 @@ Monitor 在本次运行期间从重复累计快照观测吞吐量。第一个被
 
 ## Dashboard 启动与组合
 
-Dashboard 是多 Pane Host。裸调用启动 `wide` 预设：
+Dashboard 是多 Pane Host。裸调用启动 `wide-clock` 预设；若只需要数据总览，请显式选择 `wide`：
 
 ```bash
 ccuv dashboard
 ccuv dashboard wide
-ccuv dashboard wide --demo
+ccuv dashboard wide-clock --demo
 ```
 
 ### 预设
@@ -353,16 +386,17 @@ ccuv dashboard wide --demo
 | 预设 | Pane 组成 | 网格/布局 | Dashboard 样式 |
 | --- | --- | --- | --- |
 | `wide` | Timeline、Stack、Ranking、按模型分组的 Monitor | `2x2` | `framed` |
-| `wide-clock` | 数字时钟，然后是标准 wide 的 Timeline、Stack、Ranking 和模型 Monitor Pane | 带短首行的 `spotlight-wide` `2x2` | `framed` |
+| `wide-clock` | 模拟时钟，然后是标准 wide 的 Timeline、Stack、Ranking 和模型 Monitor Pane | 带 `spotlight-wide` 的 `2x2`；行权重 `9:13:12` | `framed` |
 | `spotlight-wide` | Timeline、Stack、Ranking | 带 `spotlight-wide` 的 `2x2` | `framed` |
 | `spotlight-wide2` | Timeline、Stack、Ranking、按模型分组的 Monitor | 带 `spotlight-wide2` 的 `2x2` | `framed` |
 | `narrow` | 14 天 Timeline、项目 Ranking、模型 Monitor | `3x1` | `framed` |
-| `narrow-clock` | 数字时钟，然后是 narrow 的 Timeline、项目 Ranking 和模型 Monitor Pane | 带短首行的 `4x1` | `framed` |
+| `narrow-clock` | 数字时钟，然后是 narrow 的 Timeline、项目 Ranking 和模型 Monitor Pane | `4x1`；行权重 `3:7:7:6` | `framed` |
 | `all` | 两个 Timeline、Calendar、Ranking、两个 Stack 与四个 Monitor 变体 | `5x2` | `split` |
 
-默认 `wide` Pane 使用 `compact` 密度，并刻意采用不同图表主题/样式。`wide-clock` 与 `narrow-clock`
-是时钟预设：数字时钟是完整的动画 Pane，而不是 Dashboard Header。`spotlight-wide` 让第一个 Pane
-占据前导宽区域；`spotlight-wide2` 让前两个 Pane 占据连续的宽行。
+只包含数据的 `wide` Pane 使用 `compact` 密度，并刻意采用不同图表主题/样式。`wide-clock` 与
+`narrow-clock` 是时钟预设：前者包含模拟时钟 Pane，后者包含数字时钟 Pane；二者都不是 Dashboard Header。
+两个内置时钟 Pane 默认在右下角展示随当前本地时间变化的本地化时段状态 Overlay，且可在会话中调整。
+`spotlight-wide` 让第一个 Pane 占据前导宽区域；`spotlight-wide2` 让前两个 Pane 占据连续的宽行。
 
 预设是启动模板，不是 `--grid` 的取值。重复 `--pane` 会追加到预设 Pane 后；需要时 Host 会扩展预设
 网格以容纳所有 Pane。
@@ -420,8 +454,8 @@ ccuv dashboard \
 Dashboard Host 负责布局、外壳主题/样式、Header、输入循环和节奏。Pane 负责图表选择、范围/窗口、
 分组、Top/Other、筛选、图表主题/样式/密度，以及图表专属配置。
 
-Pane 片段只能包含图表命令（`timeline`、`calendar`、`stack`、`ranking` 或 `monitor`）与图表参数，
-不得包含如下 Host/生命周期参数：
+图表 Pane 片段只能包含图表命令（`timeline`、`calendar`、`stack`、`ranking` 或 `monitor`）及图表参数。
+动画 Pane 片段还可以包含 Overlay 来源与显示设置；二者均不得包含如下 Host/生命周期参数：
 
 ```text
 --interval --no-watch --watch --ascii --demo --lang
@@ -461,9 +495,11 @@ Dashboard Header 刻意运行未筛选、全 Agent 的聚合查询；它不会�
 
 ### 快捷键约定
 
-调整快捷键以当前可见页面或 Dashboard 管理模式为作用域；控制栏始终展示当前按键含义。
-小写键用于当前图表或页面中常用的直接操作。`t/T` 是唯一的方向性按键对：`t` 向前切换主题，
-`T` 向后切换主题。
+调整快捷键以当前可见页面或 Dashboard 管理模式为作用域；控制栏始终展示当前按键含义。在
+Dashboard **图表 Pane** 调整中，仅另一页可用的图表设置按键会自动切换到该页并执行。两页都有的
+按键始终以当前页为准；这种路由仅用于 Dashboard 图表与动画 Pane，不用于独立图表或动画、文字视图、
+Dashboard 全局调整和选择器/编辑器对话框。小写键用于当前图表或页面中常用的直接操作。`t/T` 是唯一的方向性按键对：`t`
+向前切换主题，`T` 向后切换主题。
 
 大写通常不表示“反向”。`A` 和 `P` 是低频的 Advanced 项目呈现控制，仅在按项目分组时出现：
 `A` 切换项目聚合（`name`/`exact`），`P` 逐级显示更多安全的项目名称上下文。`f`、`l`、`o`、
@@ -471,10 +507,13 @@ Dashboard Header 刻意运行未筛选、全 Agent 的聚合查询；它不会�
 
 历史图表的 `p/P` 是兼容性例外：`p` 循环尾随周期，`P` 循环自然周期。二者是两组周期预设，
 不是方向性按键对。它被刻意与 `t/T` 的规则分开说明，也不改变 Advanced 页中 `P` 的项目名称含义。
+因此按项目分组的 Dashboard 图表 Pane 中，Quick 页的 `P` 仍是自然周期，而 Advanced 页的 `P`
+仍是项目名称上下文。符合条件的 Monitor ranking/list 动画附件同样保留当前页含义：Quick 页的
+`t/T`、`s/S` 调整图表主题/样式，Advanced 页则调整附件主题/样式。
 
 ### 历史图表调整流程
 
-Timeline、Calendar、Stack 和 Ranking 在图表视图按 `m` 打开调整器。调整器会预览修改；`a` 在
+Timeline、Calendar、Stack 和 Ranking 在图表视图按 `m` 打开调整器。调整器会预览修改；`a` 显式在
 **Quick** 和 **Advanced** 页之间切换；`Enter`/换行提交当前候选配置；`Esc` 取消调整器。
 仅视觉修改会立即更新预览；影响数据的修改会在提交后的配置刷新中使用。
 
@@ -537,29 +576,43 @@ Advanced 页的 `f` 编辑器会先起草筛选，再提交：
 
 ### Dashboard 控制
 
-Dashboard 有独立的导航和归属规则。浏览模式中：
+Dashboard 有三种模式：浏览、Pane 调整与 Dashboard 调整。按 `m` 调整当前选中的 Pane，或双击 Pane
+直接选中并进入其调整；按 `d` 进入 Dashboard 范围的调整。两种调整模式都可用 `Enter` 或 `Esc` 结束；
+连续三分钟没有键盘或鼠标操作时将返回浏览模式。单击不会进入或切换 Pane 调整：当选择另一个 Pane 时，
+第一次点击会被保留，以便正常的第二次点击组成所需的双击。
+
+浏览模式中：
 
 | 按键 | 行为 |
 | --- | --- |
-| `r` | 仅在图表浏览模式刷新全部 Pane；完整命令视图中无操作。 |
-| `s` | 调整第一个 Pane。 |
-| 鼠标点击 | 调整被点击的 Pane。 |
-| `g` | 打开全局 Dashboard 调整。 |
-| `h` / `H` | 图表浏览模式中切换 Dashboard 控制栏；完整命令视图中小写 `h` 跳到首行，`H` 无操作。 |
-| `e`、`Up` / `Down` | 完整 Dashboard 命令视图中跳到末行或逐渲染行滚动。 |
-| `v` | 显示完整 Dashboard 命令。 |
-| `y` | 从命令视图复制。 |
-| `Space` | 仅在图表浏览模式暂停/恢复 Dashboard 调度；完整命令视图中无操作。 |
+| `r` | 图表视图中刷新所有 Pane 数据及 Header。 |
+| `m` | 调整当前选中的 Pane。 |
+| `d` | 调整 Dashboard 范围的设置。 |
+| `c` | 图表视图中显示或隐藏控制栏。 |
+| `h` | 打开上下文帮助。 |
+| `v` | 依次切换图表、命令与数据视图。 |
+| `y` | 复制当前非图表视图。 |
+| `Space` | 图表视图中暂停或恢复全部 Dashboard 更新及动画 Pane。 |
+| `u` / `U` | 撤销 / 重做 Dashboard 编辑。 |
 | `Ctrl-C` | 退出。 |
 
-调整 Pane 时，`v` 切换其视图。非图表 Pane 文字视图中，`Up`/`Down` 逐行滚动，`h` 跳到首行，`e`
-跳到末行；Pane 通知保持固定。始终显示的控制栏只保留阅读、复制和视图切换操作，且仅在文字溢出时提示滚动；`r` 和 `Space` 在此无操作，显示文字时不提供图表 Quick/Advanced 控制和 Dashboard Pane 管理。按 Enter、`Esc` 或发生无操作超时会结束调整，并将所有 Pane 恢复为图表视图。图表视图中，`r` 替换；`N` 在前插入；`n` 在后插入；当 Pane 多于一个时 `x`
-删除；`[`/`]` 重排；`Tab` 切到下一个 Pane。`{`/`}` 调整逻辑列份额；`_`/`=` 调整逻辑行份额。
-聚焦 Pane 的快捷键使用上面的历史/Monitor 图表控制，包含仅在项目分组时可用的 Advanced `A` 和 `P`；
-但 Monitor 没有 `i`，因为采样属于 Dashboard Host。全局 Dashboard 调整中，`t/T` 调整外壳主题，`s` 调整外壳样式，`h` 调整 Header
-样式，`u` 调整 Header 汇总，`z` 调整布局。按 `z` 会打开布局选择器：使用 `j`/`k` 或方向键选择
-兼容布局，按 `Enter` 应用，按 `Esc` 取消。无法容纳当前 Pane 数量的固定容量布局仍会列出并标为不可用，
-导航会跳过这些选项。
+非图表 Dashboard 视图中，`Up`/`Down` 逐渲染行滚动，`Home` 或 `h` 跳到首行，适用时 `e` 跳到末行。
+`y` 复制完整底层载荷，而不只是可见视口。刷新、暂停以及显示/隐藏控制栏只在图表视图中有效。
+
+Pane 调整保留上文列出的图表 Quick/Advanced 控制。图表 Pane 中，`v` 会切换其视图；非图表 Pane 视图中仍可
+阅读、复制与切换视图，但图表设置、结构编辑、刷新与暂停不可用。动画 Pane 则使用 `Space` 控制自身播放，`a`
+切换页面；Quick 页的 `p`/`P` 调整 Overlay 锚点，`t`/`T` 调整动画主题，`s`/`S` 调整动画样式。Advanced 页使用
+方向键移动 Overlay，`0` 重置偏移，`i` 循环命令 Overlay 间隔，`e` 编辑文本或命令草稿，`l` 查看命令历史。图表视图中，
+`r` 替换 Pane；`N`/`n` 在前/后插入 Pane；当 Pane 多于一个时 `x` 删除；`[`/`]` 重排；`Tab` 选择下一个 Pane；
+`{`/`}` 调整逻辑列份额；`J`/`K` 调整逻辑行份额。Dashboard 中的 Monitor Pane 不提供 `i`：采样仍是 Dashboard Host 设置。
+
+Dashboard 调整中，`t`/`T` 循环外壳主题，`s`/`S` 循环外壳样式，`H` 循环 Header 呈现，`p` 循环 Header
+汇总周期。`z` 打开布局选择器；使用 `j`/`k` 或方向键选择兼容布局，按 `Enter` 应用，按 `Esc` 取消。`Z`
+打开网格草稿：输入 `行数x列数`，用 Backspace 编辑，按 `Enter` 应用，按 `Esc` 取消。选择布局或网格都会清除
+自定义逻辑行/列权重。
+
+Dashboard 的撤销/重做只存在于内存和当前会话。它保留最近 100 次编辑；撤销后再做新的编辑会丢弃重做分支。
+帮助是上下文相关的：它会反映当前模式、页面、Pane 类型，以及 Overlay 编辑器/历史状态，因此应使用 `h`，而非只依赖固定控制栏。
 
 <!-- guide:troubleshooting -->
 
@@ -574,7 +627,7 @@ Dashboard 有独立的导航和归属规则。浏览模式中：
 | `--top` 被拒绝 | 使用正值，并在需要处提供分组维度。 |
 | `--ascii` 与主题冲突 | 省略显式 `--theme`；Dashboard 中也要省略显式 Pane 主题。 |
 | Dashboard 命令被拒绝 | 使用预设，或至少提供一个带引号的 `--pane`；不要将预设和 `--grid` 混用，也不要将 `--layout` 与预设/网格混用。 |
-| Pane 片段被拒绝 | 将 Host/生命周期参数放在 Dashboard 层；片段只描述图表。 |
+| Pane 片段被拒绝 | 将 Host/生命周期参数放在 Dashboard 层。图表片段描述图表；动画片段还可描述其 Overlay。 |
 | Monitor 没有显示旧吞吐历史 | 这是预期行为：它只观测当前进程采集到的快照。 |
 | 退出后运行时调整消失 | 这是预期行为：调整仅属于会话；如需复用，请自行保存复制出的命令。 |
 

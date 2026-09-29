@@ -4,19 +4,21 @@ This document records the stable product concepts and design constraints of `ccu
 
 ## Product boundaries and forms
 
-1. **The product expresses token consumption and directly supported derivatives only.**
+1. **Token analytics express token consumption and directly supported derivatives only.**
 
    A token metric belongs only when a data source can express it directly and reliably. TPM is currently the only rate metric. Cost, monetary estimates, call or request counts, quotas, QPM, rate limits, and other metrics inferred from token counts are outside the product boundary.
 
-2. **Standalone and Dashboard are the two product forms.**
+   Provider-free animations, clocks, and their run-local Overlays are presentation resources, not token analytics. They may show static context, local-time state, or trusted local-command output, but they neither create a token metric nor query a Provider.
 
-   Every interactive chart interface is a TUI. Standalone runs Timeline, Calendar, Stack, Ranking, or Monitor independently. Dashboard organizes multiple independently configured charts in one TUI.
+2. **Standalone and Dashboard are the two host forms.**
 
-3. **A Pane preserves its corresponding Standalone data and chart semantics.**
+   Every interactive chart interface is a TUI. Standalone runs Timeline, Calendar, Stack, Ranking, or Monitor independently, and also hosts provider-free Animation. Dashboard organizes independently configured Chart and Animation Panes in one TUI. Animation is a playback surface rather than a Token chart; it may own a declarative Overlay source and run-local presentation state.
 
-   A Pane is a contextual superset of Standalone content. It adds composition concerns such as focus, placement, ordering, and switching, but Dashboard behavior must not change the underlying chart's time or metric contract.
+3. **A Chart Pane preserves its corresponding Standalone data and chart semantics.**
 
-   **Exception:** Dashboard owns Pane refresh and sampling cadence. Copying a Pane as a Standalone command materializes the corresponding Interval.
+   A Chart Pane is a contextual superset of Standalone chart content. It adds composition concerns such as focus, placement, ordering, and switching, but Dashboard behavior must not change the underlying chart's time or metric contract.
+
+   **Exception:** Dashboard owns refresh cadence for historical Chart Panes and sampling cadence for Monitor Panes. Copying either as a Standalone command materializes the corresponding Interval. Animation Panes have neither data cadence nor a Provider lifecycle: their hosts instead own playback clocks and repaint deadlines.
 
 ## Configuration ownership
 
@@ -27,7 +29,7 @@ This document records the stable product concepts and design constraints of `ccu
    | Independent Dashboard setting | Scope | Pane behavior |
    | --- | --- | --- |
    | Layout, Weights, focus, Pane order | Dashboard geometry and navigation | Not part of Pane configuration |
-   | Global pause, Controls | Dashboard session shell | A Pane owns no local pause or Controls state |
+   | Global pause, Controls | Dashboard session shell | Chart Panes own no local data pause or Controls state; an Animation Pane owns local playback pause while it is being adjusted |
    | Dashboard Theme and Style | Shell, Header, and Summary | Does not change Pane Theme or chart Style |
    | Header Style and Summary period | Dashboard Header | Does not change Pane Density, Scope, or Granularity |
 
@@ -46,9 +48,13 @@ This document records the stable product concepts and design constraints of `ccu
    | Theme, Style, Density, and Legend | Each Pane defines chart presentation; Theme does not inherit Dashboard Theme |
    | Chart-specific settings | Belong only to the corresponding Pane |
 
-   Pane configuration and Pane fragments must not contain Demo Mode or Demo Size. Standalone still owns its own Demo settings, Interval, refresh, and pause behavior. Every Pane must remain independently explainable; copying it as Standalone materializes the necessary Dashboard-owned context.
+   Chart Pane fragments do not contain Dashboard- or host-owned lifecycle settings such as Demo mode, Watch/Interval, ASCII, or refresh cadence. Animation Pane fragments may additionally carry their declarative Overlay source and presentation settings. Standalone still owns its own Demo settings, Interval, refresh, and pause behavior. Every Pane must remain independently explainable; copying a Chart Pane as Standalone materializes the necessary Dashboard-owned context.
 
-2. **Process context is not Pane configuration.**
+2. **Command Overlays are bounded trusted-local presentation work.**
+
+   An Overlay has exactly one source: static text or a command. A command Overlay runs through the local shell with stdin disabled, a bounded execution time and output, sanitized display text, and bounded run-local result history. It inherits the environment visible to ccuv at launch, so the command and its execution environment are trusted-local input. Its execution and repaint deadlines are host-local presentation work: they never create a Token query or alter Provider scheduling.
+
+3. **Process context is not Pane configuration.**
 
    Language, the `ccusage` executable, query timeout, and Provider execution environment apply uniformly within the process and are not Pane-overridable settings.
 
@@ -138,13 +144,13 @@ This document records the stable product concepts and design constraints of `ccu
 
    A persistent, copyable setting whose states users compare or change at runtime is expressed as a valued CLI mode even when it currently has only two states. The CLI, TUI, status display, and copied command share the same concepts and canonical values. This keeps commands self-describing without requiring users to remember defaults or translate between a TUI state and a positive or negative flag. For example, Weekdays and Other use `show | hide`, while Stack Cache uses `combined | split`. Compact commands may omit default modes; Full commands state every effective mode explicitly.
 
-   **Exception:** A conspicuous capability choice or execution-lifecycle exception that is normally absent may remain a flag when its presence fully expresses the intent and it is not an ordinary runtime-adjustable setting. ASCII and Historical no-Watch are the current exceptions. Mode consistency must not create redundant controls for behavior already owned by a higher-level setting such as Density, Style, or Layout.
+   **Exception:** A conspicuous capability choice or execution-lifecycle exception that is normally absent may remain a flag when its presence fully expresses the intent and it is not an ordinary runtime-adjustable setting. ASCII and Historical no-Watch are the current exceptions. A deprecated compatibility flag is not a current product surface: it is neither promoted in user documentation nor used by copied commands. Mode consistency must not create redundant controls for behavior already owned by a higher-level setting such as Density, Style, or Layout.
 
 3. **Quick and Advanced reveal capability progressively.**
 
    Quick and Advanced are divided by usage frequency rather than an internal distinction between data and appearance. Quick covers Data Scope, analysis, and primary presentation in common analytical workflows. Advanced contains infrequent, precise, or conditional controls. Both operate on the same immediate configuration, and contextually meaningless options are omitted rather than shown disabled.
 
-   Standalone uses exactly two rows: current runtime status plus effective settings, then the active Quick or Advanced actions. Dashboard-global adjustment has one Dashboard-wide page for Theme, Style, Header, Summary, and Layout; it has no Advanced page or Pane-specific actions. A Dashboard Pane in chart view begins with the same two chart rows as Standalone, followed by Dashboard-management rows for content/lifecycle, position/focus, and logical size ratios. `a` switches only the chart action row; Dashboard management remains available on either page. A Pane text view is instead a read-only inspection context: it keeps only its reading/copy/view controls visible; lifecycle operations such as `r` and Space are not hidden-but-active commands; and chart adjustment and Dashboard management remain suppressed while text is shown. Enter, Escape, and the inactivity timeout finish adjustment by restoring ordinary chart browsing for the Dashboard and every Pane, without rolling back already-effective changes. The inactivity timeout belongs only to an active adjustment session, not to ordinary browse-mode text inspection. There is no clickable Finish target. On narrow terminals, complete low-priority action units are omitted and `…(+N)` reports the exact number still available by keyboard, while page identity, the `a` switch, and Enter/Escape guidance remain visible.
+   Standalone uses exactly two rows: current runtime status plus effective settings, then the active Quick or Advanced actions. Dashboard-global adjustment has one Dashboard-wide page for Theme, Style, Header, Summary, and Layout; it has no Advanced page or Pane-specific actions. A Dashboard Chart Pane in chart view begins with the same two chart rows as Standalone, followed by Dashboard-management rows for content/lifecycle, position/focus, and logical size ratios. An Animation Pane instead exposes its own playback, theme/style, and Overlay controls; it does not inherit chart data controls. `a` switches the active Pane's applicable action page; Dashboard management remains available on either page. A Chart-Pane text view is a read-only inspection context: only navigation, copy, and view cycling remain available, while lifecycle, configuration, and Dashboard-management keys are unavailable until returning to Chart view. Enter, Escape, and the inactivity timeout finish adjustment by restoring ordinary chart browsing for the Dashboard and every Pane, without rolling back already-effective changes. The inactivity timeout belongs only to an active adjustment session, not to ordinary browse-mode text inspection. There is no clickable Finish target. On narrow terminals, complete low-priority action units are omitted and `…(+N)` reports the exact number still available by keyboard, while page identity, the `a` switch, and Enter/Escape guidance remain visible.
 
 4. **Finite choices preserve and truthfully display any valid startup value.**
 
@@ -156,7 +162,7 @@ This document records the stable product concepts and design constraints of `ccu
 
    Most settings commit on each adjustment. The visible configuration updates at once, and any data already derivable from accepted facts is recomputed immediately. Enter and Escape therefore have the same meaning in an ordinary settings surface: both leave the surface while preserving the effective state. They do not save, discard, or roll back changes that have already taken effect. Layout and Weights follow the same rule.
 
-   **Exception:** An operation that cannot produce a valid value until the user completes input or selection uses an isolated draft: Filter, numeric Grid, Pane Replace, and Pane Add. Enter commits a valid complete draft and Escape discards only that child operation, returning to its parent adjustment. Dashboard `z` is an immediate layout-shortcut selection: `wide`, `narrow`, `all`, and `auto` select rectangular shortcuts, while the three Spotlight choices select non-rectangular topology. It changes geometry only and preserves the existing Pane objects, ordering, focus, accepted data, configuration, Monitor history, and lifecycles. `Z` opens the numeric Grid draft, which accepts only `ROWSxCOLUMNS`; from `auto` or Spotlight it starts at the smallest practical two-column grid for the existing Pane count. Applying either operation rebuilds equal Weights for the resulting topology. Pane Replace atomically installs a fresh default Pane at the same list index and retires the displaced lifecycle. Pane Add uses `N` for before and `n` for after the focused Pane's list index. Fixed layouts preserve their column count and expand their row count when insertion requires capacity; deletion reclaims only wholly empty trailing rows. A second confirmation is reserved for consequences that are destructive, difficult to reverse, or otherwise unclear; ordinary reversible configuration does not require one.
+   **Exception:** An operation that cannot produce a valid value until the user completes input or selection uses an isolated draft: Filter, Overlay source editing, numeric Grid, Pane Replace, and Pane Add. Enter commits a valid complete draft and Escape discards only that child operation, returning to its parent adjustment. Dashboard `z` opens a layout chooser: `j`/`k` or the arrow keys select `wide`, `narrow`, `all`, `auto`, or a Spotlight topology; Enter commits and Escape cancels. A committed choice changes geometry only and preserves existing Pane objects, ordering, focus, accepted data, configuration, Monitor history, and lifecycles. `Z` opens the numeric Grid draft, which accepts only `ROWSxCOLUMNS`; from `auto` or Spotlight it starts at the smallest practical two-column grid for the existing Pane count. Applying either operation rebuilds equal Weights for the resulting topology. Pane Replace atomically installs a fresh default Pane at the same list index and retires the displaced lifecycle. Pane Add uses `N` for before and `n` for after the focused Pane's list index. Fixed layouts preserve their column count and expand their row count when insertion requires capacity; deletion reclaims only wholly empty trailing rows. A second confirmation is reserved for consequences that are destructive, difficult to reverse, or otherwise unclear; ordinary reversible configuration does not require one.
 
 6. **Committed configuration and displayed data must describe the same state.**
 
@@ -166,15 +172,19 @@ This document records the stable product concepts and design constraints of `ccu
 
 7. **Keys express stable concepts, not a generic capitalization rule.**
 
-   `m` always means modify the current chart: it modifies the current view in Standalone and the current Pane in Dashboard browse mode; clicking a Pane selects it and performs the equivalent action. Uppercase `G` opens Dashboard-global settings, and clicking the Header is equivalent. Uppercase letters do not generally reverse their lowercase options. Related keys may instead represent distinct, stable families of the same concept: `p` cycles common trailing periods, while `P` cycles common natural periods to date. The interface names the active family so a calendar-aligned period is not mistaken for a trailing duration.
+   `m` means modify the current visual resource: it modifies the current Standalone chart or animation, and the selected Dashboard Pane in browse mode. A primary click selects or arms a Pane; double-click enters Pane adjustment. While adjusting, double-clicking another Pane transfers focus. `d` opens Dashboard-global settings. Uppercase letters do not generally reverse their lowercase options. Related keys may instead represent distinct, stable families of the same concept: `p` cycles common trailing periods, while `P` cycles common natural periods to date. The interface names the active family so a calendar-aligned period is not mistaken for a trailing duration.
 
    **Exception:** Theme has a large, growing choice set, so `t` advances and `T` reverses. `N` and `n` are the deliberate semantic pair for inserting a Pane before or after the focused Pane's list index. Other ordinary letter actions are lowercase-only.
 
-8. **Directional operations support both arrow keys and `hjkl`.**
+8. **Non-text directional surfaces support both arrow keys and `hjkl`.**
 
-   Any context that offers up, down, left, or right navigation or adjustment must also accept `k`, `j`, `h`, or `l` respectively and perform the identical state transition. Controls may combine both key sets in space-sensitive guidance, but the two entry paths must never differ in boundaries, cycling, or confirmation behavior.
+   A navigation or adjustment surface that is not a text editor must also accept `k`, `j`, `h`, or `l` respectively and perform the identical state transition. Controls may combine both key sets in space-sensitive guidance, but the two entry paths must never differ in boundaries, cycling, or confirmation behavior. Text editors retain their own text-entry contract.
 
-9. **Responsibility boundaries prevent semantic confusion rather than useful multiple entry points.**
+9. **Help is contextual, read-only evidence of the active surface.**
+
+   Help reflects the current mode, page, Pane kind, dialog, editor, and history surface rather than restating a fixed global key map. It does not mutate configuration or create work, and its content must remain aligned with the controls currently available.
+
+10. **Responsibility boundaries prevent semantic confusion rather than useful multiple entry points.**
 
    Standalone, Dashboard, and Pane share terminology, ordering, state representation, and adjustment behavior, but each operation appears only where its target is unambiguous. Multiple entry points are valid when they express the same intent and produce the same result. One interaction concept must not silently change another; for example, changing Granularity does not change Period.
 
@@ -246,9 +256,9 @@ This document records the stable product concepts and design constraints of `ccu
 
 7. **Refresh includes the reconciliation and repaint required by its results.**
 
-   `r` always refreshes the current context. Sorting, derived computation, and full repaint caused by refreshed data are consequences of that same operation, not separate re-sort or repaint commands. A Dashboard manual refresh gives every component an immediate refresh opportunity, invalidates the paint cache, and covers the full Dashboard. Resume performs the same refresh and repaint before fixed Ticks continue. Resize automatically recomputes all geometry and clears obsolete regions without requiring a data query. Full repaint does not imply an unconditional terminal clear.
+   `r` always refreshes the current data-bearing context. Sorting, derived computation, and full repaint caused by refreshed data are consequences of that same operation, not separate re-sort or repaint commands. A Dashboard manual refresh gives the Header and Chart Panes an immediate refresh opportunity, invalidates the paint cache, and covers the full Dashboard. Resume performs the same refresh and repaint before fixed Ticks continue. Resize automatically recomputes all geometry and clears obsolete regions without requiring a data query. Animation playback, Overlay execution, and Monitor-attachment repaint use their own host-local deadlines rather than this data-refresh operation. Full repaint does not imply an unconditional terminal clear.
 
-   **Exception:** Pause stops periodic Ticks only. Paused time creates no periodic work or backlog, while manual refresh and a one-shot completion debounced from an explicit configuration change may still run. Such completion does not resume periodic scheduling. A Monitor baseline, sampling gap, pause/resume, data-affecting reconfiguration, or counter reset clears the separate current observation until the next valid sample pair; retained Timeline history remains available and discontinuities remain Gaps. Standalone Watch and Monitor retain their own refresh, pause, and Interval behavior.
+   **Exception:** Dashboard browse-mode pause stops periodic data Ticks and pauses every Animation Pane's playback; paused time creates no periodic work or backlog, while manual refresh and a one-shot completion debounced from an explicit configuration change may still run. Such completion does not resume periodic scheduling. While adjusting an Animation Pane, Space instead controls only that Pane's playback clock. A Monitor baseline, sampling gap, pause/resume, data-affecting reconfiguration, or counter reset clears the separate current observation until the next valid sample pair; retained Timeline history remains available and discontinuities remain Gaps. A Monitor attachment uses accepted delta state for active/idle projection and may repaint its idle scene without advancing token observation or starting a query. Standalone Watch and Monitor retain their own refresh, pause, and Interval behavior.
 
 ## Reproducibility and documentation boundaries
 
@@ -260,14 +270,18 @@ This document records the stable product concepts and design constraints of `ccu
 
    A Preset supplies a complete Dashboard base state that may receive explicit startup overrides or appended Panes. Without a Preset, a command must explicitly provide a Pane, except for bare `dashboard`. Runtime `z` deliberately does not apply a Preset's content template: it retains the current Pane list and selects only the corresponding geometry. Copied commands expand actual Pane state and preserve the active layout rather than relying on a source Preset name.
 
-3. **Session state is excluded from reproducible configuration.**
+3. **Run-local presentation state is excluded from reproducible configuration.**
 
-   Current focus, pause state, Controls visibility, inspection view, and transient errors belong to the running session and do not enter copied commands.
+   Current focus, pause state, Controls visibility, inspection view, transient errors, Animation playback, Overlay offset, and Overlay command-result history belong to the running session and do not enter copied commands. Declarative Overlay source and display settings can be copied with their Animation Pane, but an editor draft cannot.
 
-4. **Design philosophy records stable constraints only.**
+4. **Undo/redo is bounded session navigation, not persistence.**
+
+   `u` and `U` undo and redo Dashboard configuration edits through a bounded, session-local history; a new edit after undo replaces the redo branch. History restores only Dashboard-state-represented composition and settings. It does not restore Overlay source drafts, Overlay position or offset mutations, command records, command-history state, Provider results, or chart facts, and it never enters copied commands.
+
+5. **Design philosophy records stable constraints only.**
 
    Complete CLI spelling, option matrices, key maps, Preset contents, and operating examples belong in user guides. Component interfaces, state machines, and test criteria belong in formal design specifications. A new feature should fit one of these principles; any necessary exception must state its boundary explicitly.
 
-5. **Documentation is layered by depth and kept consistent in one maintenance pass.**
+6. **Documentation is layered by depth and kept consistent in one maintenance pass.**
 
    The README builds first-contact understanding through natural explanations and a small product map. Architecture documents define implemented ownership and runtime boundaries, while design philosophy explains stable principles and reasons. Formal design specifications preserve decisions and test criteria; the roadmap describes planned work only. English and Simplified Chinese documents must describe the same contracts, and changes to terminology, defaults, or ownership are reconciled across these layers rather than deferred.

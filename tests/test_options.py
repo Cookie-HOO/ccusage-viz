@@ -181,7 +181,8 @@ def test_runtime_adjustments_replace_owned_nested_configs() -> None:
         ).chart.presentation.density
         == "full"
     )
-    for uppercase_alias in ("D", "S", "G", "K", "L", "C", "B", "O", "W", "I"):
+    assert adjust_standalone(source, "S").chart.presentation.style == "stem"
+    for uppercase_alias in ("D", "G", "K", "L", "C", "B", "O", "W", "I"):
         assert adjust_standalone(source, uppercase_alias) == source
     assert adjust_standalone(source, "+").chart.top == 11
     assert adjust_standalone(source, "k").chart.weekdays == "hide"

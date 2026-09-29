@@ -55,9 +55,9 @@ class FramePainter:
         self.finished = False
         self._frame: Frame | None = None
 
-    def paint(self, frame: Frame, *, force: bool = False) -> None:
+    def paint(self, frame: Frame, *, force: bool = False, atomic: bool = False) -> None:
         if force or not self.painted or self._frame is None:
-            self.stream.write("\x1b[H\x1b[2J" + "\n".join(frame.rows))
+            output = "\x1b[H\x1b[2J" + "\n".join(frame.rows)
         else:
             updates = []
             for index, row in enumerate(frame.rows):
@@ -65,8 +65,9 @@ class FramePainter:
                     updates.append(f"\x1b[{index + 1};1H\x1b[2K{row}")
             for index in range(len(frame.rows), len(self._frame.rows)):
                 updates.append(f"\x1b[{index + 1};1H\x1b[2K")
-            if updates:
-                self.stream.write("".join(updates))
+            output = "".join(updates)
+        if output:
+            self.stream.write(f"\x1b[?2026h{output}\x1b[?2026l" if atomic else output)
         self.stream.flush()
         self._frame = frame
         self.painted = True

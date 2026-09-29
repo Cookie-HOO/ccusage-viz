@@ -247,7 +247,11 @@ Animation is a separate resource kind, not a Chart variant and not an implicit p
 
 `term-animate` remains a pure projection dependency. ccuv owns terminal lifecycle, input, viewport allocation, session clocks, repaint deadlines, clipping, and cleanup, while named library themes remain library-owned. It passes active/idle state only to effects that declare state support. An animation Pane owns no Provider, query runtime, scheduler, or lifecycle operation.
 
+An Overlay is a host-local presentation resource, owned by its standalone animation host or Dashboard Animation Pane rather than by a Chart, Provider, or the animation library. Static text needs no schedule. A command Overlay owns its local shell execution schedule, bounded result history, and sanitized display output; its lifecycle ends with its host. Overlay repaint and command deadlines can redraw only their existing host frame and never start a token-data query.
+
 Monitor attachments are local to their Monitor Pane or standalone Monitor host and are disabled by default. Users enable one from the advanced ranking/list controls; it then renders after a comparable accepted interval is available and uses ccuv's accepted token-delta decision to choose active versus idle for effects that declare state support. Their repaint deadlines redraw the existing frame only; they never initiate a query. Enabled attachments begin with the `classic` theme; advanced controls cycle all library-declared Monitor effects and then ccuv-local `none`. This transient `none` state retains no catalog effect, creates no provider work, and is unavailable to standalone animation and Dashboard animation panes.
+
+Dashboard undo/redo is likewise bounded, session-only UI state owned by the Dashboard Host. It records Dashboard-state-represented composition and settings, never Provider results, Chart facts, or persisted configuration. It does not restore host-local Overlay drafts, position or offset mutations, or command-result history.
 
 Chart Components require Query and Result Processing; animation projection does not. The shared terminal Frame and Painter infrastructure composes their output without turning animation into a chart component or widening chart/provider dependencies.
 

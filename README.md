@@ -4,7 +4,7 @@
 
 [![PyPI](https://img.shields.io/pypi/v/ccusage-viz.svg)](https://pypi.org/project/ccusage-viz/) [![Python](https://img.shields.io/pypi/pyversions/ccusage-viz.svg)](https://pypi.org/project/ccusage-viz/) [![License: GPL v3](https://img.shields.io/badge/License-GPL%20v3-blue.svg)](LICENSE) [![CI](https://github.com/Cookie-HOO/ccusage-viz/actions/workflows/ci.yml/badge.svg)](https://github.com/Cookie-HOO/ccusage-viz/actions/workflows/ci.yml)
 
-> **Alpha · 0.2.0** — interfaces may change before 1.0. See the [roadmap](ROADMAP.md) for current direction.
+> **Alpha · 0.2.1** — interfaces may change before 1.0. See the [roadmap](ROADMAP.md) for current direction.
 
 `ccusage-viz` is an independent, unofficial terminal visualizer for
 [`ccusage`](https://github.com/ryoppippi/ccusage) token data. It turns
@@ -57,8 +57,33 @@ ccuv dashboard
 | `spotlight-wide2` | `ccuv dashboard spotlight-wide2` | Best for prioritizing Timeline and Stack together. Timeline + Stack-led. | <img src="docs/assets/readme/dashboard-spotlight-wide2.png" alt="Preview" width="180"> |
 
 > [!TIP]
+> Both shipped clock presets display a localized time-state Overlay at bottom-right
+> by default. It follows the local wall clock and can be adjusted for the current
+> Dashboard session.
+
+> [!TIP]
 > Dashboard coordinates pane queries: identical in-flight provider requests are
 > shared, avoiding duplicate work while multiple panes refresh.
+
+## Animation overlays
+
+Add run-local context to a standalone animation or an explicit Dashboard Animation
+Pane: place static text, show a localized time state, or render output from a
+trusted local command.
+
+```bash
+ccuv animate rain --overlay-text "Focus time"
+ccuv animate analog-clock --overlay-command "ccuv text time-state --run"
+ccuv animate rain --overlay-command "date"
+```
+
+> [!WARNING]
+> `--overlay-command` runs user-supplied local shell code. It inherits every
+> environment variable visible to `ccuv` at launch, so treat commands and their
+> execution environment as trusted local code.
+
+See the [usage guide](docs/usage.md) for Overlay options, refresh behavior, and
+Dashboard Animation Pane syntax.
 
 ## Standalone views
 

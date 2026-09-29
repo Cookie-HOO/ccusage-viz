@@ -4,7 +4,7 @@
 
 [![PyPI](https://img.shields.io/pypi/v/ccusage-viz.svg)](https://pypi.org/project/ccusage-viz/) [![Python](https://img.shields.io/pypi/pyversions/ccusage-viz.svg)](https://pypi.org/project/ccusage-viz/) [![License: GPL v3](https://img.shields.io/badge/License-GPL%20v3-blue.svg)](LICENSE) [![CI](https://github.com/Cookie-HOO/ccusage-viz/actions/workflows/ci.yml/badge.svg)](https://github.com/Cookie-HOO/ccusage-viz/actions/workflows/ci.yml)
 
-> **Alpha · 0.2.0** — 在 1.0 前接口仍可能变化。当前方向请见[路线图](ROADMAP.md)。
+> **Alpha · 0.2.1** — 在 1.0 前接口仍可能变化。当前方向请见[路线图](ROADMAP.md)。
 
 `ccusage-viz` 是面向 [`ccusage`](https://github.com/ryoppippi/ccusage) Token
 数据的独立、非官方终端可视化工具。它把 `ccusage` 命令输出转换为交互式终端图表，
@@ -51,7 +51,25 @@ ccuv dashboard
 | `spotlight-wide2` | `ccuv dashboard spotlight-wide2` | 推荐用于同时优先关注 Timeline 和 Stack。Timeline + Stack 主导。 | <img src="docs/assets/readme/dashboard-spotlight-wide2.png" alt="预览" width="180"> |
 
 > [!TIP]
+> 两个内置时钟预设默认都会在右下角展示本地化的时段状态 Overlay。它会随本地时间变化，且可在当前 Dashboard 会话中调整。
+
+> [!TIP]
 > Dashboard 会协调 Pane 查询：多个 Pane 刷新时，相同的进行中 Provider 请求会被共享，避免重复工作。
+
+## 动画 Overlay
+
+为独立动画或显式指定的 Dashboard 动画 Pane 添加仅在当前运行中生效的上下文：可以展示静态文本、本地化时段状态，或展示受信任本地命令的输出。
+
+```bash
+ccuv animate rain --overlay-text "Focus time"
+ccuv animate analog-clock --overlay-command "ccuv text time-state --run"
+ccuv animate rain --overlay-command "date"
+```
+
+> [!WARNING]
+> `--overlay-command` 会运行用户提供的本地 shell 代码。它会继承 `ccuv` 启动时可见的全部环境变量，因此应将命令及其执行环境视为受信任的本地代码。
+
+Overlay 参数、刷新行为与 Dashboard 动画 Pane 语法请参阅[使用指南](docs/usage.zh-CN.md)。
 
 ## 独立视图
 

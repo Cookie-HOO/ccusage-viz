@@ -251,11 +251,18 @@ Animation 是独立资源类型，不是 Chart 变体，也不是所有图表默
 裁剪和清理，而具名主题仍由动画库负责。它只向声明支持状态的效果传递 active/idle。动画 Pane 不拥有 Provider、
 查询运行时、scheduler 或 lifecycle operation。
 
+Overlay 是 Host 本地拥有的呈现资源，归属独立动画 Host 或 Dashboard 动画 Pane，而不归属 Chart、Provider 或动画库。
+静态文本不需要调度；命令 Overlay 拥有自身的本地 shell 执行调度、有界结果历史和净化后的展示输出，其生命周期随 Host
+结束。Overlay 的重绘与命令 deadline 只能重绘已有 Host Frame，绝不会发起 Token 数据查询。
+
 Monitor 附件只属于其所在的 Monitor Pane 或独立 Monitor Host，默认关闭。用户可在 ranking/list 视图的高级
 控制中启用；已有可比较的已接受 interval 后它才渲染，并用 ccuv 已接受的 Token 增量为声明支持状态的效果决定
 active 或 idle。附件 deadline 只重绘当前 Frame，绝不会发起查询。启用的附件使用 `classic` 主题；高级控制会循环
 全部动画库声明为 Monitor 可用的效果，随后进入 ccuv 本地的`无`。这个临时`无`状态不属于 catalog、不创建 provider
 工作，也不能用于独立动画或 Dashboard 动画 Pane。
+
+Dashboard 的撤销/重做同样是 Dashboard Host 拥有的、有界且仅会话内存在的 UI 状态。它只记录 Dashboard 状态所表示的组合与设置，
+绝不记录 Provider 结果、Chart 事实或持久化配置，也不会恢复 Host 本地的 Overlay 草稿、位置或偏移修改、命令结果历史。
 
 Chart Component 需要 Query 与 Result Processing；动画投影不需要。两者共享终端 Frame 与 Painter 基础设施来组合输出，
 但 Animation 不会变成 Chart Component，也不会扩大 chart/provider 的依赖方向。

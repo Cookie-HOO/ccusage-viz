@@ -5,6 +5,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 ADJUSTMENT_IDLE_TIMEOUT_SECONDS = 180.0
+HELP_IDLE_TIMEOUT_SECONDS = 600.0
 
 
 class AdjustmentTimeout(Exception):
@@ -21,6 +22,19 @@ class AdjustmentIdleTimer:
 
     def __post_init__(self) -> None:
         self.record_input()
+
+    @classmethod
+    def from_remaining(
+        cls,
+        remaining: float,
+        *,
+        clock: Callable[[], float] = time.monotonic,
+        timeout: float = ADJUSTMENT_IDLE_TIMEOUT_SECONDS,
+    ) -> AdjustmentIdleTimer:
+        """Restore a timer without extending its prior inactivity deadline."""
+        timer = cls(clock=clock, timeout=timeout)
+        timer.deadline = clock() + max(0.0, remaining)
+        return timer
 
     def record_input(self) -> None:
         self.deadline = self.clock() + self.timeout

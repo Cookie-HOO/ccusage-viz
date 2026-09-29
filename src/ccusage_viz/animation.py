@@ -11,7 +11,14 @@ from typing import Literal
 
 from term_animate.api import curated_catalog, project
 from term_animate.catalog import embedding_targets
-from term_animate.models import Effect, LogicalState, StyledRow, TerminalCapabilities, Viewport
+from term_animate.models import (
+    Effect,
+    EffectCategory,
+    LogicalState,
+    StyledRow,
+    TerminalCapabilities,
+    Viewport,
+)
 
 from ccusage_viz.errors import UsageError
 from ccusage_viz.formatting import clip_width
@@ -260,7 +267,11 @@ class AnimationRenderer:
                 theme=session.theme,
                 monotonic_seconds=session.clock.elapsed(now),
                 traversal_monotonic_seconds=session.traversal_frozen_at,
-                wall_time=virtual_wall_time(session, now),
+                wall_time=(
+                    datetime.now().astimezone()
+                    if session.spec.effect.category is EffectCategory.TIME
+                    else virtual_wall_time(session, now)
+                ),
                 pause_label=session.pause_label
                 or (
                     session.activity_label

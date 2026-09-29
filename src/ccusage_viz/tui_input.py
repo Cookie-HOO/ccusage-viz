@@ -24,10 +24,20 @@ class MouseEvent:
     modifiers: int
 
 
-InputEvent = KeyEvent | MouseEvent
+@dataclass(frozen=True, slots=True)
+class PasteEvent:
+    """One complete terminal bracketed-paste payload."""
 
-_MOUSE_ENABLE = "\x1b[?1000h\x1b[?1006h"
-_MOUSE_DISABLE = "\x1b[?1000l\x1b[?1006l"
+    value: str
+
+
+InputEvent = KeyEvent | MouseEvent | PasteEvent
+
+_MOUSE_ENABLE = "\x1b[?1000h\x1b[?1006h\x1b[?2004h"
+_MOUSE_DISABLE = "\x1b[?1000l\x1b[?1006l\x1b[?2004l"
+_MOUSE_BUTTON_MASK = 0b11
+_MOUSE_MOTION = 0b100000
+_MOUSE_WHEEL = 0b1000000
 
 
 def set_mouse_reporting(enabled: bool) -> None:
@@ -41,6 +51,12 @@ def set_mouse_reporting(enabled: bool) -> None:
 _ESCAPE_DELAY = 0.03
 _CONTROL_SEQUENCE_DELAY = 0.1
 _MAX_CONTROL_SEQUENCE_LENGTH = 64
+_MAX_PENDING_INPUT_CHARS = 8_192
+_MAX_BRACKETED_PASTE_CHARS = 1_048_576
+_OVERLOAD_HIGH_WATER_CHARS = 512
+_OVERLOAD_EVENT_INTERVAL = 1 / 120
+_BRACKETED_PASTE_START = "\x1b[200~"
+_BRACKETED_PASTE_END = "\x1b[201~"
 _SGR_MOUSE = re.compile(r"\x1b\[<(\d+);(\d+);(\d+)([Mm])")
 _SGR_MOUSE_PREFIX = re.compile(r"\x1b\[<\d*(?:;\d*){0,2}$")
 _MALFORMED_SGR_MOUSE = re.compile(r"\x1b\[<[^Mm]{0,61}[Mm]")
@@ -48,26 +64,91 @@ _UNKNOWN_CSI = re.compile(r"\x1b\[[0-?]+[ -/]*[@-~]")
 
 
 class InputDecoder:
-    """Decode ordinary keys and xterm SGR mouse reports from a byte buffer."""
+    """Decode bounded terminal input while pacing only pathological backlogs."""
 
     def __init__(self) -> None:
         self.buffer = ""
         self.escape_at: float | None = None
         self.control_at: float | None = None
+        self.overloaded = False
+        self.last_emitted_at: float | None = None
 
     def feed(self, value: str) -> None:
+        """Append terminal input, retaining one bounded bracketed paste atomically."""
+
+        accepting_paste = self.buffer.startswith(_BRACKETED_PASTE_START)
+        limit = _MAX_BRACKETED_PASTE_CHARS if accepting_paste else _MAX_PENDING_INPUT_CHARS
+        if len(self.buffer) + len(value) > limit:
+            self.buffer = ""
+            self.escape_at = None
+            self.control_at = None
+            self.overloaded = False
+            self.last_emitted_at = None
+            return
         self.buffer += value
+        self.overloaded = self.overloaded or len(self.buffer) > _OVERLOAD_HIGH_WATER_CHARS
+
+    def pacing_remaining(self, *, now: float | None = None) -> float:
+        """Return the overload delay before another ordinary event may be emitted."""
+
+        if not self.overloaded or self.last_emitted_at is None:
+            return 0.0
+        now = time.monotonic() if now is None else now
+        return max(0.0, self.last_emitted_at + _OVERLOAD_EVENT_INTERVAL - now)
+
+    @property
+    def awaiting_paste(self) -> bool:
+        """Whether a complete bracketed paste needs another terminal read."""
+
+        return (
+            self.buffer.startswith(_BRACKETED_PASTE_START)
+            and _BRACKETED_PASTE_END not in self.buffer[len(_BRACKETED_PASTE_START) :]
+        )
 
     def next(self, *, now: float | None = None) -> InputEvent | None:
         now = time.monotonic() if now is None else now
-        if not self.buffer:
+        if self.pacing_remaining(now=now) > 0 and not self.buffer.startswith(
+            _BRACKETED_PASTE_START
+        ):
             return None
-        if self.buffer[0] != "\x1b":
-            return self._ordinary_key()
-        if not self.buffer.startswith("\x1b["):
-            return self._escape(now)
-        self.escape_at = None
-        return self._control_sequence(now)
+        while self.buffer:
+            pending_before = len(self.buffer)
+            if self.buffer.startswith(_BRACKETED_PASTE_START):
+                event = self._bracketed_paste()
+            elif self.buffer[0] != "\x1b":
+                event = self._ordinary_key()
+            elif not (self.buffer.startswith("\x1b[") or self.buffer.startswith("\x1bO")):
+                event = self._escape(now)
+            else:
+                self.escape_at = None
+                event = self._control_sequence(now)
+            if event is None:
+                if len(self.buffer) < pending_before:
+                    continue
+                return None
+            if isinstance(event, PasteEvent):
+                if not self.buffer:
+                    self.overloaded = False
+                return event
+            self.last_emitted_at = now
+            if not self.buffer:
+                self.overloaded = False
+            return event
+        self.overloaded = False
+        return None
+
+    def _bracketed_paste(self) -> PasteEvent | None:
+        end = self.buffer.find(_BRACKETED_PASTE_END, len(_BRACKETED_PASTE_START))
+        if end < 0:
+            if len(self.buffer) > _MAX_BRACKETED_PASTE_CHARS:
+                self.buffer = ""
+                self.escape_at = None
+                self.control_at = None
+            return None
+        value = self.buffer[len(_BRACKETED_PASTE_START) : end]
+        self.buffer = self.buffer[end + len(_BRACKETED_PASTE_END) :]
+        self.control_at = None
+        return PasteEvent(value)
 
     def _ordinary_key(self) -> KeyEvent:
         self.control_at = None
@@ -88,10 +169,7 @@ class InputDecoder:
     def _control_sequence(self, now: float) -> InputEvent | None:
         if self.control_at is None:
             self.control_at = now
-        if (
-            len(self.buffer) > _MAX_CONTROL_SEQUENCE_LENGTH
-            or now - self.control_at >= _CONTROL_SEQUENCE_DELAY
-        ):
+        if now - self.control_at >= _CONTROL_SEQUENCE_DELAY:
             self._discard_control_prefix()
             return None
 
@@ -100,17 +178,27 @@ class InputDecoder:
             "\x1b[B",
             "\x1b[C",
             "\x1b[D",
+            "\x1b[H",
+            "\x1b[F",
+            "\x1bOH",
         }:
             value, self.buffer = self.buffer[:3], self.buffer[3:]
             self.control_at = None
-            return KeyEvent(value)
+            return KeyEvent("\x1b[H" if value == "\x1bOH" else value)
+        if self.buffer.startswith("\x1b[1~"):
+            self.buffer = self.buffer[4:]
+            self.control_at = None
+            return KeyEvent("\x1b[H")
 
         mouse = _SGR_MOUSE.match(self.buffer)
         if mouse is not None:
             button, x, y = (int(value) for value in mouse.groups()[:3])
             self.buffer = self.buffer[mouse.end() :]
             self.control_at = None
-            return MouseEvent(button & 0b11, x, y, mouse.group(4) == "M", button & ~0b11)
+            modifiers = button & ~_MOUSE_BUTTON_MASK
+            if modifiers & _MOUSE_WHEEL:
+                return None
+            return MouseEvent(button & _MOUSE_BUTTON_MASK, x, y, mouse.group(4) == "M", modifiers)
 
         if self.buffer.startswith("\x1b[<"):
             if _SGR_MOUSE_PREFIX.match(self.buffer):
@@ -163,6 +251,7 @@ def tui_input_mode() -> Iterator[InputDecoder]:
     try:
         tty.setcbreak(descriptor)
         attributes = termios.tcgetattr(descriptor)
+        attributes[0] &= ~termios.ICRNL
         attributes[3] &= ~termios.ISIG
         termios.tcsetattr(descriptor, termios.TCSADRAIN, attributes)
         set_mouse_reporting(True)
@@ -175,9 +264,18 @@ def tui_input_mode() -> Iterator[InputDecoder]:
 
 
 def read_event(decoder: InputDecoder, timeout: float) -> InputEvent | None:
+    """Return one event without reading ahead of pending decoder input."""
+
     event = decoder.next()
     if event is not None:
         return event
+    if decoder.buffer:
+        delay = decoder.pacing_remaining()
+        if delay > 0:
+            time.sleep(min(timeout, delay))
+            return decoder.next()
+        if not decoder.awaiting_paste and not decoder.buffer.startswith("\x1b"):
+            return None
     if os.name == "nt":
         import msvcrt
 

@@ -1,6 +1,6 @@
 [project]
 name = "ccusage-viz"
-version = "0.2.0"
+version = "0.2.1"
 description = "Stateless terminal visualizations for ccusage token data"
 readme = "README.md"
 license = "GPL-3.0-only"
@@ -9,7 +9,7 @@ authors = [{ name = "Cookie HOO" }]
 requires-python = ">=3.11,<3.14"
 dependencies = [
   "plotext>=6.1,<7",
-  "term-animate>=0.1.0,<0.2.0",
+  "term-animate>=0.1.1,<0.2.0",
 ]
 
 classifiers = [

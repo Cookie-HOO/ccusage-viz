@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import math
+import os
 import re
 import shlex
 import sys
@@ -11,6 +12,7 @@ from typing import Any, Never, cast
 
 from ccusage_viz import __version__
 from ccusage_viz.animation import animation_spec, default_animation_spec
+from ccusage_viz.animation_overlay import OVERLAY_COLORS, OVERLAY_POSITIONS, OverlayConfig
 from ccusage_viz.application import run
 from ccusage_viz.dashboard import DASHBOARD_PRESETS
 from ccusage_viz.dashboard_layout import (
@@ -63,7 +65,16 @@ from ccusage_viz.options import (
 )
 from ccusage_viz.render.palette import COLOR_SCHEMES
 
-_COMMANDS = ("timeline", "calendar", "stack", "ranking", "monitor", "dashboard", "animate")
+_COMMANDS = (
+    "timeline",
+    "calendar",
+    "stack",
+    "ranking",
+    "monitor",
+    "dashboard",
+    "animate",
+    "text",
+)
 _TUI_COMMANDS = ("timeline", "calendar", "stack", "ranking", "monitor")
 _DURATION_PATTERN = re.compile(r"(?P<value>[1-9][0-9]*)(?P<unit>[mh])$")
 _PANE_FORBIDDEN_OPTIONS = frozenset(
@@ -400,9 +411,48 @@ def build_parser(tr: Translator) -> argparse.ArgumentParser:
     animate = subparsers.add_parser(
         "animate", help=tr.text("help.animate"), description=tr.text("help.animate")
     )
-    animate.add_argument("style", nargs="?", metavar="STYLE")
+    animate.add_argument("style", nargs="?", metavar="STYLE", help=tr.text("help.animate_style"))
     animate.add_argument("--gallery", action="store_true", help=tr.text("help.animate_gallery"))
+    source = animate.add_mutually_exclusive_group()
+    source.add_argument("--overlay-text", metavar="TEXT", help=tr.text("help.overlay_text"))
+    source.add_argument(
+        "--overlay-command", metavar="COMMAND", help=tr.text("help.overlay_command")
+    )
+    source.add_argument("--overlay-time-band", action="store_true", help=argparse.SUPPRESS)
+    animate.add_argument(
+        "--overlay-position",
+        choices=OVERLAY_POSITIONS,
+        default="bottom-center",
+        help=tr.text("help.overlay_position"),
+    )
+    animate.add_argument(
+        "--overlay-color",
+        choices=OVERLAY_COLORS,
+        default="auto",
+        help=tr.text("help.overlay_color"),
+    )
+    animate.add_argument("--overlay-interval", type=float, help=tr.text("help.overlay_interval"))
+    animate.add_argument(
+        "--overlay-max-width", type=int, default=40, help=tr.text("help.overlay_max_width")
+    )
     animate.add_argument("--ascii", action="store_true", help=tr.text("help.ascii"))
+
+    text = subparsers.add_parser(
+        "text", help=tr.text("help.text"), description=tr.text("help.text")
+    )
+    text.add_argument("preset", choices=("time-state",), help=tr.text("help.text_preset"))
+    text_mode = text.add_mutually_exclusive_group()
+    text_mode.add_argument(
+        "--run", action="store_const", const="run", dest="text_mode", help=tr.text("help.text_run")
+    )
+    text_mode.add_argument(
+        "--describe",
+        action="store_const",
+        const="describe",
+        dest="text_mode",
+        help=tr.text("help.text_describe"),
+    )
+    text.add_argument("--lang", choices=("en", "zh"), help=tr.text("help.lang"))
 
     return parser
 
@@ -541,7 +591,17 @@ def _validate_chart(
     return interval if interval is not None else 10.0
 
 
-def parse_pane_fragment(fragment: str, *, host: DashboardLaunch | None = None) -> PaneConfig:
+def _time_state_command(launcher: str = "ccuv") -> str:
+    """Return the inspectable command source used by built-in clock overlays."""
+
+    from ccusage_viz.clock_overlay import time_state_overlay_command
+
+    return time_state_overlay_command(launcher)
+
+
+def parse_pane_fragment(
+    fragment: str, *, host: DashboardLaunch | None = None, language: str = "en"
+) -> PaneConfig:
     try:
         tokens = shlex.split(fragment)
     except ValueError as exc:
@@ -549,11 +609,51 @@ def parse_pane_fragment(fragment: str, *, host: DashboardLaunch | None = None) -
     if not tokens:
         raise UsageError("error.tui_panel", value=fragment)
     if tokens[0] == "animate":
-        if len(tokens) != 2:
+        if len(tokens) < 2:
             raise UsageError("error.tui_panel", value=fragment)
         try:
-            return AnimationPaneConfig(animation_spec(tokens[1], target="pane"))
-        except UsageError as exc:
+            animation = animation_spec(tokens[1], target="pane")
+            parser = LocalizedParser(add_help=False)
+            source = parser.add_mutually_exclusive_group()
+            source.add_argument("--overlay-text")
+            source.add_argument("--overlay-command")
+            source.add_argument("--overlay-time-band", action="store_true")
+            parser.add_argument(
+                "--overlay-position", choices=OVERLAY_POSITIONS, default="bottom-center"
+            )
+            parser.add_argument("--overlay-color", choices=OVERLAY_COLORS, default="auto")
+            parser.add_argument("--overlay-interval", type=float)
+            parser.add_argument("--overlay-max-width", type=int, default=40)
+            overlay_args = parser.parse_args(tokens[2:])
+            has_source = (
+                overlay_args.overlay_text is not None
+                or overlay_args.overlay_command is not None
+                or overlay_args.overlay_time_band
+            )
+            if not has_source and tokens[2:]:
+                raise ValueError("overlay options require a source")
+            if (
+                overlay_args.overlay_interval is not None
+                and overlay_args.overlay_command is None
+                and not overlay_args.overlay_time_band
+            ):
+                raise ValueError("overlay interval requires a command source")
+            overlay = OverlayConfig(
+                text=overlay_args.overlay_text,
+                command=(
+                    _time_state_command(host.launcher if host is not None else "ccuv")
+                    if overlay_args.overlay_time_band
+                    else overlay_args.overlay_command
+                ),
+                position=overlay_args.overlay_position,
+                color=overlay_args.overlay_color,
+                interval=60.0
+                if overlay_args.overlay_interval is None
+                else overlay_args.overlay_interval,
+                max_width=overlay_args.overlay_max_width,
+            )
+            return AnimationPaneConfig(animation, overlay)
+        except (UsageError, ValueError) as exc:
             raise UsageError("error.tui_panel", value=fragment) from exc
     if tokens[0] not in _TUI_COMMANDS:
         raise UsageError("error.tui_panel", value=fragment)
@@ -586,10 +686,53 @@ def parse_pane_fragment(fragment: str, *, host: DashboardLaunch | None = None) -
 
 
 def _to_options(
-    namespace: argparse.Namespace, *, explicit: frozenset[str] = frozenset()
+    namespace: argparse.Namespace,
+    *,
+    explicit: frozenset[str] = frozenset(),
+    launcher: str = "ccuv",
 ) -> LaunchConfig:
     command = namespace.command or "timeline"
     if command == "animate":
+        has_source = (
+            namespace.overlay_text is not None
+            or namespace.overlay_command is not None
+            or namespace.overlay_time_band
+        )
+        overlay_fields = {
+            "overlay_position",
+            "overlay_color",
+            "overlay_interval",
+            "overlay_max_width",
+        }
+        if namespace.gallery and (has_source or explicit & overlay_fields):
+            raise UsageError("error.arguments", detail="--gallery does not support overlay options")
+        if not has_source and explicit & overlay_fields:
+            raise UsageError(
+                "error.arguments", detail="overlay display options require an overlay source"
+            )
+        if (
+            namespace.overlay_interval is not None
+            and namespace.overlay_command is None
+            and not namespace.overlay_time_band
+        ):
+            raise UsageError(
+                "error.arguments", detail="--overlay-interval requires --overlay-command"
+            )
+        try:
+            overlay = OverlayConfig(
+                text=namespace.overlay_text,
+                command=(
+                    _time_state_command()
+                    if namespace.overlay_time_band
+                    else namespace.overlay_command
+                ),
+                position=namespace.overlay_position,
+                color=namespace.overlay_color,
+                interval=60.0 if namespace.overlay_interval is None else namespace.overlay_interval,
+                max_width=namespace.overlay_max_width,
+            )
+        except ValueError as exc:
+            raise UsageError("error.arguments", detail=str(exc)) from exc
         return AnimationLaunch(
             ProcessConfig(),
             StandaloneHostConfig(ascii=namespace.ascii),
@@ -598,6 +741,7 @@ def _to_options(
             else animation_spec(namespace.style, target="standalone"),
             explicit,
             gallery=namespace.gallery,
+            overlay=overlay,
         )
     process = ProcessConfig(
         ccusage_bin=namespace.ccusage_bin,
@@ -704,11 +848,24 @@ def _to_options(
                 else namespace.dashboard_style
             ),
         )
-        launch = DashboardLaunch(process, host, (), explicit)
-        return replace(
-            launch,
-            panes=tuple(parse_pane_fragment(fragment, host=launch) for fragment in fragments),
+        launch = DashboardLaunch(process, host, (), explicit, launcher)
+        panes = tuple(
+            parse_pane_fragment(fragment, host=launch, language=namespace.lang or "en")
+            for fragment in fragments
         )
+        if preset_name in {"wide-clock", "narrow-clock"} and panes:
+            first = panes[0]
+            if isinstance(first, AnimationPaneConfig):
+                panes = (
+                    replace(
+                        first,
+                        overlay=OverlayConfig(
+                            command=_time_state_command(launcher), position="bottom-right"
+                        ),
+                    ),
+                    *panes[1:],
+                )
+        return replace(launch, panes=panes)
     chart = _chart_from_namespace(namespace)
     interval = _validate_chart(namespace, chart, explicit=explicit, demo=namespace.demo)
     host = StandaloneHostConfig(
@@ -752,6 +909,7 @@ def _validate_configuration(options: LaunchConfig) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     raw_args = list(sys.argv[1:] if argv is None else argv)
+    launcher = os.environ.get("CCUV_LAUNCHER") or "ccuv"
     short_circuit = probe_short_circuit(raw_args)
     if short_circuit is not None:
         return _render_short_circuit(short_circuit)
@@ -762,7 +920,19 @@ def main(argv: list[str] | None = None) -> int:
     try:
         parser = build_parser(tr)
         namespace = parser.parse_args(args)
-        options = _to_options(namespace, explicit=explicit)
+        if hasattr(namespace, "lang") and namespace.lang is None:
+            namespace.lang = language
+        if namespace.command == "text":
+            from ccusage_viz.clock_overlay import describe_time_state, render_time_state
+
+            if namespace.preset == "time-state":
+                if namespace.text_mode == "describe":
+                    print(describe_time_state(namespace.lang or language))
+                else:
+                    print(render_time_state(namespace.lang or language))
+                return 0
+            raise AssertionError("unsupported text preset")
+        options = _to_options(namespace, explicit=explicit, launcher=launcher)
         _validate_configuration(options)
         route = _route(options)
         return run(route.launch, tr)

@@ -88,6 +88,19 @@ def test_frame_painter_updates_only_changed_animation_rows() -> None:
     assert stream.getvalue() == "\x1b[2;1H\x1b[2Kactive"
 
 
+def test_frame_painter_can_wrap_differential_paint_atomically() -> None:
+    stream = Stream(True)
+    painter = FramePainter(stream)
+
+    painter.paint(compose_frame("idle", "status", "controls", height=4))
+    stream.seek(0)
+    stream.truncate(0)
+    painter.paint(compose_frame("active", "status", "controls", height=4), atomic=True)
+
+    assert stream.getvalue() == "\x1b[?2026h\x1b[2;1H\x1b[2Kactive\x1b[?2026l"
+    assert "\x1b[2J" not in stream.getvalue()
+
+
 def test_compose_frame_can_omit_status_row() -> None:
     frame = compose_frame("chart\nextra", None, ("one", "two", "three"), height=5)
 

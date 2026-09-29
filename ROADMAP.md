@@ -1,15 +1,14 @@
 # Roadmap
 
-`ccusage-viz` is currently at **0.2.0**. This roadmap describes public product
+`ccusage-viz` is currently at **0.2.1**. This roadmap describes public product
 contracts, not private implementation plans.
 
 ## Current direction
 
-- `0.2.0` makes terminal animation a first-class presentation capability:
-  provider-free standalone animation, ccuv-owned gallery browsing, explicit
-  Dashboard animation panes, `wide-clock` and `narrow-clock` presets, and
-  opt-in state-aware Monitor attachments. Animations remain presentation-only
-  and do not change token data semantics.
+- `0.2.1` continues to refine presentation and interaction: provider-free
+  animation hosts, the ccuv-owned gallery, run-local Overlays, clock presets,
+  contextual Dashboard Help, and bounded session-only undo/redo. These remain
+  presentation-only and do not change token data semantics or add a collector.
 - Continue refining Dashboard layouts, pane scheduling, and the global summary
   without adding compatibility aliases.
 - Evaluate interval-aware completed-result caches and bounded recent/history

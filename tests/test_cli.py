@@ -43,6 +43,92 @@ def test_subcommand_help_is_localized(
     assert description in capsys.readouterr().out
 
 
+def test_text_and_animate_help_describe_public_interfaces(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    parser = build_parser(load_translator("en"))
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--help"])
+    root_help = capsys.readouterr().out
+    assert "text" in root_help
+    assert "Generate provider-free dynamic text presets" in root_help
+    assert "==SUPPRESS==" not in root_help
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["text", "--help"])
+    text_help = capsys.readouterr().out
+    assert "Localized status for the current local time band" in text_help
+    assert "Print the current text (default)" in text_help
+    assert "Describe the preset and its output" in text_help
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["animate", "--help"])
+    animate_help = capsys.readouterr().out
+    for option in (
+        "--overlay-text",
+        "--overlay-command",
+        "--overlay-position",
+        "--overlay-color",
+        "--overlay-interval",
+        "--overlay-max-width",
+    ):
+        assert option in animate_help
+    assert "--overlay-time-band" not in animate_help
+    assert "Seconds between command-overlay refreshes" in animate_help
+
+
+def test_text_time_state_writes_a_localized_dynamic_status(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert main(["text", "time-state", "--lang", "zh"]) == 0
+    assert capsys.readouterr().out.startswith(("🛌", "🌅", "💼", "🍜", "🌆"))
+
+
+def test_text_time_state_detects_language_when_omitted(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr("ccusage_viz.cli.detect_language", lambda: "zh")
+
+    assert main(["text", "time-state"]) == 0
+    assert capsys.readouterr().out.startswith(("🛌", "🌅", "💼", "🍜", "🌆"))
+
+
+def test_text_time_state_describe_explains_implementation(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert main(["text", "time-state", "--describe", "--lang", "en"]) == 0
+    assert capsys.readouterr().out.strip() == (
+        "Outputs one emoji status line from the local time at runtime.\n\n"
+        "Time states:\n"
+        "  00:00–06:00  🛌 Good night zzz\n"
+        "  06:00–09:00  🌅 Good morning\n"
+        "  09:00–12:00  💼 Working…\n"
+        "  12:00–14:00  🍜 On lunch break…\n"
+        "  14:00–18:00  💼 Working…\n"
+        "  18:00–24:00  🌆 Good evening\n\n"
+        "Without --lang, Simplified Chinese environments are detected automatically and all "
+        "other environments use English. ccuv text time-state and ccuv text time-state --run "
+        "both print the current status."
+    )
+
+
+def test_text_run_is_equivalent_to_default(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["text", "time-state", "--lang", "en"]) == 0
+    default = capsys.readouterr().out
+
+    assert main(["text", "time-state", "--run", "--lang", "en"]) == 0
+    assert capsys.readouterr().out == default
+
+
+def test_text_cannot_be_parsed_as_a_dashboard_pane() -> None:
+    parser = build_parser(load_translator("en"))
+
+    with pytest.raises(UsageError):
+        _to_options(parser.parse_args(["dashboard", "--pane", "text time-state"]))
+
+
 def test_animate_gallery_preserves_positional_initial_style() -> None:
     parser = build_parser(load_translator("en"))
 
@@ -335,6 +421,21 @@ def test_continuous_routes_reject_ambiguous_lifecycle_options() -> None:
             parser.parse_args(arguments)
 
 
+def test_dashboard_uses_launcher_from_local_wrapper_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = []
+    monkeypatch.setenv("CCUV_LAUNCHER", "ccuv-local")
+    monkeypatch.setattr(
+        "ccusage_viz.cli.run", lambda route, _translator: captured.append(route) or 0
+    )
+
+    assert main(["dashboard"]) == 0
+    assert captured[0].launcher == "ccuv-local"
+    assert isinstance(captured[0].panes[0], AnimationPaneConfig)
+    assert captured[0].panes[0].overlay.command == "ccuv-local text time-state --run"
+
+
 def test_ascii_conflicts_only_with_explicit_theme(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("ccusage_viz.cli.run", lambda *_args: 0)
     assert main(["timeline", "--demo", "small", "--ascii"]) == 0
@@ -480,6 +581,16 @@ def test_dashboard_rejects_non_positive_or_non_finite_timeout(timeout: str) -> N
     assert caught.value.key == "error.arguments"
 
 
+def test_clock_overlay_source_uses_automatic_language_detection() -> None:
+    parser = build_parser(load_translator("zh"))
+
+    options = _to_options(parser.parse_args(["dashboard", "wide-clock", "--lang", "zh"]))
+
+    assert isinstance(options.panes[0], AnimationPaneConfig)
+    assert options.panes[0].overlay.command == "ccuv text time-state --run"
+    assert options.panes[0].overlay.position == "bottom-right"
+
+
 def test_bare_dashboard_is_equivalent_to_wide_clock_preset() -> None:
     parser = build_parser(load_translator("en"))
 
@@ -491,7 +602,9 @@ def test_bare_dashboard_is_equivalent_to_wide_clock_preset() -> None:
     assert bare.host.refresh_interval == 60
     assert bare.host.sampling_interval == 15
     assert isinstance(bare.panes[0], AnimationPaneConfig)
-    assert bare.panes[0].animation.style == "digital-clock"
+    assert bare.panes[0].animation.style == "analog-clock"
+    assert bare.panes[0].overlay.command is not None
+    assert bare.panes[0].overlay.command == "ccuv text time-state --run"
     assert tuple(
         pane.chart.kind for pane in bare.panes[1:] if isinstance(pane, ChartPaneConfig)
     ) == (
@@ -704,24 +817,26 @@ def test_dashboard_narrow_clock_reuses_narrow_panes_with_short_clock_row() -> No
 
     assert isinstance(narrow_clock.panes[0], AnimationPaneConfig)
     assert narrow_clock.panes[0].animation.style == "digital-clock"
+    assert narrow_clock.panes[0].overlay.position == "bottom-right"
     assert narrow_clock.panes[1:] == narrow.panes
     assert narrow_clock.host.grid == "4x1"
     assert narrow_clock.host.row_weights == (6, 14, 14, 12)
     assert narrow_clock.host.style == "framed"
 
 
-def test_dashboard_wide_clock_reuses_wide_panes_below_short_clock_row() -> None:
+def test_dashboard_wide_clock_reuses_wide_panes_below_analog_clock_row() -> None:
     parser = build_parser(load_translator("en"))
 
     wide = _to_options(parser.parse_args(["dashboard", "wide"]))
     wide_clock = _to_options(parser.parse_args(["dashboard", "wide-clock"]))
 
     assert isinstance(wide_clock.panes[0], AnimationPaneConfig)
-    assert wide_clock.panes[0].animation.style == "digital-clock"
+    assert wide_clock.panes[0].animation.style == "analog-clock"
+    assert wide_clock.panes[0].overlay.position == "bottom-right"
     assert wide_clock.panes[1:] == wide.panes
     assert wide_clock.host.grid == "2x2"
     assert wide_clock.host.layout == "spotlight-wide"
-    assert wide_clock.host.row_weights == (6, 14, 14)
+    assert wide_clock.host.row_weights == (9, 13, 12)
     assert wide_clock.host.style == "framed"
 
 
