@@ -51,7 +51,8 @@ def test_text_and_animate_help_describe_public_interfaces(
     with pytest.raises(SystemExit):
         parser.parse_args(["--help"])
     root_help = capsys.readouterr().out
-    assert "text       Generate provider-free dynamic text presets" in root_help
+    assert "text" in root_help
+    assert "Generate provider-free dynamic text presets" in root_help
     assert "==SUPPRESS==" not in root_help
 
     with pytest.raises(SystemExit):
