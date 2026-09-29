@@ -411,24 +411,44 @@ def build_parser(tr: Translator) -> argparse.ArgumentParser:
     animate = subparsers.add_parser(
         "animate", help=tr.text("help.animate"), description=tr.text("help.animate")
     )
-    animate.add_argument("style", nargs="?", metavar="STYLE")
+    animate.add_argument("style", nargs="?", metavar="STYLE", help=tr.text("help.animate_style"))
     animate.add_argument("--gallery", action="store_true", help=tr.text("help.animate_gallery"))
     source = animate.add_mutually_exclusive_group()
-    source.add_argument("--overlay-text", metavar="TEXT")
-    source.add_argument("--overlay-command", metavar="COMMAND")
-    source.add_argument("--overlay-time-band", action="store_true")
-    animate.add_argument("--overlay-position", choices=OVERLAY_POSITIONS, default="bottom-center")
-    animate.add_argument("--overlay-color", choices=OVERLAY_COLORS, default="auto")
-    animate.add_argument("--overlay-interval", type=float)
-    animate.add_argument("--overlay-max-width", type=int, default=40)
+    source.add_argument("--overlay-text", metavar="TEXT", help=tr.text("help.overlay_text"))
+    source.add_argument(
+        "--overlay-command", metavar="COMMAND", help=tr.text("help.overlay_command")
+    )
+    source.add_argument("--overlay-time-band", action="store_true", help=argparse.SUPPRESS)
+    animate.add_argument(
+        "--overlay-position",
+        choices=OVERLAY_POSITIONS,
+        default="bottom-center",
+        help=tr.text("help.overlay_position"),
+    )
+    animate.add_argument(
+        "--overlay-color",
+        choices=OVERLAY_COLORS,
+        default="auto",
+        help=tr.text("help.overlay_color"),
+    )
+    animate.add_argument("--overlay-interval", type=float, help=tr.text("help.overlay_interval"))
+    animate.add_argument(
+        "--overlay-max-width", type=int, default=40, help=tr.text("help.overlay_max_width")
+    )
     animate.add_argument("--ascii", action="store_true", help=tr.text("help.ascii"))
 
-    text = subparsers.add_parser("text", help=argparse.SUPPRESS)
-    text.add_argument("preset", choices=("time-state",))
+    text = subparsers.add_parser(
+        "text", help=tr.text("help.text"), description=tr.text("help.text")
+    )
+    text.add_argument("preset", choices=("time-state",), help=tr.text("help.text_preset"))
     text_mode = text.add_mutually_exclusive_group()
-    text_mode.add_argument("--run", action="store_const", const="run", dest="text_mode")
-    text_mode.add_argument("--describe", action="store_const", const="describe", dest="text_mode")
-    text.add_argument("--lang", choices=("en", "zh"))
+    text_mode.add_argument(
+        "--run", action="store_const", const="run", dest="text_mode", help=tr.text("help.text_run")
+    )
+    text_mode.add_argument(
+        "--describe", action="store_const", const="describe", dest="text_mode", help=tr.text("help.text_describe")
+    )
+    text.add_argument("--lang", choices=("en", "zh"), help=tr.text("help.lang"))
 
     return parser
 

@@ -43,6 +43,40 @@ def test_subcommand_help_is_localized(
     assert description in capsys.readouterr().out
 
 
+def test_text_and_animate_help_describe_public_interfaces(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    parser = build_parser(load_translator("en"))
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--help"])
+    root_help = capsys.readouterr().out
+    assert "text       Generate provider-free dynamic text presets" in root_help
+    assert "==SUPPRESS==" not in root_help
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["text", "--help"])
+    text_help = capsys.readouterr().out
+    assert "Localized status for the current local time band" in text_help
+    assert "Print the current text (default)" in text_help
+    assert "Describe the preset and its output" in text_help
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["animate", "--help"])
+    animate_help = capsys.readouterr().out
+    for option in (
+        "--overlay-text",
+        "--overlay-command",
+        "--overlay-position",
+        "--overlay-color",
+        "--overlay-interval",
+        "--overlay-max-width",
+    ):
+        assert option in animate_help
+    assert "--overlay-time-band" not in animate_help
+    assert "Seconds between command-overlay refreshes" in animate_help
+
+
 def test_text_time_state_writes_a_localized_dynamic_status(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
