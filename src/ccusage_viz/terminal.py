@@ -67,9 +67,7 @@ class FramePainter:
                 updates.append(f"\x1b[{index + 1};1H\x1b[2K")
             output = "".join(updates)
         if output:
-            self.stream.write(
-                f"\x1b[?2026h{output}\x1b[?2026l" if atomic else output
-            )
+            self.stream.write(f"\x1b[?2026h{output}\x1b[?2026l" if atomic else output)
         self.stream.flush()
         self._frame = frame
         self.painted = True

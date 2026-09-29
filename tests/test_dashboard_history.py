@@ -39,9 +39,7 @@ def test_equal_snapshot_is_a_no_op_and_preserves_redo_branch() -> None:
 
 
 def test_same_family_and_target_coalesce_within_one_second() -> None:
-    history = DashboardHistory("A").record(
-        "B", family="theme", target="pane-1", timestamp=10.0
-    )
+    history = DashboardHistory("A").record("B", family="theme", target="pane-1", timestamp=10.0)
     coalesced = history.record("C", family="theme", target="pane-1", timestamp=11.0)
 
     assert coalesced.snapshots == ("A", "C")
@@ -50,9 +48,7 @@ def test_same_family_and_target_coalesce_within_one_second() -> None:
 
 
 def test_coalescing_requires_matching_family_target_and_time_window() -> None:
-    initial = DashboardHistory("A").record(
-        "B", family="theme", target="pane-1", timestamp=10.0
-    )
+    initial = DashboardHistory("A").record("B", family="theme", target="pane-1", timestamp=10.0)
 
     assert initial.record("C", family="style", target="pane-1", timestamp=10.5).edit_count == 2
     assert initial.record("C", family="theme", target="pane-2", timestamp=10.5).edit_count == 2
@@ -61,9 +57,7 @@ def test_coalescing_requires_matching_family_target_and_time_window() -> None:
 
 
 def test_undo_then_record_does_not_coalesce_with_old_branch() -> None:
-    history = DashboardHistory("A").record(
-        "B", family="theme", target="pane-1", timestamp=1.0
-    )
+    history = DashboardHistory("A").record("B", family="theme", target="pane-1", timestamp=1.0)
 
     changed = history.undo().record("C", family="theme", target="pane-1", timestamp=1.5)
     assert changed.snapshots == ("A", "C")

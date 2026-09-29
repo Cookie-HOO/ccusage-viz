@@ -446,7 +446,11 @@ def build_parser(tr: Translator) -> argparse.ArgumentParser:
         "--run", action="store_const", const="run", dest="text_mode", help=tr.text("help.text_run")
     )
     text_mode.add_argument(
-        "--describe", action="store_const", const="describe", dest="text_mode", help=tr.text("help.text_describe")
+        "--describe",
+        action="store_const",
+        const="describe",
+        dest="text_mode",
+        help=tr.text("help.text_describe"),
     )
     text.add_argument("--lang", choices=("en", "zh"), help=tr.text("help.lang"))
 
