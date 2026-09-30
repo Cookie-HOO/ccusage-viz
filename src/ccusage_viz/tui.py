@@ -153,7 +153,7 @@ from ccusage_viz.render.base import RenderAudit, RenderContext, styled_text
 from ccusage_viz.render.filters import active_filter_summary
 from ccusage_viz.render.palette import COLOR_SCHEMES, get_color_scheme
 from ccusage_viz.render.summary import render_summary
-from ccusage_viz.terminal import Frame, FramePainter, Terminal, compose_frame
+from ccusage_viz.terminal import Frame, FramePainter, Terminal, compose_frame, set_cursor_visible
 from ccusage_viz.terminal_ui import (
     AdjustmentAction,
     TransientFeedback,
@@ -2141,6 +2141,11 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
     last_size: tuple[int, int] | None = None
     screen = FramePainter(sys.stdout)
 
+    def set_screen_cursor_visible(visible: bool) -> None:
+        stream = getattr(screen, "stream", None)
+        if stream is not None:
+            set_cursor_visible(stream, visible)
+
     def end_adjustment() -> None:
         nonlocal adjustment_mode, adjustment_timer, focused, grid_draft, grid_error, body_view
         adjustment_mode = None
@@ -2923,6 +2928,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             ]
             if help_overlay.context in {"editor", "history"}:
                 policy_children.append((translator.text("status.tui_help_animation_hint"), ()))
+            policy_children.append((translator.text("status.tui_help_idle_close"), ()))
             rows.extend(
                 tree_node(
                     "",
@@ -2984,7 +2990,14 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     (translator.text("status.tui_help_browse_refresh"), ()),
                     (translator.text("status.tui_help_browse_pause"), ()),
                     (translator.text("status.tui_help_controls"), ()),
-                    (translator.text("status.tui_help_interval_dashboard"), ()),
+                    (
+                        translator.text("status.tui_help_intervals_dashboard"),
+                        (
+                            (translator.text("status.tui_help_interval_historical"), ()),
+                            (translator.text("status.tui_help_interval_monitor_dashboard"), ()),
+                            (translator.text("status.tui_help_interval_header"), ()),
+                        ),
+                    ),
                 ]
             control_nodes = (
                 (translator.text("status.tui_help_browse"), tuple(browse_children)),
@@ -3027,10 +3040,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         (translator.text("status.tui_help_animation_style"), ()),
                         (translator.text("status.tui_help_animation_move"), ()),
                         (translator.text("status.tui_help_animation_reset"), ()),
-                        (
-                            translator.text("status.tui_help_animation_edit"),
-                            ((translator.text("status.tui_help_editor_detail"), ()),),
-                        ),
+                        (translator.text("status.tui_help_animation_edit"), ()),
                         (translator.text("status.tui_help_animation_interval"), ()),
                         (
                             translator.text("status.tui_help_animation_history"),
@@ -3109,7 +3119,12 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             )
         ]
         if mode == "browse":
-            policy_children.append((translator.text("status.tui_help_browse_hint"), ()))
+            policy_children.extend(
+                (
+                    (translator.text("status.tui_help_browse_hint"), ()),
+                    (translator.text("status.tui_help_schedule_coalesce"), ()),
+                )
+            )
         elif (
             mode == "pane" and focused is not None and isinstance(panes[focused], TuiAnimationPane)
         ):
@@ -3148,6 +3163,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     ),
                 )
             )
+        policy_children.append((translator.text("status.tui_help_idle_close"), ()))
         rows.append("")
         rows.append(
             styled_text(
@@ -3506,7 +3522,11 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         nonlocal help_was_active, last_size, dashboard_text_offset, dashboard_text_line_count
         nonlocal dashboard_text_visible_rows
         size = get_terminal_size()
-        atomic = help_overlay is not None or help_was_active
+        atomic = (
+            help_overlay is not None
+            or help_was_active
+            or any(isinstance(pane, TuiAnimationPane) for pane in panes)
+        )
         if help_overlay is not None:
             last_size = (size.columns, size.lines)
             screen.paint(help_frame(size.columns, size.lines), force=force, atomic=atomic)
@@ -3792,6 +3812,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         return pane
 
     try:
+        set_screen_cursor_visible(False)
         with tui_input_mode() as decoder:
             for index in range(len(panes)):
                 refresh(index, trigger=LifecycleTrigger.STARTUP)
@@ -4677,3 +4698,4 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         runtime.cancel()
         executor.shutdown(wait=False, cancel_futures=True)
         screen.finish()
+        set_screen_cursor_visible(True)

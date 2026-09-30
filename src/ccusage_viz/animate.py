@@ -34,7 +34,13 @@ from ccusage_viz.formatting import char_width, clip_width, display_width, pad_wi
 from ccusage_viz.i18n import Translator
 from ccusage_viz.options import AnimationLaunch
 from ccusage_viz.render.palette import COLOR_SCHEMES
-from ccusage_viz.terminal import FramePainter, Terminal, compose_frame, inspect_terminal
+from ccusage_viz.terminal import (
+    FramePainter,
+    Terminal,
+    compose_frame,
+    inspect_terminal,
+    set_cursor_visible,
+)
 from ccusage_viz.terminal_ui import AdjustmentAction, adjustment_rows, controls_line
 from ccusage_viz.tui_input import (
     InputDecoder,
@@ -166,6 +172,7 @@ def _paint_animation(
             height=terminal.height,
         ),
         force=force,
+        atomic=True,
     )
 
 
@@ -865,6 +872,7 @@ def _run_gallery(options: AnimationLaunch, translator: Translator) -> int:
     screen = FramePainter()
     last_size: tuple[int, int] | None = None
     try:
+        set_cursor_visible(screen.stream, False)
         with tui_input_mode() as decoder:
             while True:
                 terminal = _terminal(options)
@@ -888,6 +896,7 @@ def _run_gallery(options: AnimationLaunch, translator: Translator) -> int:
                         height=terminal.height,
                     ),
                     force=last_size is not None and last_size != size,
+                    atomic=True,
                 )
                 last_size = size
                 event = read_event(decoder, _gallery_wait_seconds(sessions, time.monotonic()))
@@ -917,6 +926,7 @@ def _run_gallery(options: AnimationLaunch, translator: Translator) -> int:
         pass
     finally:
         screen.finish()
+        set_cursor_visible(screen.stream, True)
     return 0
 
 
@@ -931,6 +941,7 @@ def run_animation(options: AnimationLaunch, translator: Translator) -> int:
     screen = FramePainter()
     last_size: tuple[int, int] | None = None
     try:
+        set_cursor_visible(screen.stream, False)
         with tui_input_mode() as decoder:
             while True:
                 terminal = _terminal(options)
@@ -992,4 +1003,5 @@ def run_animation(options: AnimationLaunch, translator: Translator) -> int:
     finally:
         overlay.close()
         screen.finish()
+        set_cursor_visible(screen.stream, True)
     return 0

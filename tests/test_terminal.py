@@ -5,7 +5,7 @@ import pytest
 
 from ccusage_viz.errors import UsageError
 from ccusage_viz.formatting import display_width
-from ccusage_viz.terminal import FramePainter, compose_frame, inspect_terminal
+from ccusage_viz.terminal import FramePainter, compose_frame, inspect_terminal, set_cursor_visible
 from ccusage_viz.terminal_ui import (
     AdjustmentAction,
     TransientFeedback,
@@ -23,6 +23,15 @@ class Stream(StringIO):
         return self.tty
 
 
+def test_set_cursor_visible_emits_visibility_control() -> None:
+    stream = Stream(True)
+
+    set_cursor_visible(stream, False)
+    set_cursor_visible(stream, True)
+
+    assert stream.getvalue() == "\x1b[?25l\x1b[?25h"
+
+
 def test_frame_painter_finishes_once_after_paint() -> None:
     stream = Stream(True)
     painter = FramePainter(stream)
@@ -34,7 +43,25 @@ def test_frame_painter_finishes_once_after_paint() -> None:
     painter.finish()
     painter.finish()
 
-    assert stream.getvalue() == "\x1b[H\x1b[2Jstatus\nchart\n\ncontrols\n"
+    assert stream.getvalue() == (
+        "\x1b[2J\x1b[1;1H\x1b[2Kstatus\x1b[2;1H\x1b[2Kchart"
+        "\x1b[3;1H\x1b[2K\x1b[4;1H\x1b[2Kcontrols\x1b[4;1H\n"
+    )
+
+
+def test_frame_painter_addresses_each_full_width_row_without_newlines() -> None:
+    stream = Stream(True)
+    painter = FramePainter(stream)
+
+    painter.paint(compose_frame("abcd\nefgh", "status", "controls", height=4), atomic=True)
+
+    assert stream.getvalue() == (
+        "\x1b[?2026h\x1b[?7l\x1b[2J"
+        "\x1b[1;1H\x1b[2Kstatus\x1b[2;1H\x1b[2Kabcd"
+        "\x1b[3;1H\x1b[2Kefgh\x1b[4;1H\x1b[2Kcontrols"
+        "\x1b[?7h\x1b[?2026l"
+    )
+    assert "\n" not in stream.getvalue()
 
 
 def test_compose_frame_places_notices_directly_above_controls() -> None:
@@ -68,7 +95,9 @@ def test_frame_painter_force_repaints_and_preserves_incremental_updates() -> Non
     assert stream.getvalue() == ""
 
     painter.paint(frame, force=True)
-    assert stream.getvalue() == "\x1b[H\x1b[2Jstatus\nchart\n\ncontrols"
+    assert stream.getvalue() == (
+        "\x1b[2J\x1b[1;1H\x1b[2Kstatus\x1b[2;1H\x1b[2Kchart\x1b[3;1H\x1b[2K\x1b[4;1H\x1b[2Kcontrols"
+    )
 
     stream.seek(0)
     stream.truncate(0)
@@ -97,8 +126,20 @@ def test_frame_painter_can_wrap_differential_paint_atomically() -> None:
     stream.truncate(0)
     painter.paint(compose_frame("active", "status", "controls", height=4), atomic=True)
 
-    assert stream.getvalue() == "\x1b[?2026h\x1b[2;1H\x1b[2Kactive\x1b[?2026l"
+    assert stream.getvalue() == "\x1b[?2026h\x1b[?7l\x1b[2;1H\x1b[2Kactive\x1b[?7h\x1b[?2026l"
     assert "\x1b[2J" not in stream.getvalue()
+
+
+def test_frame_painter_disables_autowrap_for_atomic_full_width_updates() -> None:
+    stream = Stream(True)
+    painter = FramePainter(stream)
+
+    painter.paint(compose_frame("abcd", "status", "controls", height=4))
+    stream.seek(0)
+    stream.truncate(0)
+    painter.paint(compose_frame("abc!", "status", "controls", height=4), atomic=True)
+
+    assert stream.getvalue() == "\x1b[?2026h\x1b[?7l\x1b[2;1H\x1b[2Kabc!\x1b[?7h\x1b[?2026l"
 
 
 def test_compose_frame_can_omit_status_row() -> None:
