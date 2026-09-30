@@ -4,7 +4,7 @@
 
 [![PyPI](https://img.shields.io/pypi/v/ccusage-viz.svg)](https://pypi.org/project/ccusage-viz/) [![Python](https://img.shields.io/pypi/pyversions/ccusage-viz.svg)](https://pypi.org/project/ccusage-viz/) [![License: GPL v3](https://img.shields.io/badge/License-GPL%20v3-blue.svg)](LICENSE) [![CI](https://github.com/Cookie-HOO/ccusage-viz/actions/workflows/ci.yml/badge.svg)](https://github.com/Cookie-HOO/ccusage-viz/actions/workflows/ci.yml)
 
-> **Alpha · 0.2.1** — 在 1.0 前接口仍可能变化。当前方向请见[路线图](ROADMAP.md)。
+> **Alpha · 0.2.2** — 在 1.0 前接口仍可能变化。当前方向请见[路线图](ROADMAP.md)。
 
 `ccusage-viz` 是面向 [`ccusage`](https://github.com/ryoppippi/ccusage) Token
 数据的独立、非官方终端可视化工具。它把 `ccusage` 命令输出转换为交互式终端图表，
@@ -31,6 +31,10 @@ ccusage-viz 只关注 **Token 消耗** 与由 Token 消耗直接推导的指标�
 额度、配额或其他非 Token 的账户分析。
 
 > 本项目与 `ccusage` 项目及其维护者没有隶属关系，也未获得其背书。
+
+## 交互帮助
+
+所有交互式界面都提供帮助：不知道如何操作时，按 `h` 查看当前可用控制。编辑 Overlay 文本或命令时，请使用 `Ctrl-H`，这样字面量 `h` 仍可输入草稿。
 
 ## Dashboard 预设
 

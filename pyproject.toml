@@ -1,6 +1,6 @@
 [project]
 name = "ccusage-viz"
-version = "0.2.1"
+version = "0.2.2"
 description = "Stateless terminal visualizations for ccusage token data"
 readme = "README.md"
 license = "GPL-3.0-only"

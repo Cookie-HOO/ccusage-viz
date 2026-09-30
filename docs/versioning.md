@@ -6,6 +6,23 @@
 - **Minor (`0.x.0`)**: substantial new user-facing capabilities or source integrations before 1.0.
 - Before `1.0`, public interfaces may still change between releases.
 
+## 0.2.2
+
+`0.2.2` fixes terminal animation repaint behavior and clarifies Dashboard Help
+without changing token collection or token-derived metrics:
+
+- animation, gallery, and Dashboard animation panes use safer atomic terminal
+  paints with cursor cleanup, avoiding right-edge flicker on exact-width frames;
+- Dashboard Help now separates its Historical, Monitor, and header intervals,
+  explains their effective defaults and CLI-only configuration, separates
+  scheduled-update coalescing from query limits, and consistently states its
+  10-minute idle close behavior;
+- opening Help while adjusting an Animation Pane no longer references an
+  obsolete localization key.
+
+No collector, custom-command, query-semantic, or token-metric capability is
+added in this patch release.
+
 ## 0.2.1
 
 `0.2.1` refines the animation-host and Dashboard interaction experience while
