@@ -96,8 +96,7 @@ def test_frame_painter_force_repaints_and_preserves_incremental_updates() -> Non
 
     painter.paint(frame, force=True)
     assert stream.getvalue() == (
-        "\x1b[2J\x1b[1;1H\x1b[2Kstatus\x1b[2;1H\x1b[2Kchart"
-        "\x1b[3;1H\x1b[2K\x1b[4;1H\x1b[2Kcontrols"
+        "\x1b[2J\x1b[1;1H\x1b[2Kstatus\x1b[2;1H\x1b[2Kchart\x1b[3;1H\x1b[2K\x1b[4;1H\x1b[2Kcontrols"
     )
 
     stream.seek(0)

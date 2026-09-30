@@ -803,6 +803,25 @@ def test_dashboard_help_explains_each_mode_without_repeating_footer(
         assert "Fixed --since/--until" in help_text
         assert "Filters affect totals" in help_text
         assert "Day: today" in help_text
+    if events_before_help == ():
+        assert (
+            "Historical refresh: 60s by default · --refresh-interval · not editable in Dashboard"
+            in help_text
+        )
+        assert (
+            "Monitor sampling: 15s by default · --sampling-interval · not editable in Dashboard"
+            in help_text
+        )
+        assert (
+            "Header refresh: 60s by default · --header-interval · not editable in Dashboard"
+            in help_text
+        )
+        assert "Historical refresh: 15s by default" not in help_text
+        assert "Missed scheduled updates coalesce instead of replaying." in help_text
+        assert "This Help closes automatically after 10 min idle." in help_text
+        assert help_text.index(
+            "Missed scheduled updates coalesce instead of replaying."
+        ) < help_text.index("This Help closes automatically after 10 min idle.")
     if events_before_help in {(), ("v",)}:
         assert "Query subprocesses run up to 2 at a time" in help_text
     branch = "|- " if ascii_mode else "├─ "
@@ -1906,6 +1925,8 @@ def test_dashboard_overlay_editor_keeps_global_shortcuts_in_drafts(
     keys = iter(
         (
             KeyEvent("m"),
+            KeyEvent("h"),
+            KeyEvent("\x1b"),
             KeyEvent("a"),
             KeyEvent("e"),
             KeyEvent("\x08"),
@@ -1954,7 +1975,8 @@ def test_dashboard_overlay_editor_keeps_global_shortcuts_in_drafts(
     assert "Ctrl-J / Ctrl-K pane height" in painted
     assert "COMPLETE ·" not in painted
     assert "Overlay editor help" in painted
-    assert "Dashboard help" not in painted
+    assert "Dashboard help" in painted
+    assert "[Advanced] e edit: edit text or command source" in painted
     assert "TEXT MODE: edit literal content displayed directly" in painted
     assert "COMMAND MODE: edit the shell command whose stdout is displayed" in painted
     assert "NAVIGATION" in painted
@@ -2102,13 +2124,13 @@ def test_tui_text_footer_is_minimal_and_only_advertises_overflow() -> None:
 def test_dashboard_title_places_version_left_and_freshness_right() -> None:
     line = _dashboard_title_line("Dashboard", "updated 12:34:56", 50, color=False)
     assert display_width(line) == 50
-    assert line.startswith("v0.2.1")
+    assert line.startswith("v0.2.2")
     assert line.endswith("updated 12:34:56")
     assert line.index("Dashboard") == (50 - len("Dashboard")) // 2
 
     narrow = _dashboard_title_line("仪表盘", "更新于 12:34:56", 18, color=False)
     assert display_width(narrow) == 18
-    assert narrow.startswith("v0.2.1")
+    assert narrow.startswith("v0.2.2")
 
 
 def test_tui_is_not_a_dashboard_compatibility_alias() -> None:

@@ -89,8 +89,9 @@ class FramePainter:
         self.painted = True
 
     def finish(self) -> None:
-        if self.painted and not self.finished:
-            self.stream.write(f"\x1b[{len(self._frame.rows)};1H\n")
+        frame = self._frame
+        if self.painted and not self.finished and frame is not None:
+            self.stream.write(f"\x1b[{len(frame.rows)};1H\n")
             self.stream.flush()
             self.finished = True
 
