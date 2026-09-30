@@ -48,6 +48,17 @@ def compose_frame(
     return Frame(tuple(rows))
 
 
+_HIDE_CURSOR = "\x1b[?25l"
+_SHOW_CURSOR = "\x1b[?25h"
+
+
+def set_cursor_visible(stream: TextIO, visible: bool) -> None:
+    """Set terminal cursor visibility for an interactive command lifetime."""
+
+    stream.write(_SHOW_CURSOR if visible else _HIDE_CURSOR)
+    stream.flush()
+
+
 class FramePainter:
     def __init__(self, stream: TextIO = sys.stdout) -> None:
         self.stream = stream
@@ -57,7 +68,9 @@ class FramePainter:
 
     def paint(self, frame: Frame, *, force: bool = False, atomic: bool = False) -> None:
         if force or not self.painted or self._frame is None:
-            output = "\x1b[H\x1b[2J" + "\n".join(frame.rows)
+            output = "\x1b[2J" + "".join(
+                f"\x1b[{index + 1};1H\x1b[2K{row}" for index, row in enumerate(frame.rows)
+            )
         else:
             updates = []
             for index, row in enumerate(frame.rows):
@@ -67,14 +80,18 @@ class FramePainter:
                 updates.append(f"\x1b[{index + 1};1H\x1b[2K")
             output = "".join(updates)
         if output:
-            self.stream.write(f"\x1b[?2026h{output}\x1b[?2026l" if atomic else output)
+            if atomic:
+                self.stream.write(f"\x1b[?2026h\x1b[?7l{output}\x1b[?7h\x1b[?2026l")
+            else:
+                self.stream.write(output)
         self.stream.flush()
         self._frame = frame
         self.painted = True
 
     def finish(self) -> None:
-        if self.painted and not self.finished:
-            self.stream.write("\n")
+        frame = self._frame
+        if self.painted and not self.finished and frame is not None:
+            self.stream.write(f"\x1b[{len(frame.rows)};1H\n")
             self.stream.flush()
             self.finished = True
 

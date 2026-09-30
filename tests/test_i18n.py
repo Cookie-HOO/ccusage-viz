@@ -56,7 +56,12 @@ def test_catalogs_have_the_same_keys_and_placeholders() -> None:
         "status.tui_help_dashboard_settings",
         "status.tui_help_parameter_quick",
         "status.tui_help_parameter_advanced",
-        "status.tui_help_interval_dashboard",
+        "status.tui_help_intervals_dashboard",
+        "status.tui_help_interval_historical",
+        "status.tui_help_interval_monitor_dashboard",
+        "status.tui_help_interval_header",
+        "status.tui_help_schedule_coalesce",
+        "status.tui_help_idle_close",
         "status.tui_help_section_policy",
         "status.tui_help_summary_scope",
         "status.tui_help_summary_scope_fixed",
@@ -100,8 +105,16 @@ def test_catalogs_have_the_same_keys_and_placeholders() -> None:
     assert ZH_MESSAGES["status.tui_help_pane_structure"] == "结构调整"
     assert EN_MESSAGES["status.tui_help_close"].startswith("Enter/Esc/h close")
     assert ZH_MESSAGES["status.tui_help_close"].startswith("Enter/Esc/h 关闭")
-    assert "10 min" in EN_MESSAGES["status.tui_help_tip"]
-    assert "10 分钟" in ZH_MESSAGES["status.tui_help_tip"]
+    for key in (
+        "status.animation_help_close",
+        "status.overlay_editor_help_close",
+        "status.tui_help_editor_close",
+        "status.tui_help_close",
+    ):
+        assert "10 min" in EN_MESSAGES[key]
+        assert "10 分钟" in ZH_MESSAGES[key]
+    assert "10 min" in EN_MESSAGES["status.tui_help_idle_close"]
+    assert "10 分钟" in ZH_MESSAGES["status.tui_help_idle_close"]
     for key in (
         "status.overlay_editor_controls_navigation",
         "status.overlay_editor_controls_draft",
@@ -154,12 +167,24 @@ def test_catalogs_have_the_same_keys_and_placeholders() -> None:
     assert ZH_MESSAGES["status.overlay_editor_cleared"] == "草稿已清空"
     assert "Dashboard undo/redo history" in EN_MESSAGES["status.tui_help_tip"]
     assert "仪表盘撤销/重做历史" in ZH_MESSAGES["status.tui_help_tip"]
-    assert "30 seconds" not in EN_MESSAGES["status.tui_help_interval_dashboard"]
-    assert "30 秒" not in ZH_MESSAGES["status.tui_help_interval_dashboard"]
+    assert "10 min" not in EN_MESSAGES["status.tui_help_tip"]
+    assert "10 分钟" not in ZH_MESSAGES["status.tui_help_tip"]
+    assert "60s" in EN_MESSAGES["status.tui_help_interval_historical"]
+    assert "15s" in EN_MESSAGES["status.tui_help_interval_monitor_dashboard"]
+    assert "60s" in EN_MESSAGES["status.tui_help_interval_header"]
+    assert "默认 60 秒" in ZH_MESSAGES["status.tui_help_interval_historical"]
+    assert "默认 15 秒" in ZH_MESSAGES["status.tui_help_interval_monitor_dashboard"]
+    assert "默认 60 秒" in ZH_MESSAGES["status.tui_help_interval_header"]
+    assert "30 seconds" not in EN_MESSAGES["status.tui_help_intervals_dashboard"]
+    assert "30 秒" not in ZH_MESSAGES["status.tui_help_intervals_dashboard"]
     assert all("30 seconds" not in EN_MESSAGES[key] for key in EN_MESSAGES if "editor" in key)
     assert all("30 秒" not in ZH_MESSAGES[key] for key in ZH_MESSAGES if "editor" in key)
     assert "30 seconds" in EN_MESSAGES["status.tui_help_browse_hint"]
     assert "30 秒" in ZH_MESSAGES["status.tui_help_browse_hint"]
+    assert "coalesce" not in EN_MESSAGES["status.tui_help_browse_hint"]
+    assert "合并" not in ZH_MESSAGES["status.tui_help_browse_hint"]
+    assert "coalesce" in EN_MESSAGES["status.tui_help_schedule_coalesce"]
+    assert "合并" in ZH_MESSAGES["status.tui_help_schedule_coalesce"]
     assert "Dashboard Pane adjustment" in EN_MESSAGES["status.tui_help_mode_pages_detail"]
     assert "trailing periods" not in EN_MESSAGES["status.tui_help_mode_pages_detail"]
     assert "Dashboard 子图调整" in ZH_MESSAGES["status.tui_help_mode_pages_detail"]
