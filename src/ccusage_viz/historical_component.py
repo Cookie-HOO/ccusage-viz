@@ -13,15 +13,21 @@ from ccusage_viz.charts.registry import ChartRegistry
 from ccusage_viz.coverage import DateCoverage, DateInterval
 from ccusage_viz.domain import Notice, UsageRecord
 from ccusage_viz.options import (
+    CustomChartConfig,
     HistoricalChartConfig,
     MonitorConfig,
+    RankingConfig,
     StackConfig,
     StandaloneLaunch,
     TimelineConfig,
+    has_complete_content,
 )
 from ccusage_viz.processing.historical import HistoricalModel
-from ccusage_viz.processing.summaries import required_summary_coverage
-from ccusage_viz.project_identity import ProjectLabelContext, next_project_label_context
+from ccusage_viz.processing.summaries import (
+    ranking_comparison_interval,
+    required_summary_coverage,
+)
+from ccusage_viz.project_identity import ProjectLabelContext
 from ccusage_viz.query.coordinator import QueryHandle
 from ccusage_viz.query.models import ProviderResult, QueryTrigger
 from ccusage_viz.query.runtime import QueryRuntime
@@ -41,8 +47,12 @@ def historical_replacement_required(
     """
     previous_chart = previous.chart
     candidate_chart = candidate.chart
-    if isinstance(previous_chart, MonitorConfig) or isinstance(candidate_chart, MonitorConfig):
-        raise TypeError("historical replacement checks do not support monitor configurations")
+    if isinstance(previous_chart, (CustomChartConfig, MonitorConfig)) or isinstance(
+        candidate_chart, (CustomChartConfig, MonitorConfig)
+    ):
+        raise TypeError(
+            "historical replacement checks do not support custom or monitor configurations"
+        )
     if type(previous_chart) is not type(candidate_chart):
         raise TypeError("historical replacement checks require matching chart kinds")
     return (
@@ -128,8 +138,8 @@ class HistoricalChartComponent:
         runtime: QueryRuntime | None,
         registry: ChartRegistry,
     ) -> None:
-        if isinstance(options.chart, MonitorConfig):
-            raise TypeError("historical components do not support monitor configurations")
+        if isinstance(options.chart, (CustomChartConfig, MonitorConfig)):
+            raise TypeError("historical components do not support custom or monitor configurations")
         definition = registry.get(options.chart.kind)
         if not isinstance(options.chart, definition.config_type):
             raise TypeError(f"{definition.chart_id} definition received incompatible configuration")
@@ -168,8 +178,8 @@ class HistoricalChartComponent:
 
     def _candidate_chart(self) -> HistoricalChartConfig:
         chart = self.candidate.chart
-        if isinstance(chart, MonitorConfig):
-            raise TypeError("historical components do not support monitor configurations")
+        if isinstance(chart, (CustomChartConfig, MonitorConfig)):
+            raise TypeError("historical components do not support custom or monitor configurations")
         return chart
 
     @property
@@ -184,7 +194,7 @@ class HistoricalChartComponent:
         chart = self._candidate_chart()
         return (
             self.snapshot is not None
-            and chart.presentation.density == "full"
+            and has_complete_content(chart.presentation.density)
             and self.supplemental_error is None
             and bool(self.missing_comparison_coverage().intervals)
         )
@@ -196,8 +206,10 @@ class HistoricalChartComponent:
     def required_coverage(self) -> DateCoverage:
         chart = self._candidate_chart()
         required = self.display_coverage()
-        if chart.date_range.fixed_bounds or chart.presentation.density != "full":
+        if chart.date_range.fixed_bounds or not has_complete_content(chart.presentation.density):
             return required
+        if isinstance(chart, RankingConfig):
+            return required.merge(DateCoverage((ranking_comparison_interval(chart.date_range),)))
         period = chart.granularity if isinstance(chart, (TimelineConfig, StackConfig)) else "day"
         return required.merge(required_summary_coverage(chart.date_range.until, period))
 
@@ -355,16 +367,6 @@ class HistoricalChartComponent:
             coverage=self.snapshot.coverage.merge(returned),
             summary_notices=summary_notices,
         )
-
-    def cycle_project_label_context(self) -> None:
-        """Restore up to two verified opaque label tokens for this session."""
-        chart = self._candidate_chart()
-        if getattr(chart, "by", None) != "project":
-            return
-        self.project_label_context = next_project_label_context(self.project_label_context)
-        self.render_revision += 1
-        if self.snapshot is not None and not self.is_pending:
-            self.model = self._process(self.candidate, self.snapshot)
 
     def render(self, context: RenderContext) -> str:
         if self.model is None:

@@ -15,6 +15,8 @@ from ccusage_viz.i18n import load_translator
 from ccusage_viz.options import (
     AnimationLaunch,
     ChartPresentation,
+    CustomChartConfig,
+    CustomCommandSource,
     ProcessConfig,
     StandaloneHostConfig,
     StandaloneLaunch,
@@ -94,6 +96,40 @@ def test_animation_route_skips_provider_dependencies(monkeypatch: pytest.MonkeyP
     )
 
     assert application.run(animation_options(), load_translator("en")) == 0
+
+
+def test_custom_standalone_routes_to_the_custom_tui_runner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(application, "interactive_streams", lambda: True)
+    monkeypatch.delenv("TERM", raising=False)
+    dependency_calls: list[StandaloneLaunch] = []
+    monkeypatch.setattr(
+        application,
+        "ensure_provider_dependencies",
+        lambda selected, *_args: dependency_calls.append(selected),
+    )
+    custom = replace(
+        options(),
+        chart=CustomChartConfig(
+            "timeline",
+            CustomCommandSource("reading", ("reader", "ccuv")),
+            DateRange(date(2026, 1, 1), date(2026, 1, 14)),
+        ),
+    )
+    received: list[StandaloneLaunch] = []
+    monkeypatch.setattr(
+        "ccusage_viz.tui.run_custom_standalone",
+        lambda selected, _translator: received.append(selected) or 17,
+    )
+    monkeypatch.setattr(
+        "ccusage_viz.watch.run_watch",
+        lambda *_args: pytest.fail("custom standalone must not use historical watch"),
+    )
+
+    assert application.run(custom, load_translator("en")) == 17
+    assert received == [custom]
+    assert dependency_calls == [custom]
 
 
 def test_historical_modes_share_one_lifecycle_runner(monkeypatch: pytest.MonkeyPatch) -> None:

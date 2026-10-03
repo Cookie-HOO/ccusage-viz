@@ -14,7 +14,7 @@ from ccusage_viz.chart_models import (
     TimeOfDaySeries,
 )
 from ccusage_viz.domain import TokenUsage, UsageRecord, model_identity
-from ccusage_viz.options import StandaloneLaunch
+from ccusage_viz.options import MonitorConfig, StandaloneLaunch
 from ccusage_viz.project_identity import (
     ExactProjectDisplayKey,
     ProjectAggregation,
@@ -928,8 +928,11 @@ def monitor_counters(
     options: StandaloneLaunch, records: tuple[UsageRecord, ...]
 ) -> CounterSnapshot:
     """Build the cumulative counters represented by one filtered Monitor sample."""
+    chart = options.chart
+    if not isinstance(chart, MonitorConfig):
+        raise TypeError("monitor counters require a monitor configuration")
     selected = _project_records(
-        _agent_records(records, options.chart.filters.agents), options.chart.filters.projects
+        _agent_records(records, chart.filters.agents), chart.filters.projects
     )
     return _counters(selected)
 

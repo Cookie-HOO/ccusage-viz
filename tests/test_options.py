@@ -1,12 +1,14 @@
 import shlex
 from dataclasses import replace
 from datetime import date
+from typing import cast
 
 import pytest
 
 from ccusage_viz.cli import _to_options, build_parser
 from ccusage_viz.command_copy import format_command, format_full_command, wrap_command
-from ccusage_viz.core.time import DateRange, refresh_date_range
+from ccusage_viz.configuration import default_custom_pane, default_pane
+from ccusage_viz.core.time import DateRange, local_today, refresh_date_range
 from ccusage_viz.errors import UsageError
 from ccusage_viz.formatting import display_width
 from ccusage_viz.i18n import load_translator
@@ -14,17 +16,111 @@ from ccusage_viz.options import (
     DENSITIES,
     CalendarConfig,
     ChartPresentation,
+    CustomChartConfig,
+    CustomChartPaneConfig,
+    CustomCommandSource,
+    DashboardHostConfig,
+    DashboardLaunch,
+    Density,
+    EmptyPaneConfig,
     Filters,
     MonitorConfig,
     ProcessConfig,
     StandaloneHostConfig,
     StandaloneLaunch,
     TimelineConfig,
+    adjust_custom_chart,
     adjust_standalone,
     compatible_styles,
+    has_complete_content,
+    pane_kind,
     replace_chart_filters,
     resolve_date_range,
 )
+
+
+def test_custom_source_requires_dataset_and_nonempty_argv() -> None:
+    assert CustomCommandSource("wechat-reading", ("reader", "ccuv")).dataset_id == "wechat-reading"
+    with pytest.raises(ValueError, match="dataset"):
+        CustomCommandSource("", ("reader",))
+    with pytest.raises(ValueError, match="command"):
+        CustomCommandSource("wechat-reading", ())
+
+
+def test_custom_pane_and_empty_pane_are_discriminated() -> None:
+    dashboard = DashboardLaunch(ProcessConfig(), DashboardHostConfig(), ())
+    custom = default_custom_pane(
+        "timeline",
+        source=CustomCommandSource("wechat-reading", ("reader", "ccuv")),
+        dashboard=dashboard,
+    )
+
+    assert isinstance(custom, CustomChartPaneConfig)
+    assert pane_kind(EmptyPaneConfig()) == "empty"
+    assert pane_kind(custom) == "custom"
+    assert not hasattr(EmptyPaneConfig(), "source")
+    assert not hasattr(EmptyPaneConfig(), "provider")
+
+
+def test_custom_display_adjustments_stay_local() -> None:
+    chart = CustomChartConfig(
+        "timeline",
+        CustomCommandSource("reading", ("reader", "ccuv")),
+        resolve_date_range("timeline", period="14d", since=None, until=None),
+        group_by="book",
+    )
+
+    assert adjust_custom_chart(chart, "p").date_range.period == "30d"
+    assert adjust_custom_chart(chart, "P").date_range.period == "7d"
+    assert adjust_custom_chart(chart, "+").top == 1
+    assert adjust_custom_chart(chart, "o").other == "hide"
+    assert adjust_custom_chart(chart, "l").presentation.legend == "inside"
+    assert adjust_custom_chart(chart, "d").presentation.density == DENSITIES[0]
+
+
+def test_custom_standalone_command_round_trips() -> None:
+    parser = build_parser(load_translator("en"))
+    chart = CustomChartConfig(
+        "timeline",
+        CustomCommandSource("reading", ("reader", "export", "--format=json")),
+        resolve_date_range(
+            "timeline", period="30d", since=None, until=None, today=date(2026, 9, 30)
+        ),
+        filters=(("category", ("fiction", "literature")),),
+        group_by="book",
+        top=5,
+        granularity="month",
+        presentation=ChartPresentation(style="step", density="compact"),
+    )
+    launch = StandaloneLaunch(ProcessConfig(query_timeout=12), StandaloneHostConfig(), chart)
+
+    command = format_full_command(launch)
+    reparsed = _to_options(parser.parse_args(shlex.split(command)[1:]))
+
+    expected = replace(
+        launch,
+        chart=replace(
+            launch.chart,
+            date_range=resolve_date_range(
+                "timeline", period="30d", since=None, until=None, today=local_today()
+            ),
+        ),
+    )
+    assert reparsed == expected
+
+
+def test_custom_timeline_defaults_to_existing_historical_period_and_presentation() -> None:
+    dashboard = DashboardLaunch(ProcessConfig(), DashboardHostConfig(), ())
+    pane = default_custom_pane(
+        "timeline",
+        source=CustomCommandSource("wechat-reading", ("reader", "ccuv")),
+        dashboard=dashboard,
+    )
+    native = default_pane("timeline", dashboard=dashboard)
+
+    assert pane.chart.date_range.period == native.chart.date_range.period == "14d"
+    assert pane.chart.presentation == native.chart.presentation
+    assert pane.chart.presentation == ChartPresentation(style="linear", density="compact")
 
 
 def timeline(
@@ -80,7 +176,7 @@ def test_concise_commands_omit_effective_defaults() -> None:
                 "--style",
                 "linear",
                 "--density",
-                "full",
+                "detailed",
                 "--legend",
                 "below-title",
             ]
@@ -160,15 +256,23 @@ def test_invalid_ranges_fail(period: str | None, since: str | None, until: str |
         )
 
 
-def test_chart_density_has_exactly_three_values_and_defaults_to_full() -> None:
-    assert DENSITIES == ("minimal", "compact", "full")
-    assert ChartPresentation().density == "full"
+@pytest.mark.parametrize(
+    ("density", "expected"),
+    (("minimal", False), ("compact", False), ("full", True), ("detailed", True)),
+)
+def test_complete_content_density_contract(density: str, expected: bool) -> None:
+    assert has_complete_content(cast(Density, density)) is expected
+
+
+def test_chart_density_has_exactly_four_values_and_defaults_to_detailed() -> None:
+    assert DENSITIES == ("minimal", "compact", "full", "detailed")
+    assert ChartPresentation().density == "detailed"
 
 
 def test_runtime_adjustments_replace_owned_nested_configs() -> None:
     source = timeline(by="model", top=10)
     assert adjust_standalone(source, "p").chart.date_range.period == "30d"
-    assert adjust_standalone(source, "g").chart.granularity == "month"
+    assert adjust_standalone(source, "g").chart.granularity == "week"
     assert adjust_standalone(source, "s").chart.presentation.style == "step"
     assert adjust_standalone(source, "d").chart.presentation.density == "minimal"
     assert (
@@ -181,8 +285,16 @@ def test_runtime_adjustments_replace_owned_nested_configs() -> None:
         ).chart.presentation.density
         == "full"
     )
+    assert (
+        adjust_standalone(
+            adjust_standalone(adjust_standalone(adjust_standalone(source, "d"), "d"), "d"),
+            "d",
+        ).chart.presentation.density
+        == "detailed"
+    )
     assert adjust_standalone(source, "S").chart.presentation.style == "stem"
-    for uppercase_alias in ("D", "G", "K", "L", "C", "B", "O", "W", "I"):
+    assert adjust_standalone(source, "G").chart.granularity == "year"
+    for uppercase_alias in ("D", "K", "L", "C", "B", "O", "W", "I"):
         assert adjust_standalone(source, uppercase_alias) == source
     assert adjust_standalone(source, "+").chart.top == 11
     assert adjust_standalone(source, "k").chart.weekdays == "hide"
@@ -210,18 +322,20 @@ def test_calendar_style_key_cycles_between_relative_and_grid() -> None:
     assert adjust_standalone(grid, "s").chart.presentation.style == "relative"
 
 
-def test_period_keys_cycle_distinct_trailing_and_natural_families() -> None:
+def test_period_keys_adjust_within_the_active_time_view() -> None:
     source = timeline()
 
-    trailing = adjust_standalone(source, "p")
-    natural = adjust_standalone(source, "P")
+    larger = adjust_standalone(source, "p")
+    smaller = adjust_standalone(source, "P")
+    weekly = adjust_standalone(source, "g")
 
-    assert trailing.chart.date_range.period == "30d"
-    assert trailing.chart.date_range.since == date(2026, 8, 14)
-    assert natural.chart.date_range.period == "1mo"
-    assert natural.chart.date_range.since == date(2026, 9, 1)
-    assert adjust_standalone(natural, "P").chart.date_range.period == "1q"
-    assert adjust_standalone(trailing, "P").chart.date_range.period == "1mo"
+    assert larger.chart.date_range.period == "30d"
+    assert larger.chart.date_range.since == date(2026, 8, 14)
+    assert smaller.chart.date_range.period == "7d"
+    assert smaller.chart.date_range.since == date(2026, 9, 6)
+    assert weekly.chart.granularity == "week"
+    assert weekly.chart.date_range.period == "8w"
+    assert adjust_standalone(weekly, "P").chart.date_range.period == "4w"
     assert adjust_standalone(timeline(rolling=False), "P") == timeline(rolling=False)
 
 
@@ -304,7 +418,7 @@ def test_full_command_preserves_implicit_until_semantics() -> None:
 
     assert reparsed.chart.date_range == launch.chart.date_range
     assert reparsed.chart.date_range.implicit_until
-    assert not reparsed.chart.date_range.fixed_bounds
+    assert reparsed.chart.date_range.fixed_bounds
 
 
 def test_command_serializers_round_trip_typed_launch() -> None:

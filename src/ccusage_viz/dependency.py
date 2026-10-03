@@ -6,7 +6,13 @@ import sys
 
 from ccusage_viz.errors import QueryError
 from ccusage_viz.i18n import Translator
-from ccusage_viz.options import LaunchConfig
+from ccusage_viz.options import (
+    ChartPaneConfig,
+    CustomChartConfig,
+    DashboardLaunch,
+    LaunchConfig,
+    StandaloneLaunch,
+)
 from ccusage_viz.query.registry import ProviderRegistry
 
 _DEFAULT_CCUSAGE = "ccusage"
@@ -18,6 +24,16 @@ def ensure_provider_dependencies(
     registry: ProviderRegistry,
     translator: Translator,
 ) -> None:
+    if isinstance(options, DashboardLaunch):
+        built_in_panes = tuple(
+            pane
+            for pane in options.panes
+            if isinstance(pane, ChartPaneConfig) and not isinstance(pane.chart, CustomChartConfig)
+        )
+        if not built_in_panes:
+            return
+    elif isinstance(options, StandaloneLaunch) and isinstance(options.chart, CustomChartConfig):
+        return
     provider_id = "demo" if options.host.demo_size else options.host.provider
     dependencies = registry.get(provider_id).provider.capabilities.dependencies
     for dependency in dependencies:

@@ -15,7 +15,7 @@ from ccusage_viz.chart_models import (
     TimelineModel,
 )
 from ccusage_viz.core.time import DateRange
-from ccusage_viz.coverage import DateCoverage
+from ccusage_viz.coverage import DateCoverage, DateInterval
 from ccusage_viz.domain import Notice, TokenUsage, UsageRecord, model_identity
 from ccusage_viz.processing.summaries import build_period_summary, build_range_summary, period_start
 from ccusage_viz.project_identity import (
@@ -336,24 +336,66 @@ def build_ranking(
     notices: Iterable[Notice] = (),
     summary_notices: Iterable[Notice] = (),
     coverage: DateCoverage = _EMPTY_COVERAGE,
+    comparison_interval: DateInterval | None = None,
     filter_count: int = 0,
     project_aggregation: ProjectAggregation = "name",
     project_label_context: ProjectLabelContext = 0,
 ) -> RankingModel:
     records = tuple(records)
-    ranked_groups = _ranked_groups(
-        _grouped_daily(
-            records,
-            by,
-            project_aggregation,
-            cache_shortened=by == "project" and project_label_context == 0,
-            project_label_context=project_label_context,
-        )
+    all_groups = _grouped_daily(
+        records,
+        by,
+        project_aggregation,
+        cache_shortened=by == "project" and project_label_context == 0,
+        project_label_context=project_label_context,
     )
+    if comparison_interval is None:
+        current_groups = all_groups
+    else:
+        current_groups = {
+            key: (label, current_values)
+            for key, (label, values) in all_groups.items()
+            if (
+                current_values := {
+                    day: usage
+                    for day, usage in values.items()
+                    if date_range.since <= day <= date_range.until
+                }
+            )
+        }
+    ranked_groups = _ranked_groups(current_groups)
     denominator = sum(
         (sum(values.values(), start=TokenUsage.zero()) for _, _, values in ranked_groups),
         start=TokenUsage.zero(),
     )
+    comparison_ready = comparison_interval is not None and coverage.covers(comparison_interval)
+    previous_totals = {
+        key: sum(
+            (
+                usage
+                for day, usage in values.items()
+                if comparison_interval is not None
+                and comparison_interval.since <= day <= comparison_interval.until
+            ),
+            start=TokenUsage.zero(),
+        )
+        for key, (_, values) in all_groups.items()
+    }
+    previous_groups = {
+        key: (label, previous_values)
+        for key, (label, values) in all_groups.items()
+        if (
+            previous_values := {
+                day: usage
+                for day, usage in values.items()
+                if comparison_interval is not None
+                and comparison_interval.since <= day <= comparison_interval.until
+            }
+        )
+    }
+    previous_rank = {
+        key: rank for rank, (key, _, _) in enumerate(_ranked_groups(previous_groups), start=1)
+    }
     groups, excluded = _top_other(ranked_groups, top=top, show_other=show_other)
     entries = tuple(
         RankingEntry(
@@ -361,6 +403,11 @@ def build_ranking(
             label,
             sum(values.values(), start=TokenUsage.zero()),
             is_other,
+            None
+            if is_other or not comparison_ready
+            else previous_totals.get(key, TokenUsage.zero()),
+            comparison_ready and not is_other,
+            None if is_other or not comparison_ready else previous_rank.get(key),
         )
         for key, label, values, is_other in groups
     )

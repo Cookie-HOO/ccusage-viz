@@ -9,7 +9,10 @@ from ccusage_viz.formatting import char_width, display_width
 from ccusage_viz.options import (
     COMMAND_DEFAULT_PERIODS,
     AnimationPaneConfig,
+    CustomChartConfig,
+    CustomChartPaneConfig,
     DashboardLaunch,
+    EmptyPaneConfig,
     MonitorConfig,
     PaneConfig,
     RankingConfig,
@@ -72,12 +75,13 @@ def _chart_args(config: StandaloneLaunch, *, full: bool, pane: bool = False) -> 
         args.extend(("--other", chart.other))
     if isinstance(chart, StackConfig) and (full or chart.cache != "combined"):
         args.extend(("--cache", chart.cache))
-    for value in chart.filters.agents:
-        args.extend(("--agent", value))
-    for value in chart.filters.models:
-        args.extend(("--model", value))
-    for value in chart.filters.projects:
-        args.extend(("--project", value))
+    if isinstance(chart, (TimelineConfig, RankingConfig, StackConfig, MonitorConfig)):
+        for value in chart.filters.agents:
+            args.extend(("--agent", value))
+        for value in chart.filters.models:
+            args.extend(("--model", value))
+        for value in chart.filters.projects:
+            args.extend(("--project", value))
     if not pane and not isinstance(chart, MonitorConfig):
         if not config.host.watch:
             args.append("--no-watch")
@@ -100,7 +104,7 @@ def _chart_args(config: StandaloneLaunch, *, full: bool, pane: bool = False) -> 
     default_style = compatible_styles(chart.kind, by)[0]
     if full or chart.presentation.style != default_style:
         args.extend(("--style", chart.presentation.style))
-    if full or chart.presentation.density != "full":
+    if full or chart.presentation.density != "detailed":
         args.extend(("--density", chart.presentation.density))
     if chart.kind in {"timeline", "stack", "monitor"} and (
         full or chart.presentation.legend != "below-title"
@@ -111,12 +115,71 @@ def _chart_args(config: StandaloneLaunch, *, full: bool, pane: bool = False) -> 
     return args
 
 
+def _custom_chart_args(options: StandaloneLaunch, *, full: bool) -> list[str]:
+    chart = options.chart
+    if not isinstance(chart, CustomChartConfig):
+        raise TypeError("custom command formatting requires a custom chart")
+    args = [
+        "custom",
+        chart.kind,
+        "--dataset",
+        chart.source.dataset_id,
+        "--command",
+        shlex.join(chart.source.command_argv),
+    ]
+    date_range = chart.date_range
+    if date_range.relative_until and date_range.period is not None:
+        if full or date_range.period != COMMAND_DEFAULT_PERIODS[chart.kind]:
+            args.extend(("--period", date_range.period))
+    else:
+        args.extend(("--since", date_range.since.isoformat()))
+        if not date_range.implicit_until:
+            args.extend(("--until", date_range.until.isoformat()))
+    for filter_id, option_ids in chart.filters:
+        for option_id in option_ids:
+            args.extend(("--filter", f"{filter_id}={option_id}"))
+    if chart.group_by is not None:
+        args.extend(("--group-by", chart.group_by))
+    if chart.top is not None:
+        args.extend(("--top", str(chart.top)))
+    if chart.other != "show":
+        args.extend(("--other", chart.other))
+    if chart.granularity != "day":
+        args.extend(("--granularity", chart.granularity))
+    if chart.weekdays != "show":
+        args.extend(("--weekdays", chart.weekdays))
+    if full:
+        args.extend(("--query-timeout", f"{options.process.query_timeout:g}"))
+    if not options.host.ascii and (full or chart.presentation.theme != "classic"):
+        args.extend(("--theme", chart.presentation.theme))
+    default_style = compatible_styles(chart.kind, chart.group_by)[0]
+    if full or chart.presentation.style != default_style:
+        args.extend(("--style", chart.presentation.style))
+    if full or chart.presentation.density != "detailed":
+        args.extend(("--density", chart.presentation.density))
+    if chart.kind in {"timeline", "stack"} and (full or chart.presentation.legend != "below-title"):
+        args.extend(("--legend", chart.presentation.legend))
+    if options.host.ascii:
+        args.append("--ascii")
+    return args
+
+
 def format_command(options: StandaloneLaunch) -> str:
-    return shlex.join(["ccuv", *_chart_args(options, full=False)])
+    args = (
+        _custom_chart_args(options, full=False)
+        if isinstance(options.chart, CustomChartConfig)
+        else _chart_args(options, full=False)
+    )
+    return shlex.join(["ccuv", *args])
 
 
 def format_full_command(options: StandaloneLaunch) -> str:
-    return shlex.join(["ccuv", *_chart_args(options, full=True)])
+    args = (
+        _custom_chart_args(options, full=True)
+        if isinstance(options.chart, CustomChartConfig)
+        else _chart_args(options, full=True)
+    )
+    return shlex.join(["ccuv", *args])
 
 
 def format_dashboard_pane_command(
@@ -149,7 +212,48 @@ def format_full_dashboard_command(
     from ccusage_viz.configuration import standalone_from_chart_pane
 
     for pane_config in panes or options.panes:
-        if isinstance(pane_config, AnimationPaneConfig):
+        if isinstance(pane_config, EmptyPaneConfig):
+            fragment = "empty"
+        elif isinstance(pane_config, CustomChartPaneConfig):
+            chart = pane_config.chart
+            fragment_args = [
+                "custom",
+                chart.kind,
+                "--dataset",
+                chart.source.dataset_id,
+                "--command",
+                shlex.join(chart.source.command_argv),
+            ]
+            date_range = chart.date_range
+            if date_range.relative_until and date_range.period is not None:
+                fragment_args.extend(("--period", date_range.period))
+            else:
+                fragment_args.extend(("--since", date_range.since.isoformat()))
+                if not date_range.implicit_until:
+                    fragment_args.extend(("--until", date_range.until.isoformat()))
+            for filter_id, option_ids in chart.filters:
+                for option_id in option_ids:
+                    fragment_args.extend(("--filter", f"{filter_id}={option_id}"))
+            if chart.group_by is not None:
+                fragment_args.extend(("--group-by", chart.group_by))
+            if chart.top is not None:
+                fragment_args.extend(("--top", str(chart.top)))
+            if chart.other != "show":
+                fragment_args.extend(("--other", chart.other))
+            if chart.granularity != "day":
+                fragment_args.extend(("--granularity", chart.granularity))
+            if chart.weekdays != "show":
+                fragment_args.extend(("--weekdays", chart.weekdays))
+            if chart.presentation.style != compatible_styles(chart.kind, chart.group_by)[0]:
+                fragment_args.extend(("--style", chart.presentation.style))
+            if chart.presentation.density != "compact":
+                fragment_args.extend(("--density", chart.presentation.density))
+            if chart.kind in {"timeline", "stack"} and chart.presentation.legend != "below-title":
+                fragment_args.extend(("--legend", chart.presentation.legend))
+            if chart.presentation.theme != "classic":
+                fragment_args.extend(("--theme", chart.presentation.theme))
+            fragment = shlex.join(fragment_args)
+        elif isinstance(pane_config, AnimationPaneConfig):
             overlay = pane_config.overlay
             fragment_args = ["animate", pane_config.animation.style]
             if overlay.text is not None:

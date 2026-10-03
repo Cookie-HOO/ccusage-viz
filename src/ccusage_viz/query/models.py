@@ -4,7 +4,7 @@ import hashlib
 import json
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import TypeAlias
+from typing import Any, TypeAlias
 
 from ccusage_viz.coverage import DateCoverage, DateInterval
 from ccusage_viz.domain import Notice, UsageRecord
@@ -74,6 +74,7 @@ class QueryIntent:
     dimensions: tuple[str, ...] = ()
     execution_options: tuple[Option, ...] = ()
     execution_context: ExecutionContext | None = None
+    payload: Any = None
     _fingerprint_value: str = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
@@ -132,6 +133,7 @@ class PhysicalQuery:
     execution_context: ExecutionContext | None = None
     coverage: DateCoverage = DateCoverage()
     required: bool = True
+    payload: Any = None
     _fingerprint_value: str = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
@@ -196,6 +198,8 @@ class ProviderResultFragment:
     coverage: DateCoverage
     notices: tuple[Notice, ...] = ()
     provider_metadata: Metadata = ()
+    custom_response: object | None = None
+    diagnostics: bytes = b""
 
 
 @dataclass(frozen=True, slots=True)
@@ -208,6 +212,8 @@ class ProviderResult:
     summary_notices: tuple[Notice, ...] = ()
     provider_metadata: Metadata = ()
     includes_project_attribution: bool = False
+    custom_response: object | None = None
+    diagnostics: bytes = b""
 
 
 class QueryKind(StrEnum):

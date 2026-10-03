@@ -153,16 +153,23 @@ def _opaque_label_candidates(
     components: tuple[str, ...],
     depths: tuple[int, ...],
     context: ProjectLabelContext,
+    *,
+    minimum_suffix_components: int = 2,
 ) -> tuple[_OpaqueLabelCandidate, ...]:
     """Return shortest-first labels backed by verified opaque-token removal."""
+    # Claude's hyphen-flattened IDs retain two suffix tokens by default. The
+    # final token is often too generic to identify a project; a presentation
+    # surface may make a measured-width fallback from a separately proved alias.
+    maximum_removal_depth = max(1, len(components) - minimum_suffix_components)
     candidates = [
         _OpaqueLabelCandidate(
             label,
-            depth,
+            removal_depth,
             cacheable=True,
         )
         for depth in reversed(depths)
-        if _is_safe_display_name(label := "-".join(components[max(0, depth - context) :]))
+        if (removal_depth := min(max(0, depth - context), maximum_removal_depth)) > 0
+        and _is_safe_display_name(label := "-".join(components[removal_depth:]))
     ]
     cached = _SHORT_OPAQUE_LABELS.get(project.key)
     cached_depth = _SHORT_OPAQUE_DEPTHS.get(project.key)

@@ -7,15 +7,20 @@ from ccusage_viz.query.registry import ProviderRegistry
 
 def test_registry_preserves_registration_order_and_rejects_duplicates() -> None:
     builtins = build_provider_registry()
-    first, second = tuple(builtins)
+    ccusage, demo, custom_command = tuple(builtins)
     registry = ProviderRegistry()
 
-    registry.register(second)
-    registry.register(first)
+    registry.register(demo)
+    registry.register(ccusage)
+    registry.register(custom_command)
 
-    assert [definition.provider_id for definition in registry] == ["demo", "ccusage"]
+    assert [definition.provider_id for definition in registry] == [
+        "demo",
+        "ccusage",
+        "custom-command",
+    ]
     with pytest.raises(ValueError, match="duplicate provider ID: demo"):
-        registry.register(second)
+        registry.register(demo)
 
 
 def test_registry_freeze_rejects_registration_but_keeps_lookup_available() -> None:
@@ -32,7 +37,11 @@ def test_registry_freeze_rejects_registration_but_keeps_lookup_available() -> No
 def test_bootstrap_explicitly_registers_frozen_builtins() -> None:
     registry = build_provider_registry()
 
-    assert [definition.provider_id for definition in registry] == ["ccusage", "demo"]
+    assert [definition.provider_id for definition in registry] == [
+        "ccusage",
+        "demo",
+        "custom-command",
+    ]
     demo = registry.get("demo").provider.capabilities
     ccusage = registry.get("ccusage").provider.capabilities
     assert demo.in_process

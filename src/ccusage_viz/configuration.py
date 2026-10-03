@@ -6,6 +6,9 @@ from ccusage_viz.options import (
     CalendarConfig,
     ChartPaneConfig,
     ChartPresentation,
+    CustomChartConfig,
+    CustomChartPaneConfig,
+    CustomCommandSource,
     DashboardLaunch,
     MonitorConfig,
     RankingConfig,
@@ -17,9 +20,9 @@ from ccusage_viz.options import (
 )
 
 
-def default_pane(kind: str, *, dashboard: DashboardLaunch) -> ChartPaneConfig:
-    """Create a default Pane without interpreting command-line syntax."""
-    presentation = ChartPresentation(
+def _default_dashboard_chart_presentation(kind: str) -> ChartPresentation:
+    """Return the shared starting presentation for Dashboard chart panes."""
+    return ChartPresentation(
         style={
             "timeline": "linear",
             "calendar": "relative",
@@ -29,6 +32,11 @@ def default_pane(kind: str, *, dashboard: DashboardLaunch) -> ChartPaneConfig:
         }[kind],
         density="compact",
     )
+
+
+def default_pane(kind: str, *, dashboard: DashboardLaunch) -> ChartPaneConfig:
+    """Create a default Pane without interpreting command-line syntax."""
+    presentation = _default_dashboard_chart_presentation(kind)
     if kind == "monitor":
         chart = MonitorConfig("monitor", 3600, presentation=presentation)
     else:
@@ -46,8 +54,25 @@ def default_pane(kind: str, *, dashboard: DashboardLaunch) -> ChartPaneConfig:
     return ChartPaneConfig(chart)
 
 
+def default_custom_pane(
+    kind: str, *, source: CustomCommandSource, dashboard: DashboardLaunch
+) -> CustomChartPaneConfig:
+    """Create a default custom historical pane from a declared command source."""
+    if kind not in {"timeline", "calendar", "stack", "ranking"}:
+        raise ValueError(f"unknown custom chart kind: {kind}")
+    presentation = _default_dashboard_chart_presentation(kind)
+    return CustomChartPaneConfig(
+        CustomChartConfig(
+            kind,
+            source,
+            resolve_date_range(kind, period=None, since=None, until=None),
+            presentation=presentation,
+        )
+    )
+
+
 def standalone_from_chart_pane(
-    dashboard: DashboardLaunch, pane: ChartPaneConfig
+    dashboard: DashboardLaunch, pane: ChartPaneConfig | CustomChartPaneConfig
 ) -> StandaloneLaunch:
     """Materialize Dashboard-owned Host context for one reusable chart payload."""
     interval = (
@@ -59,6 +84,7 @@ def standalone_from_chart_pane(
         provider=dashboard.host.provider,
         ascii=dashboard.host.ascii,
         demo_size=dashboard.host.demo_size,
+        demo_seed=dashboard.host.demo_seed,
         watch=True,
         interval=interval,
     )

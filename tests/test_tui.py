@@ -2,7 +2,8 @@ import shlex
 import threading
 from contextlib import nullcontext
 from dataclasses import replace
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
 from io import StringIO
 
 import pytest
@@ -20,9 +21,27 @@ from ccusage_viz.command_copy import (
     format_full_command,
     format_full_dashboard_command,
 )
-from ccusage_viz.configuration import standalone_from_chart_pane
+from ccusage_viz.configuration import default_custom_pane, standalone_from_chart_pane
 from ccusage_viz.core.time import DateRange
 from ccusage_viz.coverage import DateCoverage, DateInterval
+from ccusage_viz.custom_component import CustomHistoricalComponent
+from ccusage_viz.custom_models import (
+    CustomCapabilities,
+    CustomChartCapability,
+    CustomComparison,
+    CustomData,
+    CustomDataset,
+    CustomMetric,
+    CustomPaneSummary,
+    CustomPoint,
+    CustomSeries,
+    CustomSummary,
+    CustomSummaryCurrent,
+    CustomSummaryMetric,
+    CustomUnit,
+    LocalizedText,
+)
+from ccusage_viz.custom_protocol import CustomPaneResponse, CustomSummaryResponse
 from ccusage_viz.deltas import RefreshRanks
 from ccusage_viz.domain import Notice, SourceKind, TokenUsage, UsageRecord
 from ccusage_viz.errors import QueryError, SchemaError, UsageError
@@ -32,9 +51,18 @@ from ccusage_viz.historical_render import RenderedChart
 from ccusage_viz.i18n import load_translator
 from ccusage_viz.lifecycle import FixedIntervalScheduler, LifecycleOperation
 from ccusage_viz.monitor_component import MonitorComponent
-from ccusage_viz.options import AnimationPaneConfig, Filters, MonitorConfig, TimelineConfig
+from ccusage_viz.options import (
+    AnimationPaneConfig,
+    CustomChartConfig,
+    CustomCommandSource,
+    EmptyPaneConfig,
+    Filters,
+    MonitorConfig,
+    TimelineConfig,
+)
 from ccusage_viz.query.models import QueryTrigger
-from ccusage_viz.terminal import Terminal
+from ccusage_viz.render.surfaces import dashboard_pane_surface
+from ccusage_viz.terminal import Terminal, compose_frame
 from ccusage_viz.tui import (
     _adjustment_controls,
     _adjustment_footer,
@@ -43,9 +71,13 @@ from ccusage_viz.tui import (
     _adjustment_target_page,
     _animation_adjustment_target_page,
     _append_monitor_attachment,
+    _choose_custom_pane_config,
     _choose_layout_shortcut,
     _choose_pane_type,
+    _custom_capability_for_component,
+    _custom_dashboard_sources,
     _dashboard_title_line,
+    _frame,
     _grid_for_pane_count,
     _grid_shape,
     _header_lines,
@@ -63,6 +95,7 @@ from ccusage_viz.tui import (
     _pane_render,
     _practical_grid,
     _query_affecting_adjustment,
+    _reconcile_custom_dashboard_summaries,
     _replace_header_interval,
     _replace_pane,
     _set_header_theme,
@@ -75,6 +108,510 @@ from ccusage_viz.tui import (
     resolve_panel_layout,
 )
 from ccusage_viz.tui_input import InputDecoder, KeyEvent, MouseEvent, PasteEvent
+
+
+def test_custom_standalone_timeline_keeps_x_axis_labels_inside_frame() -> None:
+    chart = CustomChartConfig(
+        "timeline",
+        CustomCommandSource("reading", ("reader", "ccuv")),
+        DateRange(date(2026, 9, 1), date(2026, 9, 2)),
+    )
+    unit = CustomUnit("page", LocalizedText("pages", "页"), "suffix", 2)
+    response = CustomPaneResponse(
+        CustomDataset(LocalizedText("Reading", "阅读"), LocalizedText("Daily", "每日"), unit),
+        CustomCapabilities((), (), {"timeline": CustomChartCapability(("day",), (), ())}),
+        CustomData(
+            (
+                CustomSeries(
+                    "total",
+                    LocalizedText("Total", "总计"),
+                    (
+                        CustomPoint(date(2026, 9, 1), Decimal("1")),
+                        CustomPoint(date(2026, 9, 2), Decimal("2")),
+                    ),
+                ),
+            )
+        ),
+        CustomPaneSummary(
+            CustomMetric(
+                "read",
+                LocalizedText("Read", "阅读"),
+                unit,
+                Decimal("3"),
+                CustomComparison("unavailable"),
+                CustomComparison("unavailable"),
+            )
+        ),
+    )
+    component = tui_module.CustomHistoricalComponent(chart)
+    assert component.accept_response(response)
+    terminal = Terminal(58, 14, color=False, ascii=True)
+
+    rendered = tui_module._custom_standalone_render(
+        component, load_translator("en"), terminal, pending=False
+    )
+    frame = compose_frame(
+        rendered.chart,
+        "refresh every 60s",
+        "controls",
+        height=16,
+    )
+
+    assert "09-01" in "\n".join(frame.rows)
+    assert "09-02" in "\n".join(frame.rows)
+    assert frame.rows[0] == "refresh every 60s"
+    assert frame.rows[-1] == "controls"
+
+
+def test_custom_standalone_replacement_renders_candidate_loading_placeholder() -> None:
+    from test_custom_component import response
+
+    component = CustomHistoricalComponent(
+        CustomChartConfig(
+            "timeline",
+            CustomCommandSource("reading", ("reader", "ccuv")),
+            DateRange(date(2026, 9, 1), date(2026, 9, 2)),
+        )
+    )
+    assert component.accept_response(response((("total", "10"),)))
+    component.configure(
+        replace(component.candidate, date_range=DateRange(date(2026, 9, 17), date(2026, 9, 30))),
+        data_affecting=True,
+    )
+
+    rendered = tui_module._custom_standalone_render(
+        component,
+        load_translator("zh"),
+        Terminal(80, 16, color=False, ascii=True),
+        pending=True,
+    )
+
+    assert "时间趋势 · 2026-09-17–2026-09-30" in rendered.chart
+    assert "正在加载数据…" in rendered.chart
+    assert "今日 阅读" not in rendered.chart
+    assert "查询中" not in rendered.chart
+
+
+def test_custom_capabilities_are_unavailable_after_source_replacement() -> None:
+    chart = CustomChartConfig(
+        "timeline",
+        CustomCommandSource("reading", ("reader", "ccuv")),
+        DateRange(date(2026, 1, 1), date(2026, 1, 14)),
+    )
+    component = tui_module.CustomHistoricalComponent(chart)
+    response = CustomPaneResponse(
+        CustomDataset(
+            LocalizedText("Reading", "阅读"),
+            LocalizedText("Daily", "每日"),
+            CustomUnit("page", LocalizedText("pages", "页"), "suffix", 2),
+        ),
+        CustomCapabilities(
+            (),
+            (),
+            {"timeline": CustomChartCapability(("day", "week"), ("book",), ())},
+        ),
+        CustomData(()),
+        CustomPaneSummary(
+            CustomMetric(
+                "read",
+                LocalizedText("Read", "阅读"),
+                CustomUnit("page", LocalizedText("pages", "页"), "suffix", 2),
+                Decimal(),
+                CustomComparison("unavailable"),
+                CustomComparison("unavailable"),
+            )
+        ),
+    )
+    component.accept_response(response)
+
+    assert _custom_capability_for_component(component) is not None
+
+    component.configure(
+        replace(component.candidate, source=CustomCommandSource("other", ("other",))),
+        data_affecting=True,
+    )
+
+    assert _custom_capability_for_component(component) is None
+
+
+@pytest.mark.parametrize("language", ("en", "zh"))
+def test_custom_action_labels_are_localized(language: str) -> None:
+    chart = CustomChartConfig(
+        "timeline",
+        CustomCommandSource("reading", ("reader", "ccuv")),
+        DateRange(date(2026, 1, 1), date(2026, 1, 14)),
+    )
+    component = tui_module.CustomHistoricalComponent(chart)
+    translator = load_translator(language)
+
+    actions = tui_module._custom_standalone_actions(component, translator)
+    action_text = {action.key: action.text for action in actions}
+
+    assert action_text["e"]
+    assert action_text["L"]
+    assert translator.text("label.adjust_chart")
+    assert tui_module._localized_actions((("e", "custom_source"), ("L", "custom_logs")), translator)
+
+
+def test_custom_dashboard_adjustment_uses_native_footer() -> None:
+    chart = CustomChartConfig(
+        "timeline",
+        CustomCommandSource("reading", ("reader", "ccuv")),
+        DateRange(date(2026, 1, 1), date(2026, 1, 14)),
+    )
+    options = _to_options(build_parser(load_translator("en")).parse_args(["dashboard", "--empty"]))
+    pane = _new_pane(options, tui_module.CustomChartPaneConfig(chart), "test-custom")
+    assert isinstance(pane, tui_module.TuiCustomPane)
+
+    footer = tui_module._custom_adjustment_footer(
+        pane, "quick", load_translator("en"), 120, color=False
+    )
+    advanced = tui_module._custom_adjustment_footer(
+        pane, "advanced", load_translator("en"), 120, color=False
+    )
+
+    assert "Quick settings" in footer[1]
+    assert "Dashboard Pane Management" in footer[2]
+    assert "source" not in footer[1]
+    assert "Advanced settings" in advanced[1]
+    assert "e source" in advanced[1]
+    assert "L logs" in advanced[1]
+
+
+def test_empty_dashboard_pane_renders_localized_placeholder() -> None:
+    options = _to_options(build_parser(load_translator("en")).parse_args(["dashboard", "--empty"]))
+    pane = _new_pane(options, EmptyPaneConfig())
+
+    assert _pane_render(pane, load_translator("en"), Terminal(40, 8, False, True)).chart == (
+        "Empty pane\nDouble-click to select, then press r to choose a type"
+    )
+    assert _pane_render(pane, load_translator("zh"), Terminal(40, 8, False, True)).chart == (
+        "空白子图\n双击选中，然后按 r 选择类型"
+    )
+
+
+def test_dashboard_custom_sources_choose_first_pane_for_each_dataset_id() -> None:
+    dashboard = _to_options(
+        build_parser(load_translator("en")).parse_args(["dashboard", "--empty"])
+    )
+    source = CustomCommandSource("reading", ("reader", "ccuv"))
+    panes = [
+        _new_pane(
+            dashboard,
+            default_custom_pane("timeline", source=source, dashboard=dashboard),
+            f"dashboard:pane:{index}",
+            build_query_runtime(),
+        )
+        for index in range(2)
+    ]
+
+    assert _custom_dashboard_sources(panes) == (tui_module.CustomDashboardSource(source, ()),)
+
+    panes[1].component.configure(
+        replace(panes[1].component.candidate, source=CustomCommandSource("reading", ("other",))),
+        data_affecting=True,
+    )
+
+    assert _custom_dashboard_sources(panes) == (tui_module.CustomDashboardSource(source, ()),)
+
+
+def test_custom_dashboard_context_matches_native_timeline_presentation() -> None:
+    dashboard = _to_options(
+        build_parser(load_translator("en")).parse_args(["dashboard", "--empty"])
+    )
+    chart = default_custom_pane(
+        "timeline",
+        source=CustomCommandSource("reading", ("reader", "ccuv")),
+        dashboard=dashboard,
+    ).chart
+
+    english = tui_module._custom_render_context(
+        chart,
+        load_translator("en"),
+        Terminal(80, 12, color=False, ascii=True),
+        accepted_at=None,
+        interval=60,
+        pending=False,
+        surface=dashboard_pane_surface(chart.kind),
+    )
+    chinese = tui_module._custom_render_context(
+        chart,
+        load_translator("zh"),
+        Terminal(80, 12, color=False, ascii=True),
+        accepted_at=None,
+        interval=60,
+        pending=False,
+        surface=dashboard_pane_surface(chart.kind),
+    )
+
+    assert english.hide_upper_right_axes
+    assert english.period == "14d"
+    assert english.title_content == "Total"
+    assert chinese.title_content == "总量"
+
+
+def test_custom_dashboard_pane_renders_accepted_decimal_projection() -> None:
+    dashboard = _to_options(
+        build_parser(load_translator("en")).parse_args(["dashboard", "--empty"])
+    )
+    pane = _new_pane(
+        dashboard,
+        default_custom_pane(
+            "timeline",
+            source=CustomCommandSource("reading", ("reader", "ccuv")),
+            dashboard=dashboard,
+        ),
+        "dashboard:pane:0",
+        build_query_runtime(),
+    )
+    assert isinstance(pane, tui_module.TuiCustomPane)
+
+    from test_custom_component import response
+
+    pane.component.configure(
+        replace(pane.component.candidate, date_range=DateRange(date(2026, 9, 1), date(2026, 9, 2))),
+        data_affecting=False,
+    )
+    pane.component.accept_response(response())
+    rendered = _pane_render(pane, load_translator("en"), Terminal(80, 12, False, True))
+
+    assert "Today’s Read 3.50 pages" not in rendered.chart
+    assert "Total · Timeline · 2026-09-01–2026-09-02" in rendered.chart
+    assert "+" in rendered.chart
+    assert "09-01" in rendered.chart
+    assert "a · o b · D c" in rendered.chart
+
+
+@pytest.mark.parametrize("density", ("compact", "full", "detailed"))
+def test_custom_dashboard_timeline_keeps_x_axis_labels_after_local_clipping(
+    density: str,
+) -> None:
+    dashboard = _to_options(
+        build_parser(load_translator("en")).parse_args(["dashboard", "--empty"])
+    )
+    pane = _new_pane(
+        dashboard,
+        default_custom_pane(
+            "timeline",
+            source=CustomCommandSource("reading", ("reader", "ccuv")),
+            dashboard=dashboard,
+        ),
+        "dashboard:pane:0",
+        build_query_runtime(),
+    )
+    assert isinstance(pane, tui_module.TuiCustomPane)
+
+    from test_custom_component import response
+
+    configured = replace(
+        pane.component.candidate,
+        date_range=DateRange(date(2026, 9, 1), date(2026, 9, 2)),
+        presentation=replace(pane.component.candidate.presentation, density=density),
+    )
+    pane.component.configure(configured, data_affecting=False)
+    pane.component.accept_response(response())
+    pane.summary = tui_module.CustomDashboardSummary(
+        configured.source,
+        FixedIntervalScheduler(60, now=0),
+        LifecycleOperation("dashboard:pane:0:summary"),
+        response=custom_summary_response(year_over_year=CustomComparison("ready", Decimal("34"))),
+        accepted_period="month",
+        accepted_as_of_date=date(2026, 9, 2),
+    )
+    terminal = Terminal(80, 12, False, True)
+    rendered = _pane_render(pane, load_translator("en"), terminal)
+
+    content = _local_pane_content(rendered.chart, rendered.notices, height=terminal.height)
+
+    assert isinstance(content, str)
+    assert "09-01" in content
+    assert "09-02" in content
+
+
+@pytest.mark.parametrize("density", ("minimal", "compact", "full", "detailed"))
+def test_native_dashboard_timeline_keeps_audit_adjacent_to_x_axis(
+    density: str,
+) -> None:
+    translator = load_translator("zh")
+    dashboard = _to_options(build_parser(translator).parse_args(["dashboard", "--empty"]))
+    pane_options = standalone_from_chart_pane(
+        dashboard,
+        parse_dashboard_pane("timeline --period 14d", host=dashboard),
+    )
+    pane = _new_pane(pane_options, "dashboard:timeline", build_query_runtime())
+    assert isinstance(pane, tui_module.TuiChartPane)
+    assert isinstance(pane.component, HistoricalChartComponent)
+
+    chart = pane.component.candidate.chart
+    days = tuple(chart.date_range.since + timedelta(days=index) for index in range(14))
+    snapshot = UsageSnapshot(
+        tuple(
+            UsageRecord(
+                day,
+                "claude",
+                TokenUsage(100 + index, 0, 0, 0, 0),
+                SourceKind.UNIFIED_DAILY,
+            )
+            for index, day in enumerate(days)
+        ),
+        (),
+        0.1,
+        coverage=DateCoverage.from_interval(days[0], days[-1]),
+    )
+    configured = replace(
+        pane.component.candidate,
+        chart=replace(
+            chart,
+            presentation=replace(chart.presentation, density=density, style="points"),
+        ),
+    )
+    pane.component.configure(configured, data_affecting=False)
+    pane.component.seed(configured, snapshot)
+    terminal = Terminal(90, 20, color=False, ascii=True)
+
+    rendered = _pane_render(pane, translator, terminal)
+    content = _local_pane_content(
+        rendered.chart,
+        rendered.notices,
+        height=terminal.height,
+        return_metadata=True,
+    )
+    assert isinstance(content, tuple)
+    pane_content, _, _, _ = content
+    frame = _frame(
+        pane_content.splitlines(),
+        terminal.width + 2,
+        terminal.height + 2,
+        selected=False,
+        ascii=True,
+        frame_style="auto",
+    )
+
+    assert len(frame) == terminal.height + 2
+    tick_row = next(index for index, row in enumerate(frame) if "09-20" in row and "10-02" in row)
+    if density == "detailed":
+        assert "更新于" in frame[tick_row + 1]
+        assert frame[tick_row + 2].startswith("+")
+    else:
+        assert frame[tick_row + 1].startswith("+")
+
+
+def test_custom_pane_chooser_builds_a_source_config_and_rejects_invalid_drafts() -> None:
+    class Screen:
+        def paint(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+    dashboard = _to_options(
+        build_parser(load_translator("en")).parse_args(["dashboard", "--empty"])
+    )
+    events = iter(
+        (
+            KeyEvent("\t"),
+            PasteEvent("reading"),
+            KeyEvent("\t"),
+            PasteEvent("reader ccuv"),
+            KeyEvent("\r"),
+        )
+    )
+    config = _choose_custom_pane_config(
+        Screen(),
+        load_translator("en"),
+        InputDecoder(),
+        height=20,
+        dashboard=dashboard,
+        read_input=lambda: next(events),
+    )
+
+    assert config is not None
+    assert config.chart.kind == "timeline"
+    assert config.chart.source == CustomCommandSource("reading", ("reader", "ccuv"))
+
+
+def test_custom_capabilities_are_hidden_when_the_source_changes() -> None:
+    dashboard = _to_options(
+        build_parser(load_translator("en")).parse_args(["dashboard", "--empty"])
+    )
+    pane = _new_pane(
+        dashboard,
+        default_custom_pane(
+            "timeline",
+            source=CustomCommandSource("reading", ("reader", "ccuv")),
+            dashboard=dashboard,
+        ),
+        "dashboard:pane:0",
+        build_query_runtime(),
+    )
+    assert isinstance(pane, tui_module.TuiCustomPane)
+
+    from test_custom_component import response
+
+    pane.component.configure(
+        replace(pane.component.candidate, date_range=DateRange(date(2026, 9, 1), date(2026, 9, 2))),
+        data_affecting=False,
+    )
+    pane.component.accept_response(response())
+    pane.component.configure(
+        CustomChartConfig(
+            "timeline",
+            CustomCommandSource("other", ("other", "ccuv")),
+            pane.component.candidate.date_range,
+        ),
+        data_affecting=True,
+    )
+
+    assert tui_module._custom_capability(pane) is None
+
+
+def test_custom_log_records_render_localized_statuses() -> None:
+    dashboard = _to_options(
+        build_parser(load_translator("en")).parse_args(["dashboard", "--empty"])
+    )
+    pane = _new_pane(
+        dashboard,
+        default_custom_pane(
+            "timeline",
+            source=CustomCommandSource("reading", ("reader", "ccuv")),
+            dashboard=dashboard,
+        ),
+        "dashboard:pane:0",
+        build_query_runtime(),
+    )
+    assert isinstance(pane, tui_module.TuiCustomPane)
+    pane.logs.extend(
+        (
+            tui_module.CustomLogRecord(datetime(2026, 9, 30, 10, 20), "ok", "done"),
+            tui_module.CustomLogRecord(datetime(2026, 9, 30, 10, 21), "error", "failed"),
+        )
+    )
+
+    rows = tuple(
+        f"{load_translator('zh').text(f'status.custom_log_{record.status}')} "
+        f"{record.timestamp:%H:%M:%S}: {record.detail}"
+        for record in pane.logs
+    )
+
+    assert rows == ("成功 10:20:00: done", "错误 10:21:00: failed")
+
+
+def test_dashboard_command_copy_preserves_custom_legend() -> None:
+    parser = build_parser(load_translator("en"))
+    dashboard = _to_options(
+        parser.parse_args(
+            [
+                "dashboard",
+                "--pane",
+                "custom timeline --dataset reading --command 'reader ccuv' --legend inside",
+            ]
+        )
+    )
+
+    command = format_full_dashboard_command(dashboard)
+    copied = _to_options(parser.parse_args(shlex.split(command)[1:]))
+
+    assert "--legend inside" in command
+    pane = copied.panes[0]
+    assert isinstance(pane, tui_module.CustomChartPaneConfig)
+    assert pane.chart.presentation.legend == "inside"
 
 
 def test_dashboard_defaults_to_a_filled_four_pane_dashboard() -> None:
@@ -544,7 +1081,7 @@ def test_dashboard_panes_host_chart_components_without_legacy_runners() -> None:
 
 
 @pytest.mark.parametrize("text_view", (False, True))
-def test_dashboard_pause_cancels_automatic_panes_and_manual_refresh_remains_allowed(
+def test_dashboard_space_is_ignored_and_manual_refresh_remains_allowed(
     monkeypatch: pytest.MonkeyPatch,
     text_view: bool,
 ) -> None:
@@ -655,7 +1192,7 @@ def test_dashboard_pause_cancels_automatic_panes_and_manual_refresh_remains_allo
     ] == expected_submissions
     painted_text = "\n".join("\n".join(event[1].rows) for event in events if event[0] == "paint")
     assert (not text_view) == ("refresh requested" in painted_text)
-    assert (not text_view) == ("paused" in painted_text)
+    assert "paused" not in painted_text
     assert len(submissions) == len(expected_submissions)
     assert submissions[0].cancelled.is_set()
     assert not any(event[0] == "fail" for event in events)
@@ -804,18 +1341,12 @@ def test_dashboard_help_explains_each_mode_without_repeating_footer(
         assert "Filters affect totals" in help_text
         assert "Day: today" in help_text
     if events_before_help == ():
-        assert (
-            "Historical refresh: 60s by default · --refresh-interval · not editable in Dashboard"
-            in help_text
-        )
-        assert (
-            "Monitor sampling: 15s by default · --sampling-interval · not editable in Dashboard"
-            in help_text
-        )
-        assert (
-            "Header refresh: 60s by default · --header-interval · not editable in Dashboard"
-            in help_text
-        )
+        for interval in (
+            "Historical refresh: 60s by default · --refresh-interval · not editable in Dashboard",
+            "Monitor sampling: 15s by default · --sampling-interval · not editable in Dashboard",
+            "Header refresh: 60s by default · --header-interval · not editable in Dashboard",
+        ):
+            assert interval in help_text
         assert "Historical refresh: 15s by default" not in help_text
         assert "Missed scheduled updates coalesce instead of replaying." in help_text
         assert "This Help closes automatically after 10 min idle." in help_text
@@ -824,6 +1355,9 @@ def test_dashboard_help_explains_each_mode_without_repeating_footer(
         ) < help_text.index("This Help closes automatically after 10 min idle.")
     if events_before_help in {(), ("v",)}:
         assert "Query subprocesses run up to 2 at a time" in help_text
+        assert "coalesce" not in next(
+            line for line in help_text.splitlines() if "Query subprocesses run up to 2" in line
+        )
     branch = "|- " if ascii_mode else "├─ "
     assert branch in help_text
     assert "Enter adjustment: m Pane / d Dashboard" in help_text
@@ -996,8 +1530,7 @@ def test_dashboard_manual_refresh_notice_clears_after_its_final_completion(
     refreshing = [frame.rows for frame in frames if "refresh requested · in progress" in frame.rows]
     assert refreshing
     notice_row = refreshing[-1].index("refresh requested · in progress")
-    assert "paused" in refreshing[-1][notice_row + 1]
-    assert "r refresh all" in refreshing[-1][notice_row + 2]
+    assert "r refresh all" in refreshing[-1][notice_row + 1]
     assert "refresh requested · in progress" not in frames[-1].rows
 
 
@@ -1206,6 +1739,80 @@ def test_dashboard_pane_insert_chooser_renders_inside_focused_pane(
     painted = ["\n".join(frame.rows) for frame in frames]
     assert any("Insert pane after" in frame for frame in painted), painted
     assert any("Insert pane before" in frame for frame in painted), painted
+
+
+def test_empty_dashboard_pane_double_click_enters_management_before_replacement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parser = build_parser(load_translator("en"))
+    options = _to_options(
+        parser.parse_args(
+            [
+                "dashboard",
+                "--empty",
+                "--grid",
+                "1x2",
+                "--pane",
+                "empty",
+                "--pane",
+                "animate rain",
+                "--header-style",
+                "hidden",
+                "--header-summary",
+                "none",
+            ]
+        )
+    )
+    frames: list[object] = []
+
+    class Screen:
+        def __init__(self, _stream: object) -> None:
+            pass
+
+        def paint(self, frame: object, **_kwargs: object) -> None:
+            frames.append(frame)
+
+        def finish(self) -> None:
+            pass
+
+    events = iter(
+        (
+            MouseEvent(0, 1, 1, True, 0),
+            MouseEvent(0, 1, 1, True, 0),
+            KeyEvent("r"),
+            KeyEvent("\x1b"),
+            MouseEvent(0, 70, 1, True, 0),
+            MouseEvent(0, 70, 1, True, 0),
+            KeyEvent("\x03"),
+        )
+    )
+    monkeypatch.setattr(tui_module, "FramePainter", Screen)
+    monkeypatch.setattr(tui_module, "tui_input_mode", nullcontext)
+    monkeypatch.setattr(tui_module, "read_event", lambda _decoder, _timeout: next(events))
+    monkeypatch.setattr(
+        tui_module, "get_terminal_size", lambda: __import__("os").terminal_size((100, 30))
+    )
+    monkeypatch.setattr(
+        tui_module,
+        "layout_pane_at",
+        lambda _layout, x, _y: 0 if x < 50 else 1,
+    )
+
+    assert tui_module.run_tui(options, load_translator("en")) == 0
+
+    painted = ["\n".join(frame.rows) for frame in frames]
+    chooser_index = next(index for index, frame in enumerate(painted) if "Replace pane" in frame)
+    management_index = next(
+        index
+        for index, frame in enumerate(painted)
+        if "Dashboard Pane Management" in frame and "r replace" in frame
+    )
+    assert management_index < chooser_index
+    assert "v switch view" not in painted[management_index]
+    assert any(
+        index > chooser_index and "p/P overlay position" in frame
+        for index, frame in enumerate(painted)
+    )
 
 
 def test_dashboard_primary_completion_queues_pane_supplement(
@@ -1777,8 +2384,8 @@ def test_dashboard_pane_adjustment_state_changes_with_page() -> None:
     assert quick != advanced
 
 
-@pytest.mark.parametrize("command", ("timeline", "ranking", "monitor"))
-def test_project_aggregation_is_advanced_only_for_project_panes(command: str) -> None:
+@pytest.mark.parametrize("command", ("timeline", "ranking"))
+def test_historical_project_adjustments_are_not_exposed_in_dashboard(command: str) -> None:
     parser = build_parser(load_translator("en"))
     dashboard = _to_options(parser.parse_args(["dashboard", "--pane", f"{command} --by project"]))
     project_pane = _new_pane(
@@ -1787,19 +2394,14 @@ def test_project_aggregation_is_advanced_only_for_project_panes(command: str) ->
     chart = project_pane.component.candidate.chart
     translator = load_translator("en")
 
-    assert "A project aggregation" in _adjustment_controls(
-        command, "advanced", translator, chart=chart
-    )
-    assert _adjustment_key_supported(command, "advanced", "A", chart=chart)
-    assert "Project aggregation name" in _pane_adjustment_state(
-        project_pane, "advanced", translator
-    )
-
-    nonproject_chart = replace(chart, by="agent")
-    assert "project aggregation" not in _adjustment_controls(
-        command, "advanced", translator, chart=nonproject_chart
-    )
-    assert not _adjustment_key_supported(command, "advanced", "A", chart=nonproject_chart)
+    controls = _adjustment_controls(command, "advanced", translator, chart=chart)
+    assert "project aggregation" not in controls
+    assert "project labels" not in controls
+    assert not _adjustment_key_supported(command, "advanced", "A", chart=chart)
+    assert not _adjustment_key_supported(command, "advanced", "P", chart=chart)
+    state = _pane_adjustment_state(project_pane, "advanced", translator)
+    assert "Project aggregation" not in state
+    assert "Project labels" not in state
 
 
 def test_dashboard_pane_adjustment_page_resolves_unambiguous_shortcuts() -> None:
@@ -1811,7 +2413,7 @@ def test_dashboard_pane_adjustment_page_resolves_unambiguous_shortcuts() -> None
     assert _adjustment_target_page("timeline", "quick", "f", chart=chart) == "advanced"
     assert _adjustment_target_page("timeline", "quick", "?", chart=chart) is None
     assert _adjustment_target_page("timeline", "quick", "P", chart=project_chart) == "quick"
-    assert _adjustment_target_page("timeline", "advanced", "P", chart=project_chart) == "advanced"
+    assert _adjustment_target_page("timeline", "advanced", "P", chart=project_chart) == "quick"
     assert _adjustment_target_page("timeline", "advanced", "P", chart=chart) == "quick"
 
 
@@ -1999,7 +2601,7 @@ def test_animation_pane_footer_exposes_dashboard_management_without_view() -> No
     advanced = tui_module._animation_adjustment_footer(pane, "advanced", load_translator("en"), 120)
     chinese = tui_module._animation_adjustment_footer(pane, "quick", load_translator("zh"), 120)
 
-    assert "Space pause/resume" in quick[1]
+    assert "Space" not in quick[1]
     assert "p/P overlay position" in quick[1]
     assert "r replace" in quick[3]
     assert "N insert before" in quick[3]
@@ -2030,6 +2632,34 @@ def test_animation_pane_footer_exposes_dashboard_management_without_view() -> No
         )
 
 
+def test_empty_pane_footer_exposes_dashboard_management_without_local_actions() -> None:
+    translator = load_translator("en")
+    footer = tui_module._empty_pane_adjustment_footer(translator, 120)
+    chinese = tui_module._empty_pane_adjustment_footer(load_translator("zh"), 120)
+
+    assert footer[0] == "━━ Dashboard Pane Management ━━"
+    assert "r replace" in footer[1]
+    assert "N insert before" in footer[1]
+    assert "n insert after" in footer[1]
+    assert "x delete" in footer[1]
+    assert "v switch view" not in footer[1]
+    assert "y copy" not in footer[1]
+    assert "Tab select next" in footer[2]
+    assert "{ / } width" in footer[2]
+    assert "J / K height" in footer[2]
+    assert "Quick settings" not in "\n".join(footer)
+    assert "p/P period" not in "\n".join(footer)
+    assert "r 替换" in chinese[1]
+    assert "v 切换视图" not in chinese[1]
+    for language in ("en", "zh"):
+        assert all(
+            display_width(row) <= 24
+            for row in tui_module._empty_pane_adjustment_footer(
+                load_translator(language), 24, color=True
+            )
+        )
+
+
 def test_tui_adjustment_footer_separates_dashboard_management() -> None:
     translator = load_translator("en")
     timeline_chart = TimelineConfig(
@@ -2047,12 +2677,13 @@ def test_tui_adjustment_footer_separates_dashboard_management() -> None:
     assert "k weekdays" in timeline_advanced
     assert "l legend" in timeline_advanced
     assert "f edit filters" in timeline_advanced
-    assert "A project aggregation" in timeline_advanced
+    assert "project aggregation" not in timeline_advanced
+    assert "project labels" not in timeline_advanced
     assert "c cache mode" in stack_advanced
     assert not _adjustment_key_supported("timeline", "quick", "k")
     assert _adjustment_key_supported("timeline", "advanced", "k")
-    assert not _adjustment_key_supported("timeline", "advanced", "A")
-    assert _adjustment_key_supported("timeline", "advanced", "A", chart=timeline_chart)
+    assert not _adjustment_key_supported("timeline", "advanced", "A", chart=timeline_chart)
+    assert not _adjustment_key_supported("timeline", "advanced", "P", chart=timeline_chart)
     assert _adjustment_key_supported("timeline", "quick", "b")
     assert _adjustment_key_supported("timeline", "quick", "d")
     assert _adjustment_key_supported("monitor", "quick", "d")
@@ -2182,7 +2813,7 @@ def test_header_summary_cycle_includes_none_and_wraps() -> None:
         period = _next_header_summary(period)
         observed.append(period)
 
-    assert observed == ["month", "quarter", "year", "none", "day"]
+    assert observed == ["week", "month", "quarter", "year", "none"]
 
 
 def test_header_refresh_uses_missing_coverage_then_current_day() -> None:
@@ -2217,6 +2848,116 @@ def test_header_date_rollover_requests_new_current_day() -> None:
     assert _header_refresh_interval(header, today=date(2026, 3, 16)) == DateInterval(
         date(2026, 3, 16), date(2026, 3, 16)
     )
+
+
+def custom_summary_response(
+    *,
+    display: str = "68 pages",
+    sequential: CustomComparison | None = None,
+    year_over_year: CustomComparison | None = None,
+) -> CustomSummaryResponse:
+    return CustomSummaryResponse(
+        CustomSummary(
+            CustomSummaryMetric(
+                "pages",
+                LocalizedText("Pages read", "阅读页数"),
+                CustomSummaryCurrent(Decimal("68"), LocalizedText(display, "68 页")),
+                sequential or CustomComparison("ready", Decimal("56")),
+                year_over_year or CustomComparison("unavailable"),
+            )
+        )
+    )
+
+
+def test_custom_dashboard_summary_reconfiguration_keeps_accepted_metrics() -> None:
+    options = _to_options(build_parser(load_translator("en")).parse_args(["dashboard", "--empty"]))
+    header = _new_header(options, build_query_runtime())
+    initial = CustomCommandSource("reading", ("reader", "ccuv"))
+    replacement = CustomCommandSource("reading", ("reader-next", "ccuv"))
+    summary = tui_module.CustomDashboardSummary(
+        initial,
+        FixedIntervalScheduler(60, now=0),
+        LifecycleOperation("dashboard:header:custom:reading"),
+        response=custom_summary_response(),
+        accepted_at=datetime(2026, 9, 30, tzinfo=UTC),
+        accepted_period="day",
+        accepted_as_of_date=date(2026, 9, 30),
+    )
+    header.custom_summaries[initial.dataset_id] = summary
+
+    changed = _reconcile_custom_dashboard_summaries(
+        header, (tui_module.CustomDashboardSource(replacement, ()),), now=1
+    )
+
+    assert changed == ()
+    assert header.custom_summaries == {"reading": summary}
+    assert summary.source == initial
+    assert summary.response is not None
+    assert summary.accepted_at == datetime(2026, 9, 30, tzinfo=UTC)
+    assert summary.accepted_period == "day"
+    assert summary.accepted_as_of_date == date(2026, 9, 30)
+    assert summary.generation == 0
+
+
+def test_header_renders_custom_metrics_without_token_summary() -> None:
+    options = _to_options(build_parser(load_translator("en")).parse_args(["dashboard", "--empty"]))
+    header = _new_header(options, build_query_runtime())
+    source = CustomCommandSource("reading", ("reader", "ccuv"))
+    summary = tui_module.CustomDashboardSummary(
+        source,
+        FixedIntervalScheduler(60, now=0),
+        LifecycleOperation("dashboard:header:custom:reading"),
+        response=custom_summary_response(),
+    )
+    header.custom_summaries[source.dataset_id] = summary
+
+    lines = _header_lines(header, "banner", load_translator("en"), Terminal(80, 4, False, True))
+
+    assert len(lines) == 2
+    assert "Selected-range Pages read 68 pages" in lines[1]
+    assert "token" not in lines[1].lower()
+
+
+def test_header_keeps_summary_items_on_separate_rows() -> None:
+    options = _to_options(build_parser(load_translator("en")).parse_args(["dashboard", "--empty"]))
+    header = _new_header(options, build_query_runtime())
+    first = CustomCommandSource("reading", ("reader", "ccuv"))
+    second = CustomCommandSource("builds", ("builder", "ccuv"))
+    for source in (first, second):
+        header.custom_summaries[source.dataset_id] = tui_module.CustomDashboardSummary(
+            source,
+            FixedIntervalScheduler(60, now=0),
+            LifecycleOperation(f"dashboard:header:custom:{source.dataset_id}"),
+            response=custom_summary_response(),
+        )
+
+    lines = _header_lines(header, "compact", load_translator("en"), Terminal(160, 8, False, True))
+
+    assert "Dashboard" in lines[0]
+    summary_lines = [line for line in lines[1:] if "Pages read" in line]
+    assert len(summary_lines) == 2
+    assert all(line.count("Pages read") == 1 for line in summary_lines)
+
+
+def test_header_renders_custom_metrics_against_their_accepted_scope() -> None:
+    options = _to_options(build_parser(load_translator("en")).parse_args(["dashboard", "--empty"]))
+    header = _new_header(options, build_query_runtime())
+    header.summary_period = "month"
+    source = CustomCommandSource("reading", ("reader", "ccuv"))
+    header.custom_summaries[source.dataset_id] = tui_module.CustomDashboardSummary(
+        source,
+        FixedIntervalScheduler(60, now=0),
+        LifecycleOperation("dashboard:header:custom:reading"),
+        response=custom_summary_response(year_over_year=CustomComparison("ready", Decimal("34"))),
+        accepted_period="quarter",
+        accepted_as_of_date=date(2026, 10, 1),
+    )
+
+    lines = _header_lines(header, "banner", load_translator("en"), Terminal(120, 4, False, True))
+
+    assert "vs prior quarter-to-date" in lines[1]
+    assert "vs same period last year" in lines[1]
+    assert "vs prior month-to-date" not in lines[1]
 
 
 def test_header_none_keeps_title_without_unknown_detail() -> None:
@@ -2445,7 +3186,7 @@ def test_pane_chooser_reuses_dashboard_decoder_and_ignores_mouse(
             decoder,
             height=20,
         )
-        == "calendar"
+        == "timeline"
     )
 
 
@@ -2466,9 +3207,9 @@ def test_pane_chooser_opens_help_without_losing_selection() -> None:
             read_input=lambda: next(events),
             on_help=selected.append,
         )
-        == "calendar"
+        == "timeline"
     )
-    assert selected == ["timeline"]
+    assert selected == ["empty"]
 
 
 def test_pane_chooser_wraps_backward_and_escape_cancels(
@@ -2485,7 +3226,7 @@ def test_pane_chooser_wraps_backward_and_escape_cancels(
         "read_event",
         lambda active, timeout: active.next(now=1.0),
     )
-    assert _choose_pane_type(Screen(), load_translator("en"), decoder, height=20) == "animate"
+    assert _choose_pane_type(Screen(), load_translator("en"), decoder, height=20) == "custom"
 
     cancelled = InputDecoder()
     cancelled.feed("\x1b")
@@ -2547,9 +3288,11 @@ def test_pane_chooser_localizes_names_and_includes_animation() -> None:
         is None
     )
 
+    assert "空白 (Empty)" in painted[0][0]
     assert "时间趋势 (Timeline)" in painted[0][0]
     assert "监控 (Monitor)" in painted[0][0]
     assert "动画 (Animation)" in painted[0][0]
+    assert "自定义 (Custom)" in painted[0][0]
 
 
 def test_tui_input_decodes_keys_and_fragmented_mouse_press() -> None:

@@ -33,7 +33,7 @@ from ccusage_viz.historical_component import (
     UsageSnapshot,
     historical_replacement_required,
 )
-from ccusage_viz.historical_render import render_historical_component
+from ccusage_viz.historical_render import historical_chart_config, render_historical_component
 from ccusage_viz.i18n import Translator
 from ccusage_viz.lifecycle import (
     FixedIntervalScheduler,
@@ -43,6 +43,7 @@ from ccusage_viz.lifecycle import (
     query_trigger,
 )
 from ccusage_viz.options import (
+    CustomChartConfig,
     HistoricalChartConfig,
     MonitorConfig,
     RankingConfig,
@@ -54,6 +55,11 @@ from ccusage_viz.options import (
     replace_chart_filters,
 )
 from ccusage_viz.render.palette import COLOR_SCHEMES
+from ccusage_viz.render.surfaces import (
+    EMPTY_SURFACE_CONTROLS,
+    SurfaceControls,
+    standalone_surface,
+)
 from ccusage_viz.terminal import FramePainter, Terminal, compose_frame, inspect_terminal
 from ccusage_viz.terminal_ui import (
     AdjustmentAction,
@@ -94,10 +100,10 @@ _ADJUSTMENT_QUICK_KEYS = {
     "ranking": frozenset("dpPb+-=tTs"),
 }
 _ADJUSTMENT_ADVANCED_KEYS = {
-    "timeline": frozenset("folAPk"),
+    "timeline": frozenset("folk"),
     "calendar": frozenset("f"),
     "stack": frozenset("fclk"),
-    "ranking": frozenset("foAP"),
+    "ranking": frozenset("fo"),
 }
 
 _ADJUSTMENT_ACTIONS = {
@@ -114,8 +120,6 @@ _ADJUSTMENT_ACTIONS = {
         "advanced": (
             ("f", "filter"),
             ("o", "other"),
-            ("A", "project_aggregation"),
-            ("P", "project_label_context"),
             ("l", "legend"),
             ("k", "weekdays"),
         ),
@@ -143,12 +147,7 @@ _ADJUSTMENT_ACTIONS = {
             ("t/T", "theme"),
             ("s", "style"),
         ),
-        "advanced": (
-            ("f", "filter"),
-            ("o", "other"),
-            ("A", "project_aggregation"),
-            ("P", "project_label_context"),
-        ),
+        "advanced": (("f", "filter"), ("o", "other")),
     },
 }
 
@@ -157,20 +156,17 @@ def _project_grouping_available(chart: object) -> bool:
     return isinstance(chart, (TimelineConfig, RankingConfig)) and chart.by == "project"
 
 
-def _adjustment_key_supported(
-    command: str, page: str, key: str, *, project_grouping: bool = False
-) -> bool:
+def _adjustment_key_supported(command: str, page: str, key: str) -> bool:
     keys = _ADJUSTMENT_QUICK_KEYS if page == "quick" else _ADJUSTMENT_ADVANCED_KEYS
-    return key in keys[command] and (key not in {"A", "P"} or project_grouping)
+    return key in keys[command]
 
 
 def _adjustment_actions(
-    command: str, page: str, translator: Translator, *, project_grouping: bool = False
+    command: str, page: str, translator: Translator
 ) -> tuple[AdjustmentAction, ...]:
     return tuple(
         AdjustmentAction(key, translator.text(f"adjustment.{label}"), priority)
         for priority, (key, label) in enumerate(_ADJUSTMENT_ACTIONS[command][page])
-        if key not in {"A", "P"} or project_grouping
     )
 
 
@@ -184,9 +180,7 @@ def render_component(
     translator: Translator,
     terminal: Terminal,
     *,
-    reserve_prompt: bool = False,
-    control_rows: int = 0,
-    hide_upper_right_axes: bool = False,
+    controls: SurfaceControls = EMPTY_SURFACE_CONTROLS,
     ranking_deltas: Mapping[Hashable, float] | None = None,
     ranking_rank_deltas: Mapping[Hashable, int] | None = None,
     normalize_titles: bool = False,
@@ -200,9 +194,8 @@ def render_component(
         component,
         translator,
         terminal,
-        reserve_prompt=reserve_prompt,
-        control_rows=control_rows,
-        hide_upper_right_axes=hide_upper_right_axes,
+        controls=controls,
+        surface=standalone_surface(historical_chart_config(options).kind),
         ranking_deltas=ranking_deltas,
         ranking_rank_deltas=ranking_rank_deltas,
         normalize_titles=normalize_titles,
@@ -229,19 +222,8 @@ def _paint(
     FramePainter(sys.stdout).paint(compose_frame(body, status, controls, notices, height=height))
 
 
-def _watch_status(
-    base: str,
-    translator: Translator,
-    *,
-    interval: float,
-    paused: bool,
-) -> str:
-    suffix = (
-        translator.text("status.paused")
-        if paused
-        else translator.text("status.refresh_every", seconds=f"{interval:g}")
-    )
-    return f"{base} · {suffix}"
+def _watch_status(base: str, translator: Translator, *, interval: float) -> str:
+    return f"{base} · {translator.text('status.refresh_every', seconds=f'{interval:g}')}"
 
 
 def run_runtime_adjustment(
@@ -319,7 +301,7 @@ def run_runtime_adjustment(
                 component,
                 translator,
                 terminal,
-                control_rows=2,
+                controls=SurfaceControls(rows=("", "")),
             )
         except UsageError as exc:
             render_warning = format_error(
@@ -347,14 +329,7 @@ def run_runtime_adjustment(
             "style_count": len(styles),
             "style": style,
         }
-        project_grouping = _project_grouping_available(current.chart)
         status_key = f"status.runtime_adjustment_{current.chart.kind}_{adjustment_page}"
-        if (
-            adjustment_page == "advanced"
-            and isinstance(current.chart, (TimelineConfig, RankingConfig))
-            and not project_grouping
-        ):
-            status_key += "_nonproject"
         state_values = dict(common)
         if isinstance(current.chart, (TimelineConfig, RankingConfig)):
             state_values.update(
@@ -363,10 +338,6 @@ def run_runtime_adjustment(
                 if current.chart.top is not None
                 else translator.text("label.all"),
                 other=translator.text("label.on" if current.chart.other == "show" else "label.off"),
-                project_grouping=(
-                    current.chart.project_aggregation if current.chart.by == "project" else "—"
-                ),
-                project_label_context=getattr(component, "project_label_context", 0),
             )
         if isinstance(current.chart, (TimelineConfig, StackConfig)):
             state_values["weekday"] = translator.text(f"label.weekday_{current.chart.weekdays}")
@@ -389,12 +360,7 @@ def run_runtime_adjustment(
         controls = adjustment_rows(
             state,
             translator.text(f"adjustment.page_{adjustment_page}"),
-            _adjustment_actions(
-                current.chart.kind,
-                adjustment_page,
-                translator,
-                project_grouping=project_grouping,
-            ),
+            _adjustment_actions(current.chart.kind, adjustment_page, translator),
             width=terminal.width,
             color=terminal.color,
             switch_action=translator.text(
@@ -464,11 +430,16 @@ def run_runtime_adjustment(
                             )
                         )
 
+                    chart = current.chart
+                    if isinstance(chart, (CustomChartConfig, MonitorConfig)):
+                        raise TypeError(
+                            "historical adjustments do not support custom or monitor configurations"
+                        )
                     edited = run_filter_editor(
-                        current.chart.filters,
+                        chart.filters,
                         discover_filter_choices(
                             snapshot.records,
-                            current.chart.filters,
+                            chart.filters,
                             include_projects=snapshot.includes_project_attribution,
                         ),
                         translator,
@@ -481,18 +452,10 @@ def run_runtime_adjustment(
                         paint()
                     else:
                         paint()
-                elif (
-                    adjustment_page == "advanced"
-                    and key == "P"
-                    and _project_grouping_available(current.chart)
-                ):
-                    component.cycle_project_label_context()
-                    paint()
                 elif key is not None and _adjustment_key_supported(
                     current.chart.kind,
                     adjustment_page,
                     key,
-                    project_grouping=_project_grouping_available(current.chart),
                 ):
                     updated = adjust_standalone(current, key)
                     if updated != current:
@@ -508,8 +471,8 @@ def run_runtime_adjustment(
 
 
 def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
-    if isinstance(options.chart, MonitorConfig):
-        raise TypeError("historical watch mode does not support monitor configurations")
+    if isinstance(options.chart, (CustomChartConfig, MonitorConfig)):
+        raise TypeError("historical watch mode does not support custom or monitor configurations")
     active_screen = FramePainter(sys.stdout)
     interval = options.host.interval or 10.0
     runtime = build_query_runtime()
@@ -539,8 +502,10 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
     copy_feedback = TransientFeedback()
 
     def historical_chart(config: StandaloneLaunch) -> HistoricalChartConfig:
-        if isinstance(config.chart, MonitorConfig):
-            raise TypeError("historical watch mode does not support monitor configurations")
+        if isinstance(config.chart, (CustomChartConfig, MonitorConfig)):
+            raise TypeError(
+                "historical watch mode does not support custom or monitor configurations"
+            )
         return config.chart
 
     historical_chart(current)
@@ -557,12 +522,7 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
         return get_terminal_size()
 
     def status() -> str:
-        return _watch_status(
-            base_status,
-            translator,
-            interval=interval,
-            paused=lifecycle.paused,
-        )
+        return _watch_status(base_status, translator, interval=interval)
 
     def notices() -> tuple[str, ...]:
         active = lifecycle.active
@@ -591,7 +551,6 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
         }[body_view]
         keys = translator.text(
             key,
-            action=translator.text("status.resume" if lifecycle.paused else "status.pause"),
             scroll=translator.text("status.text_scroll_keys") if overflowing else "",
         )
         if current.host.demo_size:
@@ -642,7 +601,11 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
                     component,
                     translator,
                     terminal,
-                    control_rows=0 if controls_hidden else 1,
+                    controls=(
+                        EMPTY_SURFACE_CONTROLS
+                        if controls_hidden
+                        else SurfaceControls(rows=(controls(),))
+                    ),
                     ranking_deltas=ranking_deltas.current
                     if current.chart.kind == "ranking"
                     else None,
@@ -851,7 +814,7 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
                     component,
                     translator,
                     terminal,
-                    reserve_prompt=True,
+                    controls=SurfaceControls(reserves_prompt=True),
                     normalize_titles=True,
                 )
                 base_status = (
@@ -1064,16 +1027,6 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
                                 now=time.monotonic(),
                                 data_affecting=False,
                             )
-                    paint()
-                elif body_view == "chart" and key == " ":
-                    if not lifecycle.paused:
-                        scheduler.pause()
-                        lifecycle.pause()
-                    else:
-                        now = time.monotonic()
-                        lifecycle.resume()
-                        scheduler.resume(now=now)
-                        request(LifecycleTrigger.RESUME, now=now)
                     paint()
                 elif current.host.demo_size and key in {"s", "d", "l"}:
                     size = {"s": "small", "d": "medium", "l": "large"}[key]

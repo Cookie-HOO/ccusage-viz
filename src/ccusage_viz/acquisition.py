@@ -1,14 +1,26 @@
 from __future__ import annotations
 
+import time
 from datetime import date, timedelta
+from typing import cast
 
 from ccusage_viz.core.time import local_today
 from ccusage_viz.coverage import DateCoverage, DateInterval
-from ccusage_viz.options import MonitorConfig, StandaloneLaunch
+from ccusage_viz.custom_protocol import CustomChartRequest, CustomSummaryRequest
+from ccusage_viz.options import (
+    CustomChartConfig,
+    CustomCommandSource,
+    DashboardLaunch,
+    MonitorConfig,
+    ProcessConfig,
+    StandaloneLaunch,
+)
+from ccusage_viz.processing.summaries import SummaryQueryPlan, SummaryScope, summary_query_plan
 from ccusage_viz.query.models import (
     DataResolution,
     DataScope,
     ExecutionContext,
+    ProviderRef,
     QueryIntent,
     QueryTrigger,
 )
@@ -17,7 +29,7 @@ from ccusage_viz.query.provider import ProviderDefinition
 
 def historical_provider_id(options: StandaloneLaunch) -> str:
     """Resolve the configured historical data mode to its Provider ID."""
-    return "demo" if options.host.demo_size else options.host.provider
+    return "demo" if options.host.demo_size is not None else options.host.provider
 
 
 def monitor_query_intent(
@@ -41,7 +53,8 @@ def monitor_query_intent(
     available_options = {
         "chart_kind": chart.kind,
         "demo_size": options.host.demo_size,
-        "sample_ordinal": sample_ordinal,
+        "demo_seed": options.host.demo_seed,
+        "demo_report_time": time.monotonic() if options.host.demo_size is not None else None,
     }
     execution_options = tuple(
         (key, available_options[key])
@@ -84,8 +97,10 @@ def historical_query_intent(
 ) -> QueryIntent:
     """Compose one historical Host request into provider-neutral query intent."""
     chart = options.chart
-    if isinstance(chart, MonitorConfig):
-        raise TypeError("historical query planning does not support monitor configurations")
+    if isinstance(chart, (MonitorConfig, CustomChartConfig)):
+        raise TypeError(
+            "historical query planning only supports built-in historical configurations"
+        )
     provider = definition.provider
     scope_interval = DateInterval(chart.date_range.since, chart.date_range.until)
     required_coverage = (
@@ -96,6 +111,7 @@ def historical_query_intent(
     available_options = {
         "chart_kind": chart.kind,
         "demo_size": options.host.demo_size,
+        "demo_seed": options.host.demo_seed,
     }
     execution_options = tuple(
         (key, available_options[key])
@@ -123,4 +139,108 @@ def historical_query_intent(
         dimensions=("project",) if project_required else ("agent",),
         execution_options=execution_options,
         execution_context=execution_context,
+    )
+
+
+def custom_historical_query_intent(
+    config: CustomChartConfig,
+    *,
+    owner_id: str,
+    generation: int,
+    trigger: QueryTrigger,
+    process: ProcessConfig | None = None,
+    request_id_suffix: str = "",
+) -> QueryIntent:
+    """Plan one command-backed custom pane request without display-only fields."""
+    process = process or ProcessConfig()
+    interval = DateInterval(config.date_range.since, config.date_range.until)
+    request = CustomChartRequest(
+        request_id=f"{owner_id}:{generation}{request_id_suffix}",
+        dataset_id=config.source.dataset_id,
+        start_date=interval.since,
+        end_date=interval.until,
+        filters=config.filters,
+        group_by=config.group_by,
+        granularity=config.granularity,
+        command_argv=config.source.command_argv,
+    )
+    return QueryIntent(
+        owner_id=owner_id,
+        generation=generation,
+        trigger=trigger,
+        provider=ProviderRef("custom-command", config.source.dataset_id),
+        scope=DataScope((interval,)),
+        missing_intervals=(interval,),
+        resolution=DataResolution.DATE,
+        execution_context=ExecutionContext(
+            config.source.command_argv[0],
+            process.query_timeout,
+            process.output_limit,
+            process.environment,
+        ),
+        payload=request,
+    )
+
+
+def custom_summary_query_intent(
+    source: CustomCommandSource,
+    plan: SummaryQueryPlan,
+    *,
+    filters: tuple[tuple[str, tuple[str, ...]], ...] = (),
+    owner_id: str,
+    generation: int,
+    trigger: QueryTrigger,
+    process: ProcessConfig | None = None,
+) -> QueryIntent:
+    """Plan one source summary from a ccuv-resolved set of intervals."""
+    process = process or ProcessConfig()
+    request = CustomSummaryRequest(
+        request_id=f"{owner_id}:{generation}",
+        dataset_id=source.dataset_id,
+        scope=plan.scope,
+        current=plan.current,
+        sequential=plan.sequential,
+        year_over_year=plan.year_over_year,
+        filters=filters,
+        command_argv=source.command_argv,
+    )
+    return QueryIntent(
+        owner_id=owner_id,
+        generation=generation,
+        trigger=trigger,
+        provider=ProviderRef("custom-command", source.dataset_id),
+        scope=DataScope(plan.intervals),
+        missing_intervals=plan.intervals,
+        resolution=DataResolution.DATE,
+        execution_context=ExecutionContext(
+            source.command_argv[0],
+            process.query_timeout,
+            process.output_limit,
+            process.environment,
+        ),
+        payload=request,
+    )
+
+
+def custom_dashboard_summary_query_intent(
+    source: CustomCommandSource,
+    dashboard: DashboardLaunch,
+    *,
+    owner_id: str,
+    generation: int,
+    trigger: QueryTrigger,
+    as_of_date: date | None = None,
+) -> QueryIntent:
+    """Compatibility wrapper for Dashboard callers during the protocol migration."""
+    period = dashboard.host.header_summary
+    if period not in {"day", "week", "month", "quarter", "year"}:
+        raise ValueError("custom Dashboard summary requires a supported scope")
+
+    return custom_summary_query_intent(
+        source,
+        summary_query_plan(local_today(as_of_date), cast(SummaryScope, period)),
+        owner_id=owner_id,
+        generation=generation,
+        trigger=trigger,
+        process=dashboard.process,
     )

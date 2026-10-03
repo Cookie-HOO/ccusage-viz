@@ -4,6 +4,7 @@ import argparse
 import math
 import os
 import re
+import secrets
 import shlex
 import sys
 from dataclasses import dataclass, replace
@@ -17,6 +18,7 @@ from ccusage_viz.application import run
 from ccusage_viz.dashboard import DASHBOARD_PRESETS
 from ccusage_viz.dashboard_layout import (
     NAMED_LAYOUTS,
+    fixed_shape,
     layout_bands,
     layout_for_pane_count,
     parse_grid,
@@ -44,10 +46,14 @@ from ccusage_viz.options import (
     CalendarConfig,
     ChartPaneConfig,
     ChartPresentation,
+    CustomChartConfig,
+    CustomChartPaneConfig,
+    CustomCommandSource,
     DashboardHostConfig,
     DashboardLaunch,
     DashboardRoute,
     Density,
+    EmptyPaneConfig,
     Filters,
     LaunchConfig,
     LaunchRoute,
@@ -73,9 +79,11 @@ _COMMANDS = (
     "monitor",
     "dashboard",
     "animate",
+    "custom",
     "text",
 )
 _TUI_COMMANDS = ("timeline", "calendar", "stack", "ranking", "monitor")
+_CUSTOM_COMMANDS = ("timeline", "calendar", "stack", "ranking")
 _DURATION_PATTERN = re.compile(r"(?P<value>[1-9][0-9]*)(?P<unit>[mh])$")
 _PANE_FORBIDDEN_OPTIONS = frozenset(
     {
@@ -163,6 +171,7 @@ def _add_presentation(parser: argparse.ArgumentParser, tr: Translator, command: 
         const="medium",
         help=tr.text("help.demo"),
     )
+    parser.add_argument("--demo-seed", type=int, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--lang", choices=("en", "zh"), help=tr.text("help.lang"))
     parser.add_argument("--ccusage-bin", default="ccusage", help=tr.text("help.ccusage_bin"))
     parser.add_argument("--query-timeout", type=float, default=30.0, help=argparse.SUPPRESS)
@@ -183,7 +192,7 @@ def _add_presentation(parser: argparse.ArgumentParser, tr: Translator, command: 
     parser.add_argument(
         "--density",
         choices=DENSITIES,
-        default="full",
+        default="detailed",
         help=tr.text("help.density"),
     )
     if command in {"timeline", "monitor", "stack"}:
@@ -297,6 +306,7 @@ def _add_tui(parser: argparse.ArgumentParser, tr: Translator) -> None:
         const="medium",
         help=tr.text("help.demo"),
     )
+    parser.add_argument("--demo-seed", type=int, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--lang", choices=("en", "zh"), help=tr.text("help.lang"))
     parser.add_argument("--ccusage-bin", default="ccusage", help=tr.text("help.ccusage_bin"))
     parser.add_argument("--query-timeout", type=float, default=30.0, help=argparse.SUPPRESS)
@@ -308,6 +318,27 @@ def _add_tui(parser: argparse.ArgumentParser, tr: Translator) -> None:
         default="classic",
         help=tr.text("help.theme"),
     )
+
+
+def _add_custom_history(parser: argparse.ArgumentParser, tr: Translator, command: str) -> None:
+    parser.add_argument("--dataset", required=True, metavar="ID")
+    parser.add_argument("--command", dest="command_text", required=True, metavar="TEXT")
+    parser.add_argument("--period", help=tr.text("help.period"))
+    parser.add_argument("--since", help=tr.text("help.since"))
+    parser.add_argument("--until", help=tr.text("help.until"))
+    parser.add_argument(
+        "--filter", dest="custom_filters", action="append", default=[], metavar="ID=OPTION"
+    )
+    parser.add_argument("--group-by")
+    if command in {"timeline", "stack"}:
+        parser.add_argument("--granularity", choices=GRANULARITIES, default="day")
+        parser.add_argument("--weekdays", choices=WEEKDAY_MODES, default="show")
+    if command in {"timeline", "ranking"}:
+        parser.add_argument("--top", type=int, default=None, help=tr.text("help.top"))
+        parser.add_argument(
+            "--other", choices=OTHER_MODES, default="show", help=tr.text("help.other")
+        )
+    _add_presentation(parser, tr, command)
 
 
 def _add_monitor(parser: argparse.ArgumentParser, tr: Translator) -> None:
@@ -406,7 +437,14 @@ def build_parser(tr: Translator) -> argparse.ArgumentParser:
         choices=tuple(DASHBOARD_PRESETS),
         help=tr.text("help.dashboard_preset"),
     )
+    tui.add_argument("--empty", action="store_true", help=argparse.SUPPRESS)
     _add_tui(tui, tr)
+
+    custom = subparsers.add_parser("custom", help="Render a custom command-backed chart")
+    custom_subparsers = custom.add_subparsers(dest="custom_kind", required=True, metavar="COMMAND")
+    for command in _CUSTOM_COMMANDS:
+        custom_parser = custom_subparsers.add_parser(command)
+        _add_custom_history(custom_parser, tr, command)
 
     animate = subparsers.add_parser(
         "animate", help=tr.text("help.animate"), description=tr.text("help.animate")
@@ -497,7 +535,7 @@ def _chart_from_namespace(namespace: argparse.Namespace):
         theme=namespace.color_scheme,
         style=style,
         legend=getattr(namespace, "legend", "below-title"),
-        density=cast(Density, getattr(namespace, "density", "full")),
+        density=cast(Density, getattr(namespace, "density", "detailed")),
     )
     top = getattr(namespace, "top", None)
     if command in {"timeline", "monitor"} and namespace.by is not None and top is None:
@@ -557,6 +595,55 @@ def _chart_from_namespace(namespace: argparse.Namespace):
     )
 
 
+def _custom_chart_from_namespace(namespace: argparse.Namespace) -> CustomChartConfig:
+    filters: dict[str, set[str]] = {}
+    for value in namespace.custom_filters:
+        filter_id, separator, option_id = value.partition("=")
+        if not separator or not filter_id or not option_id:
+            raise UsageError("error.arguments", detail="--filter must use ID=OPTION")
+        filters.setdefault(filter_id, set()).add(option_id)
+    try:
+        command_argv = tuple(shlex.split(namespace.command_text))
+    except ValueError as exc:
+        raise UsageError(
+            "error.arguments", detail="--command contains invalid shell quoting"
+        ) from exc
+    if not command_argv:
+        raise UsageError("error.arguments", detail="--command must not be empty")
+    kind = namespace.custom_kind
+    group_by = namespace.group_by
+    top = getattr(namespace, "top", None)
+    if top is not None and top < 1:
+        raise UsageError("error.top_positive")
+    if top is not None and group_by is None:
+        raise UsageError("error.top_requires_by")
+    style = namespace.style or compatible_styles(kind, group_by)[0]
+    if style not in compatible_styles(kind, group_by):
+        raise UsageError("error.style_incompatible", style=style, mode=group_by or "total")
+    return CustomChartConfig(
+        kind=kind,
+        source=CustomCommandSource(namespace.dataset, command_argv),
+        date_range=resolve_date_range(
+            kind, period=namespace.period, since=namespace.since, until=namespace.until
+        ),
+        filters=tuple(
+            (filter_id, tuple(sorted(option_ids)))
+            for filter_id, option_ids in sorted(filters.items())
+        ),
+        presentation=ChartPresentation(
+            theme=namespace.color_scheme,
+            style=style,
+            legend=getattr(namespace, "legend", "below-title"),
+            density=cast(Density, namespace.density),
+        ),
+        group_by=group_by,
+        top=top,
+        other=getattr(namespace, "other", "show"),
+        granularity=getattr(namespace, "granularity", "day"),
+        weekdays=getattr(namespace, "weekdays", "show"),
+    )
+
+
 def _validate_chart(
     namespace: argparse.Namespace, chart, *, explicit: frozenset[str], demo: str | None
 ) -> float:
@@ -591,6 +678,13 @@ def _validate_chart(
     return interval if interval is not None else 10.0
 
 
+def _demo_seed(namespace: argparse.Namespace) -> int | None:
+    if namespace.demo is None:
+        return None
+    seed = getattr(namespace, "demo_seed", None)
+    return seed if seed is not None else secrets.randbits(63)
+
+
 def _time_state_command(launcher: str = "ccuv") -> str:
     """Return the inspectable command source used by built-in clock overlays."""
 
@@ -606,8 +700,31 @@ def parse_pane_fragment(
         tokens = shlex.split(fragment)
     except ValueError as exc:
         raise UsageError("error.tui_panel", value=fragment) from exc
+    if tokens == ["empty"]:
+        return EmptyPaneConfig()
     if not tokens:
         raise UsageError("error.tui_panel", value=fragment)
+    if tokens[0] == "custom":
+        if any(
+            token.split("=", 1)[0] in _PANE_FORBIDDEN_OPTIONS
+            or token.split("=", 1)[0].startswith("--header-")
+            for token in tokens[1:]
+        ):
+            raise UsageError("error.tui_panel", value=fragment)
+        try:
+            namespace = build_parser(Translator("en", dict(CATALOGS["en"]))).parse_args(tokens)
+            chart = _custom_chart_from_namespace(namespace)
+            explicit = _explicit_fields(tokens)
+            if "density" not in explicit:
+                chart = replace(chart, presentation=replace(chart.presentation, density="compact"))
+            if host is not None and host.host.ascii and "color_scheme" in explicit:
+                raise UsageError(
+                    "error.arguments",
+                    detail="Dashboard --ascii conflicts with an explicit Pane --theme",
+                )
+            return CustomChartPaneConfig(chart)
+        except UsageError as exc:
+            raise UsageError("error.tui_panel", value=fragment) from exc
     if tokens[0] == "animate":
         if len(tokens) < 2:
             raise UsageError("error.tui_panel", value=fragment)
@@ -692,6 +809,19 @@ def _to_options(
     launcher: str = "ccuv",
 ) -> LaunchConfig:
     command = namespace.command or "timeline"
+    if command == "custom":
+        chart = _custom_chart_from_namespace(namespace)
+        process = ProcessConfig(
+            ccusage_bin=namespace.ccusage_bin,
+            query_timeout=namespace.query_timeout,
+        )
+        if not math.isfinite(process.query_timeout) or process.query_timeout <= 0:
+            raise UsageError(
+                "error.arguments", detail="--query-timeout must be positive and finite"
+            )
+        return StandaloneLaunch(
+            process, StandaloneHostConfig(ascii=namespace.ascii), chart, explicit
+        )
     if command == "animate":
         has_source = (
             namespace.overlay_text is not None
@@ -749,13 +879,19 @@ def _to_options(
     )
     if not math.isfinite(process.query_timeout) or process.query_timeout <= 0:
         raise UsageError("error.arguments", detail="--query-timeout must be positive and finite")
+    demo_seed = _demo_seed(namespace)
     if command == "dashboard":
         preset_name = namespace.preset
-        if preset_name is None and not namespace.panes:
-            if explicit:
+        if namespace.empty and preset_name is not None:
+            raise UsageError(
+                "error.arguments", detail="--empty cannot be combined with a dashboard preset"
+            )
+        if preset_name is None and not namespace.panes and not namespace.empty:
+            structural_options = {"grid", "layout", "column_weights", "row_weights"}
+            if explicit & structural_options:
                 raise UsageError(
                     "error.arguments",
-                    detail="dashboard options require a preset or at least one --pane",
+                    detail="dashboard layout options require a preset, --pane, or --empty",
                 )
             preset_name = "wide-clock"
         if preset_name is not None and namespace.grid is not None:
@@ -769,12 +905,27 @@ def _to_options(
                 detail="--layout cannot be combined with a dashboard preset or --grid",
             )
         preset = DASHBOARD_PRESETS.get(preset_name)
-        fragments = [*(preset.panels if preset is not None else ()), *namespace.panes]
         layout = namespace.layout or (preset.layout if preset is not None else None)
+        if namespace.empty:
+            grid_text = layout or namespace.grid or "2x2"
+            if grid_text in NAMED_LAYOUTS:
+                empty_count = 1 if grid_text == "auto" else 2
+            else:
+                try:
+                    rows, columns = fixed_shape(grid_text)
+                except ValueError as exc:
+                    raise UsageError("error.tui_grid", value=grid_text) from exc
+                empty_count = rows * columns
+            fragments = [
+                *namespace.panes,
+                *("empty" for _ in range(max(0, empty_count - len(namespace.panes)))),
+            ]
+        else:
+            fragments = [*(preset.panels if preset is not None else ()), *namespace.panes]
         configured_layout = layout or (
             preset.grid if preset is not None else namespace.grid or "2x2"
         )
-        if preset is not None and namespace.panes:
+        if (preset is not None and namespace.panes) or (namespace.empty and layout is None):
             configured_layout = layout_for_pane_count(configured_layout, len(fragments))
         if layout is not None:
             layout = parse_layout(configured_layout, len(fragments))
@@ -824,6 +975,7 @@ def _to_options(
         host = DashboardHostConfig(
             ascii=namespace.ascii,
             demo_size=namespace.demo,
+            demo_seed=demo_seed,
             grid=grid,
             layout=layout,
             column_weights=column_weights,
@@ -871,6 +1023,7 @@ def _to_options(
     host = StandaloneHostConfig(
         ascii=namespace.ascii,
         demo_size=namespace.demo,
+        demo_seed=demo_seed,
         watch=not getattr(namespace, "no_watch", False),
         interval=interval,
     )

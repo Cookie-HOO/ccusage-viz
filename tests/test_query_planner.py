@@ -1,12 +1,22 @@
 from dataclasses import replace
 from datetime import date
 
-from ccusage_viz.acquisition import historical_query_intent, monitor_query_intent
+from ccusage_viz.acquisition import (
+    custom_dashboard_summary_query_intent,
+    custom_historical_query_intent,
+    custom_summary_query_intent,
+    historical_query_intent,
+    monitor_query_intent,
+)
 from ccusage_viz.core.time import DateRange
 from ccusage_viz.coverage import DateCoverage, DateInterval
 from ccusage_viz.domain import Notice
 from ccusage_viz.options import (
     CalendarConfig,
+    CustomChartConfig,
+    CustomCommandSource,
+    DashboardHostConfig,
+    DashboardLaunch,
     Filters,
     MonitorConfig,
     ProcessConfig,
@@ -16,7 +26,9 @@ from ccusage_viz.options import (
     StandaloneLaunch,
     TimelineConfig,
 )
+from ccusage_viz.processing.summaries import summary_query_plan
 from ccusage_viz.providers.ccusage import CCUSAGE_DEFINITION
+from ccusage_viz.providers.custom_command import CUSTOM_COMMAND_DEFINITION
 from ccusage_viz.providers.demo import DEMO_DEFINITION
 from ccusage_viz.query.models import QueryTrigger
 
@@ -67,6 +79,73 @@ def monitor_options(*, by: str | None = None, demo_size: str | None = None) -> S
     )
 
 
+def test_custom_dashboard_summary_intent_uses_dashboard_header_period() -> None:
+    dashboard = DashboardLaunch(
+        ProcessConfig(query_timeout=12.0, output_limit=2048),
+        DashboardHostConfig(header_summary="quarter"),
+        (),
+    )
+
+    intent = custom_dashboard_summary_query_intent(
+        CustomCommandSource("reading", ("reading-export", "ccuv")),
+        dashboard,
+        owner_id="dashboard:header:custom:reading",
+        generation=4,
+        trigger=QueryTrigger.REFRESH,
+        as_of_date=date(2026, 9, 30),
+    )
+    request = intent.payload
+
+    assert request.dataset_id == "reading"
+    assert request.command_argv == ("reading-export", "ccuv")
+    assert request.scope == "quarter"
+    assert request.current == DateInterval(date(2026, 7, 1), date(2026, 9, 30))
+    assert request.sequential == DateInterval(date(2026, 4, 1), date(2026, 6, 30))
+    assert request.year_over_year == DateInterval(date(2025, 7, 1), date(2025, 9, 30))
+    assert intent.owner_id == "dashboard:header:custom:reading"
+    assert intent.generation == 4
+
+
+def test_matching_custom_header_and_pane_summaries_have_the_same_physical_input() -> None:
+    source = CustomCommandSource("reading", ("reading-export", "ccuv"))
+    plan = summary_query_plan(date(2026, 9, 30), "month")
+    chart = CustomChartConfig(
+        "timeline",
+        source,
+        DateRange(date(2026, 9, 17), date(2026, 9, 30)),
+        group_by="book",
+        granularity="day",
+    )
+
+    pane_summary = custom_summary_query_intent(
+        source,
+        plan,
+        owner_id="dashboard:pane:1:summary",
+        generation=2,
+        trigger=QueryTrigger.REFRESH,
+    )
+    header_summary = custom_summary_query_intent(
+        source,
+        plan,
+        owner_id="dashboard:header:custom:reading",
+        generation=4,
+        trigger=QueryTrigger.REFRESH,
+    )
+    chart_intent = custom_historical_query_intent(
+        chart,
+        owner_id="dashboard:pane:1",
+        generation=2,
+        trigger=QueryTrigger.REFRESH,
+    )
+
+    pane_query = CUSTOM_COMMAND_DEFINITION.provider.compile(pane_summary).queries[0]
+    header_query = CUSTOM_COMMAND_DEFINITION.provider.compile(header_summary).queries[0]
+    chart_query = CUSTOM_COMMAND_DEFINITION.provider.compile(chart_intent).queries[0]
+
+    assert pane_query.fingerprint == header_query.fingerprint
+    assert chart_query.fingerprint != pane_query.fingerprint
+
+
 def test_monitor_intent_always_queries_complete_yesterday_today_scope() -> None:
     selected = monitor_query_intent(
         monitor_options(),
@@ -100,9 +179,15 @@ def test_monitor_project_mode_uses_only_claude_daily_projects() -> None:
     assert plan.notices == (Notice("notice.daily_project_omitted", {"agent": "Codex"}),)
 
 
-def test_monitor_demo_sample_ordinal_changes_physical_fingerprint() -> None:
+def test_monitor_demo_report_time_is_independent_of_sample_ordinal(
+    monkeypatch,
+) -> None:
+    options = monitor_options(demo_size="small")
+    options = replace(options, host=replace(options.host, demo_seed=31))
+    monkeypatch.setattr("ccusage_viz.acquisition.time.monotonic", lambda: 123.4)
+
     first = monitor_query_intent(
-        monitor_options(demo_size="small"),
+        options,
         DEMO_DEFINITION,
         owner_id="standalone:monitor",
         generation=0,
@@ -110,12 +195,25 @@ def test_monitor_demo_sample_ordinal_changes_physical_fingerprint() -> None:
         sample_ordinal=1,
         today=date(2026, 1, 3),
     )
-    second = replace(first, execution_options=(("demo_size", "small"), ("sample_ordinal", 2)))
-    first_query = DEMO_DEFINITION.provider.compile(first).queries[0]
-    second_query = DEMO_DEFINITION.provider.compile(second).queries[0]
+    second = monitor_query_intent(
+        options,
+        DEMO_DEFINITION,
+        owner_id="standalone:monitor",
+        generation=0,
+        trigger=QueryTrigger.TICK,
+        sample_ordinal=99,
+        today=date(2026, 1, 3),
+    )
 
-    assert first_query.arguments == ("small", "2026-01-02", "2026-01-03", "1")
-    assert first_query.fingerprint != second_query.fingerprint
+    assert (
+        first.execution_options
+        == second.execution_options
+        == (
+            ("demo_report_time", 123.4),
+            ("demo_seed", 31),
+            ("demo_size", "small"),
+        )
+    )
 
 
 def test_default_plan_uses_unified_by_agent_query() -> None:
@@ -209,7 +307,7 @@ def test_provider_neutral_planner_compiles_demo_acquisition() -> None:
 
     assert query.provider == DEMO_DEFINITION.provider.provider
     assert query.operation == "generate"
-    assert query.arguments == ("small", "2026-01-02", "2026-01-03")
+    assert query.arguments == ("small", "2026-01-02", "2026-01-03", "0")
 
 
 def test_empty_provider_results_preserve_query_attribution_semantics() -> None:

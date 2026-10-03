@@ -4,7 +4,7 @@ import pytest
 
 from ccusage_viz.chart_models import ChangeDirection
 from ccusage_viz.core.time import DateRange
-from ccusage_viz.coverage import DateCoverage
+from ccusage_viz.coverage import DateCoverage, DateInterval
 from ccusage_viz.demo import generate_demo
 from ccusage_viz.domain import ModelBreakdown, Notice, SourceKind, TokenUsage, UsageRecord
 from ccusage_viz.options import Filters, TimelineConfig
@@ -34,6 +34,40 @@ def record(day: int, agent: str, project: str, model: str, total: int) -> UsageR
         make_project_ref(agent, project),
         (ModelBreakdown(model, value),),
     )
+
+
+def test_ranking_derives_previous_values_and_ranks_from_raw_coverage() -> None:
+    current = DateRange(date(2026, 1, 8), date(2026, 1, 9))
+    previous = DateInterval(date(2026, 1, 6), date(2026, 1, 7))
+    records = (
+        record(6, "claude", "/work/app", "opus", 200),
+        record(6, "claude", "/work/api", "opus", 100),
+        record(8, "claude", "/work/app", "opus", 100),
+        record(8, "claude", "/work/api", "opus", 300),
+    )
+
+    ranking = build_ranking(
+        records,
+        current,
+        by="project",
+        coverage=DateCoverage((DateInterval(current.since, current.until), previous)),
+        comparison_interval=previous,
+    )
+
+    api, app = ranking.entries
+    assert (api.label, api.usage.total, api.previous_usage.total, api.previous_rank) == (
+        "api",
+        300,
+        100,
+        2,
+    )
+    assert (app.label, app.usage.total, app.previous_usage.total, app.previous_rank) == (
+        "app",
+        100,
+        200,
+        1,
+    )
+    assert api.comparison_ready and app.comparison_ready
 
 
 def test_demo_stack_has_no_other_component() -> None:

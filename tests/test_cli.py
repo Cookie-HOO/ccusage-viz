@@ -14,6 +14,7 @@ from ccusage_viz.cli import (
     main,
     probe_short_circuit,
 )
+from ccusage_viz.configuration import standalone_from_chart_pane
 from ccusage_viz.dashboard import DASHBOARD_PRESETS
 from ccusage_viz.errors import UsageError
 from ccusage_viz.i18n import load_translator
@@ -22,6 +23,14 @@ from ccusage_viz.options import (
     AnimationLaunch,
     AnimationPaneConfig,
     ChartPaneConfig,
+    CustomChartConfig,
+    CustomChartPaneConfig,
+    CustomCommandSource,
+    DashboardHostConfig,
+    DashboardLaunch,
+    EmptyPaneConfig,
+    ProcessConfig,
+    resolve_date_range,
 )
 from ccusage_viz.render.palette import COLOR_SCHEMES
 
@@ -51,8 +60,7 @@ def test_text_and_animate_help_describe_public_interfaces(
     with pytest.raises(SystemExit):
         parser.parse_args(["--help"])
     root_help = capsys.readouterr().out
-    assert "text" in root_help
-    assert "Generate provider-free dynamic text presets" in root_help
+    assert "text       Generate provider-free dynamic text presets" in root_help
     assert "==SUPPRESS==" not in root_help
 
     with pytest.raises(SystemExit):
@@ -122,6 +130,55 @@ def test_text_run_is_equivalent_to_default(capsys: pytest.CaptureFixture[str]) -
     assert capsys.readouterr().out == default
 
 
+def test_empty_dashboard_populates_fixed_and_named_layouts() -> None:
+    parser = build_parser(load_translator("en"))
+
+    fixed = _to_options(parser.parse_args(["dashboard", "--empty", "--grid", "2x2"]))
+    named = _to_options(parser.parse_args(["dashboard", "--empty", "--layout", "spotlight-wide"]))
+
+    assert len(fixed.panes) == 4
+    assert all(isinstance(pane, EmptyPaneConfig) for pane in fixed.panes)
+    assert len(named.panes) == 2
+    assert all(isinstance(pane, EmptyPaneConfig) for pane in named.panes)
+
+
+def test_custom_pane_fragment_preserves_normalized_filters_and_compact_density() -> None:
+    parser = build_parser(load_translator("en"))
+
+    dashboard = _to_options(
+        parser.parse_args(
+            [
+                "dashboard",
+                "--pane",
+                'custom timeline --dataset reading --command "reader export" '
+                "--filter category=fiction --filter category=literature",
+            ]
+        )
+    )
+
+    pane = dashboard.panes[0]
+    assert isinstance(pane, CustomChartPaneConfig)
+    assert pane.chart.filters == (("category", ("fiction", "literature")),)
+    assert pane.chart.presentation.density == "compact"
+
+
+def test_standalone_conversion_preserves_custom_source_and_chart() -> None:
+    source = CustomCommandSource("wechat-reading", ("reader", "ccuv"))
+    chart = CustomChartConfig(
+        "timeline",
+        source,
+        resolve_date_range("timeline", period="14d", since=None, until=None),
+        group_by="book",
+    )
+    dashboard = DashboardLaunch(ProcessConfig(), DashboardHostConfig(refresh_interval=30), ())
+
+    standalone = standalone_from_chart_pane(dashboard, CustomChartPaneConfig(chart))
+
+    assert standalone.chart == chart
+    assert standalone.chart.source == source
+    assert standalone.host.interval == 30
+
+
 def test_text_cannot_be_parsed_as_a_dashboard_pane() -> None:
     parser = build_parser(load_translator("en"))
 
@@ -189,12 +246,12 @@ def test_stack_accepts_supported_legend_modes(mode: str) -> None:
     assert parser.parse_args(["stack", "--legend", mode]).legend == mode
 
 
-def test_all_commands_accept_exactly_three_density_values() -> None:
+def test_all_commands_accept_exactly_four_density_values() -> None:
     parser = build_parser(load_translator("en"))
     for command in ("timeline", "calendar", "stack", "ranking", "monitor"):
-        for density in ("minimal", "compact", "full"):
+        for density in ("minimal", "compact", "full", "detailed"):
             assert parser.parse_args([command, "--density", density]).density == density
-        assert parser.parse_args([command]).density == "full"
+        assert parser.parse_args([command]).density == "detailed"
     with pytest.raises(UsageError) as caught:
         parser.parse_args(["timeline", "--density", "standard"])
     assert caught.value.key == "error.arguments"
@@ -558,6 +615,24 @@ def test_monitor_grouping_rejects_bars(dimension: str) -> None:
 def test_demo_monitor_defaults_to_one_second_interval() -> None:
     options = _to_options(namespace(command="monitor", demo="small", by=None, style="bars"))
     assert options.host.interval == 1.0
+    assert options.host.demo_seed is not None
+
+
+def test_demo_seed_is_shared_by_dashboard_panes_and_varies_between_invocations() -> None:
+    parser = build_parser(load_translator("en"))
+
+    first = _to_options(parser.parse_args(["dashboard", "--demo", "small"]))
+    second = _to_options(parser.parse_args(["dashboard", "--demo", "small"]))
+    fixed = _to_options(parser.parse_args(["dashboard", "--demo", "small", "--demo-seed", "47"]))
+
+    assert first.host.demo_seed is not None
+    assert first.host.demo_seed != second.host.demo_seed
+    assert fixed.host.demo_seed == 47
+    assert all(
+        standalone_from_chart_pane(fixed, pane).host.demo_seed == 47
+        for pane in fixed.panes
+        if isinstance(pane, ChartPaneConfig)
+    )
 
 
 def test_global_language_options_precede_a_subcommand() -> None:
@@ -900,13 +975,25 @@ def test_dashboard_rejects_unknown_preset() -> None:
         parser.parse_args(["dashboard", "medium"])
 
 
-def test_dashboard_options_require_a_preset_or_pane() -> None:
+def test_dashboard_host_options_use_the_default_preset() -> None:
+    parser = build_parser(load_translator("en"))
+
+    options = _to_options(
+        parser.parse_args(["dashboard", "--theme", "nord"]),
+        explicit=frozenset({"color_scheme"}),
+    )
+
+    assert options.host.theme == "nord"
+    assert options.panes[0].animation.style == "analog-clock"
+
+
+def test_dashboard_structural_options_require_content() -> None:
     parser = build_parser(load_translator("en"))
 
     with pytest.raises(UsageError, match="error.arguments"):
         _to_options(
-            parser.parse_args(["dashboard", "--theme", "nord"]),
-            explicit=frozenset({"color_scheme"}),
+            parser.parse_args(["dashboard", "--grid", "2x2"]),
+            explicit=frozenset({"grid"}),
         )
 
 
