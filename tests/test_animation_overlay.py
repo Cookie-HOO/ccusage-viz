@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import Future
 from datetime import datetime
 
 import pytest
@@ -89,6 +90,34 @@ def _record(
     return ExecutionRecord(
         command, started_at, 0.12, exit_code, timed_out, "hello", "", False, False
     )
+
+
+def test_command_overlay_displays_failure_diagnostic_without_opening_history() -> None:
+    runtime = AnimationOverlayRuntime(OverlayConfig(command="failing-command"))
+    future: Future[ExecutionRecord] = Future()
+    runtime._future = future
+    runtime._future_generation = runtime._generation
+    future.set_result(
+        ExecutionRecord(
+            "failing-command",
+            datetime(2026, 9, 29, 12, 34, 56),
+            0.12,
+            1,
+            False,
+            "partial stdout",
+            "connection refused",
+            False,
+            False,
+        )
+    )
+
+    try:
+        assert runtime.poll(now=0) is True
+        assert runtime.output == "exit 1: connection refused"
+        assert runtime.lines(available_width=80) == ("exit 1: connection refused",)
+        assert runtime.history[0].stderr == "connection refused"
+    finally:
+        runtime.close()
 
 
 def test_command_record_preserves_wall_clock_start_and_monotonic_duration(monkeypatch) -> None:

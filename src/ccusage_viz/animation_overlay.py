@@ -391,6 +391,16 @@ def format_execution_record(record: ExecutionRecord) -> str:
     )
 
 
+def _display_output(record: ExecutionRecord) -> str:
+    """Return the live overlay text for one completed command."""
+
+    if not record.timed_out and record.exit_code == 0:
+        return record.stdout
+    outcome = "timed out" if record.timed_out else f"exit {record.exit_code}"
+    detail = record.stderr or record.stdout or "(no output)"
+    return f"{outcome}: {detail}"
+
+
 def _history_outcome(record: ExecutionRecord) -> str:
     if record.timed_out:
         return "timeout"
@@ -592,7 +602,7 @@ class AnimationOverlayRuntime:
                 )
             self.history.appendleft(record)
             if self._future_generation == self._generation:
-                self.output = record.stdout
+                self.output = _display_output(record)
                 changed = True
         if self.config.command is not None:
             due = self.next_due is not None and current >= self.next_due

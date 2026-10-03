@@ -306,16 +306,6 @@ class MonitorComponent:
         self.value_changes.clear()
         self.rank_changes.clear()
 
-    def pause(self) -> None:
-        self.observer.current_interval = None
-        self.clear_changes()
-
-    def resume(self, *, now: float, wall: datetime | None = None) -> None:
-        wall = wall or datetime.now().astimezone()
-        if self.observer.previous is not None:
-            self.observer.rebaseline(self.observer.previous, now, wall)
-        self.clear_changes()
-
     def current_values(
         self, now: float, *, wall: datetime | None = None
     ) -> dict[MonitorKey, float]:

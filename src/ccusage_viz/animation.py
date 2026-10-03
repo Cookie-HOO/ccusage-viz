@@ -146,9 +146,7 @@ class AnimationSessionState:
     wall_origin: datetime
     playback_requested: bool = True
     idle_animation_requested: bool = False
-    host_paused: bool = False
     traversal_frozen_at: float | None = None
-    pause_label: str | None = None
     activity_label: str | None = None
     visible: bool = True
     viable: bool = False
@@ -182,22 +180,13 @@ class AnimationSessionState:
         self.reconcile_clock(now)
 
     def reconcile_traversal(self, now: float) -> None:
-        """Freeze motion once while inactive or manually paused, retaining its position."""
+        """Freeze motion once while inactive, retaining its position."""
 
-        if not self.playback_requested or self.host_paused:
+        if not self.playback_requested:
             if self.traversal_frozen_at is None:
                 self.traversal_frozen_at = self.clock.elapsed(now)
         else:
             self.traversal_frozen_at = None
-
-    def set_host_paused(self, paused: bool, now: float, *, pause_label: str | None = None) -> None:
-        self.host_paused = paused
-        self.pause_label = pause_label if paused else None
-        self.reconcile_traversal(now)
-        self.reconcile_clock(now)
-
-    def set_pause_label(self, pause_label: str | None) -> None:
-        self.pause_label = pause_label
 
     def reconcile_clock(self, now: float) -> None:
         if (
@@ -272,16 +261,11 @@ class AnimationRenderer:
                     if session.spec.effect.category is EffectCategory.TIME
                     else virtual_wall_time(session, now)
                 ),
-                pause_label=session.pause_label
-                or (
-                    session.activity_label
-                    if not session.playback_requested and not session.host_paused
-                    else None
+                pause_label=(
+                    session.activity_label if not session.playback_requested else None
                 ),
                 logical_state=(
-                    LogicalState.ACTIVE
-                    if session.playback_requested and not session.host_paused
-                    else LogicalState.IDLE
+                    LogicalState.ACTIVE if session.playback_requested else LogicalState.IDLE
                 )
                 if session.spec.effect.supports_state
                 else None,

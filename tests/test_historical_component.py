@@ -1,5 +1,6 @@
 from dataclasses import replace
 from datetime import UTC, date, datetime
+from typing import cast
 
 import pytest
 
@@ -16,6 +17,7 @@ from ccusage_viz.historical_component import (
 )
 from ccusage_viz.options import (
     ChartPresentation,
+    Density,
     ProcessConfig,
     RankingConfig,
     StandaloneHostConfig,
@@ -282,6 +284,33 @@ def test_component_reprojects_project_aggregation_without_new_generation() -> No
         ("project", "exact", "claude", "claude-app"),
         ("project", "exact", "codex", "codex-app"),
     ]
+
+
+@pytest.mark.parametrize(
+    ("density", "expects_comparison"),
+    (("minimal", False), ("compact", False), ("full", True), ("detailed", True)),
+)
+def test_component_requests_comparison_coverage_for_complete_content_densities(
+    density: str, expects_comparison: bool
+) -> None:
+    selected = replace(
+        options(),
+        chart=replace(
+            options().chart, presentation=ChartPresentation(density=cast(Density, density))
+        ),
+    )
+    chart = HistoricalChartComponent(
+        selected,
+        owner_id="test:density",
+        runtime=None,
+        registry=build_chart_registry(),
+    )
+    display = chart.display_coverage()
+    chart.seed(selected, UsageSnapshot((), (), 0.1, coverage=display))
+
+    assert (chart.required_coverage() != display) is expects_comparison
+    assert bool(chart.missing_comparison_coverage().intervals) is expects_comparison
+    assert chart.has_pending_unknowns is expects_comparison
 
 
 def test_component_exposes_missing_full_comparison_coverage() -> None:

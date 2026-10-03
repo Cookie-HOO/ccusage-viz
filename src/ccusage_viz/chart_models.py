@@ -254,6 +254,9 @@ class RankingEntry:
     label: str
     usage: TokenUsage
     is_other: bool = False
+    previous_usage: TokenUsage | None = None
+    comparison_ready: bool = False
+    previous_rank: int | None = None
 
 
 @dataclass(frozen=True, slots=True)

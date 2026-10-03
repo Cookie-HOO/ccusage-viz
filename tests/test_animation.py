@@ -416,7 +416,7 @@ def test_non_time_effect_retains_virtual_effective_wall_time(monkeypatch, transl
     assert received == [session.wall_origin, session.wall_origin + timedelta(seconds=1)]
 
 
-def test_session_clock_stops_only_when_no_animated_frame_is_requested() -> None:
+def test_session_clock_stops_when_no_animated_frame_is_requested() -> None:
     session = new_animation_session(animation_spec("rain"), theme="classic")
     session.set_viable(True, 1.0)
     assert session.clock.playing
@@ -424,14 +424,15 @@ def test_session_clock_stops_only_when_no_animated_frame_is_requested() -> None:
     assert not session.clock.playing
     assert session.clock.elapsed(10.0) == 1.0
     session.set_visible(True, 10.0)
-    session.set_host_paused(True, 11.0)
     assert session.clock.playing
     assert session.clock.elapsed(20.0) == 11.0
-    assert session.traversal_frozen_at == 2.0
-    session.set_host_paused(False, 20.0)
-    assert session.clock.playing
+    session.set_playback_requested(False, 20.0)
+    assert session.traversal_frozen_at == 11.0
+    assert not session.clock.playing
+    session.set_playback_requested(True, 30.0)
     assert session.traversal_frozen_at is None
-    assert session.clock.elapsed(21.0) == 12.0
+    assert session.clock.playing
+    assert session.clock.elapsed(31.0) == 12.0
 
 
 def test_style_change_preserves_elapsed_time() -> None:
@@ -500,45 +501,6 @@ def test_idle_animation_keeps_source_frames_live_and_traversal_fixed(
     )
 
     assert received == [(0.0, None), (2.0, 1.0), (3.0, 1.0), (5.0, None)]
-
-
-def test_manual_pause_keeps_source_frames_live_and_traversal_fixed(monkeypatch, translator) -> None:
-    session = new_animation_session(animation_spec("mole-cat"), theme="classic")
-    received: list[tuple[float, float | None, str | None]] = []
-    frame = ProjectedFrame((StyledRow((StyledCell("x"),)),), 0, 9.0, "full")
-    monkeypatch.setattr(
-        "ccusage_viz.animation.project",
-        lambda *_args, **kwargs: received.append(
-            (
-                kwargs["monotonic_seconds"],
-                kwargs["traversal_monotonic_seconds"],
-                kwargs["pause_label"],
-            )
-        )
-        or frame,
-    )
-
-    AnimationRenderer().render(
-        session, width=80, height=24, color=False, ascii=False, now=10.0, translator=translator
-    )
-    session.set_host_paused(True, 11.0, pause_label="paused")
-    AnimationRenderer().render(
-        session, width=80, height=24, color=False, ascii=False, now=12.0, translator=translator
-    )
-    AnimationRenderer().render(
-        session, width=80, height=24, color=False, ascii=False, now=13.0, translator=translator
-    )
-    session.set_host_paused(False, 14.0)
-    AnimationRenderer().render(
-        session, width=80, height=24, color=False, ascii=False, now=15.0, translator=translator
-    )
-
-    assert received == [
-        (0.0, None, None),
-        (2.0, 1.0, "paused"),
-        (3.0, 1.0, "paused"),
-        (5.0, None, None),
-    ]
 
 
 def test_stateful_effects_receive_active_and_idle_state(monkeypatch, translator) -> None:
@@ -626,7 +588,7 @@ def test_renderer_passes_the_selected_library_theme(monkeypatch, translator) -> 
     assert received == ["dracula"]
 
 
-def test_renderer_prefers_explicit_pause_label_over_idle_activity(monkeypatch, translator) -> None:
+def test_renderer_passes_idle_activity_label(monkeypatch, translator) -> None:
     received: list[object] = []
     frame = ProjectedFrame((StyledRow((StyledCell("x"),)),), 0, None, "full")
     monkeypatch.setattr(
@@ -643,12 +605,8 @@ def test_renderer_prefers_explicit_pause_label_over_idle_activity(monkeypatch, t
     AnimationRenderer().render(
         session, width=80, height=24, color=False, ascii=False, now=2.0, translator=translator
     )
-    session.set_pause_label("paused")
-    AnimationRenderer().render(
-        session, width=80, height=24, color=False, ascii=False, now=3.0, translator=translator
-    )
 
-    assert received == [None, "last activity detected: 06:42:10", "paused"]
+    assert received == [None, "last activity detected: 06:42:10"]
 
 
 def test_monitor_attachment_cycle_reaches_none_then_wraps_in_both_directions() -> None:
@@ -750,12 +708,11 @@ def test_standalone_help_shows_overlay_timeout_hint(
     assert "└─ Overlay commands time out after 30 seconds." in help_text
 
 
-def test_standalone_host_space_pauses_and_resumes(
+def test_standalone_host_ignores_space(
     monkeypatch, translator, animation_launch
 ) -> None:
     session = new_animation_session(animation_spec("rain"), theme="classic")
-    recorded_states: list[bool] = []
-    events = iter((" ", " ", "q"))
+    events = iter((" ", "q"))
 
     monkeypatch.setattr(animate_module, "tui_input_mode", nullcontext)
     monkeypatch.setattr(animate_module, "new_animation_session", lambda *_args, **_kwargs: session)
@@ -765,23 +722,13 @@ def test_standalone_host_space_pauses_and_resumes(
     monkeypatch.setattr(
         animate_module, "_terminal", lambda _options: Terminal(80, 24, False, False)
     )
-    monkeypatch.setattr(
-        animate_module,
-        "_paint_animation",
-        lambda _screen, rendered_session, *_args, **_kwargs: recorded_states.append(
-            rendered_session.host_paused
-        ),
-    )
+
+    monkeypatch.setattr(animate_module, "_paint_animation", lambda *_args, **_kwargs: None)
 
     assert animate_module.run_animation(animation_launch, translator) == 0
-    assert any(
-        not before and after
-        for before, after in zip(recorded_states, recorded_states[1:], strict=False)
-    )
-    assert any(
-        before and not after
-        for before, after in zip(recorded_states, recorded_states[1:], strict=False)
-    )
+    assert session.playback_requested
+    assert session.traversal_frozen_at is None
+    assert not hasattr(session, "host_paused")
 
 
 def test_standalone_host_adjustment_handles_quick_controls(

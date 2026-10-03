@@ -378,7 +378,10 @@ def test_monitor_reuses_a_shortened_opaque_project_label_from_process_cache() ->
         make_project_ref("claude", "-Users-me-Projects-tool"),
     )
 
-    assert {key.label for key in _counters((app, tool)).projects} == {"app", "tool"}
+    assert {key.label for key in _counters((app, tool)).projects} == {
+        "Projects-app",
+        "Projects-tool",
+    }
     assert [(key.agent, key.raw_id, key.label) for key in _counters((app,)).projects] == [
         ("claude", "-Users-me-Projects-app", "-Users-me-Projects-app")
     ]
@@ -390,7 +393,7 @@ def test_monitor_reuses_a_shortened_opaque_project_label_from_process_cache() ->
     )
     singleton = _counters((app,)).projects
     assert [(key.agent, key.raw_id, key.label) for key in singleton] == [
-        ("claude", "-Users-me-Projects-app", "app")
+        ("claude", "-Users-me-Projects-app", "Projects-app")
     ]
 
 
@@ -597,9 +600,6 @@ def test_standalone_monitor_localizes_schema_errors(
             self.error = error
             return True
 
-        def pause(self) -> None:
-            pass
-
     class Screen:
         def paint(self, frame: object, **_kwargs: object) -> None:
             painted.append(str(frame))
@@ -628,7 +628,7 @@ def test_standalone_monitor_localizes_schema_errors(
 
 
 @pytest.mark.parametrize("text_view", (False, True))
-def test_standalone_pause_discards_active_sample_and_preserves_paused_status(
+def test_standalone_space_is_ignored_while_sampling_continues(
     monkeypatch: pytest.MonkeyPatch,
     text_view: bool,
 ) -> None:
@@ -678,9 +678,6 @@ def test_standalone_pause_discards_active_sample_and_preserves_paused_status(
         def render(self, *_args: object, **_kwargs: object) -> str:
             return "monitor chart"
 
-        def pause(self) -> None:
-            events.append(("pause",))
-
         def fail(self, error: BaseException, *, generation: int) -> bool:
             events.append(("fail", str(error), generation))
             self.error = error
@@ -711,12 +708,9 @@ def test_standalone_pause_discards_active_sample_and_preserves_paused_status(
     assert [event for event in events if event[0] == "submit"] == [
         ("submit", QueryTrigger.STARTUP, 1)
     ]
-    assert (not text_view) == (("pause",) in events)
     assert ("submission-cancel",) in events
     assert not any(event[0] == "fail" for event in events)
-    assert (not text_view) == any(
-        event[0] == "paint" and "paused" in str(event[1]) for event in events
-    )
+    assert not any(event[0] == "paint" and "paused" in str(event[1]) for event in events)
     assert events[-2:] == [("runtime-cancel",), ("finish",)]
 
 

@@ -49,7 +49,7 @@ from ccusage_viz.options import (
     monitor_shows_window_control,
     replace_chart_filters,
 )
-from ccusage_viz.render.base import RenderAudit, RenderContext
+from ccusage_viz.render.base import RenderAudit, RenderContext, audit_row_visible
 from ccusage_viz.render.filters import active_filter_summary
 from ccusage_viz.render.palette import COLOR_SCHEMES
 from ccusage_viz.terminal import FramePainter, Terminal, compose_frame, inspect_terminal
@@ -116,7 +116,6 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
     last_size: tuple[int, int] | None = None
     manual_refresh_operations: set[OperationToken] = set()
     copy_feedback = TransientFeedback()
-    paused_notice = False
 
     def monitor_chart(config: StandaloneLaunch) -> MonitorConfig:
         if not isinstance(config.chart, MonitorConfig):
@@ -163,11 +162,21 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
     ) -> str:
         display = target.display() if hasattr(target, "display") else target
         display_query_pending = getattr(display, "display_query_pending", False)
+        audit = RenderAudit(
+            target.accepted_at,
+            target.last_elapsed,
+            config.host.interval,
+            "sample",
+            refreshing=lifecycle.submission is not None,
+            querying=display_query_pending,
+        )
         context = RenderContext(
             terminal.width,
             max(
                 1,
-                terminal.height - control_rows - int(config.chart.presentation.density == "full"),
+                terminal.height
+                - control_rows
+                - int(audit_row_visible(config.chart.presentation.density, audit)),
             ),
             translator,
             color=terminal.color,
@@ -183,14 +192,7 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
             ),
             density=config.chart.presentation.density,
             pending=display_query_pending,
-            audit=RenderAudit(
-                target.accepted_at,
-                target.last_elapsed,
-                config.host.interval,
-                "sample",
-                refreshing=lifecycle.submission is not None,
-                querying=display_query_pending,
-            ),
+            audit=audit,
         )
         return display.render(
             context,
@@ -240,7 +242,6 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
     def notices() -> tuple[str, ...]:
         active = lifecycle.active
         manual_refresh_operations.intersection_update({active} if active is not None else ())
-        paused = (translator.text("status.dashboard_paused"),) if paused_notice else ()
         manual = (translator.text("status.tui_refreshing"),) if manual_refresh_operations else ()
         recovery = (
             transient_query_recovery_lines(
@@ -249,7 +250,7 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
             if component.error is not None
             else None
         )
-        return (*paused, *manual, *(recovery or ()))
+        return (*manual, *(recovery or ()))
 
     def feedback(terminal: Terminal, *, now: float) -> tuple[str, ...]:
         return feedback_lines(copy_feedback, width=terminal.width, color=terminal.color, now=now)
@@ -276,7 +277,6 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                         "data-table": "status.monitor_data_table_controls",
                         "data-json": "status.monitor_data_json_controls",
                     }[body_view],
-                    action=translator.text("status.resume" if lifecycle.paused else "status.pause"),
                     scroll=translator.text("status.text_scroll_keys")
                     if body_view != "chart" and overflowing
                     else "",
@@ -662,7 +662,7 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
             "status.monitor_source",
             source=str(exc),
             interval=f"{component.candidate.host.interval:g}",
-            state=(f" · {translator.text('status.paused')}" if lifecycle.paused else ""),
+            state="",
         ).rstrip(" ·")
 
     def start_ready(now: float) -> bool:
@@ -764,11 +764,7 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                                 "status.monitor_source",
                                 source=source,
                                 interval=f"{component.candidate.host.interval:g}",
-                                state=(
-                                    f" · {translator.text('status.paused')}"
-                                    if lifecycle.paused
-                                    else ""
-                                ),
+                                state="",
                             ).rstrip(" ·")
                         else:
                             lifecycle.abandon(operation)
@@ -780,11 +776,7 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                                 "status.monitor_source",
                                 source=str(exc),
                                 interval=f"{component.candidate.host.interval:g}",
-                                state=(
-                                    f" · {translator.text('status.paused')}"
-                                    if lifecycle.paused
-                                    else ""
-                                ),
+                                state="",
                             ).rstrip(" ·")
                     manual_refresh_operations.discard(operation)
                     paint()
@@ -856,39 +848,6 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                         if component.candidate.host.interval != previous_interval:
                             scheduler.rebuild(component.candidate.host.interval, now=now)
                         request(LifecycleTrigger.CONFIGURATION, now=now)
-                    paint()
-                elif body_view == "chart" and key == " ":
-                    resumed = False
-                    paused_notice = not lifecycle.paused
-                    if not lifecycle.paused:
-                        scheduler.pause()
-                        lifecycle.pause()
-                        component.pause()
-                        attachment.set_host_paused(
-                            True,
-                            time.monotonic(),
-                            pause_label=translator.text("status.animation_paused"),
-                        )
-                    else:
-                        now = time.monotonic()
-                        lifecycle.resume()
-                        attachment.set_host_paused(False, now)
-                        scheduler.resume(now=now)
-                        component.resume(now=now, wall=datetime.now().astimezone())
-                        resumed = request(LifecycleTrigger.RESUME, now=now)
-                    if lifecycle.paused or resumed:
-                        status = translator.text(
-                            "status.monitor_paused",
-                            source=(
-                                f"ccusage {component.last_elapsed:.2f}s"
-                                if component.last_elapsed is not None
-                                else "ccusage …"
-                            ),
-                            interval=f"{component.candidate.host.interval:g}",
-                            state=(
-                                f" · {translator.text('status.paused')}" if lifecycle.paused else ""
-                            ),
-                        )
                     paint()
     except KeyboardInterrupt:
         return 0

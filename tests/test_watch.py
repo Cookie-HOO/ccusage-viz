@@ -40,6 +40,7 @@ from ccusage_viz.options import (
     TimelineConfig,
 )
 from ccusage_viz.query.coordinator import QueryHandle
+from ccusage_viz.render.surfaces import SurfaceControls
 from ccusage_viz.terminal import FramePainter, Terminal
 from ccusage_viz.terminal_ui import controls_line, notice_lines
 from ccusage_viz.watch import (
@@ -161,7 +162,7 @@ def test_one_shot_requires_complete_atomic_coverage() -> None:
 
 
 @pytest.mark.parametrize("text_view", (False, True))
-def test_historical_pause_cancels_automatic_query_and_manual_refresh_remains_allowed(
+def test_historical_space_does_not_interrupt_refresh_and_manual_refresh_remains_allowed(
     monkeypatch: pytest.MonkeyPatch,
     text_view: bool,
 ) -> None:
@@ -258,9 +259,7 @@ def test_historical_pause_cancels_automatic_query_and_manual_refresh_remains_all
         (event[1], event[2]) for event in events if event[0] == "submit"
     ] == expected_submissions
     assert len(submissions) == len(expected_submissions)
-    assert (not text_view) == any(
-        event[0] == "paint" and "paused" in str(event[1]) for event in events
-    )
+    assert not any(event[0] == "paint" and "paused" in str(event[1]) for event in events)
     assert not any(event[0] == "fail" for event in events)
     assert events[-3:] == [
         ("submission-cancel", 0),
@@ -528,13 +527,13 @@ def test_watch_paint_places_footer_last_without_refresh_newline(
     _paint(
         "summary\nchart\n",
         "status",
-        "r refresh · m adjust · Space pause",
+        "r refresh · m adjust",
         ("! warning one", "! warning two"),
     )
     assert capsys.readouterr().out == (
         "\x1b[2J\x1b[1;1H\x1b[2Kstatus\x1b[2;1H\x1b[2Ksummary"
         "\x1b[3;1H\x1b[2Kchart\x1b[4;1H\x1b[2K! warning one"
-        "\x1b[5;1H\x1b[2K! warning two\x1b[6;1H\x1b[2Kr refresh · m adjust · Space pause"
+        "\x1b[5;1H\x1b[2K! warning two\x1b[6;1H\x1b[2Kr refresh · m adjust"
     )
 
 
@@ -559,37 +558,10 @@ def test_watch_paint_keeps_footer_visible_if_body_is_too_tall(
     )
 
 
-@pytest.mark.parametrize(
-    ("paused", "expected"),
-    [
-        (False, "ccusage 1.83s · refresh every 5s"),
-        (True, "ccusage 1.83s · paused"),
-    ],
-)
-def test_watch_status_is_derived_from_pause_state(
-    paused: bool,
-    expected: str,
-) -> None:
+def test_watch_status_includes_its_refresh_interval() -> None:
     assert (
-        _watch_status(
-            "ccusage 1.83s",
-            load_translator("en"),
-            interval=5,
-            paused=paused,
-        )
-        == expected
-    )
-
-
-def test_loading_status_can_show_pause_before_first_result() -> None:
-    assert (
-        _watch_status(
-            "Loading…",
-            load_translator("en"),
-            interval=5,
-            paused=True,
-        )
-        == "Loading… · paused"
+        _watch_status("ccusage 1.83s", load_translator("en"), interval=5)
+        == "ccusage 1.83s · refresh every 5s"
     )
 
 
@@ -619,8 +591,8 @@ def test_notice_lines_use_redundant_glyph_color_and_width() -> None:
 
 
 def test_controls_are_dimmed_and_clipped_to_one_row() -> None:
-    colored = controls_line("r refresh · m adjust · Space pause", width=20, color=True)
-    plain = controls_line("r refresh · m adjust · Space pause", width=20, color=False)
+    colored = controls_line("r refresh · m adjust", width=20, color=True)
+    plain = controls_line("r refresh · m adjust", width=20, color=False)
 
     assert colored.startswith("\x1b[2m") and colored.endswith("\x1b[0m")
     assert display_width(colored) == 20
@@ -699,7 +671,12 @@ def test_render_keeps_notices_separate_from_chart() -> None:
                 (),
                 (Notice("notice.project_agent_omitted", {"agent": "Codex"}),),
                 0.0,
-                coverage=DateCoverage.from_interval(date(2025, 12, 25), date(2026, 1, 14)),
+                coverage=DateCoverage(
+                    (
+                        DateInterval(date(2025, 12, 18), date(2025, 12, 31)),
+                        DateInterval(date(2026, 1, 1), date(2026, 1, 14)),
+                    )
+                ),
             )
         ),
         load_translator("en"),
@@ -732,8 +709,13 @@ def test_one_shot_reserves_one_more_row_than_watch(monkeypatch: pytest.MonkeyPat
     chart = component(snapshot=snapshot, registry=registry)
 
     render_component(chart, translator, terminal)
-    render_component(chart, translator, terminal, reserve_prompt=True)
-    render_component(chart, translator, terminal, control_rows=1)
+    render_component(
+        chart,
+        translator,
+        terminal,
+        controls=SurfaceControls(reserves_prompt=True),
+    )
+    render_component(chart, translator, terminal, controls=SurfaceControls(rows=("controls",)))
 
     assert heights == [28, 27, 27]
 
@@ -973,7 +955,7 @@ def test_project_adjustment_explains_missing_retained_attribution(
     assert any("project data is not in this preview" in str(args[0].rows) for args in paints)
 
 
-def test_project_aggregation_adjustment_is_advanced_and_local(
+def test_project_aggregation_adjustment_is_not_exposed_at_runtime(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     paints: list[tuple[object, ...]] = []
@@ -999,9 +981,9 @@ def test_project_aggregation_adjustment_is_advanced_and_local(
 
     assert isinstance(result, RuntimeAdjustmentResult)
     assert result.options.chart.by == "project"
-    assert result.options.chart.project_aggregation == "exact"
-    assert any("A project aggregation" in str(args[0].rows) for args in paints)
-    assert any("PROJECT AGGREGATION exact" in str(args[0].rows) for args in paints)
+    assert result.options.chart.project_aggregation == "name"
+    assert not any("project aggregation" in str(args[0].rows).lower() for args in paints)
+    assert not any("project labels" in str(args[0].rows).lower() for args in paints)
 
 
 def test_runtime_adjustment_ignores_removed_copy_key(
@@ -1082,7 +1064,7 @@ def test_runtime_adjustment_normalizes_timeline_area_when_grouping_changes(
 
 
 @pytest.mark.skipif(os.name != "posix", reason="PTY smoke test is POSIX-only")
-def test_demo_watch_reports_pause_immediately_and_restores_terminal() -> None:
+def test_demo_watch_ignores_space_and_restores_terminal() -> None:
     import pty
     import select
     import subprocess
@@ -1126,12 +1108,8 @@ def test_demo_watch_reports_pause_immediately_and_restores_terminal() -> None:
         assert b"Ranking" in output
 
         os.write(master, b" ")
-        pause_deadline = time.monotonic() + 1
-        while time.monotonic() < pause_deadline and b"paused" not in output:
-            readable, _, _ = select.select([master], [], [], 0.05)
-            if readable:
-                output.extend(os.read(master, 8192))
-        assert b"paused" in output
+        time.sleep(0.1)
+        assert b"paused" not in output
 
         os.write(master, b"\x03")
         assert process.wait(timeout=3) == 0

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from ccusage_viz.chart_models import RankingModel, TimelineModel
 from ccusage_viz.formatting import clip_width, format_tokens
+from ccusage_viz.options import has_complete_content
 from ccusage_viz.render.base import RenderContext
 
 
@@ -17,7 +18,7 @@ def render_observation(
     model: TimelineModel | RankingModel,
     context: RenderContext,
 ) -> str:
-    if context.density != "full" or not model.is_observed:
+    if not has_complete_content(context.density) or not model.is_observed:
         return ""
     values = (
         _timeline_values(model)

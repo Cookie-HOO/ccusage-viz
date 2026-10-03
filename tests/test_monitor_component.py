@@ -1,6 +1,8 @@
 from dataclasses import replace
 from datetime import UTC, date, datetime
 
+import pytest
+
 from ccusage_viz.bootstrap import build_chart_registry, build_query_runtime
 from ccusage_viz.chart_models import TimeOfDayDistributionModel
 from ccusage_viz.domain import ModelBreakdown, ProjectRef, SourceKind, TokenUsage, UsageRecord
@@ -65,8 +67,13 @@ def completion(
     return MonitorCompletion(component.generation, component.candidate, records, elapsed)
 
 
-def test_monitor_component_submits_provider_backed_demo_samples() -> None:
-    launch = replace(options(), host=replace(options().host, demo_size="small"))
+def test_monitor_component_submits_provider_backed_demo_samples(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("ccusage_viz.acquisition.time.monotonic", lambda: 4.9)
+    launch = replace(
+        options(), host=replace(options().host, demo_size="small", demo_seed=17)
+    )
     runtime = build_query_runtime()
     component = MonitorComponent(
         launch,
@@ -81,6 +88,7 @@ def test_monitor_component_submits_provider_backed_demo_samples() -> None:
         started_at = component.monitor_started_at
         assert started_at is not None
         first_result = first.result()
+        monkeypatch.setattr("ccusage_viz.acquisition.time.monotonic", lambda: 5.0)
         second = component.submit(QueryTrigger.TICK, sample_ordinal=2, today=date(2026, 9, 19))
         second_result = second.result()
         component.submit(QueryTrigger.STARTUP, sample_ordinal=3, today=date(2026, 9, 19)).cancel()
@@ -158,8 +166,7 @@ def test_monitor_component_exposes_only_the_accepted_interval_total_delta() -> N
     assert component.accept(completion(component, (record(160),)), now=20, wall=wall)
     assert component.accepted_total_token_delta == 0
 
-    component.pause()
-    assert component.accepted_total_token_delta is None
+    assert component.accepted_total_token_delta == 0
 
 
 def test_monitor_component_accepts_cumulative_samples_and_projects_timeline() -> None:
@@ -670,30 +677,6 @@ def test_monitor_component_reconfigures_without_losing_observed_history() -> Non
     component.accept(completion(component, (record(200),)), now=120, wall=wall)
     assert tuple(component.observer.intervals) == intervals
     assert not component.rebaseline_pending
-
-
-def test_monitor_component_clears_current_across_pause_resume_and_restores_next_pair() -> None:
-    component = MonitorComponent(
-        options(by="model", style="ranking"), registry=build_chart_registry()
-    )
-    wall = datetime(2026, 9, 19, 12, 0, tzinfo=UTC)
-    component.accept(completion(component, (record(100, models={"a": 100}),)), now=0, wall=wall)
-    component.accept(completion(component, (record(160, models={"a": 160}),)), now=10, wall=wall)
-    assert [
-        (entry.key, entry.value) for entry in component.ranking_model(now=10).observed_entries
-    ] == [("a", 360.0)]
-
-    intervals = tuple(component.observer.intervals)
-    component.pause()
-    assert component.ranking_model(now=10).observed_entries == ()
-    assert tuple(component.observer.intervals) == intervals
-
-    component.resume(now=20, wall=wall)
-    component.accept(completion(component, (record(190, models={"a": 190}),)), now=30, wall=wall)
-    assert [
-        (entry.key, entry.value) for entry in component.ranking_model(now=30).observed_entries
-    ] == [("a", 180.0)]
-    assert tuple(component.observer.intervals)[:1] == intervals
 
 
 def test_monitor_component_gap_rebaselines_and_stale_failure_keeps_accepted_state() -> None:

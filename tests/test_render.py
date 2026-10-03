@@ -3,11 +3,13 @@ import re
 import subprocess
 import sys
 from dataclasses import replace
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import plotext as plt
 import pytest
 
+import ccusage_viz.render.stack as stack_renderer
+import ccusage_viz.render.timeline as timeline_renderer
 from ccusage_viz.bootstrap import build_chart_registry
 from ccusage_viz.chart_models import (
     CalendarDay,
@@ -51,6 +53,7 @@ from ccusage_viz.options import (
 from ccusage_viz.render.base import (
     RenderAudit,
     RenderContext,
+    audit_row_visible,
     isolated_plot,
     observed_start_marker,
     render_audit,
@@ -69,8 +72,74 @@ from ccusage_viz.render.palette import (
 )
 from ccusage_viz.render.ranking import render_ranking
 from ccusage_viz.render.stack import render_stack
+from ccusage_viz.render.summary import SummaryBlock, layout_summary_blocks, render_summary
+from ccusage_viz.render.surfaces import (
+    SurfaceControls,
+    SurfacePresentation,
+    dashboard_pane_surface,
+    standalone_surface,
+)
 from ccusage_viz.render.timeline import render_timeline
 from ccusage_viz.terminal import Terminal
+
+
+def test_timeline_surfaces_have_independent_axis_and_control_budgets() -> None:
+    presentation = SurfacePresentation(
+        "timeline",
+        "no-color",
+        "linear",
+        "below-title",
+        "detailed",
+        "show",
+        "14d",
+        "Total",
+        None,
+        None,
+        None,
+        60,
+    )
+    terminal = Terminal(80, 20, color=False, ascii=True)
+    controls = SurfaceControls(rows=("standalone controls",), reserves_prompt=True)
+
+    standalone = standalone_surface("timeline").context(
+        terminal, load_translator("en"), presentation, notices=1, controls=controls
+    )
+    dashboard = dashboard_pane_surface("timeline").context(
+        terminal, load_translator("en"), presentation, notices=1
+    )
+
+    assert not standalone.hide_upper_right_axes
+    assert dashboard.hide_upper_right_axes
+    assert standalone.height == 15
+    assert dashboard.height == 18
+
+
+def test_detailed_surfaces_do_not_reserve_empty_audit_rows() -> None:
+    presentation = SurfacePresentation(
+        "timeline",
+        "no-color",
+        "linear",
+        "below-title",
+        "detailed",
+        "show",
+        "14d",
+        "Total",
+        None,
+        None,
+        None,
+        None,
+    )
+    terminal = Terminal(80, 20, color=False, ascii=True)
+
+    standalone = standalone_surface("timeline").context(
+        terminal, load_translator("en"), presentation
+    )
+    dashboard = dashboard_pane_surface("timeline").context(
+        terminal, load_translator("en"), presentation
+    )
+
+    assert standalone.height == 19
+    assert dashboard.height == 20
 
 
 def usage(total: int) -> TokenUsage:
@@ -83,6 +152,43 @@ def context(ascii: bool = False) -> RenderContext:
 
 def period() -> DateRange:
     return DateRange(date(2026, 1, 1), date(2026, 1, 14))
+
+
+def test_layout_summary_blocks_wraps_semantic_facts_with_ansi_and_cjk_widths() -> None:
+    context = RenderContext(10, 1, load_translator("zh"), color=False)
+
+    rows = layout_summary_blocks(
+        (
+            SummaryBlock("甲乙"),
+            SummaryBlock("\x1b[1m丙丁\x1b[0m"),
+            SummaryBlock("戊己"),
+        ),
+        context,
+    )
+
+    assert rows == ("甲乙，\x1b[1m丙丁\x1b[0m", "戊己")
+    assert all(display_width(row) <= context.width for row in rows)
+
+
+def test_layout_summary_blocks_clips_only_an_oversized_block() -> None:
+    context = RenderContext(6, 1, load_translator("en"), color=False)
+
+    rows = layout_summary_blocks((SummaryBlock("Current"), SummaryBlock("Today")), context)
+
+    assert rows == ("Curren", "Today")
+
+
+def test_layout_summary_blocks_stacks_facts_without_separators() -> None:
+    context = RenderContext(10, 1, load_translator("zh"), color=False)
+
+    rows = layout_summary_blocks(
+        (SummaryBlock("甲乙"), SummaryBlock("\x1b[1m丙丁\x1b[0m"), SummaryBlock("戊己")),
+        context,
+        layout="stack",
+    )
+
+    assert rows == ("甲乙", "\x1b[1m丙丁\x1b[0m", "戊己")
+    assert all(display_width(row) <= context.width for row in rows)
 
 
 @pytest.mark.parametrize(
@@ -128,7 +234,7 @@ def test_pending_historical_component_renders_candidate_safe_placeholder(config)
     assert "2026-01-01" not in output
 
 
-def test_title_querying_marker_is_semantic_and_localized() -> None:
+def test_title_shows_only_querying_marker() -> None:
     querying = RenderContext(
         80,
         24,
@@ -146,7 +252,7 @@ def test_title_querying_marker_is_semantic_and_localized() -> None:
     model = TimelineModel((date(2026, 1, 1),), (Series("total", "Total", (usage(1),)),))
 
     assert "查询中" in render_timeline(model, querying)
-    assert "querying" not in render_timeline(model, refreshing)
+    assert "refreshing" not in render_timeline(model, refreshing)
 
 
 def test_normalized_content_headings_prefix_timeline_and_ranking() -> None:
@@ -165,6 +271,16 @@ def test_normalized_content_headings_prefix_timeline_and_ranking() -> None:
 
     assert "Total · Timeline · 10d" in timeline_output
     assert "Project · Ranking · 14d" in ranking_output
+
+
+def test_historical_ranking_heading_is_centered_once() -> None:
+    context = RenderContext(80, 24, load_translator("zh"), color=False, period="14d")
+    model = RankingModel((RankingEntry("a", "A", usage(1_200)),), period())
+
+    heading = render_ranking(model, context).splitlines()[0]
+
+    assert heading.lstrip() == "累计排名 · 14d"
+    assert len(heading) - len(heading.lstrip()) == (context.width - display_width(heading.lstrip())) // 2
 
 
 def test_ranking_heading_shows_hidden_top_coverage() -> None:
@@ -224,6 +340,7 @@ def test_pending_historical_ranking_masks_stale_figures() -> None:
         ("minimal", False, False),
         ("compact", True, False),
         ("full", True, True),
+        ("detailed", True, True),
     ],
 )
 def test_historical_density_controls_summary_structure(
@@ -287,7 +404,7 @@ def test_full_summary_marks_unknown_applicable_comparisons(state: ComparisonStat
             24,
             load_translator("en"),
             color=False,
-            density="full",
+            density="detailed",
         ),
     )
 
@@ -517,7 +634,38 @@ def test_exact_project_ranking_keeps_agent_visible_in_narrow_context() -> None:
     assert all("very-long-project" not in row for row in rows)
 
 
-def test_ranking_change_markers_separate_rank_activity_and_value() -> None:
+def test_historical_ranking_derives_comparison_markers_from_entry_facts() -> None:
+    model = RankingModel(
+        (
+            RankingEntry(
+                ("project", "api"),
+                "api",
+                usage(300),
+                previous_usage=usage(100),
+                comparison_ready=True,
+                previous_rank=2,
+            ),
+            RankingEntry(
+                ("project", "app"),
+                "app",
+                usage(100),
+                previous_usage=usage(200),
+                comparison_ready=True,
+                previous_rank=1,
+            ),
+        ),
+        period(),
+    )
+
+    output = render_ranking(model, context(True))
+
+    api_line = next(line for line in output.splitlines() if "api" in line)
+    app_line = next(line for line in output.splitlines() if "app" in line)
+    assert "^ +200 · ^" in api_line
+    assert "v -100 · v" in app_line
+
+
+def test_historical_ranking_ignores_refresh_delta_maps() -> None:
     model = RankingModel(
         (
             RankingEntry(("project", "app"), "app", usage(1_200)),
@@ -541,27 +689,10 @@ def test_ranking_change_markers_separate_rank_activity_and_value() -> None:
     )
 
     assert "^" not in static
-    app_line = next(line for line in live.splitlines() if "app" in line)
-    api_line = next(line for line in live.splitlines() if "api" in line)
-    assert "1 ^ * app" in app_line
-    assert "1.2K ^" in app_line
-    assert "2 v * api" in api_line
-    assert "800 v" in api_line
-
-    equal = render_ranking(
-        model,
-        replace(
-            context(True),
-            deltas={("project", "app"): 0},
-            rank_deltas={("project", "app"): 0},
-        ),
-    )
-    equal_line = next(line for line in equal.splitlines() if "app" in line)
-    assert "1     app" in equal_line
-    assert "1.2K =" in equal_line
+    assert live == static
 
 
-def test_ranking_other_has_value_activity_but_no_rank_marker() -> None:
+def test_historical_ranking_other_ignores_refresh_activity() -> None:
     other = RankingModel(
         (RankingEntry("Other", "Other", usage(500), is_other=True),),
         period(),
@@ -581,9 +712,8 @@ def test_ranking_other_has_value_activity_but_no_rank_marker() -> None:
     )
 
     line = next(line for line in output.splitlines() if "Other" in line)
-    assert "1   * Other" in line
-    assert "500 ^" in line
-    assert "1 ^ * Other" not in line
+    assert "^" not in line
+    assert "*" not in line
 
 
 def test_empty_ranking_keeps_localized_effective_range() -> None:
@@ -613,7 +743,7 @@ def test_observed_monitor_heading_marks_only_query_pending_candidates() -> None:
     refreshing = render_timeline(model, replace(context(), audit=RenderAudit(refreshing=True)))
 
     assert "querying" in querying
-    assert "querying" not in refreshing
+    assert "refreshing" not in refreshing
 
 
 def test_observed_timeline_uses_wall_clock_axis_and_metric_heading() -> None:
@@ -679,10 +809,12 @@ def test_observed_timeline_labels_visible_monitor_start_by_density() -> None:
     )
 
     full = render_timeline(model, replace(context(), width=140, density="full"))
+    detailed = render_timeline(model, replace(context(), width=140, density="detailed"))
     compact = render_timeline(model, replace(context(), width=140, density="compact"))
     minimal = render_timeline(model, replace(context(), width=140, density="minimal"))
 
     assert "Monitor started 10:02" in full
+    assert "Monitor started 10:02" in detailed
     assert "Started 10:02" in compact
     assert "Monitor started 10:02" not in minimal
     assert "Started 10:02" not in minimal
@@ -734,7 +866,12 @@ def test_observed_timeline_renders_sampling_state_with_real_translator() -> None
 
 @pytest.mark.parametrize(
     ("density", "current"),
-    [("minimal", False), ("compact", False), ("full", True)],
+    [
+        ("minimal", False),
+        ("compact", False),
+        ("full", True),
+        ("detailed", True),
+    ],
 )
 def test_monitor_density_controls_current_observation(
     density: str,
@@ -763,14 +900,14 @@ def test_monitor_density_controls_current_observation(
     assert "vs " not in output
 
 
-def test_full_audit_uses_host_supplied_sample_cadence() -> None:
+def test_detailed_audit_uses_host_supplied_sample_cadence() -> None:
     output = render_audit(
         RenderContext(
             80,
             24,
             load_translator("en"),
             color=False,
-            density="full",
+            density="detailed",
             audit=RenderAudit(
                 datetime(2026, 1, 1, 10, 5),
                 0.25,
@@ -783,16 +920,16 @@ def test_full_audit_uses_host_supplied_sample_cadence() -> None:
     assert output == "updated 10:05:00 · ccusage 0.25s · sample every 15s"
 
 
-def test_full_audit_appends_localized_muted_refreshing_suffix() -> None:
+def test_detailed_audit_appends_localized_muted_refreshing_suffix() -> None:
     audit = RenderAudit(datetime(2026, 1, 1, 10, 5), 0.25, 15, "sample", refreshing=True)
     plain = render_audit(
-        RenderContext(80, 24, load_translator("en"), color=False, density="full", audit=audit)
+        RenderContext(80, 24, load_translator("en"), color=False, density="detailed", audit=audit)
     )
     colored = render_audit(
-        RenderContext(80, 24, load_translator("en"), density="full", audit=audit)
+        RenderContext(80, 24, load_translator("en"), density="detailed", audit=audit)
     )
     chinese = render_audit(
-        RenderContext(80, 24, load_translator("zh"), color=False, density="full", audit=audit)
+        RenderContext(80, 24, load_translator("zh"), color=False, density="detailed", audit=audit)
     )
 
     assert plain == "updated 10:05:00 · ccusage 0.25s · sample every 15s · refreshing"
@@ -802,8 +939,33 @@ def test_full_audit_appends_localized_muted_refreshing_suffix() -> None:
     assert chinese.endswith(" · 刷新中")
 
 
-@pytest.mark.parametrize("density", ("minimal", "compact"))
-def test_non_full_audit_hides_refreshing_suffix(density: str) -> None:
+@pytest.mark.parametrize(
+    ("density", "audit", "visible"),
+    (
+        ("detailed", RenderAudit(), False),
+        ("detailed", RenderAudit(querying=True), False),
+        ("detailed", RenderAudit(accepted_at=datetime(2026, 1, 1)), True),
+        ("detailed", RenderAudit(query_elapsed=0.25), True),
+        ("detailed", RenderAudit(interval=60), True),
+        ("detailed", RenderAudit(refreshing=True), True),
+        ("full", RenderAudit(interval=60), False),
+        ("compact", RenderAudit(interval=60), False),
+        ("minimal", RenderAudit(interval=60), False),
+    ),
+)
+def test_audit_row_visibility_matches_rendered_footer(
+    density: str, audit: RenderAudit, visible: bool
+) -> None:
+    context = RenderContext(
+        80, 24, load_translator("en"), color=False, density=density, audit=audit
+    )
+
+    assert audit_row_visible(density, audit) is visible
+    assert bool(render_audit(context)) is visible
+
+
+@pytest.mark.parametrize("density", ("minimal", "compact", "full"))
+def test_non_detailed_audit_hides_refreshing_suffix(density: str) -> None:
     output = render_audit(
         RenderContext(
             80,
@@ -1731,6 +1893,129 @@ def test_color_schemes_allocate_distinct_visible_series() -> None:
         assert colors == categorical_colors(reversed(keys), scheme)
 
 
+def test_full_summary_wraps_between_semantic_blocks() -> None:
+    summary = PeriodSummary(
+        "day",
+        date(2026, 1, 2),
+        21_400_000,
+        PercentChange(ChangeDirection.INCREASE, 12.4),
+        PercentChange(ChangeDirection.DECREASE, 23.4),
+        date(2025, 12, 26),
+    )
+    context = RenderContext(28, 24, load_translator("en"), color=False)
+
+    rows = render_summary(summary, context).splitlines()
+
+    assert rows == ["Today’s tokens 21.4M", "vs yesterday ↑ 12.4%", "vs last Fr ↓ 23.4%"]
+    assert all(display_width(row) <= context.width for row in rows)
+
+
+def test_timeline_budgets_each_wrapped_summary_row(monkeypatch: pytest.MonkeyPatch) -> None:
+    summary = PeriodSummary(
+        "day",
+        date(2026, 1, 2),
+        21_400_000,
+        PercentChange(ChangeDirection.INCREASE, 12.4),
+        PercentChange(ChangeDirection.DECREASE, 23.4),
+        date(2025, 12, 26),
+    )
+    model = TimelineModel(
+        (date(2026, 1, 1), date(2026, 1, 2)),
+        (Series("total", "Total", (usage(10), usage(20))),),
+        summary=summary,
+    )
+    context = RenderContext(28, 12, load_translator("en"), color=False)
+    captured: dict[str, object] = {}
+    original = timeline_renderer.render_timeline_plot
+
+    def capture(*args: object, **kwargs: object) -> object:
+        captured.update(kwargs)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(timeline_renderer, "render_timeline_plot", capture)
+
+    output = render_timeline(model, context)
+
+    assert len(render_summary(summary, context).splitlines()) == 3
+    assert captured["text_rows"] == 4
+    assert len(output.splitlines()) == context.height
+    assert "01-01" in output.splitlines()[-1]
+    assert "01-02" in output.splitlines()[-1]
+
+
+def test_timeline_ignores_plotext_ambient_terminal_height_limit() -> None:
+    days = tuple(date(2026, 9, 20) + timedelta(days=index) for index in range(14))
+    model = TimelineModel(
+        days,
+        (
+            Series(
+                "total",
+                "Total",
+                tuple(usage(100_000 * (index + 1)) for index in range(len(days))),
+            ),
+        ),
+        summary=PeriodSummary(
+            "day",
+            days[-1],
+            1_400_000,
+            PercentChange(ChangeDirection.DECREASE, 35.0),
+            PercentChange(ChangeDirection.DECREASE, 40.2),
+            days[-8],
+        ),
+    )
+    context = RenderContext(
+        108,
+        25,
+        load_translator("zh"),
+        color=False,
+        style="points",
+        density="detailed",
+        weekday_mode="show",
+        period="14d",
+        title_content="总量",
+        hide_upper_right_axes=True,
+    )
+
+    output = render_timeline(model, context)
+
+    assert len(output.splitlines()) == context.height
+    assert days[0].strftime("%m-%d") in output.splitlines()[-1]
+    assert days[-2].strftime("%m-%d") in output.splitlines()[-1]
+
+
+def test_grouped_stack_budgets_each_wrapped_summary_row(monkeypatch: pytest.MonkeyPatch) -> None:
+    summary = PeriodSummary(
+        "day",
+        date(2026, 1, 2),
+        21_400_000,
+        PercentChange(ChangeDirection.INCREASE, 12.4),
+        PercentChange(ChangeDirection.DECREASE, 23.4),
+        date(2025, 12, 26),
+    )
+    model = StackModel(
+        (date(2026, 1, 1), date(2026, 1, 2)),
+        (
+            Series("input", "input", (usage(10), usage(20))),
+            Series("output", "output", (usage(5), usage(10))),
+        ),
+        summary=summary,
+    )
+    context = RenderContext(28, 12, load_translator("en"), color=False, style="grouped")
+    captured: dict[str, object] = {}
+    original = stack_renderer.render_grouped_stack_plot
+
+    def capture(*args: object, **kwargs: object) -> object:
+        captured.update(kwargs)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(stack_renderer, "render_grouped_stack_plot", capture)
+
+    render_stack(model, context)
+
+    assert len(render_summary(summary, context).splitlines()) == 3
+    assert captured["text_rows"] == 5
+
+
 @pytest.mark.parametrize("scheme", ["classic", "vivid", "contrast"])
 def test_summary_uses_theme_semantic_colors(scheme: str) -> None:
     summary = PeriodSummary(
@@ -1853,6 +2138,9 @@ def test_categorical_color_is_independent_of_python_hash_seed() -> None:
 
 
 def test_plotext_state_is_cleared_after_render_scope() -> None:
+    original_limits = tuple(plt.terminal._limit)
     with isolated_plot():
         plt.figure.title("private")
+        plt.terminal.limit(False, False)
     assert "private" not in plt.figure.build()
+    assert tuple(plt.terminal._limit) == original_limits

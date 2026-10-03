@@ -81,11 +81,11 @@ def _usage_values(usage: TokenUsage) -> dict[str, int]:
 
 
 def _historical_model(options: StandaloneLaunch, snapshot: UsageSnapshot):
-    from ccusage_viz.options import MonitorConfig
+    from ccusage_viz.options import CustomChartConfig, MonitorConfig
 
     chart = options.chart
-    if isinstance(chart, MonitorConfig):
-        raise TypeError("historical data views do not support monitor configurations")
+    if isinstance(chart, (CustomChartConfig, MonitorConfig)):
+        raise TypeError("historical data views do not support custom or monitor configurations")
     return process_historical(
         chart,
         snapshot.records,

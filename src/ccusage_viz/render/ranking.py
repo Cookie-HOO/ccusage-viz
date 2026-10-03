@@ -20,6 +20,10 @@ from ccusage_viz.render.base import (
     title_with_querying,
 )
 from ccusage_viz.render.palette import get_color_scheme
+from ccusage_viz.render.ranking_presentation import (
+    RankingPresentationEntry,
+    render_historical_ranking,
+)
 from ccusage_viz.render.summary import render_summary, render_summary_placeholder
 from ccusage_viz.trends import trend_glyph
 
@@ -148,7 +152,7 @@ def render_ranking(model: RankingModel, context: RenderContext) -> str:
                 top=model.top,
                 share=f"{model.top_share:.1%}",
             )
-        heading = center_text(heading_text, context.width)
+        heading = heading_text
     pending = context.pending and not model.is_observed
     summary = (
         render_summary_placeholder(
@@ -170,6 +174,35 @@ def render_ranking(model: RankingModel, context: RenderContext) -> str:
         return "\n".join(
             line for line in (summary, heading, context.translator.text(message)) if line
         )
+    if not model.is_observed:
+        return render_historical_ranking(
+            tuple(
+                RankingPresentationEntry(
+                    entry.key,
+                    (
+                        f"{agent} {entry.label}"
+                        if (agent := _entry_agent(entry)) is not None
+                        and model.project_aggregation == "exact"
+                        and not entry.is_other
+                        else entry.label
+                    ),
+                    entry.usage.total,
+                    None if entry.previous_usage is None else entry.previous_usage.total,
+                    entry.comparison_ready,
+                    entry.is_other,
+                    entry.previous_rank,
+                )
+                for entry in model.entries
+            ),
+            heading=heading,
+            value_formatter=lambda value: format_tokens(round(value)),
+            delta_formatter=lambda value: f"{value:+,}",
+            context=context,
+            summary=summary,
+            pending=pending,
+            total=model.percentage_total.total,
+        )
+
     total = None if model.is_observed or pending else model.percentage_total.total
     formatted_values = [
         "??" if pending else format_tokens(round(_entry_value(entry))) for entry in entries

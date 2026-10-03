@@ -115,14 +115,11 @@ def _frame_rows(
 
 
 def _status(session: AnimationSessionState, translator: Translator) -> str:
-    state = translator.text(
-        "status.animation_paused" if session.host_paused else "status.animation_running"
-    )
     return translator.text(
         "status.animation",
         style=session.spec.display_name,
         theme=session.theme,
-        state=state,
+        state=translator.text("status.animation_running"),
     )
 
 
@@ -156,10 +153,7 @@ def _paint_animation(
                     rows[placement.row], placement, width=terminal.width
                 )
     controls = controls_line(
-        translator.text(
-            "status.animation_controls",
-            action=translator.text("status.resume" if session.host_paused else "status.pause"),
-        ),
+        translator.text("status.animation_controls"),
         width=terminal.width,
         color=terminal.color,
     )
@@ -545,7 +539,7 @@ def _run_adjustment(
                 AdjustmentAction("0", translator.text("adjustment.overlay_reset"), 1),
                 AdjustmentAction("e", translator.text("adjustment.overlay_edit"), 2),
                 AdjustmentAction("i", translator.text("adjustment.overlay_interval"), 3),
-                AdjustmentAction("l", translator.text("adjustment.overlay_history"), 4),
+                AdjustmentAction("L", translator.text("adjustment.overlay_history"), 4),
             )
         )
         state = translator.text(
@@ -645,7 +639,7 @@ def _run_adjustment(
             _run_overlay_editor(screen, overlay, decoder, options, translator)
         elif page == "advanced" and key == "i":
             overlay.cycle_interval(now=now)
-        elif page == "advanced" and key == "l":
+        elif page == "advanced" and key == "L":
             _run_overlay_history(screen, overlay, decoder, options, translator)
         else:
             continue
@@ -673,7 +667,6 @@ class GalleryState:
 
     styles: tuple[str, ...]
     selected_style: str
-    playback_requested: bool = True
     sessions: dict[str, AnimationSessionState] = field(default_factory=dict)
     frames: dict[tuple[str, int, int, bool, bool, str], tuple[str, ...]] = field(
         default_factory=dict
@@ -715,7 +708,6 @@ class GalleryState:
             )
             self.sessions[style] = session
         session.set_visible(True, now)
-        session.set_playback_requested(self.playback_requested, now)
         return session
 
     def set_visible_styles(self, styles: tuple[str, ...], *, now: float) -> None:
@@ -730,12 +722,6 @@ class GalleryState:
             self.session_for(style, now=now)
             if not was_visible:
                 self.dirty_styles.add(style)
-
-    def set_playback_requested(self, requested: bool, *, now: float) -> None:
-        self.playback_requested = requested
-        self.dirty_styles.update(self.sessions)
-        for session in self.sessions.values():
-            session.set_playback_requested(requested, now)
 
     def mark_theme_changed(self, style: str) -> None:
         self.dirty_styles.add(style)
@@ -882,11 +868,7 @@ def _run_gallery(options: AnimationLaunch, translator: Translator) -> int:
                 rows, sessions = _gallery_rows(state, renderer, terminal, translator, now=now)
                 status = translator.text(
                     "status.animation_gallery",
-                    state=translator.text(
-                        "status.animation_running"
-                        if state.playback_requested
-                        else "status.animation_paused"
-                    ),
+                    state=translator.text("status.animation_running"),
                 )
                 screen.paint(
                     compose_frame(
@@ -906,9 +888,7 @@ def _run_gallery(options: AnimationLaunch, translator: Translator) -> int:
                 now = time.monotonic()
                 if key in {"q", "Q", "\x03"}:
                     break
-                if key == " ":
-                    state.set_playback_requested(not state.playback_requested, now=now)
-                elif key in {"t", "T"} and state.selected_style:
+                if key in {"t", "T"} and state.selected_style:
                     session = state.session_for(state.selected_style, now=now)
                     _cycle_theme(session, step=1 if key == "t" else -1, now=now)
                     state.mark_theme_changed(state.selected_style)
@@ -973,13 +953,7 @@ def run_animation(options: AnimationLaunch, translator: Translator) -> int:
                 now = time.monotonic()
                 if key in {"q", "Q", "\x1b", "\x03"}:
                     break
-                if key == " ":
-                    session.set_host_paused(
-                        not session.host_paused,
-                        now,
-                        pause_label=translator.text("status.animation_paused"),
-                    )
-                elif key in {"m", "M"}:
+                if key in {"m", "M"}:
                     if _run_adjustment(
                         screen, session, renderer, overlay, decoder, options, translator
                     ):
