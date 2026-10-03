@@ -11,6 +11,21 @@ def record_identity(record: UsageRecord) -> tuple[date, str, tuple[str, str], st
     return record.day, record.agent, record.project.key, record.models[0].model
 
 
+def test_seeded_demo_is_reproducible_but_live_reports_progress_irregularly() -> None:
+    period = DateRange(date(2026, 1, 1), date(2026, 1, 8))
+
+    baseline = generate_demo("small", period, seed=17)
+    assert baseline == generate_demo("small", period, seed=17)
+    assert baseline != generate_demo("small", period, seed=18)
+    assert baseline == generate_demo("small", period, seed=17, report_time=0.1)
+    assert generate_demo("small", period, seed=17, report_time=0.1) == generate_demo(
+        "small", period, seed=17, report_time=4.9
+    )
+    assert generate_demo("small", period, seed=17, report_time=4.9) != generate_demo(
+        "small", period, seed=17, report_time=5.0
+    )
+
+
 def test_demo_sizes_only_change_magnitude() -> None:
     period = DateRange(date(2026, 1, 1), date(2026, 1, 8))
     small = generate_demo("small", period)

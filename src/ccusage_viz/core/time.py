@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass, replace
 from datetime import date, timedelta
 
-_PERIOD_PATTERN = re.compile(r"(?P<value>[1-9][0-9]*)(?P<unit>d|mo|q|y)$")
+_PERIOD_PATTERN = re.compile(r"(?P<value>[1-9][0-9]*)(?P<unit>d|w|mo|q|y)$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,13 +24,15 @@ class DateRange:
 def parse_period(value: str) -> tuple[int, str]:
     match = _PERIOD_PATTERN.fullmatch(value)
     if match is None:
-        raise ValueError("period must be a positive integer followed by d, mo, q, or y")
+        raise ValueError("period must be a positive integer followed by d, w, mo, q, or y")
     return int(match["value"]), match["unit"]
 
 
 def natural_period_start(end: date, value: int, unit: str) -> date:
     if unit == "d":
         return end - timedelta(days=value - 1)
+    if unit == "w":
+        return end - timedelta(days=end.weekday() + 7 * (value - 1))
     if unit == "mo":
         month_index = end.year * 12 + end.month - 1 - (value - 1)
         return date(month_index // 12, month_index % 12 + 1, 1)

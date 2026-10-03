@@ -8,7 +8,7 @@ from threading import Event
 from ccusage_viz.core.time import DateRange
 from ccusage_viz.coverage import DateCoverage
 from ccusage_viz.demo import generate_demo
-from ccusage_viz.domain import ModelBreakdown, TokenUsage, UsageRecord
+from ccusage_viz.domain import UsageRecord
 from ccusage_viz.errors import QueryError
 from ccusage_viz.query.models import (
     DataResolution,
@@ -32,7 +32,7 @@ class DemoProvider:
     capabilities = ProviderCapabilities(
         resolutions=(DataResolution.DATE.value,),
         dimensions=("agent", "model", "project"),
-        execution_options=("demo_size", "sample_ordinal"),
+        execution_options=("demo_report_time", "demo_seed", "demo_size"),
         in_process=True,
     )
 
@@ -42,19 +42,26 @@ class DemoProvider:
         self.capabilities.validate(intent)
         options = dict(intent.execution_options)
         size = str(options.get("demo_size", "small"))
-        raw_sample_ordinal = options.get("sample_ordinal")
-        if raw_sample_ordinal is not None and not isinstance(raw_sample_ordinal, (str, int)):
-            raise ValueError("demo sample ordinal must be an integer")
-        sample_arguments = () if raw_sample_ordinal is None else (str(int(raw_sample_ordinal)),)
+        seed = _option_int(options.get("demo_seed", 0), "demo seed")
+        report_time = options.get("demo_report_time")
+        if report_time is not None and (
+            isinstance(report_time, bool) or not isinstance(report_time, (int, float))
+        ):
+            raise ValueError("demo report time must be numeric")
+        arguments = (
+            (size, str(seed))
+            if report_time is None
+            else (size, str(seed), str(float(report_time)))
+        )
         queries = tuple(
             PhysicalQuery(
                 intent.provider,
                 "generate",
                 (
-                    size,
+                    arguments[0],
                     interval.since.isoformat(),
                     interval.until.isoformat(),
-                    *sample_arguments,
+                    *arguments[1:],
                 ),
                 intent.execution_context,
                 DateCoverage.from_interval(interval.since, interval.until),
@@ -69,22 +76,19 @@ class DemoProvider:
         return query.fingerprint
 
     def execute(self, query: PhysicalQuery, cancelled: Event) -> PhysicalResult:
-        if query.operation != "generate" or len(query.arguments) not in {3, 4}:
+        if query.operation != "generate" or len(query.arguments) not in {3, 4, 5}:
             raise ValueError(f"unsupported demo operation: {query.operation}")
         if cancelled.is_set():
             raise QueryError("error.ccusage_cancelled", query=query.operation)
-        size, raw_since, raw_until, *ordinal = query.arguments
-        raw_ordinal = ordinal[0] if ordinal else "0"
+        size, raw_since, raw_until, *live_arguments = query.arguments
+        raw_seed, *report_time = live_arguments or ("0",)
         records = generate_demo(
             size,
             DateRange(date.fromisoformat(raw_since), date.fromisoformat(raw_until)),
+            seed=_option_int(raw_seed, "demo seed"),
+            report_time=float(report_time[0]) if len(query.arguments) == 5 else None,
             cancelled=cancelled.is_set,
         )
-        sample_ordinal = int(raw_ordinal)
-        if sample_ordinal:
-            records = tuple(
-                _scale_record(record, _sample_factor(sample_ordinal)) for record in records
-            )
         if cancelled.is_set():
             raise QueryError("error.ccusage_cancelled", query=query.operation)
         return PhysicalResult(query, pickle.dumps(records, protocol=5))
@@ -125,36 +129,13 @@ class DemoProvider:
         )
 
 
-def _sample_factor(ordinal: int) -> int:
-    if ordinal < 0:
-        raise ValueError("demo sample ordinal must be non-negative")
-    waveform = (1, 1, 2, 1, 6, 14, 5, 2, 1, 3, 8, 2)
-    return sum(waveform[index % len(waveform)] for index in range(ordinal + 1))
-
-
-def _scale_usage(usage: TokenUsage, factor: int) -> TokenUsage:
-    return TokenUsage(
-        usage.total * factor,
-        usage.input * factor,
-        usage.output * factor,
-        usage.cache_read * factor,
-        usage.cache_creation * factor,
-        usage.other * factor,
-    )
-
-
-def _scale_record(record: UsageRecord, factor: int) -> UsageRecord:
-    return UsageRecord(
-        record.day,
-        record.agent,
-        _scale_usage(record.usage, factor),
-        record.source,
-        record.project,
-        tuple(
-            ModelBreakdown(model.model, _scale_usage(model.usage, factor))
-            for model in record.models
-        ),
-    )
+def _option_int(value: object, name: str) -> int:
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be an integer")
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be an integer") from exc
 
 
 DEMO_DEFINITION = ProviderDefinition(DemoProvider())

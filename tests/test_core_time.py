@@ -16,6 +16,7 @@ from ccusage_viz.core.time import (
     [
         ("1d", (1, "d")),
         ("13mo", (13, "mo")),
+        ("8w", (8, "w")),
         ("8q", (8, "q")),
         ("5y", (5, "y")),
     ],
@@ -24,7 +25,7 @@ def test_parse_period_accepts_supported_units(period: str, expected: tuple[int, 
     assert parse_period(period) == expected
 
 
-@pytest.mark.parametrize("period", ["", "0d", "-1d", "1w", "1.5d", "d", " 1d"])
+@pytest.mark.parametrize("period", ["", "0d", "-1d", "1.5d", "d", " 1d"])
 def test_parse_period_rejects_invalid_values(period: str) -> None:
     with pytest.raises(ValueError, match="positive integer"):
         parse_period(period)
@@ -34,6 +35,7 @@ def test_parse_period_rejects_invalid_values(period: str) -> None:
     ("value", "unit", "expected"),
     [
         (7, "d", date(2026, 9, 7)),
+        (2, "w", date(2026, 8, 31)),
         (3, "mo", date(2026, 7, 1)),
         (4, "q", date(2025, 10, 1)),
         (3, "y", date(2024, 1, 1)),
@@ -47,7 +49,7 @@ def test_natural_period_start_uses_calendar_boundaries(
 
 def test_natural_period_start_rejects_unknown_unit() -> None:
     with pytest.raises(ValueError, match="unsupported period unit"):
-        natural_period_start(date(2026, 9, 13), 1, "w")
+        natural_period_start(date(2026, 9, 13), 1, "z")
 
 
 def test_local_today_uses_explicit_override() -> None:
