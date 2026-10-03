@@ -1,6 +1,6 @@
 # ccusage-viz
 
-[简体中文](README.zh-CN.md) · [Usage guide](docs/usage.md) · [Design philosophy](docs/design-philosophy.md) · [Architecture](docs/architecture.md) · [Versioning](docs/versioning.md)
+[简体中文](README.zh-CN.md) · [Usage guide](docs/usage.md) · [Custom command protocol](docs/custom-command-protocol.md) · [Design philosophy](docs/design-philosophy.md) · [Architecture](docs/architecture.md) · [Versioning](docs/versioning.md)
 
 [![PyPI](https://img.shields.io/pypi/v/ccusage-viz.svg)](https://pypi.org/project/ccusage-viz/) [![Python](https://img.shields.io/pypi/pyversions/ccusage-viz.svg)](https://pypi.org/project/ccusage-viz/) [![License: GPL v3](https://img.shields.io/badge/License-GPL%20v3-blue.svg)](LICENSE) [![CI](https://github.com/Cookie-HOO/ccusage-viz/actions/workflows/ci.yml/badge.svg)](https://github.com/Cookie-HOO/ccusage-viz/actions/workflows/ci.yml)
 
@@ -39,14 +39,21 @@ pricing, balances, quotas, allowances, or other non-token account analytics.
 
 ## Interactive Help
 
-Every interactive view provides Help: press `h` whenever you need to see its
-available controls. While editing Overlay text or a command, use `Ctrl-H`
-instead so the literal `h` remains available to the draft.
+Dashboard provides contextual Help: press `h` to see the controls for the
+active surface, and press `c` in chart-browse mode to show or hide its footer.
+While editing Overlay text or a command, use `Ctrl-H` instead so the literal `h`
+remains available to the draft.
 
 ## Dashboard presets
 
-`dashboard` composes independently configured charts in one terminal. The default
-preset is `wide-clock`:
+`dashboard` composes independently configured charts in one terminal. Without a positional preset, `dashboard` defaults to `wide-clock`:
+
+> [!TIP]
+> To start without default ccusage panes or requests, use `ccuv dashboard --empty`.
+> It fills the selected default grid or explicit `--grid`/layout with temporary
+> `empty` panes. Add custom command-backed data with a pane such as
+> `--pane 'custom timeline --dataset reading --command "my-reader ccuv"'`. See
+> the [custom command protocol guide](docs/custom-command-protocol.md).
 
 ```bash
 ccuv dashboard
@@ -54,7 +61,7 @@ ccuv dashboard
 
 | Preset | Command | Layout | Preview |
 | --- | --- | --- | --- |
-| 【Recommended—wide terminal】 `wide-clock` **(default)** | `ccuv dashboard wide-clock` | Best for an all-purpose overview with a live clock. Clock + balanced 2×2. | <img src="docs/assets/readme/dashboard-wide-clock.png" alt="Preview" width="180"> |
+| 【Recommended—wide terminal】 `wide-clock` **(default without a preset)** | `ccuv dashboard wide-clock` | Best for an all-purpose overview with a live analog clock. Analog clock + balanced 2×2. | <img src="docs/assets/readme/dashboard-wide-clock.png" alt="Preview" width="180"> |
 | 【Recommended—sidebar】 `narrow-clock` | `ccuv dashboard narrow-clock` | Best for a sidebar with a live clock. Clock + vertical 4×1. | <img src="docs/assets/readme/dashboard-narrow-clock.png" alt="Preview" width="180"> |
 | `wide` | `ccuv dashboard wide` | Best for a balanced data-only overview. Balanced 2×2. | <img src="docs/assets/readme/dashboard-wide.png" alt="Preview" width="180"> |
 | `narrow` | `ccuv dashboard narrow` | Best for a compact, narrow-terminal overview. Vertical focus. | <img src="docs/assets/readme/dashboard-narrow.png" alt="Preview" width="180"> |
@@ -63,33 +70,8 @@ ccuv dashboard
 | `spotlight-wide2` | `ccuv dashboard spotlight-wide2` | Best for prioritizing Timeline and Stack together. Timeline + Stack-led. | <img src="docs/assets/readme/dashboard-spotlight-wide2.png" alt="Preview" width="180"> |
 
 > [!TIP]
-> Both shipped clock presets display a localized time-state Overlay at bottom-right
-> by default. It follows the local wall clock and can be adjusted for the current
-> Dashboard session.
-
-> [!TIP]
 > Dashboard coordinates pane queries: identical in-flight provider requests are
 > shared, avoiding duplicate work while multiple panes refresh.
-
-## Animation overlays
-
-Add run-local context to a standalone animation or an explicit Dashboard Animation
-Pane: place static text, show a localized time state, or render output from a
-trusted local command.
-
-```bash
-ccuv animate rain --overlay-text "Focus time"
-ccuv animate analog-clock --overlay-command "ccuv text time-state --run"
-ccuv animate rain --overlay-command "date"
-```
-
-> [!WARNING]
-> `--overlay-command` runs user-supplied local shell code. It inherits every
-> environment variable visible to `ccuv` at launch, so treat commands and their
-> execution environment as trusted local code.
-
-See the [usage guide](docs/usage.md) for Overlay options, refresh behavior, and
-Dashboard Animation Pane syntax.
 
 ## Standalone views
 
@@ -104,7 +86,7 @@ overview composed from multiple panes.
 | Token composition `stack` | Stack — composition | `ccuv stack` | Overall input, output, and cache-token composition over time. | <img src="docs/assets/readme/standalone-stack-composition.png" alt="Preview" width="180"> |
 | Token composition `stack` | Stack — cache split | `ccuv stack --cache split` | Cache reads versus cache creation over time. | <img src="docs/assets/readme/standalone-stack-cache-split.png" alt="Preview" width="180"> |
 | Historical ranking `ranking` | Ranking | `ccuv ranking --by project` | Projects, models, or agents with the most tokens in a range. | <img src="docs/assets/readme/standalone-ranking.png" alt="Preview" width="180"> |
-| Terminal animations `animate` | Animation gallery | `ccuv animate --gallery` | Provider-free presentation-only animations; optionally specify a style, for example `ccuv animate digital-clock --gallery`. Space pauses or resumes playback; `m` opens local style and theme controls. | <img src="docs/assets/readme/standalone-animation-gallery.gif" alt="Preview" width="180"> |
+| Terminal animations `animate` | Animation gallery | `ccuv animate --gallery` | Provider-free presentation-only animations; optionally specify a style, for example `ccuv animate digital-clock --gallery`. `m` opens local style and theme controls. | <img src="docs/assets/readme/standalone-animation-gallery.gif" alt="Preview" width="180"> |
 | Usage monitoring `monitor` | Monitor — throughput | `ccuv monitor` | Process-local throughput from repeated cumulative snapshots, not reconstructed hourly history. The observation begins after its sampling baseline; Timeline marks the invocation start while visible. | <img src="docs/assets/readme/standalone-monitor-throughput.png" alt="Preview" width="180"> |
 | Usage monitoring `monitor` | Monitor — cumulative bars | `ccuv monitor --style cumulative-bars` | Retained local-day token increments. Press `w` for Today/Yesterday and `g` for hourly/half-hour buckets; unobserved periods remain distinct from observed zero values. | <img src="docs/assets/readme/standalone-monitor-cumulative-bars.png" alt="Preview" width="180"> |
 | Usage monitoring `monitor` | Monitor — grouped ranking | `ccuv monitor --by project` | The selected dimension ranked within its observed window. | <img src="docs/assets/readme/standalone-monitor-ranking.png" alt="Preview" width="180"> |
@@ -214,6 +196,7 @@ These documents answer the deeper questions:
 | Document | What it answers |
 | --- | --- |
 | [Usage guide](docs/usage.md) | How do I install, configure, compose, and adjust charts and Dashboards? |
+| [Custom command protocol](docs/custom-command-protocol.md) | How do I connect an additive historical dataset through a command, use empty Dashboard panes, and implement the JSON contract? |
 | [Design philosophy](docs/design-philosophy.md) | Which product boundaries, ownership rules, and presentation principles are intentional? |
 | [Architecture](docs/architecture.md) | How do CLI routes, hosts, panes, providers, processing, and renderers fit together for maintainers? |
 | [Roadmap](ROADMAP.md) | What is planned, deferred, or open for feedback? |

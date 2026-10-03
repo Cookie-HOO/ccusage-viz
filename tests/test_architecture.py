@@ -56,10 +56,10 @@ def test_chart_registry_contains_only_the_four_presentation_charts() -> None:
     )
 
 
-def test_density_contract_is_three_state_and_pane_owned() -> None:
-    assert DENSITIES == ("minimal", "compact", "full")
+def test_density_contract_is_four_state_and_pane_owned() -> None:
+    assert DENSITIES == ("minimal", "compact", "full", "detailed")
     assert "standard" not in DENSITIES
-    assert ChartPresentation().density == "full"
+    assert ChartPresentation().density == "detailed"
     assert "density" not in {field.name for field in fields(DashboardHostConfig)}
 
     dashboard = DashboardLaunch(ProcessConfig(), DashboardHostConfig(), ())

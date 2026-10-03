@@ -16,7 +16,8 @@ This document describes the implemented architecture of `ccusage-viz`. It is int
 | **Chart Component** | One running chart instance. It owns its reusable chart payload and lifecycle state—generation, Coverage, accepted data, pending/running/error state, processed model, and rendered content—and receives resolved Host context without taking ownership of Host settings. |
 | **Host** | Product shell that runs and presents Components. Standalone hosts one Component; Dashboard hosts ordered Components in Panes. |
 | **Pane** | Dashboard placement and composition context for one Component. It adds geometry, focus, order, and Dashboard-owned cadence; it does not redefine chart semantics. |
-| **Provider** | Data capability that compiles logical requests, executes physical queries, and returns normalized usage data with provenance, resolution, and Coverage. `ccusage` and Demo are built-in Providers. |
+| **Provider** | Data capability that compiles logical requests, executes physical queries, and returns normalized usage data with provenance, resolution, and Coverage. `ccusage`, Demo, and command-backed custom historical sources are built-in Provider implementations. |
+| **Empty Pane** | A temporary Dashboard pane configuration with geometry and focus but no Component, Provider, scheduler, chart data, or summary contribution. |
 
 A Chart Component is the smallest product-level runtime unit shared by Standalone and Dashboard. Smaller functions and services remain reusable below it, but Hosts never reimplement a chart.
 
@@ -110,7 +111,8 @@ The execution coordinator asks Providers to compile logical requests into physic
 The initial optimization boundary is deliberately narrow:
 
 - deduplicate strictly identical in-flight physical queries;
-- share a Monitor raw cumulative snapshot only where the product has explicitly proven that sharing safe.
+- share a Monitor raw cumulative snapshot only where the product has explicitly proven that sharing safe;
+- for custom commands, coalesce only equivalent in-flight executions. Their identity includes argv/execution context, dataset, request kind, range, normalized filters, grouping, granularity, and summary period/as-of date—not chart kind, style, theme, density, legend, Top/Other, layout, or pane position.
 
 Across independent owners, the coordinator does not union date ranges, merge different Filters, construct field supersets, delay ticks to gather batches, reuse completed stale results, reconcile overlapping Sources, or own Interval semantics. This does not prohibit one owner's logical planner from combining adjacent missing Coverage intervals as defined by the product contract.
 
@@ -146,13 +148,17 @@ Semantic Chart Model
 
 Renderers never query data or write directly to stdout. Status, Controls, Notices, settings, inspection content, and chart bodies are composed into a complete logical Frame. The Painter compares complete Frames and writes only changed terminal rows; a complete logical repaint does not imply an unconditional terminal clear.
 
+Historical presentation has a kind-aware protocol shared by native and Custom adapters for Timeline, Calendar, Stack, and Ranking. Adapters retain their own domain models—Custom measurements remain `Decimal` through projection and formatting—and provide only protocol facts to the selected product surface. The peer surface families are deliberately independent: Standalone A and Dashboard-pane B each have a distinct implementation for every kind, as well as their own operation-bar vocabulary, placement, focus/prompt behavior, and row budget. They may share chart-body primitives but neither is a mode of the other. For example, a Standalone Timeline retains Plotext's upper/right axes, while the Dashboard Timeline pane intentionally keeps only the left/bottom axes. `SurfaceControls` is an explicit surface contract; callback hosts must not reduce it to a generic row-count parameter. Dashboard-owned header, divider, and outer-frame rows are compositor rows, never pane rows.
+
+Accepted Custom responses remain bound to the query configuration that produced them. While a replacement data query is pending, hosts render the old accepted facts only against their accepted scope; display-local changes may reproject them, but a changed source, kind, range, filter, grouping, or granularity renders pending state instead. The Dashboard header records each Custom summary response's accepted period and as-of date, so comparison wording cannot be relabelled by a newer pending header setting. Its independent native and Custom summary blocks wrap at semantic boundaries with ANSI- and CJK-display-width-aware layout rather than being concatenated and clipped.
+
 Plotext rendering remains behind a serialized adapter because Plotext uses process-global state. Query is the only pipeline stage required to run asynchronously: Provider work commonly takes seconds, while current processing and rendering are millisecond-scale operations. Processing therefore remains a synchronous, isolated semantic transformation, and rendering remains synchronous through the serialized adapter. If profiling later demonstrates material input latency, the existing render boundary may move behind one serial worker without changing Component or Host semantics.
 
 ### Presentation and Scope contract
 
-Chart presentation has exactly three Density values: `minimal`, `compact`, and `full`. Standalone defaults to `full`; each new or default Dashboard Pane explicitly uses `compact`. Density belongs to the chart configuration carried by Standalone or Pane. Dashboard has no global chart Density, and changes to Dashboard Theme, Style, Header, Summary, or Layout do not rewrite Pane-owned Density, Theme, Style, Filters, or analysis settings. A Density change advances render revision only; it does not change data Generation or scheduler baselines.
+Chart presentation has four ordered Density values: `minimal`, `compact`, `full`, and `detailed`. Standalone defaults to `detailed`; each new or default Dashboard Pane explicitly uses `compact`. Density belongs to the chart configuration carried by Standalone or Pane. Dashboard has no global chart Density, and changes to Dashboard Theme, Style, Header, Summary, or Layout do not rewrite Pane-owned Density, Theme, Style, Filters, or analysis settings. A Density change advances render revision only; it does not change data Generation or scheduler baselines.
 
-`minimal` retains identity, chart, and compact runtime state. `compact` adds the current filtered-Scope total and active Filter-dimension count. `full` adds applicable period comparisons and Host-supplied runtime audit. Controls and correctness-critical Notices are independent of Density. In Dashboard, each Pane formats a bounded local Notice band after resolving its own geometry; Notices are not globally aggregated or deduplicated and cannot consume another Pane's rows.
+`minimal` retains identity, chart, and compact live state without a summary or audit. `compact` adds the current filtered-Scope total and active Filter-dimension count without comparisons or audit. `full` adds applicable period comparisons and observed metrics without a passive runtime audit footer. `detailed` adds that same complete content plus Host-supplied runtime audit. Controls and correctness-critical Notices are independent of Density. In Dashboard, each Pane formats a bounded local Notice band after resolving its own geometry; Notices are not globally aggregated or deduplicated and cannot consume another Pane's rows.
 
 Time range, based on the host machine's local natural day, and Agent/Model/Project Filters define one chart Summary Scope. Filtering occurs before Summary calculation; By, Top, and Other are later projections and do not alter the Summary total or comparisons. Ranking with hidden Other carries `Top N · X% of total` metadata in its title; when Other is shown, the share is omitted because the chart covers the full filtered Scope. The Dashboard Header Summary is a separate owner with unfiltered data and Coverage, never a projection of Pane state.
 
@@ -166,7 +172,7 @@ Hosts and Components communicate through actions and effects:
 Action → reduce(state, action) → new state + effects
 ```
 
-Actions include ticks, manual refresh, pause/resume, resize, input, settings changes, query completion, query failure, and debounce expiry. Effects include asynchronous query submission, debounce scheduling, scheduler rebuilding, copy, repaint, and exit. Accepted query completion is processed synchronously into a semantic model, then rendered synchronously through the serialized Plotext adapter before complete-Frame composition.
+Actions include ticks, manual refresh, resize, input, settings changes, query completion, query failure, and debounce expiry. Effects include asynchronous query submission, debounce scheduling, scheduler rebuilding, copy, repaint, and exit. Accepted query completion is processed synchronously into a semantic model, then rendered synchronously through the serialized Plotext adapter before complete-Frame composition.
 
 Each data-owning Component keeps an independent lifecycle envelope:
 
@@ -192,7 +198,7 @@ Four identities keep product ownership, data intent, logical execution, and shar
 | --- | --- | --- | --- |
 | **Owner ID** | The Component or other data owner to which a result belongs | Host when the owner is created | The owner is destroyed and a new owner is created; moving or reconfiguring a Pane does not change it |
 | **Generation** | The current version of the owner's data intent | Component when committed configuration requires data not satisfied by accepted facts and Coverage | Data requirements change; repaint, local reprocessing, periodic refresh, and manual refresh do not change it |
-| **Operation ID** | One logical execution for an owner | Lifecycle coordinator when work is actually submitted | Every startup, periodic, manual, configuration, resume, or retry submission, including repeated work in the same generation |
+| **Operation ID** | One logical execution for an owner | Lifecycle coordinator when work is actually submitted | Every startup, periodic, manual, configuration, or retry submission, including repeated work in the same generation |
 | **Subscription ID** | One owner's interest in an in-flight physical query | Execution coordinator when attaching the operation | Every attachment or reattachment, even when an existing physical query can be reused |
 
 A completion may mutate Component state only when its Owner ID and Generation match the current owner and data intent, its Operation ID is still the active operation, and its Subscription has not been detached. The stopping state rejects all completion. Rejection does not update data, Coverage, error, loading placeholders, pending intent, or a newer active operation.
@@ -203,9 +209,9 @@ A Subscription is distinct from its physical query. If two Panes request the sam
 
 A data-affecting adjustment increments the Generation immediately and detaches obsolete effects. Data and Coverage are accepted atomically only for the current Generation; stale success and stale failure update neither. Theme/Style, viewport, and transient-only changes advance a separate render revision. Changes computable from accepted facts advance processing/render revision without changing data Generation. The redesign introduces no completed-result cache.
 
-Intentional detachment is not a business error. Configuration replacement, automatic-work cancellation on Pause, owner removal, and shutdown suppress the detached completion. Pause cancels automatic Startup, Periodic, and Resume work and clears periodic backlog, while an explicit manual refresh and committed-configuration completion remain allowed; their completion does not resume periodic scheduling. Shutdown detaches every subscription, clears pending and debounce state, rejects all later completion, then closes runtime and terminal resources in order.
+Intentional detachment is not a business error. Configuration replacement, owner removal, and shutdown suppress the detached completion. Shutdown detaches every subscription, clears pending and debounce state, rejects all later completion, then closes runtime and terminal resources in order.
 
-Refresh, Sampling, debounce, manual refresh, resume, and committed configuration work remain distinguishable trigger sources. Fixed scheduler baselines do not move because of query duration, success, failure, manual refresh, pause, or resume. A slow Component never overlaps one pipeline stage for the same generation, and equivalent pending opportunities coalesce within their own trigger kind.
+Refresh, Sampling, debounce, manual refresh, and committed configuration work remain distinguishable trigger sources. Fixed scheduler baselines do not move because of query duration, success, failure, or manual refresh. A slow Component never overlaps one pipeline stage for the same generation, and equivalent pending opportunities coalesce within their own trigger kind.
 
 Asynchronous Query workers return immutable completion actions through one serialized runtime queue. Only the runtime owner mutates state, synchronously processes accepted facts, serially renders charts, composes Frames, and paints. Render revision still distinguishes successive visible states, but no render worker or render-completion queue is introduced without measured need. Shutdown stops admission, detaches/cancels work, suppresses late completions, stops painting, and restores terminal state last.
 
@@ -229,9 +235,16 @@ These registries are private dependency-inversion seams for composing the curren
 Built-in Providers are initially:
 
 - `ccusage`: wraps query planning, safe subprocess execution, schema validation, and normalization;
-- Demo: deterministic in-process records with no external dependency check.
+- Demo: deterministic in-process records with no external dependency check;
+- custom command: a static command adapter for neutral additive historical series. It writes one `ccuv.custom/v1` request to subprocess stdin, validates one stdout response, and retains bounded stderr diagnostics.
 
-Provider code does not import charts or presentation code. Chart code does not invoke Providers or read external storage.
+The custom adapter is not a public plugin registry, source-discovery system, or
+file/HTTP/Python extension point. It performs no completed-result cache, range
+union, overlap merging, batching, or result slicing. Commands provide complete
+candidate records and capabilities; shared processing retains local chart
+projection and presentation behavior. Provider code does not import charts or
+presentation code. Chart code does not invoke Providers or read external storage.
+See the [custom command protocol](custom-command-protocol.md).
 
 ### Charts
 
@@ -247,11 +260,7 @@ Animation is a separate resource kind, not a Chart variant and not an implicit p
 
 `term-animate` remains a pure projection dependency. ccuv owns terminal lifecycle, input, viewport allocation, session clocks, repaint deadlines, clipping, and cleanup, while named library themes remain library-owned. It passes active/idle state only to effects that declare state support. An animation Pane owns no Provider, query runtime, scheduler, or lifecycle operation.
 
-An Overlay is a host-local presentation resource, owned by its standalone animation host or Dashboard Animation Pane rather than by a Chart, Provider, or the animation library. Static text needs no schedule. A command Overlay owns its local shell execution schedule, bounded result history, and sanitized display output; its lifecycle ends with its host. Overlay repaint and command deadlines can redraw only their existing host frame and never start a token-data query.
-
 Monitor attachments are local to their Monitor Pane or standalone Monitor host and are disabled by default. Users enable one from the advanced ranking/list controls; it then renders after a comparable accepted interval is available and uses ccuv's accepted token-delta decision to choose active versus idle for effects that declare state support. Their repaint deadlines redraw the existing frame only; they never initiate a query. Enabled attachments begin with the `classic` theme; advanced controls cycle all library-declared Monitor effects and then ccuv-local `none`. This transient `none` state retains no catalog effect, creates no provider work, and is unavailable to standalone animation and Dashboard animation panes.
-
-Dashboard undo/redo is likewise bounded, session-only UI state owned by the Dashboard Host. It records Dashboard-state-represented composition and settings, never Provider results, Chart facts, or persisted configuration. It does not restore host-local Overlay drafts, position or offset mutations, or command-result history.
 
 Chart Components require Query and Result Processing; animation projection does not. The shared terminal Frame and Painter infrastructure composes their output without turning animation into a chart component or widening chart/provider dependencies.
 

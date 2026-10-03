@@ -29,7 +29,7 @@ This document records the stable product concepts and design constraints of `ccu
    | Independent Dashboard setting | Scope | Pane behavior |
    | --- | --- | --- |
    | Layout, Weights, focus, Pane order | Dashboard geometry and navigation | Not part of Pane configuration |
-   | Global pause, Controls | Dashboard session shell | Chart Panes own no local data pause or Controls state; an Animation Pane owns local playback pause while it is being adjusted |
+   | Controls | Dashboard session shell | Chart Panes own no local data or Controls state; Animation Panes own only their local presentation settings while being adjusted |
    | Dashboard Theme and Style | Shell, Header, and Summary | Does not change Pane Theme or chart Style |
    | Header Style and Summary period | Dashboard Header | Does not change Pane Density, Scope, or Granularity |
 
@@ -48,7 +48,7 @@ This document records the stable product concepts and design constraints of `ccu
    | Theme, Style, Density, and Legend | Each Pane defines chart presentation; Theme does not inherit Dashboard Theme |
    | Chart-specific settings | Belong only to the corresponding Pane |
 
-   Chart Pane fragments do not contain Dashboard- or host-owned lifecycle settings such as Demo mode, Watch/Interval, ASCII, or refresh cadence. Animation Pane fragments may additionally carry their declarative Overlay source and presentation settings. Standalone still owns its own Demo settings, Interval, refresh, and pause behavior. Every Pane must remain independently explainable; copying a Chart Pane as Standalone materializes the necessary Dashboard-owned context.
+   Chart Pane fragments do not contain Dashboard- or host-owned lifecycle settings such as Demo mode, Watch/Interval, ASCII, or refresh cadence. Animation Pane fragments may additionally carry their declarative Overlay source and presentation settings. Standalone still owns its own Demo settings, Interval, and refresh behavior. Every Pane must remain independently explainable; copying a Chart Pane as Standalone materializes the necessary Dashboard-owned context.
 
 2. **Command Overlays are bounded trusted-local presentation work.**
 
@@ -114,7 +114,7 @@ This document records the stable product concepts and design constraints of `ccu
 
 1. **Density controls information outside the narrow chart.**
 
-   Density has exactly three values. Minimal retains identity, chart, and compact runtime state. Compact adds the current filtered-Scope token value and active Filter-dimension count without comparisons or audit. Full adds applicable period comparisons and Host-supplied runtime audit. Standalone defaults to Full; a new or default Pane uses Compact. Dashboard has no global chart Density.
+   Density has four ordered values: `minimal`, `compact`, `full`, and `detailed`. Minimal retains identity, chart, and compact live state without a summary or audit. Compact adds the current filtered-Scope token value and active Filter-dimension count without comparisons or audit. Full adds applicable period comparisons and observed metrics without the passive runtime audit footer. Detailed adds that same complete content plus Host-supplied runtime audit. Standalone defaults to Detailed; a new or default Pane uses Compact. Dashboard has no global chart Density.
 
 2. **Theme, Style, and Density each have one responsibility.**
 
@@ -168,7 +168,7 @@ This document records the stable product concepts and design constraints of `ccu
 
    A committed data-affecting change updates visible configuration and invalidates obsolete work immediately. Values not yet known for the new state display `??`, and an immediate refresh intent is created. A short trailing debounce may replace repeated intermediate refreshes with one request for the latest state, but it must not delay the visible configuration, invalidation, placeholder, or generation change. Enter or Escape leaving an immediate settings surface flushes a refresh intent still waiting in the debounce window.
 
-   Only affected values become unknown. Presentation-only changes require only repaint; changes fully computable from accepted data reprocess immediately; changes requiring new data use `??` until the current generation is accepted. Obsolete completion cannot restore stale values or clear the placeholder. Pause suppresses periodic backlog, not an explicit refresh caused by committed configuration or manual refresh, and such a completion does not resume periodic scheduling.
+   Only affected values become unknown. Presentation-only changes require only repaint; changes fully computable from accepted data reprocess immediately; changes requiring new data use `??` until the current generation is accepted. Obsolete completion cannot restore stale values or clear the placeholder. Explicit manual refresh and committed-configuration work remain independent of periodic scheduling.
 
 7. **Keys express stable concepts, not a generic capitalization rule.**
 
@@ -228,11 +228,11 @@ This document records the stable product concepts and design constraints of `ccu
 
 1. **Dashboard uses two fixed Tick sequences.**
 
-   Refresh Tick offers work to the Summary and historical Panes. Sampling Tick offers work to Monitor Panes. Their session baselines do not move because of execution duration, success or failure, manual refresh, pause, or resume. Changing one Interval rebuilds only its corresponding sequence.
+   Refresh Tick offers work to the Summary and historical Panes. Sampling Tick offers work to Monitor Panes. Their session baselines do not move because of execution duration, success or failure, or manual refresh. Changing one Interval rebuilds only its corresponding sequence.
 
 2. **Data-affecting adjustments complete the latest state after a debounce.**
 
-   A setting takes effect immediately and creates a new generation. Content computable from existing data updates at once, while missing values show `??`. Only when the latest state still requires data does a short trailing debounce offer one refresh opportunity. Continued adjustment resets the debounce, preventing queries for intermediate states. A fixed Tick, manual refresh, or resume that occurs first satisfies and cancels the pending debounce without moving Tick baselines.
+   A setting takes effect immediately and creates a new generation. Content computable from existing data updates at once, while missing values show `??`. Only when the latest state still requires data does a short trailing debounce offer one refresh opportunity. Continued adjustment resets the debounce, preventing queries for intermediate states. A fixed Tick or manual refresh that occurs first satisfies and cancels the pending debounce without moving Tick baselines.
 
    **Exception:** Presentation-only changes and adjustments fully computable from existing data schedule no query; changing an Interval only rebuilds its Tick sequence.
 
@@ -256,9 +256,9 @@ This document records the stable product concepts and design constraints of `ccu
 
 7. **Refresh includes the reconciliation and repaint required by its results.**
 
-   `r` always refreshes the current data-bearing context. Sorting, derived computation, and full repaint caused by refreshed data are consequences of that same operation, not separate re-sort or repaint commands. A Dashboard manual refresh gives the Header and Chart Panes an immediate refresh opportunity, invalidates the paint cache, and covers the full Dashboard. Resume performs the same refresh and repaint before fixed Ticks continue. Resize automatically recomputes all geometry and clears obsolete regions without requiring a data query. Animation playback, Overlay execution, and Monitor-attachment repaint use their own host-local deadlines rather than this data-refresh operation. Full repaint does not imply an unconditional terminal clear.
+   `r` always refreshes the current data-bearing context. Sorting, derived computation, and full repaint caused by refreshed data are consequences of that same operation, not separate re-sort or repaint commands. A Dashboard manual refresh gives the Header and Chart Panes an immediate refresh opportunity, invalidates the paint cache, and covers the full Dashboard. Resize automatically recomputes all geometry and clears obsolete regions without requiring a data query. Animation playback, Overlay execution, and Monitor-attachment repaint use their own host-local deadlines rather than this data-refresh operation. Full repaint does not imply an unconditional terminal clear.
 
-   **Exception:** Dashboard browse-mode pause stops periodic data Ticks and pauses every Animation Pane's playback; paused time creates no periodic work or backlog, while manual refresh and a one-shot completion debounced from an explicit configuration change may still run. Such completion does not resume periodic scheduling. While adjusting an Animation Pane, Space instead controls only that Pane's playback clock. A Monitor baseline, sampling gap, pause/resume, data-affecting reconfiguration, or counter reset clears the separate current observation until the next valid sample pair; retained Timeline history remains available and discontinuities remain Gaps. A Monitor attachment uses accepted delta state for active/idle projection and may repaint its idle scene without advancing token observation or starting a query. Standalone Watch and Monitor retain their own refresh, pause, and Interval behavior.
+   A Monitor baseline, sampling gap, data-affecting reconfiguration, or counter reset clears the separate current observation until the next valid sample pair; retained Timeline history remains available and discontinuities remain Gaps. A Monitor attachment uses accepted delta state for active/idle projection and may repaint its idle scene without advancing token observation or starting a query. Standalone Watch and Monitor retain their own refresh and Interval behavior.
 
 ## Reproducibility and documentation boundaries
 
@@ -272,7 +272,7 @@ This document records the stable product concepts and design constraints of `ccu
 
 3. **Run-local presentation state is excluded from reproducible configuration.**
 
-   Current focus, pause state, Controls visibility, inspection view, transient errors, Animation playback, Overlay offset, and Overlay command-result history belong to the running session and do not enter copied commands. Declarative Overlay source and display settings can be copied with their Animation Pane, but an editor draft cannot.
+   Current focus, Controls visibility, inspection view, transient errors, Animation presentation state, Overlay offset, and Overlay command-result history belong to the running session and do not enter copied commands. Declarative Overlay source and display settings can be copied with their Animation Pane, but an editor draft cannot.
 
 4. **Undo/redo is bounded session navigation, not persistence.**
 

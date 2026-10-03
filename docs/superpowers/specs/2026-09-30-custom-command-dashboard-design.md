@@ -3,6 +3,11 @@
 **Status:** approved direction, ready for implementation planning
 **Date:** 2026-09-30
 
+> **Behavior amendment — 2026-10-03:** Double-clicking an empty pane now enters
+> the same pane-adjustment context as every other pane. It does not open the
+> type chooser or replace the pane. Choosing a type is an explicit `r` action;
+> `N` and `n` remain the shared insert chooser entry points.
+
 ## Goal
 
 Make ccuv a general-purpose terminal dashboard platform while preserving its existing ccusage experience. Users can add command-backed custom data to standalone charts and Dashboard panes, including datasets such as reading, CI activity, or cost.
@@ -48,15 +53,15 @@ It participates in layout, focus, mouse handling, Tab navigation, insertion, del
 
 ```text
 Empty pane
-Double-click to choose a type
+Double-click to select, then press r to choose a type
 ```
 
 ```text
 空白子图
-双击选择类型
+双击选中，然后按 r 选择类型
 ```
 
-A double-click replaces the empty pane in place. The type chooser is shared by empty-pane activation, replacement, insertion before, and insertion after:
+A double-click enters the empty pane's Dashboard management context. The type chooser is shared by explicit replacement, insertion before, and insertion after:
 
 ```text
 Empty
@@ -461,7 +466,7 @@ Future file sources can adapt to the same normalized custom result model, with c
 6. Error, empty-data, zero-baseline, pending, unavailable, and malformed-response behavior are separately tested.
 7. `dashboard --empty` starts without ccusage default panes or requests and fills its selected layout with temporary empty panes.
 8. `--pane 'empty'` round-trips through copied Dashboard commands, including intermediate empty panes.
-9. The shared type chooser is identical for empty activation, replacement, insertion before, and insertion after; insertion supports Empty.
+9. The shared type chooser is identical for explicit replacement, insertion before, and insertion after; insertion supports Empty.
 10. A custom dataset contributes at most one Dashboard summary request per Dashboard refresh cycle.
 11. Equivalent concurrent custom requests coalesce to one command execution; nonidentical or already-completed requests do not.
 12. Existing ccusage dashboards, clock presets, pane deletion semantics, and non-custom chart behavior remain compatible.

@@ -1,6 +1,11 @@
 # Source Plugin Guide
 
 > **Status:** Future Source plugin data contract. The plugin system is not implemented; this document constrains its later protocol design.
+>
+> The implemented `ccuv custom` feature is different: it is a static,
+> command-backed additive historical-data adapter, not public Source-plugin
+> registration, discovery, or a file/HTTP/Python extension system. See the
+> [custom command protocol](custom-command-protocol.md).
 
 A Source plugin converts an external Token data source into standard facts that ccuv can combine and chart. It supplies data; it does not own charts, TPM calculation, filtering, grouping, or terminal rendering.
 
