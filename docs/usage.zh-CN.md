@@ -140,6 +140,10 @@ Monitor-eligible 效果；随后 `s`/`S` 会循环 term-animate 声明的所有�
 | `--interval SECONDS` | 有限数字；历史图表至少 `2` | `10` | 历史路由 | 监听时的刷新节奏。 |
 | `--no-watch` | 标志 | 关闭 | 历史路由 | 仅查询一次后退出，不持续监听。 |
 
+所有历史日期和自然日边界都使用运行 ccuv 的主机本地 IANA 时区。`--timezone AREA/LOCATION`
+可覆盖主机默认值，ccuv 会在每个 custom Dataset 请求中显式发送解析后的时区。Dashboard
+Pane 继承 Dashboard 时区，不能单独覆盖；复制的命令会保留 `--timezone`，以复现相同的日期解释。
+
 同一维度重复筛选值表示匹配其中任一个值，不同维度之间同时生效。例如，以下表示
 **Agent A 或 B**，使用**模型 X**，且属于**项目 one 或 two**：
 
@@ -303,7 +307,7 @@ ccuv ranking --period 30d --by project --top 15 --other hide --style dots
 | `--top` | 正整数；默认 `10` | 排名值数量。 |
 | `--other` | `show`（默认）、`hide` | 显示/隐藏 Top 以外的值。 |
 | `--project-aggregation` | `name`（默认）、`exact`；仅用于 `--by project` | 使用安全的跨 Agent 同名呈现，或保留每个精确来源。 |
-| `--style` | `bar`（默认）、`dot`、`dots` | 排名呈现方式。 |
+| `--style` | `dot`（默认）、`bar`、`dots` | 排名呈现方式。 |
 
 ### Monitor
 
@@ -357,12 +361,12 @@ ccuv dashboard narrow --demo large
 ```bash
 ccuv dashboard --empty --grid 2x2 \
   --pane 'empty' \
-  --pane 'custom timeline --dataset wechat-reading --command "wechat-reading ccuv"' \
+  --pane 'custom timeline --dataset weread' \
   --pane 'empty' \
   --pane 'animate --style rain'
 ```
 
-`empty` Pane 没有 Provider、调度、数据或汇总贡献，但参与布局、焦点、鼠标处理、Tab 导航、插入、删除和复制命令序列化。它显示 `空白子图` 与 `双击选中，然后按 r 选择类型`。显式位置会在复制命令中保留，包括配置 Pane 之间的空 Pane。双击会进入该 Pane 的管理上下文；其中只显示 Dashboard 结构和位置操作，不显示图表专属设置。`r` 打开共用的替换类型选择器，`N` 和 `n` 分别打开前插和后插选择器。选择器的顺序为 Empty、Timeline、Stack、Calendar、Ranking、Monitor、Animate、Custom。选择 Custom 后再选择 Timeline、Stack、Calendar 或 Ranking，并填写 Dataset ID 与 Command。只有初始自定义查询成功后，ccuv 才替换原 Pane。`x` 删除空 Pane 后会压缩其余 Pane，不会自动添加占位。
+`empty` Pane 没有 Provider、调度、数据或汇总贡献，但参与布局、焦点、鼠标处理、Tab 导航、插入、删除和复制命令序列化。它显示 `空白子图` 与 `双击选中，然后按 r 选择类型`。显式位置会在复制命令中保留，包括配置 Pane 之间的空 Pane。双击会进入该 Pane 的管理上下文；其中只显示 Dashboard 结构和位置操作，不显示图表专属设置。`r` 打开共用的替换类型选择器，`N` 和 `n` 分别打开前插和后插选择器。选择器的顺序为 Empty、Timeline、Stack、Calendar、Ranking、Monitor、Animate、Datasets。Datasets 会列出本地命令编辑器、已安装的可执行数据集、`浏览官方数据集…` 和 `从 GitHub 安装…`。打开 Datasets 只读取本地状态；打开浏览页时才会获取并验证已签名的官方索引，并显示可通过 Esc 取消的加载提示。当前固定的官方索引 URL 在维护者提交有效且已签名的 `main/catalog/catalog.json` 前会显示不可用；ccuv 不会回退到未签名索引。选择当前平台可用的数据集后，会显示仓库、Release 标签、平台以及明确的原生可执行文件安装确认。从 GitHub 安装只需输入仓库链接（例如 `https://github.com/Cookie-HOO/ccuv-dataset-weread`）或 `Cookie-HOO/ccuv-dataset-weread`；ccuv 自动发现稳定 Release 中唯一匹配平台的归档，并要求 GitHub SHA-256 摘要或受支持的校验和文件才会提供安装确认。不支持当前平台的条目仍会显示但不能安装。选择就绪的已安装数据集后，再选择 Timeline、Stack、Calendar 或 Ranking。只有初始自定义查询成功后，ccuv 才替换原 Pane。`x` 删除空 Pane 后会压缩其余 Pane，不会自动添加占位。
 
 ### 预设
 
@@ -385,7 +389,7 @@ ccuv dashboard --empty --grid 2x2 \
 
 ### 构造自定义 Dashboard
 
-Pane 片段是一个安全引用的图表命令及图表参数。自定义片段形式为 `custom <kind>`，并带有 `--dataset` 和 `--command`；`empty` 是有效的临时片段。复制后的命令使用 `shlex.join` 序列化自定义 argv，因此 token 边界和中间空 Pane 位置可往返保留：
+Pane 片段是一个安全引用的图表命令及图表参数。自定义片段形式为 `custom <kind>` 并带有 Dataset ID：不提供 `--command` 时解析已安装 Dataset，开发者自定义命令则提供 `--command`；`empty` 是有效的临时片段。复制后的命令会保留这一数据源选择，并使用 `shlex.join` 序列化自定义 argv，因此 token 边界和中间空 Pane 位置可往返保留：
 
 ```bash
 ccuv dashboard \
@@ -408,7 +412,13 @@ ccuv dashboard \
 支持的 `--layout` 值为 `auto`、`spotlight-wide`、`spotlight-wide2`。网格形式为
 `ROWSxCOLUMNS`，必须有足够单元格容纳所有 Pane。
 
-自定义 Pane 若未在片段中显式提供 `--density`，则默认 `compact` 密度。
+自定义 Pane 若未在片段中显式提供 `--density`，则默认 `compact` 密度。已安装的 WeRead Dataset 不需要二进制路径或固定日期：
+
+```bash
+ccuv dashboard --empty --grid 1x1 \
+  --pane 'custom timeline --dataset weread'
+```
+
 
 ### Dashboard Host 参数
 
@@ -437,7 +447,7 @@ ccuv dashboard \
 Dashboard Host 负责布局、外壳主题/样式、Header、输入循环和节奏。Pane 负责图表选择、范围/窗口、
 分组、Top/Other、筛选、图表主题/样式/密度，以及图表专属配置。
 
-Pane 片段可以包含内置图表命令（`timeline`、`calendar`、`stack`、`ranking` 或 `monitor`）、具有显式样式的 `animate`、`empty`，或 `custom timeline|stack|calendar|ranking` 及图表参数。自定义 `--dataset` 和 `--command` 属于 Pane，且为必填；命令文本以 `shlex.split` 转为 argv，不经 shell 执行。所有片段均不得包含如下 Host/生命周期参数：
+Pane 片段可以包含内置图表命令（`timeline`、`calendar`、`stack`、`ranking` 或 `monitor`）、具有显式样式的 `animate`、`empty`，或 `custom timeline|stack|calendar|ranking` 及图表参数。自定义 Pane 必须提供 `--dataset`：不提供 `--command` 时使用已安装 Dataset，提供 `--command` 时使用任意命令；命令文本以 `shlex.split` 转为 argv，不经 shell 执行。Dashboard 预设仍是仅统计 token 消耗的启动模板，不会变成 Dataset 预设。所有片段均不得包含如下 Host/生命周期参数：
 
 ```text
 --interval --no-watch --watch --ascii --demo --lang
@@ -478,15 +488,18 @@ Dashboard Header 刻意运行未筛选、全 Agent 的聚合查询；它不会�
 ### 快捷键约定
 
 调整快捷键以当前可见页面或 Dashboard 管理模式为作用域；控制栏始终展示当前按键含义。
-小写键用于当前图表或页面中常用的直接操作。`t/T` 是唯一的方向性按键对：`t` 向前切换主题，
-`T` 向后切换主题。
+对于控制栏展示的小写/大写有限有序档位，小写向前、大写向后，两个方向都会循环：`p/P`
+周期、`g/G` 历史粒度、`t/T` 主题、`s/S` 样式和 `v/V` 视图均遵循这一规则。
 
-大写通常不表示“反向”。`A` 和 `P` 是低频的 Advanced 项目呈现控制，仅在按项目分组时出现：
-`A` 切换项目聚合（`name`/`exact`），`P` 逐级显示更多安全的项目名称上下文。`f`、`l`、`o`、
-`k` 和 `c` 即使位于 Advanced 页，仍用小写，因为它们是直接操作。
+大小写不是通用的反向规则。`A` 和页面作用域内的 `P` 在按项目分组时仍是低频 Advanced
+项目呈现控制；`N`/`n` 分别表示前插/后插；`u/U` 表示撤销/重做；`H` 调整 Dashboard
+Header 呈现；`L` 打开自定义诊断或动画历史。即使位于 Advanced 页，`f`、`l`、`o`、`k`
+和 `c` 仍是小写直接操作。
 
-历史图表的 `p/P` 是兼容性例外：`p` 循环尾随周期，`P` 循环自然周期。二者是两组周期预设，
-不是方向性按键对。它被刻意与 `t/T` 的规则分开说明，也不改变 Advanced 页中 `P` 的项目名称含义。
+历史图表的 `p/P` 在共享序列 `7d → 14d → 30d → 90d → 180d → 365d → 1w → 1mo → 1y`
+中前进/后退，到达端点时循环。`1w`、`1mo`、`1y` 分别表示截至今天的本周、本月和本年。
+这套序列适用于所有历史 token 图表和 Dataset 图表，而不取决于当前粒度。固定的显式日期范围不受影响。
+仅当 Advanced 页的控制栏明确声明时，`P` 才保留其单独的项目名称含义。
 
 ### 历史图表调整流程
 
@@ -498,15 +511,16 @@ Timeline、Calendar、Stack 和 Ranking 在图表视图按 `m` 打开调整器�
 
 | 图表 | Quick 页 | Advanced 页 |
 | --- | --- | --- |
-| Timeline | `p/P` 范围；`g` 粒度；`b` 分组；`+/-` Top；`d` 密度；`t/T` 主题；`s` 样式 | `f` 筛选；`o` Other；按项目分组时 `A` 项目聚合和 `P` 项目名称上下文；`l` 图例；`k` 星期标签 |
-| Calendar | `p/P` 范围；`d` 密度；`t/T` 主题；`s` 样式 | `f` 筛选 |
-| Stack | `p/P` 范围；`g` 粒度；`d` 密度；`t/T` 主题；`s` 样式 | `f` 筛选；`c` 缓存模式；`l` 图例；`k` 星期标签 |
-| Ranking | `p/P` 范围；`b` 分组；`+/-` Top；`d` 密度；`t/T` 主题；`s` 样式 | `f` 筛选；`o` Other；按项目分组时 `A` 项目聚合和 `P` 项目名称上下文 |
+| Timeline | `p/P` 范围；`g/G` 粒度；`b` 分组；`+/-` Top；`d` 密度；`t/T` 主题；`s/S` 样式 | `f` 筛选；`o` Other；按项目分组时 `A` 项目聚合和 `P` 项目名称上下文；`l` 图例；`k` 星期标签 |
+| Calendar | `p/P` 范围；`d` 密度；`t/T` 主题；`s/S` 样式 | `f` 筛选 |
+| Stack | `p/P` 范围；`g/G` 粒度；`d` 密度；`t/T` 主题；`s/S` 样式 | `f` 筛选；`c` 缓存模式；`l` 图例；`k` 星期标签 |
+| Ranking | `p/P` 范围；`b` 分组；`+/-` Top；`d` 密度；`t/T` 主题；`s/S` 样式 | `f` 筛选；`o` Other；按项目分组时 `A` 项目聚合和 `P` 项目名称上下文 |
 | Monitor | 时间线样式：`w` 窗口；`i` 采样间隔；`b` 分组；`+/-` Top；`d` 密度；`t/T` 主题；`s` 样式。`cumulative-bars`：`w` 今天/昨天；`g` 每小时/30 分钟；`b` 分组；`+/-` Top；`d` 密度；`t/T` 主题；`s` 样式。ranking/list 不显示 `w`。 | `f` 筛选；按项目分组时 `A` 项目聚合和 `P` 项目名称上下文；`l` 图例 |
 
-`p` 循环尾随预设（`7d`、`14d`、`30d`、`365d`）；`P` 循环自然周期预设（`1mo`、`1q`、`1y`）。
-二者都不会修改固定的显式日期范围。分组/样式变化会维持兼容样式；例如 Timeline 改为分组时，
-`area` 会替换为兼容样式。
+`p` 向前、`P` 向后遍历共享历史序列
+`7d → 14d → 30d → 90d → 180d → 365d → 1w → 1mo → 1y`。`1w`、`1mo`、`1y`
+分别是截至今天的本周、本月和本年。两个方向都会循环，且都不会修改固定的显式日期范围。
+分组/样式变化会维持兼容样式；例如 Timeline 改为分组时，`area` 会替换为兼容样式。
 
 ### 候选数据查询期间的显示
 
@@ -564,16 +578,16 @@ Dashboard 有独立的导航和归属规则。浏览模式中：
 | `h` | 打开与当前界面对应的帮助；完整命令视图中小写 `h` 跳到首行。 |
 | `c` | 图表浏览模式中显示/隐藏 Dashboard 控制栏。 |
 | `e`、`Up` / `Down` | 完整 Dashboard 命令视图中跳到末行或逐渲染行滚动。 |
-| `v` | 显示完整 Dashboard 命令。 |
+| `v` / `V` | 在 Dashboard 图表与完整命令视图之间向前/向后循环。 |
 | `y` | 从命令视图复制。 |
 | `Ctrl-C` | 退出。 |
 
-调整 Pane 时，`v` 切换其视图。非图表 Pane 文字视图中，`Up`/`Down` 逐行滚动，`h` 跳到首行，`e`
+调整 Pane 时，`v` 向前、`V` 向后切换视图。内置和自定义 Dataset Pane 都在图表、紧凑命令、完整命令、数据表和 JSON 间循环；自定义数据导出表示 ccuv 当前本地投影的数据，而不是 Dataset 进程的原始响应。非图表 Pane 文字视图中，`Up`/`Down` 逐行滚动，`h` 跳到首行，`e`
 跳到末行；Pane 通知保持固定。始终显示的控制栏只保留阅读、复制和视图切换操作，且仅在文字溢出时提示滚动；`r` 在此无操作，显示文字时不提供图表 Quick/Advanced 控制和 Dashboard Pane 管理。按 Enter、`Esc` 或发生无操作超时会结束调整，并将所有 Pane 恢复为图表视图。图表视图中，`r` 替换；`N` 在前插入；`n` 在后插入；当 Pane 多于一个时 `x`
 删除；`[`/`]` 重排；`Tab` 切到下一个 Pane。`{`/`}` 调整逻辑列份额；`_`/`=` 调整逻辑行份额。
 聚焦 Pane 的快捷键使用上面的历史/Monitor 图表控制，包含仅在项目分组时可用的 Advanced `A` 和 `P`；
-但 Monitor 没有 `i`，因为采样属于 Dashboard Host。全局 Dashboard 调整中，`t/T` 调整外壳主题，`s` 调整外壳样式，`h` 调整 Header
-样式，`u` 调整 Header 汇总，`z` 调整布局。按 `z` 会打开布局选择器：使用 `j`/`k` 或方向键选择
+但 Monitor 没有 `i`，因为采样属于 Dashboard Host。全局 Dashboard 调整中，`t/T` 调整外壳主题，`s/S` 调整外壳样式，`H` 调整 Header
+样式，`p/P` 调整 Header 汇总范围，`z` 调整布局。按 `z` 会打开布局选择器：使用 `j`/`k` 或方向键选择
 兼容布局，按 `Enter` 应用，按 `Esc` 取消。无法容纳当前 Pane 数量的固定容量布局仍会列出并标为不可用，
 导航会跳过这些选项。
 

@@ -163,6 +163,13 @@ the conflict is caused by explicitly specifying a theme. `--ascii` without a
 | `--interval SECONDS` | Finite number; at least `2` for historical charts | `10` | Historical routes | Refresh cadence while watching. |
 | `--no-watch` | Flag | off | Historical routes | Query once and exit instead of watching. |
 
+All historical dates and natural-day boundaries use the local IANA timezone of
+the host running ccuv. `--timezone AREA/LOCATION` overrides that host default,
+and ccuv sends the resolved timezone explicitly with every custom Dataset
+request. Dashboard panes inherit the Dashboard timezone; a pane cannot override
+it. Copied commands retain `--timezone` so the same date interpretation can be
+reproduced.
+
 Repeat a selector to accept any of its values in that dimension, then combine
 dimensions together. For example, the following means **Agent A or B**, using
 **model X**, in **project one or two**:
@@ -359,7 +366,7 @@ ccuv ranking --period 30d --by project --top 15 --other hide --style dots
 | `--top` | Positive integer; default `10` | Number of ranked values. |
 | `--other` | `show` (default), `hide` | Show/hide values outside Top. |
 | `--project-aggregation` | `name` (default), `exact`; only with `--by project` | Use safe cross-agent same-name presentation or preserve each exact source. |
-| `--style` | `bar` (default), `dot`, `dots` | Ranking representation. |
+| `--style` | `dot` (default), `bar`, `dots` | Ranking representation. |
 
 ### Monitor
 
@@ -424,7 +431,7 @@ retain their existing first clock pane.
 ```bash
 ccuv dashboard --empty --grid 2x2 \
   --pane 'empty' \
-  --pane 'custom timeline --dataset wechat-reading --command "wechat-reading ccuv"' \
+  --pane 'custom timeline --dataset weread --command "weread ccuv"' \
   --pane 'empty' \
   --pane 'animate --style rain'
 ```
@@ -438,10 +445,24 @@ Double-click enters the pane's management context; it exposes only Dashboard
 structure and position controls, not chart-specific settings. `r` opens the
 shared replacement chooser, while `N` and `n` open its insert-before and
 insert-after forms. It offers Empty, Timeline, Stack, Calendar, Ranking,
-Monitor, Animate, and Custom; Custom then selects Timeline, Stack, Calendar, or
-Ranking and collects Dataset ID plus Command. ccuv replaces the existing pane
-only after the initial custom query succeeds. `x` deletes an empty pane and
-compacts the rest without adding a placeholder.
+Monitor, Animate, and Datasets. Datasets lists the Local command editor,
+installed executable datasets, `Browse official datasets…`, and `Install from
+GitHub…`. Opening Datasets reads only local state. Opening Browse explicitly
+fetches and verifies the signed official catalog, shows a cancellable loading
+notice, then shows every catalog dataset for the current platform. The currently
+configured official catalog URL returns unavailable until its maintainers commit
+a valid signed `main/catalog/catalog.json`; ccuv deliberately does not use an
+unsigned fallback. A selected available dataset shows its repository, release
+tag, platform, and an explicit native-executable installation confirmation before
+any download or local write. GitHub installation accepts only a repository URL
+such as `https://github.com/Cookie-HOO/ccuv-dataset-weread` (or
+`Cookie-HOO/ccuv-dataset-weread`): ccuv discovers a stable release's unique
+platform archive and requires GitHub's SHA-256 digest or a supported checksum
+asset before offering installation. Unavailable platforms remain visible but
+cannot be installed. Selecting a ready installed dataset then selects Timeline,
+Stack, Calendar, or Ranking. ccuv replaces the existing pane only after the
+initial custom query succeeds. `x`
+deletes an empty pane and compacts the rest without adding a placeholder.
 
 ### Presets
 
@@ -468,9 +489,11 @@ preset grid where required to make room.
 ### Build a custom Dashboard
 
 A pane fragment is one safely quoted chart command plus chart options. A custom
-fragment is `custom <kind>` with `--dataset` and `--command`; `empty` is a valid
-temporary fragment. The copied command uses `shlex.join` for a custom argv, so
-its token boundaries and intermediate empty pane positions round-trip:
+fragment is `custom <kind>` with a Dataset ID and one source mode: an installed
+Dataset uses a bare `--dataset ID`, while an arbitrary developer command uses `--command`.
+`empty` is a valid temporary fragment. The copied command preserves that source
+choice and uses `shlex.join` for arbitrary command argv, so token boundaries and
+intermediate empty pane positions round-trip:
 
 ```bash
 ccuv dashboard \
@@ -495,7 +518,14 @@ Supported `--layout` values are `auto`, `spotlight-wide`, and
 panes.
 
 A custom pane defaults to `compact` density unless the fragment explicitly
-contains `--density`.
+contains `--density`. For example, an installed WeRead Dataset needs no binary
+path or fixed dates:
+
+```bash
+ccuv dashboard --empty --grid 1x1 \
+  --pane 'custom timeline --dataset weread'
+```
+
 
 ### Dashboard-host options
 
@@ -528,9 +558,11 @@ filters, chart theme/style/density, and chart-specific configuration.
 
 Pane fragments may contain one built-in chart command (`timeline`, `calendar`,
 `stack`, `ranking`, or `monitor`), `animate` with an explicit style, `empty`, or
-`custom timeline|stack|calendar|ranking` plus chart settings. Custom `--dataset`
-and `--command` are pane-owned and required; the command text becomes argv with
-`shlex.split` and runs without a shell. All fragments must not include
+`custom timeline|stack|calendar|ranking` plus chart settings. A custom pane always
+requires `--dataset`; choose exactly one source: a bare `--dataset ID` for an installed
+Dataset, or `--command` for an arbitrary command. Command text becomes argv with
+`shlex.split` and runs without a shell. Dashboard presets remain token-consumption
+startup templates; they do not become Dataset presets. All fragments must not include
 host/lifecycle options such as:
 
 ```text
@@ -579,20 +611,25 @@ unscrolled command or data payload.
 ### Shortcut conventions
 
 Adjustment shortcuts are scoped to the visible page or Dashboard management mode;
-the control footer always shows the active meaning. Lowercase keys are the usual
-direct actions for the current chart or page. `t/T` is the only directional pair:
-`t` cycles the theme forward and `T` cycles it backward.
+the control footer always shows the active meaning. For an ordered finite control
+that displays a lowercase/uppercase pair, lowercase advances, uppercase reverses,
+and both directions wrap. This applies to `p/P` periods, `g/G` historical
+granularity, `t/T` theme, `s/S` style, and `v/V` views.
 
-Uppercase does not generally mean “reverse.” `A` and `P` are low-frequency,
-Advanced project-presentation controls that appear only while grouped by project:
-`A` cycles project aggregation (`name`/`exact`) and `P` reveals progressively more
-safe project-label context. `f`, `l`, `o`, `k`, and `c` remain lowercase because
-they are direct actions despite appearing on the Advanced page.
+Capitalization is not a universal reverse rule. `A` and page-scoped `P` remain
+low-frequency Advanced project-presentation controls while grouped by project;
+`N`/`n` mean insert before/after; `u/U` mean undo/redo; `H` changes Dashboard
+Header presentation; and `L` opens custom diagnostics or animation history.
+`f`, `l`, `o`, `k`, and `c` remain lowercase direct actions despite appearing on
+the Advanced page.
 
-Historical `p/P` is a compatibility exception: `p` cycles trailing periods and
-`P` cycles natural periods. They are two period preset families, not a directional
-pair. It is intentionally documented separately from the `t/T` rule and does
-not change `P`'s Advanced project-label meaning.
+Historical `p/P` traverses the shared sequence `7d → 14d → 30d → 90d → 180d →
+365d → 1w → 1mo → 1y`; at either endpoint it wraps to the other end. `1w`,
+`1mo`, and `1y` mean This week, This month, and This year respectively, ending
+at today. The sequence applies to every historical token or Dataset chart, not
+just its current granularity. On a fixed explicit-date range it has no effect.
+The same `P` may retain its separately documented project-label meaning only on
+the Advanced page where that footer declares it.
 
 ### Historical adjustment flow
 
@@ -612,16 +649,18 @@ to browse mode.
 
 | Chart | Quick page | Advanced page |
 | --- | --- | --- |
-| Timeline | `p/P` period; `g` granularity; `b` grouping; `+/-` Top; `d` density; `t/T` theme; `s` style | `f` filters; `o` Other; `A` project aggregation and `P` project-label context when grouped by project; `l` legend; `k` weekday labels |
-| Calendar | `p/P` period; `d` density; `t/T` theme; `s` style | `f` filters |
-| Stack | `p/P` period; `g` granularity; `d` density; `t/T` theme; `s` style | `f` filters; `c` cache mode; `l` legend; `k` weekday labels |
-| Ranking | `p/P` period; `b` grouping; `+/-` Top; `d` density; `t/T` theme; `s` style | `f` filters; `o` Other; `A` project aggregation and `P` project-label context when grouped by project |
+| Timeline | `p/P` period; `g/G` granularity; `b` grouping; `+/-` Top; `d` density; `t/T` theme; `s/S` style | `f` filters; `o` Other; `A` project aggregation and `P` project-label context when grouped by project; `l` legend; `k` weekday labels |
+| Calendar | `p/P` period; `d` density; `t/T` theme; `s/S` style | `f` filters |
+| Stack | `p/P` period; `g/G` granularity; `d` density; `t/T` theme; `s/S` style | `f` filters; `c` cache mode; `l` legend; `k` weekday labels |
+| Ranking | `p/P` period; `b` grouping; `+/-` Top; `d` density; `t/T` theme; `s/S` style | `f` filters; `o` Other; `A` project aggregation and `P` project-label context when grouped by project |
 | Monitor | Timeline styles: `w` window; `i` sampling interval; `b` grouping; `+/-` Top; `d` density; `t/T` theme; `s` style. `cumulative-bars`: `w` Today/Yesterday; `g` hour/30 min; `b` grouping; `+/-` Top; `d` density; `t/T` theme; `s` style. Ranking/list omit `w`. | `f` filters; `A` project aggregation and `P` project-label context when grouped by project; `l` legend |
 
-`p` cycles trailing presets (`7d`, `14d`, `30d`, `365d`). `P` cycles natural
-presets (`1mo`, `1q`, `1y`). Neither changes a fixed explicit-date range.
-Grouping/style changes retain a compatible style; for example changing
-Timeline to grouped mode will replace `area` with a compatible style.
+`p` advances and `P` reverses through the shared historical sequence
+`7d → 14d → 30d → 90d → 180d → 365d → 1w → 1mo → 1y`. `1w`, `1mo`, and `1y`
+are week-to-date, month-to-date, and year-to-date periods. Both directions wrap;
+neither changes a fixed explicit-date range. Grouping/style changes retain a
+compatible style; for example changing Timeline to grouped mode will replace
+`area` with a compatible style.
 
 ### Candidate data while querying
 
@@ -688,11 +727,14 @@ Dashboard has separate navigation and ownership rules. In browse mode:
 | `h` | Open contextual Help. In the full-command view, lowercase `h` goes to the first line. |
 | `c` | In chart browse mode, show/hide the Dashboard control footer. |
 | `e`, `Up` / `Down` | In the full Dashboard command view, go to the final line or scroll one rendered line. |
-| `v` | Show the full Dashboard command. |
+| `v` / `V` | Cycle forward / backward between the Dashboard chart and full-command views. |
 | `y` | Copy from command view. |
 | `Ctrl-C` | Exit. |
 
-While adjusting a Pane, `v` cycles its view. In a non-chart pane text view,
+While adjusting a Pane, `v` advances and `V` reverses its view. Native and custom
+Dataset panes cycle chart, compact command, full command, data table, and JSON;
+custom data exports describe ccuv's currently projected data rather than a raw
+Dataset process response. In a non-chart pane text view,
 `Up`/`Down` scroll one line, `h` goes to the first line, and `e` goes to the
 final line; the pane's notices remain fixed. Its always-visible footer contains
 only reading, copying, and view-cycle actions, and only advertises scrolling
@@ -706,8 +748,8 @@ logical column shares; `_`/`=` adjust logical row shares. Focused Pane Quick
 keys are the historical/Monitor chart controls listed above, including the
 project-only Advanced `A` and `P` controls, except Monitor has no `i` because
 sampling belongs to the Dashboard host. Global Dashboard
-adjustment uses `t/T` for shell theme, `s` for shell style, `h` for header
-style, `u` for header summary, and `z` for layout. Pressing `z` opens the layout
+adjustment uses `t/T` for shell theme, `s/S` for shell style, `H` for header
+style, `p/P` for header-summary scope, and `z` for layout. Pressing `z` opens the layout
 chooser: use `j`/`k` or arrow keys to select a compatible layout, then `Enter`
 to apply it or `Esc` to cancel. Fixed-capacity layouts that cannot fit the
 current Pane count remain listed as unavailable and are skipped by navigation.

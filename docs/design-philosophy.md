@@ -170,11 +170,11 @@ This document records the stable product concepts and design constraints of `ccu
 
    Only affected values become unknown. Presentation-only changes require only repaint; changes fully computable from accepted data reprocess immediately; changes requiring new data use `??` until the current generation is accepted. Obsolete completion cannot restore stale values or clear the placeholder. Explicit manual refresh and committed-configuration work remain independent of periodic scheduling.
 
-7. **Keys express stable concepts, not a generic capitalization rule.**
+7. **Keys express scoped, stable concepts.**
 
-   `m` means modify the current visual resource: it modifies the current Standalone chart or animation, and the selected Dashboard Pane in browse mode. A primary click selects or arms a Pane; double-click enters Pane adjustment. While adjusting, double-clicking another Pane transfers focus. `d` opens Dashboard-global settings. Uppercase letters do not generally reverse their lowercase options. Related keys may instead represent distinct, stable families of the same concept: `p` cycles common trailing periods, while `P` cycles common natural periods to date. The interface names the active family so a calendar-aligned period is not mistaken for a trailing duration.
+   `m` means modify the current visual resource: it modifies the current Standalone chart or animation, and the selected Dashboard Pane in browse mode. A primary click selects or arms a Pane; double-click enters Pane adjustment. While adjusting, double-clicking another Pane transfers focus. `d` opens Dashboard-global settings. For an ordered finite selector that presents a lowercase/uppercase pair, lowercase advances, uppercase reverses, and both directions wrap. This applies to periods, historical granularity, theme, style, Pane views, and Dashboard Header summary scope.
 
-   **Exception:** Theme has a large, growing choice set, so `t` advances and `T` reverses. `N` and `n` are the deliberate semantic pair for inserting a Pane before or after the focused Pane's list index. Other ordinary letter actions are lowercase-only.
+   **Exception:** Capitalization is not a generic reverse rule. `N` and `n` deliberately insert before or after the focused Pane; `u/U` remain undo/redo; `H` is Dashboard Header presentation; `L` is custom diagnostics or animation history; and page-scoped `P` retains its declared Advanced project-label action. Other controls remain lowercase-only unless their active footer explicitly presents a directional pair.
 
 8. **Non-text directional surfaces support both arrow keys and `hjkl`.**
 

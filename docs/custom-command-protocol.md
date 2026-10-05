@@ -14,19 +14,25 @@ support non-additive metrics.
 
 ## Start a custom chart
 
-Choose a chart kind and supply a stable dataset ID plus the command argv:
+Choose a chart kind and a stable Dataset ID. Select exactly one source mode:
 
 ```bash
-ccuv custom timeline --dataset wechat-reading --command 'wechat-reading ccuv'
-ccuv custom stack --dataset wechat-reading --command 'wechat-reading ccuv'
-ccuv custom calendar --dataset wechat-reading --command 'wechat-reading ccuv'
-ccuv custom ranking --dataset wechat-reading --command 'wechat-reading ccuv'
+# Installed Dataset: chart kind + Dataset ID, validated from ccuv's Dataset store.
+ccuv custom timeline --dataset weread
+
+# Arbitrary developer command: chart kind + Dataset ID + command argv.
+ccuv custom timeline --dataset example --command 'example-reader ccuv'
+ccuv custom stack --dataset example --command 'example-reader ccuv'
+ccuv custom calendar --dataset example --command 'example-reader ccuv'
+ccuv custom ranking --dataset example --command 'example-reader ccuv'
 ```
 
 `--dataset` is required. It is the stable identity of the source and every
-response must echo it exactly. `--command` is split into argv with
-`shlex.split` and runs without a shell. To deliberately use shell behavior,
-make the shell part of argv yourself:
+response must echo it exactly. Without `--command`, `--dataset ID` resolves and
+validates the locally installed Dataset; it never requires the user to supply its
+executable path.
+`--command` is split into argv with `shlex.split` and runs without a shell. To
+deliberately use shell behavior, make the shell part of argv yourself:
 
 ```bash
 ccuv custom timeline --dataset example --command "sh -lc 'collector | adapter'"
@@ -34,7 +40,7 @@ ccuv custom timeline --dataset example --command "sh -lc 'collector | adapter'"
 
 A custom chart begins with a 14-day, ungrouped total graph and a day-period
 summary. Custom data cannot use `monitor`. The Dashboard pane always exposes
-`p`/`P` to change the rolling graph range. After the first successful response,
+`p`/`P` to cycle the shared rolling graph range (`7d → 14d → 30d → 90d → 180d → 365d → 1w → 1mo → 1y`). `1w`, `1mo`, and `1y` mean This week, This month, and This year. After the first successful response,
 it also exposes capability-gated query controls: `g` cycles declared
 granularities, `b` cycles total and declared groupings, and `f` edits declared
 filter options. Each such adjustment starts a new command query. Source editing
@@ -45,27 +51,41 @@ A standalone custom chart continuously refreshes by issuing `ccuv.custom/v1`
 chart requests to its configured command. It does not run `ccusage` historical
 acquisition or watch processing. A data-affecting replacement immediately
 shows the candidate chart title and loading state, without stale facts or a
-`querying` annotation. If that request fails, ccuv restores the previously
-accepted chart with the custom-source error alongside it.
+`querying` annotation. A same-query refresh failure may retain its accepted
+chart with the custom-source error alongside it. A failed replacement query
+never renders numeric facts from a different selection: ccuv keeps only the
+candidate title/range and the error.
 
 ## Use custom panes in a Dashboard
 
-Use ordinary ordered `--pane` fragments. The dataset may appear in more than
-one pane only when all uses have the same command configuration.
+Use ordinary ordered `--pane` fragments. The Dataset may appear in more than
+one pane only when all uses have the same source configuration. Installed Dataset
+panes require only chart kind and Dataset ID; arbitrary commands remain available
+for developer integrations.
 
 ```bash
 ccuv dashboard --empty --grid 2x2 \
   --pane 'empty' \
-  --pane 'custom timeline --dataset wechat-reading --command "wechat-reading ccuv"' \
+  --pane 'custom timeline --dataset weread' \
   --pane 'empty' \
   --pane 'animate --style rain'
 ```
+
+Dashboard presets remain the built-in token-consumption templates; adding a
+Dataset pane does not create or modify a Dataset preset.
 
 `dashboard --empty` suppresses default ccusage panes and their default data
 dependencies. It uses the normal default Dashboard layout and fills it with
 `empty` panes; `--grid` or an explicit layout sets their initial count and
 placement. It does not add a clock. Existing `wide-clock` and `narrow-clock`
 presets retain their clock pane.
+
+After a custom Dashboard pane is selected, `v` and `V` cycle forward and backward
+through chart, compact command, full command, data table, and JSON views. The
+data views serialize ccuv's current locally projected chart data: they honor the
+active range, filters, grouping, granularity, Top/Other selection, and unit
+precision. JSON keeps canonical series IDs and Decimal values as strings beside
+localized display labels; it does not expose an opaque raw process response.
 
 `--pane 'empty'` is a real temporary pane: it takes part in layout, focus, mouse
 and Tab navigation, insertion, deletion, and copied-command serialization, but
@@ -79,10 +99,11 @@ Double-click to select, then press r to choose a type
 Double-clicking an empty pane enters its Dashboard management context. It shows
 only Dashboard structure and position controls, not chart-specific settings.
 `r` opens the shared replacement type chooser; `N` and `n` open the insert-before
-and insert-after chooser. Selecting Custom then selects Timeline, Stack,
-Calendar, or Ranking and opens Dataset ID and Command fields. The new custom
-pane starts its initial query after replacement; the pane displays the resulting
-source error if that query fails. Insertion can also create an Empty pane.
+and insert-after chooser. Selecting Datasets lets a user choose an installed
+Dataset and then Timeline, Stack, Calendar, or Ranking—no command path is shown.
+Selecting Local command uses the advanced Dataset ID and Command fields. The new
+custom pane starts its initial query after replacement; the pane displays the
+resulting source error if that query fails. Insertion can also create an Empty pane.
 Deleting a pane with `x` compacts the remaining panes and does not create a
 replacement placeholder.
 
@@ -109,16 +130,22 @@ must not depend on a previous command process.
 
 ## Requests
 
-A chart request has inclusive calendar dates. Version 1 has no timestamps, time
-zones, hours, rolling windows, or sub-day fields.
+A chart request has inclusive calendar dates and a required IANA `timezone`.
+ccuv resolves its global `--timezone` (or the local system IANA timezone by
+default) before every request. The timezone is request context, not a capability:
+it tells a Dataset how ccuv interpreted the date boundaries. Version 1 has no
+timestamps, hours, or sub-day fields. `range.period` is additive metadata within
+`ccuv.custom/v1` for the selected rolling preset; it does not replace the
+absolute date boundaries or change the protocol version.
 
 ```json
 {
   "protocol": "ccuv.custom/v1",
   "request_id": "physical-request-id",
   "request_kind": "chart",
-  "dataset_id": "wechat-reading",
-  "range": {"start_date": "2026-09-17", "end_date": "2026-09-30"},
+  "dataset_id": "weread",
+  "timezone": "Asia/Shanghai",
+  "range": {"start_date": "2026-09-17", "end_date": "2026-09-30", "period": "14d"},
   "query": {
     "filters": {"category": ["literature"]},
     "group_by": "book",
@@ -127,8 +154,7 @@ zones, hours, rolling windows, or sub-day fields.
 }
 ```
 
-`range` supplies graph coverage. `query` supplies source-side business filters,
-grouping, and aggregation. ccuv does not send style, theme, density, legend,
+`range.start_date` and `range.end_date` are inclusive, resolved, and authoritative graph coverage. `range.period` is the canonical rolling-period spelling (`1w`, `1mo`, and `1y` carry natural week-to-date, month-to-date, and year-to-date intent); it is `null` for a fixed `--since`/`--until` range. A Dataset may use it for source-specific semantics but must not replace the supplied dates. `query` supplies source-side business filters, grouping, and aggregation. ccuv does not send style, theme, density, legend,
 sort order, Top N, Other, pane geometry, or layout.
 
 A summary request contains the resolved, inclusive intervals for exactly one
@@ -141,7 +167,8 @@ Only present comparison intervals are requested.
   "protocol": "ccuv.custom/v1",
   "request_id": "physical-summary-id",
   "request_kind": "summary",
-  "dataset_id": "wechat-reading",
+  "dataset_id": "weread",
+  "timezone": "Asia/Shanghai",
   "query": {"filters": {"category": ["literature"]}},
   "summary": {
     "scope": "month",
@@ -155,17 +182,19 @@ Only present comparison intervals are requested.
 ```
 
 The Dashboard displays one summary per dataset ID. It scans visible panes in
-pane order and uses the first pane’s command and filter context for that ID at a
-Header refresh boundary; duplicate-ID panes continue to query independently.
-A same-ID pane command edit does not replace the accepted Header result until a
-later Header-owned refresh. Header metrics remain independent from token totals.
+pane order and uses the first pane’s command for that ID; duplicate-ID panes
+continue to query independently. Header summaries always use empty filters and
+ignore Pane grouping, granularity, graph range, and presentation settings. When
+that first pane’s command changes, ccuv immediately suppresses the previously
+accepted Header metric and starts a replacement Header-owned refresh. Header
+metrics remain independent from token totals.
 
 ```json
 {
   "protocol": "ccuv.custom/v1",
   "request_id": "physical-summary-id",
   "request_kind": "summary",
-  "dataset_id": "wechat-reading",
+  "dataset_id": "weread",
   "status": "ok",
   "summary": {
     "metric": {
@@ -186,7 +215,10 @@ later Header-owned refresh. Header metrics remain independent from token totals.
 
 A successful chart response includes `protocol`, `request_id`, `request_kind`,
 `dataset_id`, `status: "ok"`, `dataset`, `capabilities`, and `data`. A successful
-summary response contains only `summary.metric`. Dataset titles/descriptions,
+summary response contains `summary.metric`. Either successful response may also
+include a non-blocking `warnings` array. Each warning has an open-ended stable
+`code` and a localized `message`; ccuv shows it while retaining the successful
+chart or summary. Dataset titles/descriptions,
 unit labels, dimension/filter labels and options, series labels, metric labels,
 source display text, and returned messages must always include both `en` and
 `zh-CN`. ccuv selects its active language.
@@ -196,10 +228,19 @@ source display text, and returned messages must always include both `en` and
   "protocol": "ccuv.custom/v1",
   "request_id": "physical-request-id",
   "request_kind": "chart",
-  "dataset_id": "wechat-reading",
+  "dataset_id": "weread",
   "status": "ok",
+  "warnings": [
+    {
+      "code": "timezone_not_supported",
+      "message": {
+        "en": "WeRead uses Asia/Shanghai; the requested timezone was not applied.",
+        "zh-CN": "微信读书使用 Asia/Shanghai；未应用请求的时区。"
+      }
+    }
+  ],
   "dataset": {
-    "title": {"en": "WeChat Reading", "zh-CN": "微信读书"},
+    "title": {"en": "WeRead", "zh-CN": "微信读书"},
     "description": {"en": "Daily pages read", "zh-CN": "每日阅读页数"},
     "unit": {"id": "page", "label": {"en": "pages", "zh-CN": "页"}, "placement": "suffix", "decimal_places": 0}
   },
@@ -214,6 +255,15 @@ numbers, blank strings, scientific notation, `NaN`, and infinities are invalid. 
 metric has one fixed unit and dimension and must be additive. Supported examples
 include counts, amounts, and byte totals. Averages, rates, percentages, unique
 users, min/max values, percentiles, balances, and snapshots are excluded.
+
+For example, the WeRead Dataset currently uses `Asia/Shanghai` for source-date
+semantics. It accepts every valid request timezone; when the requested timezone
+is not `Asia/Shanghai`, it successfully returns Shanghai-based data with a
+`timezone_not_supported` warning instead of turning the successful query into an
+error. Datasets declare their own units and precision. WeRead reports reading
+minutes to two decimals: it aggregates raw seconds before converting and
+rounding summaries, so the sum of individually rounded days can differ from a
+total by `0.01` minute.
 
 The command filters the requested inclusive range, applies business rules,
 aggregates by the requested dimension (or returns sole `total` when grouping is
@@ -232,12 +282,23 @@ be rejected rather than weakened or silently changed.
 
 Each chart declaration lists permitted granularities, grouping dimensions, and
 filters. Timeline, Stack, and Ranking use total or grouped date series.
-Calendar requires an ungrouped daily total. The protocol and projection
-capability-validate period, grouping, granularity, filter IDs, and selected
-filter option IDs. The Dashboard only shows `g`, `b`, and `f` after a successful
-response declares the corresponding capability; it never weakens an unsupported
-selection. Local Top N/Other changes remain display-only and do not start a
+Calendar requires an ungrouped daily total. A Dataset owns source-specific
+combination rules—such as an otherwise declared grouping that is available only
+for particular `range.period` values—and returns its correlated
+`unsupported_query` response when the selected combination is unavailable.
+ccuv sends the selected query unchanged: it does not maintain a Dataset-specific
+compatibility matrix, substitute Total data, or select another period. The
+protocol and projection capability-validate period syntax, grouping,
+granularity, filter IDs, and selected filter option IDs. The Dashboard only shows
+`g`, `b`, and `f` after a successful response declares the corresponding
+capability. Local Top N/Other changes remain display-only and do not start a
 command query.
+
+A Dataset may represent an official period aggregate in a Ranking response with
+one point per entity at the request `end_date`. That point is a coordinate for
+Ranking projection, not daily attribution; its value is the source aggregate.
+Such a Dataset must declare the grouping only for Ranking, not for Timeline,
+Stack, or Calendar unless it also supplies the respective source-backed data.
 
 Summary values use the active filters but not grouping, Top N, or Other.
 Summary responses return exactly one `metric`: its `current.value` and ready
@@ -258,7 +319,7 @@ message, and one of these stable codes:
   "protocol": "ccuv.custom/v1",
   "request_id": "physical-request-id",
   "request_kind": "chart",
-  "dataset_id": "wechat-reading",
+  "dataset_id": "weread",
   "status": "error",
   "error": {
     "code": "unsupported_query",
@@ -277,11 +338,30 @@ message, and one of these stable codes:
 - `source_unavailable`
 - `internal_error`
 
-ccuv keeps the last valid result and rendering after a failed source query,
-then shows the error alongside that result. Its candidate source configuration
-remains available for correction. Empty series is not an error: return
-`status: "ok"`, an empty series list, and valid zero/pending/unavailable summary
-values.
+`unsupported` is optional, but a Dataset should include it for every user-correctable
+selection failure. Its exact `field` and requested `value` identify the rejected
+control. In particular, use `{"field": "range.period", "value": "<period>"}`
+when the selected rolling period is unavailable. ccuv then clears an older chart:
+leaving it visible would imply that the period switch did not apply. For every
+other field, ccuv retains a prior accepted chart when one exists and shows the
+warning beside it. Other replacement failures clear prior numeric facts when
+the request-affecting identity differs; the titled candidate error surface then
+shows the current selection without a chart from another query.
+
+Dataset error messages are localized, actionable UI copy. Both variants should
+identify the rejected choice and name supported alternatives where applicable.
+They must not prescribe ccuv shortcuts or controls: a Dataset can run under
+multiple hosts, and the host renders the controls available in its current
+surface. Do not silently substitute a different period or query.
+
+ccuv compares a failed request's data-affecting identity—source, chart kind,
+inclusive range plus `range.period`, filters, grouping, and granularity—with the
+accepted query. A same-query refresh may retain valid facts, while a failed
+replacement clears them and retains only localized Dataset metadata for the
+candidate title/range. This is Dataset-neutral and never depends on specific
+period names, Dataset IDs, or source endpoints. Empty series is not an error:
+return `status: "ok"`, an empty series list, and valid zero/pending/unavailable
+summary values.
 
 Malformed output, mismatched IDs, invalid decimals, missing localized text,
 unknown protocol versions, timeouts, spawn failures, and nonzero exits without a
@@ -289,17 +369,21 @@ valid protocol error are source/protocol failures. stderr may appear in bounded
 diagnostics but is never parsed into a result.
 
 Only exact concurrent requests coalesce. Identity includes argv and execution
-context, dataset ID, request kind, inclusive range, normalized filters (sorted
-keys and choices), grouping, granularity, and summary period/as-of date. It
-excludes chart kind, style, theme, density, legend, Top N, Other, layout, and
-pane position. Version 1 has no overlapping-range merge, interval/range union,
+context, dataset ID, request kind, timezone, inclusive range **and its
+`range.period` semantic**, normalized filters (sorted keys and choices), grouping,
+granularity, and summary period/as-of date. Thus, equal resolved dates with
+different selected period semantics never share an execution. Identity excludes
+chart kind, style, theme, density, legend, Top N, Other, layout, and pane
+position. Version 1 has no overlapping-range merge, interval/range union,
 completed-result cache, batching, or result slicing.
 
-Custom Dashboard panes provide **Source** (`e`) to edit Dataset ID and argv
-through the Tab-navigable form. Enter validates the draft and starts a query.
-A data-affecting replacement immediately shows the candidate title and loading
-state rather than the previous chart; a failed query restores the accepted
-rendering with its error. `L` opens bounded per-pane **Logs** and `y` copies
-them; `l` remains reserved for the built-in legend shortcut. Logs contain
-successful query diagnostics and failures only; they never parse or display
-protocol stdout as result data.
+Custom Dashboard panes provide **Source** (`e`). Installed Dataset panes edit
+only chart type and Dataset ID, then revalidate the local installation; arbitrary
+command panes edit Dataset ID and argv through the Tab-navigable form. Enter
+validates the draft and starts a query. A data-affecting replacement immediately
+shows the candidate title and loading state rather than the previous chart. A
+same-query refresh failure may retain accepted facts with its error; a failed
+replacement keeps only the candidate title/range and error. `L` opens bounded
+per-pane **Logs** and `y` copies them; `l` remains reserved for the built-in
+legend shortcut. Logs contain successful query diagnostics and failures only;
+they never parse or display protocol stdout as result data.

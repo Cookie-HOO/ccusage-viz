@@ -34,6 +34,12 @@ from token consumption, such as observed tokens per minute (TPM). It does not
 provide session analytics, request counts, elapsed-time metrics, costs,
 pricing, balances, quotas, allowances, or other non-token account analytics.
 
+Historical date boundaries use the local IANA timezone by default. Pass
+`--timezone AREA/LOCATION` to select another calendar context; copied commands
+retain the resolved timezone. ccuv sends that timezone explicitly to every
+custom Dataset request, while a Dataset may return a non-blocking warning if it
+cannot apply the requested timezone.
+
 > This project is not affiliated with or endorsed by the `ccusage` project or
 > its maintainers.
 
@@ -51,9 +57,9 @@ remains available to the draft.
 > [!TIP]
 > To start without default ccusage panes or requests, use `ccuv dashboard --empty`.
 > It fills the selected default grid or explicit `--grid`/layout with temporary
-> `empty` panes. Add custom command-backed data with a pane such as
-> `--pane 'custom timeline --dataset reading --command "my-reader ccuv"'`. See
-> the [custom command protocol guide](docs/custom-command-protocol.md).
+> `empty` panes. Add an installed Dataset with only its chart type and Dataset ID:
+> `--pane 'custom timeline --dataset weread'`. Arbitrary commands add `--command`.
+> See the [custom command protocol guide](docs/custom-command-protocol.md).
 
 ```bash
 ccuv dashboard
