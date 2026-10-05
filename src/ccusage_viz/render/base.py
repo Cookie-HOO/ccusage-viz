@@ -174,7 +174,12 @@ def title_with_querying(title: str, context: RenderContext) -> str:
 
 def date_range_heading(name: str, since: date, until: date, context: RenderContext) -> str:
     if context.period is not None:
-        return title_with_querying(f"{name} · {context.period}", context)
+        period = {
+            "1w": context.translator.text("label.period_this_week"),
+            "1mo": context.translator.text("label.period_this_month"),
+            "1y": context.translator.text("label.period_this_year"),
+        }.get(context.period, context.period)
+        return title_with_querying(f"{name} · {period}", context)
     date_range = context.translator.text(
         "label.date_range", since=since.isoformat(), until=until.isoformat()
     )

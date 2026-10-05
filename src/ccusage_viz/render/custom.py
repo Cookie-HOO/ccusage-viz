@@ -12,6 +12,7 @@ from typing import cast
 
 import plotext as plt
 
+from ccusage_viz.custom_models import CustomPresentationDescriptor
 from ccusage_viz.formatting import center_text, clip_width
 from ccusage_viz.options import CustomChartConfig
 from ccusage_viz.processing.custom_historical import CustomChartProjection, CustomProjectedSeries
@@ -24,7 +25,7 @@ from ccusage_viz.render.base import (
     date_ticks,
     isolated_plot,
 )
-from ccusage_viz.render.calendar_body import render_calendar_grid
+from ccusage_viz.render.calendar_body import render_calendar_footer, render_calendar_grid
 from ccusage_viz.render.palette import categorical_colors, get_color_scheme
 from ccusage_viz.render.ranking_presentation import (
     RankingPresentationEntry,
@@ -49,14 +50,42 @@ def _label(series: CustomProjectedSeries, context: RenderContext) -> str:
     return label.zh_cn if context.translator.language == "zh" else label.en
 
 
-def _heading(projection: CustomChartProjection, context: RenderContext) -> str:
-    title = context.translator.text(f"label.{projection.kind}")
+def custom_heading(
+    config: CustomChartConfig,
+    context: RenderContext,
+    descriptor: CustomPresentationDescriptor | None = None,
+) -> str:
+    """Render candidate-first custom chart chrome without retaining numeric facts."""
+
+    labels: list[str] = []
+    if descriptor is not None:
+        dataset = descriptor.dataset.title
+        labels.append(dataset.zh_cn if context.translator.language == "zh" else dataset.en)
+    if config.kind == "ranking":
+        if config.group_by is None:
+            labels.append(context.translator.text("label.total"))
+        elif descriptor is not None and config.group_by in descriptor.group_labels:
+            group = descriptor.group_labels[config.group_by]
+            labels.append(group.zh_cn if context.translator.language == "zh" else group.en)
+        else:
+            labels.append(config.group_by)
+    labels.append(context.translator.text(f"label.{config.kind}"))
+    title = " · ".join(labels)
     heading = (
-        content_heading(title, projection.days[0], projection.days[-1], context)
+        content_heading(title, config.date_range.since, config.date_range.until, context)
         if context.title_content
-        else date_range_heading(title, projection.days[0], projection.days[-1], context)
+        else date_range_heading(title, config.date_range.since, config.date_range.until, context)
     )
     return center_text(heading, context.width)
+
+
+def _heading(projection: CustomChartProjection, context: RenderContext) -> str:
+    if projection.config is not None:
+        return custom_heading(projection.config, context, projection.presentation)
+    title = context.translator.text(f"label.{projection.kind}")
+    return center_text(
+        date_range_heading(title, projection.days[0], projection.days[-1], context), context.width
+    )
 
 
 def _summary(projection: CustomChartProjection, context: RenderContext) -> str:
@@ -73,34 +102,81 @@ def _value(value: Decimal, projection: CustomChartProjection, context: RenderCon
     return format_custom_value(value, projection.unit, language=context.translator.language)
 
 
+def _custom_axis_value(value: Decimal, projection: CustomChartProjection) -> str:
+    quantum = Decimal(1).scaleb(-projection.unit.decimal_places)
+    return format(value.quantize(quantum), f".{projection.unit.decimal_places}f")
+
+
+def _custom_timeline_heading(projection: CustomChartProjection, context: RenderContext) -> str:
+    label = (
+        projection.unit.label.zh_cn
+        if context.translator.language == "zh"
+        else projection.unit.label.en
+    )
+    heading = _heading(projection, context).strip()
+    text = (
+        f"{label} · {heading}" if projection.unit.placement == "prefix" else f"{heading} · {label}"
+    )
+    return center_text(text, context.width)
+
+
 def _configure_custom_y_ticks(
     values: list[Decimal], projection: CustomChartProjection, context: RenderContext
 ) -> None:
     maximum = max(values, default=Decimal())
-    positions = [0.0] if maximum <= 0 else [float(maximum * index / 4) for index in range(5)]
-    labels = [_value(Decimal(str(position)), projection, context) for position in positions]
-    plt.figure.ruler("y").ticks(positions, labels)
-
-
-def render_custom_pending(config: CustomChartConfig, context: RenderContext) -> str:
-    """Render a source-independent placeholder for a pending primary request."""
-    title = context.translator.text(f"label.{config.kind}")
-    heading = center_text(
-        (
-            content_heading(title, config.date_range.since, config.date_range.until, context)
-            if context.title_content
-            else date_range_heading(
-                title, config.date_range.since, config.date_range.until, context
-            )
-        ),
-        context.width,
+    positions = [Decimal()] if maximum <= 0 else [maximum * index / 4 for index in range(5)]
+    plt.figure.ruler("y").ticks(
+        [float(position) for position in positions],
+        [_custom_axis_value(position, projection) for position in positions],
     )
-    return "\n".join((heading, context.translator.text("message.data_loading")))
+
+
+def render_custom_pending(
+    config: CustomChartConfig,
+    context: RenderContext,
+    descriptor: CustomPresentationDescriptor | None = None,
+) -> str:
+    """Render a source-independent placeholder for a pending primary request."""
+    return "\n".join(
+        (
+            custom_heading(config, context, descriptor),
+            context.translator.text("message.data_loading"),
+        )
+    )
+
+
+def render_custom_empty(
+    config: CustomChartConfig,
+    context: RenderContext,
+    descriptor: CustomPresentationDescriptor | None = None,
+) -> str:
+    """Render a titled, metric-neutral empty custom chart state."""
+    return "\n".join(
+        (
+            custom_heading(config, context, descriptor),
+            context.translator.text("message.custom_no_data"),
+        )
+    )
+
+
+def render_custom_failure(
+    config: CustomChartConfig,
+    context: RenderContext,
+    descriptor: CustomPresentationDescriptor | None = None,
+) -> str:
+    """Render only the current selection's chart chrome after a failed replacement."""
+    return custom_heading(config, context, descriptor)
 
 
 def render_custom_timeline(projection: CustomChartProjection, context: RenderContext) -> str:
     if not projection.series:
-        return context.translator.text("message.no_data")
+        return (
+            render_custom_empty(projection.config, context, projection.presentation)
+            if projection.config is not None
+            else "\n".join(
+                (_heading(projection, context), context.translator.text("message.custom_no_data"))
+            )
+        )
     sole_total = len(projection.series) == 1 and projection.series[0].id == "total"
     show_legend = (not sole_total and context.legend_position != "hidden") or (
         sole_total and context.legend_position == "inside"
@@ -123,7 +199,7 @@ def render_custom_timeline(projection: CustomChartProjection, context: RenderCon
         x_ticks=date_ticks(projection.days, context, aggregation=projection.granularity),
         y_ticks=(
             y_positions,
-            [_value(position, projection, context) for position in y_positions],
+            [_custom_axis_value(position, projection) for position in y_positions],
         ),
         context=context,
         text_rows=(
@@ -138,7 +214,7 @@ def render_custom_timeline(projection: CustomChartProjection, context: RenderCon
         line
         for line in (
             summary,
-            _heading(projection, context),
+            _custom_timeline_heading(projection, context),
             plot.legend,
             plot.chart,
         )
@@ -168,7 +244,13 @@ def _custom_stack_ticks(
 
 def render_custom_stack(projection: CustomChartProjection, context: RenderContext) -> str:
     if not projection.series or projection.total == 0:
-        return context.translator.text("message.no_data")
+        return (
+            render_custom_empty(projection.config, context, projection.presentation)
+            if projection.config is not None
+            else "\n".join(
+                (_heading(projection, context), context.translator.text("message.custom_no_data"))
+            )
+        )
     with isolated_plot():
         configure_plot(context)
         scheme = get_color_scheme(context.color_scheme)
@@ -252,7 +334,13 @@ def render_custom_stack(projection: CustomChartProjection, context: RenderContex
 
 def render_custom_calendar(projection: CustomChartProjection, context: RenderContext) -> str:
     if not projection.series:
-        return context.translator.text("message.no_data")
+        return (
+            render_custom_empty(projection.config, context, projection.presentation)
+            if projection.config is not None
+            else "\n".join(
+                (_heading(projection, context), context.translator.text("message.custom_no_data"))
+            )
+        )
     values = {
         day: value for day, value in zip(projection.days, projection.series[0].values, strict=True)
     }
@@ -260,12 +348,26 @@ def render_custom_calendar(projection: CustomChartProjection, context: RenderCon
         line for line in (_summary(projection, context), _heading(projection, context)) if line
     ]
     lines.extend(render_calendar_grid(projection.days, values, context))
+    lines.extend(
+        render_calendar_footer(
+            projection.days,
+            values,
+            context,
+            value_formatter=lambda value: _value(cast(Decimal, value), projection, context),
+        )
+    )
     return "\n".join(clip_width(line, context.width) for line in lines)
 
 
 def render_custom_ranking(projection: CustomChartProjection, context: RenderContext) -> str:
     if not projection.series:
-        return context.translator.text("message.no_data")
+        return (
+            render_custom_empty(projection.config, context, projection.presentation)
+            if projection.config is not None
+            else "\n".join(
+                (_heading(projection, context), context.translator.text("message.custom_no_data"))
+            )
+        )
     return render_historical_ranking(
         tuple(
             RankingPresentationEntry(
@@ -279,7 +381,7 @@ def render_custom_ranking(projection: CustomChartProjection, context: RenderCont
             )
             for entry in projection.series
         ),
-        heading=_heading(projection, context),
+        heading=_heading(projection, context).strip(),
         value_formatter=lambda value: _value(cast(Decimal, value), projection, context),
         delta_formatter=lambda value: (
             f"{'+' if value > 0 else '-'}{_value(abs(cast(Decimal, value)), projection, context)}"

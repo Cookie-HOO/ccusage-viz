@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from decimal import Decimal
 from json import loads
 
 from ccusage_viz.chart_models import (
@@ -8,10 +9,15 @@ from ccusage_viz.chart_models import (
     TimeOfDaySeries,
 )
 from ccusage_viz.core.time import DateRange
+from ccusage_viz.custom_models import CustomUnit, LocalizedText
 from ccusage_viz.data_view import (
     body_view_copy_kind,
+    custom_data_payload,
+    cycle_body_view,
+    cycle_dashboard_body_view,
     next_body_view,
     next_dashboard_body_view,
+    render_custom_data,
     render_monitor_data,
     render_monitor_distribution_data,
     render_snapshot_data,
@@ -26,6 +32,7 @@ from ccusage_viz.options import (
     StandaloneLaunch,
     TimelineConfig,
 )
+from ccusage_viz.processing.custom_historical import CustomChartProjection, CustomProjectedSeries
 from ccusage_viz.processing.monitor import ObservedBucket
 from ccusage_viz.project_identity import ExactProjectDisplayKey, make_project_ref
 from ccusage_viz.terminal import Terminal
@@ -58,6 +65,8 @@ def test_body_view_cycle_and_copy_permissions() -> None:
     assert body_view_copy_kind("full-command") == "full-command"
     assert body_view_copy_kind("data-table") == "data-table"
     assert body_view_copy_kind("data-json") == "data-json"
+    assert cycle_body_view("chart", step=-1) == "data-json"
+    assert cycle_body_view("command", step=-1) == "chart"
 
 
 def test_dashboard_body_view_cycle_has_no_data_views() -> None:
@@ -68,6 +77,75 @@ def test_dashboard_body_view_cycle_has_no_data_views() -> None:
         observed.append(view)
 
     assert observed == ["chart", "full-command", "chart"]
+    assert cycle_dashboard_body_view("chart", step=-1) == "full-command"
+
+
+def test_custom_data_serializes_visible_decimal_projection() -> None:
+    projection = CustomChartProjection(
+        "timeline",
+        (date(2026, 9, 1), date(2026, 9, 2)),
+        (
+            CustomProjectedSeries(
+                "book-a",
+                LocalizedText("Book A", "图书 A"),
+                (Decimal("1.20"), Decimal("0.05")),
+            ),
+            CustomProjectedSeries(
+                "Other",
+                LocalizedText("Other", "其他"),
+                (Decimal("2.75"), Decimal("0")),
+                is_other=True,
+            ),
+        ),
+        CustomUnit("page", LocalizedText("pages", "页"), "suffix", 2),
+        DateRange(date(2026, 9, 1), date(2026, 9, 2)),
+        "day",
+    )
+    translator = load_translator("en")
+
+    table = render_custom_data(projection, language="en", translator=translator)
+    payload = loads(
+        render_custom_data(projection, language="zh", translator=translator, view="data-json")
+    )
+
+    assert table.splitlines()[0] == "| period | series_id | series | is_other | value |"
+    assert payload == {
+        "kind": "timeline",
+        "range": {"start_date": "2026-09-01", "end_date": "2026-09-02"},
+        "granularity": "day",
+        "unit": {"id": "page", "label": "页", "placement": "suffix", "decimal_places": 2},
+        "rows": [
+            {
+                "period": "2026-09-01",
+                "series_id": "book-a",
+                "series": "图书 A",
+                "is_other": False,
+                "value": "1.20",
+            },
+            {
+                "period": "2026-09-02",
+                "series_id": "book-a",
+                "series": "图书 A",
+                "is_other": False,
+                "value": "0.05",
+            },
+            {
+                "period": "2026-09-01",
+                "series_id": "Other",
+                "series": "其他",
+                "is_other": True,
+                "value": "2.75",
+            },
+            {
+                "period": "2026-09-02",
+                "series_id": "Other",
+                "series": "其他",
+                "is_other": True,
+                "value": "0",
+            },
+        ],
+    }
+    assert custom_data_payload(projection, language="en")["rows"][0]["value"] == "1.20"
 
 
 def test_snapshot_data_serializes_aggregated_chart_rows() -> None:

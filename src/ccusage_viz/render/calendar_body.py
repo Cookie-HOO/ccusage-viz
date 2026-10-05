@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -12,6 +13,105 @@ from ccusage_viz.render.base import RenderContext, background_mark
 from ccusage_viz.render.palette import get_color_scheme
 
 CalendarNumber = int | Decimal
+
+
+@dataclass(frozen=True, slots=True)
+class CalendarStatistics:
+    """Domain-neutral calendar facts derived from daily numeric values."""
+
+    active_days: int
+    average: CalendarNumber
+    peak_day: date | None
+    peak_value: CalendarNumber | None
+    current_streak: int
+    longest_streak: int
+
+
+def calendar_statistics(
+    days: tuple[date, ...], values: Mapping[date, CalendarNumber]
+) -> CalendarStatistics:
+    """Calculate generic activity and magnitude facts for a calendar footer."""
+    active_days = sum(values.get(day, 0) > 0 for day in days)
+    total = sum((values.get(day, 0) for day in days), start=Decimal())
+    average = total / len(days) if days else Decimal()
+    active = ((day, values.get(day, 0)) for day in days if values.get(day, 0) > 0)
+    peak = max(active, key=lambda item: (item[1], -item[0].toordinal()), default=None)
+
+    current_streak = longest_streak = running_streak = 0
+    for day in days:
+        if values.get(day, 0) > 0:
+            running_streak += 1
+            longest_streak = max(longest_streak, running_streak)
+        else:
+            running_streak = 0
+    for day in reversed(days):
+        if values.get(day, 0) <= 0:
+            break
+        current_streak += 1
+
+    return CalendarStatistics(
+        active_days,
+        average,
+        peak[0] if peak else None,
+        peak[1] if peak else None,
+        current_streak,
+        longest_streak,
+    )
+
+
+def render_calendar_footer(
+    days: tuple[date, ...],
+    values: Mapping[date, CalendarNumber],
+    context: RenderContext,
+    *,
+    value_formatter: Callable[[CalendarNumber], str],
+) -> tuple[str, ...]:
+    """Render density-aware, domain-neutral calendar facts and legend."""
+    if context.density in {"minimal", "compact"}:
+        return ()
+
+    stats = calendar_statistics(days, values)
+    activity = [context.translator.text("label.active_days", count=stats.active_days)]
+    usage = [context.translator.text("label.average", value=value_formatter(stats.average))]
+    if stats.peak_day is not None and stats.peak_value is not None:
+        usage.append(
+            context.translator.text(
+                "label.peak",
+                date=stats.peak_day.isoformat(),
+                value=value_formatter(stats.peak_value),
+            )
+        )
+    if context.density == "detailed":
+        activity.extend(
+            (
+                context.translator.text("label.current_streak", count=stats.current_streak),
+                context.translator.text("label.longest_streak", count=stats.longest_streak),
+            )
+        )
+
+    first, last = days[0], days[-1]
+    start = first - timedelta(days=first.weekday())
+    end = last + timedelta(days=6 - last.weekday())
+    week_count = (end - start).days // 7 + 1
+    cell_width, _ = cell_geometry(week_count, context)
+    scheme = get_color_scheme(context.color_scheme)
+    marks = fallback_marks(context)
+
+    def legend_cell(level: int) -> str:
+        if context.color:
+            return background_mark(" " * cell_width, scheme.calendar[level - 1], context)
+        return marks[level]
+
+    if context.density != "detailed":
+        return (" · ".join((*activity, *usage)),)
+    legend = " ".join(
+        (
+            context.translator.text("calendar.legend.less"),
+            *(legend_cell(level) for level in (1, 2, 3, 4)),
+            context.translator.text("calendar.legend.more"),
+        )
+    )
+    return (" · ".join(activity), " · ".join(usage), legend)
 
 
 def positive_levels(values: list[CalendarNumber]) -> dict[CalendarNumber, int]:

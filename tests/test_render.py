@@ -280,7 +280,10 @@ def test_historical_ranking_heading_is_centered_once() -> None:
     heading = render_ranking(model, context).splitlines()[0]
 
     assert heading.lstrip() == "累计排名 · 14d"
-    assert len(heading) - len(heading.lstrip()) == (context.width - display_width(heading.lstrip())) // 2
+    assert (
+        len(heading) - len(heading.lstrip())
+        == (context.width - display_width(heading.lstrip())) // 2
+    )
 
 
 def test_ranking_heading_shows_hidden_top_coverage() -> None:
@@ -1230,7 +1233,18 @@ def test_calendar_color_styles_use_background_swatches_and_distinct_geometry() -
     assert relative != grid
 
 
-def test_calendar_footer_separates_activity_usage_and_legend() -> None:
+@pytest.mark.parametrize(
+    ("density", "has_stats", "has_streaks", "has_legend"),
+    (
+        ("minimal", False, False, False),
+        ("compact", False, False, False),
+        ("full", True, False, False),
+        ("detailed", True, True, True),
+    ),
+)
+def test_calendar_footer_follows_density(
+    density: str, has_stats: bool, has_streaks: bool, has_legend: bool
+) -> None:
     calendar = render_calendar(
         CalendarModel(
             (
@@ -1238,18 +1252,15 @@ def test_calendar_footer_separates_activity_usage_and_legend() -> None:
                 CalendarDay(date(2026, 1, 2), usage(4_000)),
             )
         ),
-        RenderContext(100, 24, load_translator("en"), color=False, ascii=True),
+        RenderContext(100, 24, load_translator("en"), color=False, ascii=True, density=density),
     )
-    lines = calendar.splitlines()
-    activity = next(line for line in lines if "Active days" in line)
-    usage_line = next(line for line in lines if "Daily average" in line)
-    legend = next(line for line in lines if "Less . o O # More" in line)
 
-    assert "Current streak" in activity and "Longest streak" in activity
-    assert "Peak" not in activity
-    assert "Peak" in usage_line
-    assert lines.index(activity) + 1 == lines.index(usage_line)
-    assert lines.index(usage_line) + 1 == lines.index(legend)
+    assert ("Active days" in calendar) is has_stats
+    assert ("Daily average" in calendar) is has_stats
+    assert ("Peak" in calendar) is has_stats
+    assert ("Current streak" in calendar) is has_streaks
+    assert ("Longest streak" in calendar) is has_streaks
+    assert ("Less . o O # More" in calendar) is has_legend
 
 
 def test_calendar_grid_uses_only_positive_color_swatches() -> None:
@@ -1299,13 +1310,13 @@ def test_calendar_uses_one_cell_per_week_when_width_requires_compact_stride() ->
 def test_calendar_footer_keeps_average_without_peak_and_clips_rows_independently() -> None:
     calendar = render_calendar(
         CalendarModel((CalendarDay(date(2026, 1, 1), usage(0)),)),
-        RenderContext(24, 24, load_translator("en"), color=False, ascii=True),
+        RenderContext(32, 24, load_translator("en"), color=False, ascii=True, density="full"),
     )
     lines = calendar.splitlines()
 
     assert any("Daily average" in line for line in lines)
     assert not any("Peak" in line for line in lines)
-    assert all(len(line) <= 24 for line in lines)
+    assert all(len(line) <= 32 for line in lines)
 
 
 def test_calendar_labels_follow_selected_language() -> None:

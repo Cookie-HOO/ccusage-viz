@@ -129,7 +129,7 @@ def render_summary_placeholder(
         ),
         context.translator.text(f"summary.sequential.{period}", relation=unknown),
     ]
-    if period != "year":
+    if period not in {"week", "year"}:
         values = {"relation": unknown}
         if period == "day":
             previous_week_day = end - timedelta(days=7)

@@ -8,7 +8,10 @@ def test_catalogs_have_the_same_keys_and_placeholders() -> None:
     assert EN_MESSAGES.keys() == ZH_MESSAGES.keys()
     assert EN_MESSAGES["label.monitor_sampling"] == "sampling"
     assert ZH_MESSAGES["label.monitor_sampling"] == "采样中"
-    assert EN_MESSAGES["status.empty_pane_hint"] == "Double-click to select, then press r to choose a type"
+    assert (
+        EN_MESSAGES["status.empty_pane_hint"]
+        == "Double-click to select, then press r to choose a type"
+    )
     assert ZH_MESSAGES["status.empty_pane_hint"] == "双击选中，然后按 r 选择类型"
     assert ZH_MESSAGES["label.pane_empty"] == "空白 (Empty)"
     assert ZH_MESSAGES["label.pane_custom"] == "自定义 (Custom)"
@@ -28,9 +31,9 @@ def test_catalogs_have_the_same_keys_and_placeholders() -> None:
     assert "高级" not in ZH_MESSAGES["status.tui_global_quick_controls"]
     assert "status.tui_global_advanced_controls" not in EN_MESSAGES
     assert "H header" in EN_MESSAGES["status.tui_global_quick_controls"]
-    assert "p summary period" in EN_MESSAGES["status.tui_global_quick_controls"]
+    assert "p/P summary period" in EN_MESSAGES["status.tui_global_quick_controls"]
     assert "H 页眉" in ZH_MESSAGES["status.tui_global_quick_controls"]
-    assert "p 摘要周期" in ZH_MESSAGES["status.tui_global_quick_controls"]
+    assert "p/P 摘要周期" in ZH_MESSAGES["status.tui_global_quick_controls"]
     assert (
         EN_MESSAGES["status.tui_global_operations"]
         == "Global operations: u undo · U redo · h open help"
@@ -46,8 +49,6 @@ def test_catalogs_have_the_same_keys_and_placeholders() -> None:
     assert ZH_MESSAGES["label.adjust_replace"] == "替换"
     assert EN_MESSAGES["label.adjust_next_pane"] == "select next"
     assert ZH_MESSAGES["label.adjust_next_pane"] == "选择下一项"
-    assert EN_MESSAGES["label.adjust_custom_source"] == "source"
-    assert ZH_MESSAGES["label.adjust_custom_source"] == "数据源"
     assert EN_MESSAGES["label.adjust_custom_logs"] == "logs"
     assert ZH_MESSAGES["label.adjust_custom_logs"] == "日志"
     assert EN_MESSAGES["label.adjust_chart"] == "adjust chart"
@@ -201,14 +202,15 @@ def test_catalogs_have_the_same_keys_and_placeholders() -> None:
     assert "trailing periods" not in EN_MESSAGES["status.tui_help_mode_pages_detail"]
     assert "Dashboard 子图调整" in ZH_MESSAGES["status.tui_help_mode_pages_detail"]
     assert "尾随周期" not in ZH_MESSAGES["status.tui_help_mode_pages_detail"]
-    assert "p trailing presets (7d, 14d" in EN_MESSAGES["status.tui_help_parameter_period"]
-    assert "P cycles project label detail" not in EN_MESSAGES[
-        "status.tui_help_parameter_project_label_context"
-    ]
-    assert "p 切换尾随预设（7d、14d" in ZH_MESSAGES["status.tui_help_parameter_period"]
-    assert "P 切换项目名称细节" not in ZH_MESSAGES[
-        "status.tui_help_parameter_project_label_context"
-    ]
+    assert "p/P advance / reverse" in EN_MESSAGES["status.tui_help_parameter_period"]
+    assert (
+        "P cycles project label detail"
+        not in EN_MESSAGES["status.tui_help_parameter_project_label_context"]
+    )
+    assert "p/P 在当前粒度预设中向前/向后" in ZH_MESSAGES["status.tui_help_parameter_period"]
+    assert (
+        "P 切换项目名称细节" not in ZH_MESSAGES["status.tui_help_parameter_project_label_context"]
+    )
     assert EN_MESSAGES["status.tui_help_section_policy"] == "STRATEGY"
     assert ZH_MESSAGES["status.tui_help_section_policy"] == "策略"
     assert EN_MESSAGES["status.tui_help_summary_scope"] == "SUMMARY SCOPE [COMPUTATION LOGIC]"

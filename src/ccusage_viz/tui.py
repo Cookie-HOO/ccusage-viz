@@ -64,7 +64,11 @@ from ccusage_viz.command_copy import (
     wrap_command,
 )
 from ccusage_viz.configuration import default_custom_pane
-from ccusage_viz.core.time import DateRange, local_today, refresh_date_range
+from ccusage_viz.core.time import (
+    DateRange,
+    local_today,
+    refresh_date_range,
+)
 from ccusage_viz.coverage import DateCoverage, DateInterval
 from ccusage_viz.custom_component import (
     CustomHistoricalComponent,
@@ -76,6 +80,7 @@ from ccusage_viz.custom_models import (
     CustomCapabilities,
     CustomChartCapability,
     CustomFilter,
+    CustomProtocolFailure,
 )
 from ccusage_viz.custom_protocol import CustomSummaryRequest, CustomSummaryResponse
 from ccusage_viz.dashboard_history import DashboardHistory
@@ -104,8 +109,9 @@ from ccusage_viz.data_view import (
     BodyView,
     DashboardBodyView,
     body_view_copy_kind,
-    next_body_view,
-    next_dashboard_body_view,
+    cycle_body_view,
+    cycle_dashboard_body_view,
+    render_custom_data,
     render_monitor_data,
     render_snapshot_data,
 )
@@ -113,7 +119,7 @@ from ccusage_viz.deltas import RefreshDeltas, RefreshRanks
 from ccusage_viz.diagnostics import format_error, transient_query_recovery_lines
 from ccusage_viz.domain import UsageRecord
 from ccusage_viz.editor_help import editor_help_groups
-from ccusage_viz.errors import UsageError, VizError
+from ccusage_viz.errors import QueryError, UsageError, VizError
 from ccusage_viz.filter_draft import discover_filter_choices, run_filter_editor
 from ccusage_viz.formatting import (
     center_text,
@@ -189,7 +195,11 @@ from ccusage_viz.render.base import (
     render_audit,
     styled_text,
 )
-from ccusage_viz.render.custom import render_custom_pending, render_custom_projection
+from ccusage_viz.render.custom import (
+    render_custom_failure,
+    render_custom_pending,
+    render_custom_projection,
+)
 from ccusage_viz.render.filters import active_filter_summary
 from ccusage_viz.render.palette import COLOR_SCHEMES, get_color_scheme
 from ccusage_viz.render.summary import render_custom_metrics, render_summary
@@ -224,6 +234,7 @@ from ccusage_viz.text_viewport import (
     next_text_offset,
     render_text_viewport,
     text_viewport_overflows,
+    wrap_text_rows,
 )
 from ccusage_viz.tui_input import (
     InputDecoder,
@@ -242,7 +253,7 @@ _PANE_COMMANDS = (
     "ranking",
     "monitor",
     "animate",
-    "custom",
+    "datasets",
 )
 
 
@@ -300,6 +311,13 @@ class TuiCustomPane:
     summary: CustomDashboardSummary | None = None
     pane_id: int = -1
     logs: list[CustomLogRecord] = field(default_factory=list)
+    body_view: BodyView = "chart"
+    text_offsets: dict[BodyView, int] = field(default_factory=dict)
+    text_line_counts: dict[BodyView, int] = field(default_factory=dict)
+    text_visible_rows: dict[BodyView, int] = field(default_factory=dict)
+    error_offset: int = 0
+    error_line_count: int = 0
+    error_visible_rows: int = 0
 
     @property
     def interval(self) -> float:
@@ -441,6 +459,26 @@ class OverlayHistoryState:
     table: OverlayHistoryTableState = field(default_factory=OverlayHistoryTableState)
 
 
+@dataclass(slots=True)
+class DashboardDatasetModalState:
+    """One nonblocking Dashboard Dataset selection transaction."""
+
+    action: str
+    pane_index: int
+    initial: CustomChartConfig | None
+    statuses: tuple[object, ...]
+    service: object
+    stage: str = "pane"
+    index: int = 0
+    offset: int = 0
+    draft: CustomPaneDraft = field(default_factory=lambda: CustomPaneDraft())
+    error: str | None = None
+    future: Future[object] | None = None
+    entries: tuple[object, ...] = ()
+    selected_dataset_id: str | None = None
+    artifact: object | None = None
+
+
 _DOUBLE_CLICK_SECONDS = 0.35
 
 
@@ -467,6 +505,13 @@ def _chart_pane_config(pane: TuiChartPane) -> ChartPaneConfig:
     return ChartPaneConfig(chart)
 
 
+def _custom_pane_options(dashboard: DashboardLaunch, pane: TuiCustomPane) -> StandaloneLaunch:
+    from ccusage_viz.configuration import standalone_from_chart_pane
+
+    chart = pane.component.accepted_config or pane.component.candidate
+    return standalone_from_chart_pane(dashboard, CustomChartPaneConfig(chart))
+
+
 @dataclass(slots=True)
 class CustomDashboardSummary:
     """Per-dataset accepted state for one Header-owned source summary."""
@@ -491,11 +536,24 @@ class CustomDashboardSummary:
         self.source = source
         self.filters = filters
 
+    def invalidate(self) -> None:
+        """Discard facts that no longer describe the selected summary query."""
+        self.generation += 1
+        self.lifecycle.detach_active()
+        self.response = None
+        self.error = None
+        self.accepted_at = None
+        self.accepted_period = None
+        self.accepted_as_of_date = None
+        self.requested_period = None
+        self.requested_as_of_date = None
+
 
 @dataclass(frozen=True, slots=True)
 class CustomDashboardSource:
+    """A Dataset source selected once per Header summary."""
+
     source: CustomCommandSource
-    filters: tuple[tuple[str, tuple[str, ...]], ...]
 
 
 @dataclass(slots=True)
@@ -557,9 +615,7 @@ def _custom_dashboard_sources(panes: list[TuiPane]) -> tuple[CustomDashboardSour
         if not isinstance(pane, TuiCustomPane):
             continue
         config = pane.component.candidate
-        sources.setdefault(
-            config.source.dataset_id, CustomDashboardSource(config.source, config.filters)
-        )
+        sources.setdefault(config.source.dataset_id, CustomDashboardSource(config.source))
     return tuple(sources.values())
 
 
@@ -578,13 +634,17 @@ def _reconcile_custom_dashboard_summaries(
             summary.scheduler.shutdown()
             summary.lifecycle.shutdown()
     for dataset_id, selection in wanted.items():
-        if dataset_id in header.custom_summaries:
+        summary = header.custom_summaries.get(dataset_id)
+        if summary is not None:
+            if summary.source != selection.source:
+                summary.invalidate()
+                summary.select(selection.source, ())
+                added.append(summary)
             continue
         summary = CustomDashboardSummary(
             selection.source,
             FixedIntervalScheduler(header.scheduler.interval, now=now),
             LifecycleOperation(f"dashboard:header:custom:{dataset_id}"),
-            filters=selection.filters,
         )
         header.custom_summaries[dataset_id] = summary
         added.append(summary)
@@ -607,8 +667,14 @@ def _set_header_theme(header: DashboardHeader, theme: str) -> None:
     )
 
 
+def _cycle_header_summary(period: str, *, step: int = 1) -> str:
+    """Cycle Dashboard header summary scopes in either direction."""
+    return _cycle(HEADER_SUMMARIES, period, step)
+
+
 def _next_header_summary(period: str) -> str:
-    return _cycle(HEADER_SUMMARIES, period, 1)
+    """Return the next Dashboard header summary scope."""
+    return _cycle_header_summary(period)
 
 
 def _header_refresh_interval(
@@ -1295,6 +1361,7 @@ class PaneRender:
     chart: str
     notices: tuple[str, ...] = ()
     overlay_placements: tuple[OverlayPlacement, ...] = ()
+    error_body: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -1303,8 +1370,33 @@ class DashboardOverlayPlacement:
     placement: OverlayPlacement
 
 
-def _pane_copy_payload(pane: TuiChartPane, translator: Translator, terminal: Terminal) -> str:
+def _pane_copy_payload(
+    pane: TuiChartPane | TuiCustomPane,
+    translator: Translator,
+    terminal: Terminal,
+    *,
+    dashboard: DashboardLaunch | None = None,
+) -> str:
     """Return the focused non-chart pane view's complete clipboard payload."""
+    if isinstance(pane, TuiCustomPane):
+        if dashboard is None:
+            raise ValueError("custom pane copy requires dashboard options")
+        active = _custom_pane_options(dashboard, pane)
+        view = body_view_copy_kind(pane.body_view)
+        if view is None:
+            raise ValueError("chart panes do not have a copy payload")
+        if view == "command":
+            return format_command(active)
+        if view == "full-command":
+            return format_full_command(active)
+        if pane.component.model is None:
+            return translator.text("status.loading")
+        return render_custom_data(
+            pane.component.model,
+            language=translator.language,
+            translator=translator,
+            view=view,
+        )
     active = _pane_options(pane)
     view = body_view_copy_kind(pane.body_view)
     if view is None:
@@ -1378,6 +1470,50 @@ def _custom_render_context(
     )
 
 
+def _custom_failure_log_detail(error: BaseException, translator: Translator) -> str:
+    if isinstance(error, QueryError):
+        failure = error.values.get("custom_failure")
+        if isinstance(failure, CustomProtocolFailure):
+            message = failure.message.zh_cn if translator.language == "zh" else failure.message.en
+            detail = f"{failure.code}: {message}"
+            if failure.unsupported is not None:
+                field = failure.unsupported.get("field")
+                value = failure.unsupported.get("value")
+                if isinstance(field, str) and isinstance(value, str):
+                    detail = f"{detail} ({field}={value})"
+            return detail
+    return translator.text("status.custom_log_error")
+
+
+def _render_custom_failure(
+    component: CustomHistoricalComponent,
+    translator: Translator,
+    terminal: Terminal,
+    *,
+    accepted_at: datetime | None,
+    interval: float | None,
+    surface: HistoricalPresentationSurface,
+) -> PaneRender:
+    context = _custom_render_context(
+        component.candidate,
+        translator,
+        terminal,
+        accepted_at=accepted_at,
+        interval=interval,
+        pending=False,
+        surface=surface,
+    )
+    return PaneRender(
+        "\n\n".join(
+            (
+                render_custom_failure(component.candidate, context, component.presentation),
+                format_error(component.error, translator, color=False),
+            )
+        ),
+        error_body=True,
+    )
+
+
 def _render_custom_projection(
     projection: CustomChartProjection,
     config: CustomChartConfig,
@@ -1434,7 +1570,9 @@ def _render_custom_projection(
                 controls=controls,
                 reserved_summary_rows=len(summary_render.splitlines()),
             )
-    rendered = render_custom_projection(projection, context)
+    rendered = render_custom_projection(
+        replace(projection, config=config, presentation=projection.presentation), context
+    )
     if summary_render:
         rendered = "\n".join((summary_render, rendered))
     audit = render_audit(context)
@@ -1448,6 +1586,7 @@ def _pane_render(
     translator: Translator,
     terminal: Terminal,
     *,
+    dashboard: DashboardLaunch | None = None,
     defer_animation_overlay: bool = False,
 ) -> PaneRender:
     if isinstance(pane, TuiEmptyPane):
@@ -1461,14 +1600,40 @@ def _pane_render(
         )
     if isinstance(pane, TuiCustomPane):
         component = pane.component
+        if (
+            pane.body_view in {"command", "full-command", "data-table", "data-json"}
+            and dashboard is None
+        ):
+            raise ValueError("custom pane text views require dashboard options")
+        options = _custom_pane_options(dashboard, pane) if dashboard is not None else None
         if component.error is not None and component.model is None:
-            error = component.error
-            message = (
-                format_error(error, translator, color=terminal.color)
-                if isinstance(error, VizError)
-                else str(error)
+            return _render_custom_failure(
+                component,
+                translator,
+                terminal,
+                accepted_at=component.accepted_at,
+                interval=pane.interval,
+                surface=dashboard_pane_surface(component.candidate.kind),
             )
-            return PaneRender(message)
+        if pane.body_view == "command":
+            assert options is not None
+            return PaneRender(wrap_command(format_command(options), terminal.width))
+        if pane.body_view == "full-command":
+            assert options is not None
+            return PaneRender(
+                format_full_command_display(format_full_command(options), terminal.width)
+            )
+        if pane.body_view in {"data-table", "data-json"}:
+            if component.model is None:
+                return PaneRender(translator.text("status.loading"))
+            return PaneRender(
+                render_custom_data(
+                    component.model,
+                    language=translator.language,
+                    translator=translator,
+                    view=pane.body_view,
+                )
+            )
         if component.model is None:
             return PaneRender(translator.text("status.loading"))
         if component.is_pending:
@@ -1481,7 +1646,7 @@ def _pane_render(
                 pending=True,
                 surface=dashboard_pane_surface(component.candidate.kind),
             )
-            rendered = render_custom_pending(component.candidate, context)
+            rendered = render_custom_pending(component.candidate, context, component.presentation)
             audit = render_audit(context)
             return PaneRender("\n".join(line for line in (rendered, audit) if line))
         rendered = _render_custom_projection(
@@ -1496,7 +1661,9 @@ def _pane_render(
             summary=pane.summary,
         )
         if component.error is not None:
-            return PaneRender(rendered.chart, (str(component.error),))
+            return PaneRender(
+                rendered.chart, (format_error(component.error, translator, color=False),)
+            )
         return rendered
     if isinstance(pane, TuiAnimationPane):
         if pane.body_view != "chart":
@@ -1757,6 +1924,7 @@ def _local_pane_content(
     notices: tuple[str, ...],
     *,
     height: int,
+    width: int = 80,
     offset: int = 0,
     scrollable: bool = False,
     return_metadata: bool = False,
@@ -1764,7 +1932,8 @@ def _local_pane_content(
     """Keep notices fixed below an optionally scrollable pane body."""
     notice_rows = min(len(notices), max(0, height - 3))
     chart_height = max(0, height - notice_rows)
-    viewport = render_text_viewport(chart, offset=offset, visible_rows=chart_height)
+    rows = wrap_text_rows(chart, width=width) if scrollable else chart
+    viewport = render_text_viewport(rows, offset=offset, visible_rows=chart_height)
     chart_lines = (viewport.body if scrollable else chart).splitlines()[:chart_height]
     chart_lines.extend("" for _ in range(chart_height - len(chart_lines)))
     content = "\n".join((*chart_lines, *notices[:notice_rows]))
@@ -1782,6 +1951,26 @@ def _cycle(values: tuple[str, ...], current: str, step: int) -> str:
     return values[(values.index(current) + step) % len(values)]
 
 
+def _cycle_custom_grouping(
+    config: CustomChartConfig, groupings: tuple[str, ...]
+) -> CustomChartConfig:
+    """Advance custom grouping and preserve a style valid for the result."""
+
+    values = (None, *groupings)
+    current = config.group_by if config.group_by in values else values[0]
+    group_by = values[(values.index(current) + 1) % len(values)]
+    presentation = config.presentation
+    styles = compatible_styles(config.kind, group_by)
+    if presentation.style not in styles:
+        presentation = replace(presentation, style=styles[0])
+    return replace(
+        config,
+        group_by=group_by,
+        top=(config.top or 3) if group_by else None,
+        presentation=presentation,
+    )
+
+
 def _new_pane_options(command: str, base: DashboardLaunch) -> StandaloneLaunch:
     from ccusage_viz.configuration import default_pane, standalone_from_chart_pane
 
@@ -1792,9 +1981,9 @@ def _new_pane_options(command: str, base: DashboardLaunch) -> StandaloneLaunch:
 
 
 _PANE_QUICK_ACTIONS = {
-    "timeline": (("p/P", "period"), ("g", "granularity"), ("b", "group"), ("+/-", "top")),
+    "timeline": (("p/P", "period"), ("g/G", "granularity"), ("b", "group"), ("+/-", "top")),
     "calendar": (("p/P", "period"),),
-    "stack": (("p/P", "period"), ("g", "granularity")),
+    "stack": (("p/P", "period"), ("g/G", "granularity")),
     "ranking": (("p/P", "period"), ("b", "group"), ("+/-", "top")),
     "monitor": (("w", "window"), ("b", "group"), ("+/-", "top")),
 }
@@ -1871,7 +2060,7 @@ def _custom_pane_adjustment_bindings(pane: TuiCustomPane, page: str) -> tuple[tu
         actions.append(("o", "other"))
     if chart.kind in {"timeline", "stack"}:
         actions.extend((("l", "legend"), ("k", "weekdays")))
-    actions.extend((("e", "custom_source"), ("L", "custom_logs")))
+    actions.append(("L", "custom_logs"))
     return tuple(actions)
 
 
@@ -1966,7 +2155,7 @@ _GLOBAL_ACTIONS = (
     ("t/T", "theme"),
     ("s/S", "style"),
     ("H", "header"),
-    ("p", "summary"),
+    ("p/P", "summary"),
     ("z", "layout"),
     ("Z", "grid"),
 )
@@ -2162,7 +2351,7 @@ def _text_view_footer(
     return (
         clip_width(
             f"{scroll}y {translator.text('label.adjust_copy')} · "
-            f"v {translator.text('label.adjust_view')}",
+            f"v/V {translator.text('label.adjust_view')}",
             width,
         ),
     )
@@ -2601,10 +2790,21 @@ def _choose_custom_pane_config(
     *,
     height: int,
     dashboard: DashboardLaunch,
-    paint_choices: Callable[[str, str, str], None] | None = None,
+    paint_choices: Callable[[str, str, str, tuple[str, ...]], None] | None = None,
     read_input: Callable[[], object] | None = None,
     initial: CustomChartConfig | None = None,
 ) -> CustomChartPaneConfig | None:
+    if initial is not None and initial.source.source_kind == "installed":
+        return _choose_installed_pane_config(
+            screen,
+            translator,
+            decoder,
+            height=height,
+            dashboard=dashboard,
+            initial=initial,
+            paint_choices=paint_choices,
+            read_input=read_input,
+        )
     draft = CustomPaneDraft(
         kind=initial.kind if initial is not None else "timeline",
         dataset_id=initial.source.dataset_id if initial is not None else "",
@@ -2623,18 +2823,19 @@ def _choose_custom_pane_config(
             for index, (field, value) in enumerate(zip(fields, values, strict=True))
         )
         controls = translator.text("status.custom_pane_controls")
-        body = f"{choices}\n{error}" if error is not None else choices
+        notices = () if error is None else (error,)
         if paint_choices is None:
             screen.paint(
                 compose_frame(
-                    body,
+                    choices,
                     translator.text("status.custom_pane_title"),
                     controls,
+                    notices,
                     height=height,
                 )
             )
         else:
-            paint_choices(body, translator.text("status.custom_pane_title"), controls)
+            paint_choices(choices, translator.text("status.custom_pane_title"), controls, notices)
         event = read_input() if read_input is not None else read_event(decoder, 0.1)
         if isinstance(event, PasteEvent):
             if draft.field == 1:
@@ -2647,14 +2848,33 @@ def _choose_custom_pane_config(
         key = event.value
         if key == "\x1b":
             return None
-        if key == "\t":
+        if key in {"\t", "\x1b[B"}:
             draft.field = (draft.field + 1) % len(fields)
             continue
-        if draft.field == 0 and key in {"j", "\x1b[B"}:
+        if key == "\x1b[A":
+            draft.field = (draft.field - 1) % len(fields)
+            continue
+        if draft.field == 0 and key in {"j", "\x1b[C"}:
             draft.kind = _CUSTOM_PANE_KINDS[(_CUSTOM_PANE_KINDS.index(draft.kind) + 1) % 4]
             continue
-        if draft.field == 0 and key in {"k", "\x1b[A"}:
+        if draft.field == 0 and key in {"k", "\x1b[D"}:
             draft.kind = _CUSTOM_PANE_KINDS[(_CUSTOM_PANE_KINDS.index(draft.kind) - 1) % 4]
+            continue
+        if key == "\x19":
+            value = (draft.kind, draft.dataset_id, draft.command)[draft.field]
+            error = translator.text(
+                "status.command_copied" if copy_command(value) else "status.command_copy_failed"
+            )
+            continue
+        if key == "\x15":
+            if draft.field == 0:
+                error = translator.text("status.custom_pane_kind_required")
+            elif draft.field == 1:
+                draft.dataset_id = ""
+                error = translator.text("status.custom_pane_field_cleared")
+            else:
+                draft.command = ""
+                error = translator.text("status.custom_pane_field_cleared")
             continue
         if key in {"\r", "\n"}:
             try:
@@ -2678,6 +2898,631 @@ def _choose_custom_pane_config(
                 draft.command = value
 
 
+def _choose_installed_pane_config(
+    screen: FramePainter,
+    translator: Translator,
+    decoder: InputDecoder,
+    *,
+    height: int,
+    dashboard: DashboardLaunch,
+    initial: CustomChartConfig,
+    paint_choices: Callable[[str, str, str, tuple[str, ...]], None] | None = None,
+    read_input: Callable[[], object] | None = None,
+) -> CustomChartPaneConfig | None:
+    """Edit an installed Dataset pane without exposing its resolved command."""
+
+    from ccusage_viz.datasets.service import DatasetService
+
+    kind = initial.kind
+    dataset_id = initial.source.dataset_id
+    field = 0
+    error: str | None = None
+    while True:
+        fields = (translator.text("label.custom_kind"), translator.text("label.custom_dataset"))
+        values = (kind, dataset_id)
+        choices = "\n".join(
+            f"{'›' if index == field else ' '} {label}: {value or '—'}"
+            for index, (label, value) in enumerate(zip(fields, values, strict=True))
+        )
+        controls = translator.text("status.custom_pane_controls")
+        notices = () if error is None else (error,)
+        if paint_choices is None:
+            screen.paint(
+                compose_frame(
+                    choices,
+                    translator.text("status.custom_pane_title"),
+                    controls,
+                    notices,
+                    height=height,
+                )
+            )
+        else:
+            paint_choices(choices, translator.text("status.custom_pane_title"), controls, notices)
+        event = read_input() if read_input is not None else read_event(decoder, 0.1)
+        if isinstance(event, PasteEvent) and field == 1:
+            dataset_id += event.value
+            continue
+        if not isinstance(event, KeyEvent):
+            continue
+        key = event.value
+        if key == "\x1b":
+            return None
+        if key in {"\t", "\x1b[B"}:
+            field = (field + 1) % len(fields)
+            continue
+        if key == "\x1b[A":
+            field = (field - 1) % len(fields)
+            continue
+        if field == 0 and key in {"j", "\x1b[C"}:
+            kind = _CUSTOM_PANE_KINDS[
+                (_CUSTOM_PANE_KINDS.index(kind) + 1) % len(_CUSTOM_PANE_KINDS)
+            ]
+            continue
+        if field == 0 and key in {"k", "\x1b[D"}:
+            kind = _CUSTOM_PANE_KINDS[
+                (_CUSTOM_PANE_KINDS.index(kind) - 1) % len(_CUSTOM_PANE_KINDS)
+            ]
+            continue
+        if key == "\x19":
+            value = (kind, dataset_id)[field]
+            error = translator.text(
+                "status.command_copied" if copy_command(value) else "status.command_copy_failed"
+            )
+            continue
+        if key == "\x15":
+            if field == 0:
+                error = translator.text("status.custom_pane_kind_required")
+            else:
+                dataset_id = ""
+                error = translator.text("status.custom_pane_field_cleared")
+            continue
+        if key in {"\r", "\n"}:
+            try:
+                source = DatasetService().installed_command_source(dataset_id.strip())
+                return default_custom_pane(kind, source=source, dashboard=dashboard)
+            except (UsageError, ValueError) as exc:
+                error = format_error(exc, translator) if isinstance(exc, UsageError) else str(exc)
+            continue
+        if field != 1:
+            continue
+        if key in {"\x7f", "\b"}:
+            dataset_id = dataset_id[:-1]
+        elif len(key) == 1 and key.isprintable():
+            dataset_id += key
+
+
+_DATASET_VIEW_KINDS = ("timeline", "calendar", "stack", "ranking")
+
+
+def _chooser_viewport(
+    rows: list[str], *, index: int, offset: int, height: int, reserved_rows: int = 2
+) -> tuple[str, int]:
+    """Keep the selected chooser row visible in the available frame body."""
+
+    visible_rows = max(1, height - reserved_rows)
+    maximum_offset = max(0, len(rows) - visible_rows)
+    offset = min(max(0, offset), maximum_offset)
+    if index < offset:
+        offset = index
+    elif index >= offset + visible_rows:
+        offset = index - visible_rows + 1
+    return "\n".join(rows[offset : offset + visible_rows]), offset
+
+
+def _choose_dataset_view(
+    screen: FramePainter,
+    translator: Translator,
+    decoder: InputDecoder,
+    *,
+    height: int,
+    paint_choices: Callable[[str, str, str, tuple[str, ...]], None] | None = None,
+    read_input: Callable[[], object] | None = None,
+) -> str | None:
+    index = 0
+    offset = 0
+    while True:
+        rows = [
+            f"{'›' if item_index == index else ' '} {translator.text(f'label.pane_{kind}')}"
+            for item_index, kind in enumerate(_DATASET_VIEW_KINDS)
+        ]
+        title = translator.text("status.dataset_chooser_title")
+        controls = translator.text("status.dataset_chooser_controls")
+        choices, offset = _chooser_viewport(rows, index=index, offset=offset, height=height)
+        if paint_choices is None:
+            screen.paint(compose_frame(choices, title, controls, height=height))
+        else:
+            paint_choices(choices, title, controls, ())
+        event = read_input() if read_input is not None else read_event(decoder, 0.1)
+        if not isinstance(event, KeyEvent):
+            continue
+        if event.value == "\x1b":
+            return None
+        if event.value in {"j", "\x1b[B"}:
+            index = (index + 1) % len(_DATASET_VIEW_KINDS)
+        elif event.value in {"k", "\x1b[A"}:
+            index = (index - 1) % len(_DATASET_VIEW_KINDS)
+        elif event.value in {"\r", "\n"}:
+            return _DATASET_VIEW_KINDS[index]
+
+
+def _browse_dataset_catalog(
+    screen: FramePainter,
+    translator: Translator,
+    decoder: InputDecoder,
+    *,
+    service: object,
+    height: int,
+    paint_choices: Callable[[str, str, str, tuple[str, ...]], None] | None = None,
+    read_input: Callable[[], object] | None = None,
+) -> str | None:
+    """Fetch and present verified official datasets without blocking the dashboard."""
+
+    executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ccusage-viz-catalog")
+    future = executor.submit(cast(Callable[[], tuple[object, ...]], service.official_entries))
+    entries: tuple[object, ...] | None = None
+    error: str | None = None
+    try:
+        while entries is None and error is None:
+            title = translator.text("status.dataset_browse_title")
+            controls = translator.text("status.dataset_browse_controls")
+            notices = (translator.text("status.dataset_catalog_loading"),)
+            if paint_choices is None:
+                screen.paint(compose_frame("", title, controls, notices, height=height))
+            else:
+                paint_choices("", title, controls, notices)
+            if future.done():
+                try:
+                    entries = future.result()
+                except UsageError as exc:
+                    error = format_error(exc, translator)
+                except Exception:
+                    error = translator.text("status.dataset_catalog_unavailable")
+                continue
+            event = read_input() if read_input is not None else read_event(decoder, 0.1)
+            if isinstance(event, KeyEvent) and event.value == "\x1b":
+                future.cancel()
+                return None
+            if not future.done():
+                continue
+            try:
+                entries = future.result()
+            except UsageError as exc:
+                error = format_error(exc, translator)
+            except Exception:
+                error = translator.text("status.dataset_catalog_unavailable")
+        if error is not None:
+            while True:
+                title = translator.text("status.dataset_browse_title")
+                controls = translator.text("status.dataset_browse_controls")
+                if paint_choices is None:
+                    screen.paint(compose_frame("", title, controls, (error,), height=height))
+                else:
+                    paint_choices("", title, controls, (error,))
+                event = read_input() if read_input is not None else read_event(decoder, 0.1)
+                if isinstance(event, KeyEvent) and event.value == "\x1b":
+                    return None
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
+
+    assert entries is not None
+    index = 0
+    offset = 0
+    confirming = False
+    notice: str | None = None
+    host_os, host_arch = service.platform
+    platform_name = f"{host_os}/{host_arch}"
+    while True:
+        rows = [
+            f"{'›' if item_index == index else ' '} {entry.title.zh_cn if translator.language == 'zh' else entry.title.en} · {entry.id}"
+            for item_index, entry in enumerate(entries)
+        ]
+        choices, offset = (
+            _chooser_viewport(rows, index=index, offset=offset, height=height)
+            if rows
+            else (translator.text("status.datasets_official_empty"), 0)
+        )
+        selected = entries[index] if entries else None
+        available = selected is not None and any(
+            artifact.os == host_os and artifact.arch == host_arch for artifact in selected.artifacts
+        )
+        title = translator.text("status.dataset_browse_title")
+        controls = translator.text(
+            "status.dataset_browse_confirm_controls"
+            if confirming
+            else "status.dataset_browse_controls"
+        )
+        notices = () if notice is None else (notice,)
+        if confirming and selected is not None:
+            artifact = next(
+                artifact
+                for artifact in selected.artifacts
+                if artifact.os == host_os and artifact.arch == host_arch
+            )
+            detail = "\n".join(
+                (
+                    choices,
+                    "",
+                    selected.description.zh_cn
+                    if translator.language == "zh"
+                    else selected.description.en,
+                    f"{artifact.repository} · {artifact.release_tag} · {platform_name}",
+                    translator.text(
+                        "status.dataset_browse_confirm",
+                        dataset_id=selected.id,
+                        repository=artifact.repository,
+                    ),
+                )
+            )
+        else:
+            detail = choices
+        if paint_choices is None:
+            screen.paint(compose_frame(detail, title, controls, notices, height=height))
+        else:
+            paint_choices(detail, title, controls, notices)
+        event = read_input() if read_input is not None else read_event(decoder, 0.1)
+        if not isinstance(event, KeyEvent):
+            continue
+        key = event.value
+        if key == "\x1b":
+            if confirming:
+                confirming = False
+                notice = None
+                continue
+            return None
+        if not entries:
+            continue
+        if not confirming and key in {"j", "\x1b[B"}:
+            index = (index + 1) % len(entries)
+            notice = None
+            continue
+        if not confirming and key in {"k", "\x1b[A"}:
+            index = (index - 1) % len(entries)
+            notice = None
+            continue
+        if key not in {"\r", "\n"}:
+            continue
+        if not available:
+            notice = translator.text(
+                "status.dataset_catalog_unavailable_platform", platform=platform_name
+            )
+            continue
+        if not confirming:
+            confirming = True
+            notice = None
+            continue
+        notice = translator.text("status.dataset_browse_installing", dataset_id=selected.id)
+        executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ccusage-viz-install")
+        install = executor.submit(service.install_official, selected.id)
+        try:
+            while not install.done():
+                if paint_choices is None:
+                    screen.paint(compose_frame(detail, title, controls, (notice,), height=height))
+                else:
+                    paint_choices(detail, title, controls, (notice,))
+                event = read_input() if read_input is not None else read_event(decoder, 0.1)
+                if isinstance(event, KeyEvent) and event.value == "\x1b":
+                    # A started installation is transactional and cannot be safely cancelled.
+                    continue
+            install.result()
+        except UsageError as exc:
+            confirming = False
+            notice = format_error(exc, translator)
+            continue
+        except Exception:
+            confirming = False
+            notice = translator.text("error.dataset_download_failed")
+            continue
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
+        return selected.id
+
+
+def _install_github_dataset(
+    screen: FramePainter,
+    translator: Translator,
+    decoder: InputDecoder,
+    *,
+    service: object,
+    height: int,
+    paint_choices: Callable[[str, str, str, tuple[str, ...]], None] | None = None,
+    read_input: Callable[[], object] | None = None,
+) -> str | None:
+    """Install a verified GitHub dataset from one repository input."""
+
+    repository = ""
+    artifact: object | None = None
+    error: str | None = None
+    resolving: Future[object] | None = None
+    installing: Future[object] | None = None
+    executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ccusage-viz-github")
+    try:
+        while True:
+            if resolving is not None and resolving.done():
+                try:
+                    artifact = resolving.result()
+                    error = None
+                except UsageError as exc:
+                    error = format_error(exc, translator)
+                except Exception:
+                    error = translator.text("error.dataset_download_failed")
+                resolving = None
+            if installing is not None and installing.done():
+                try:
+                    status = installing.result()
+                    installed = status.installed
+                    if installed is None:
+                        raise UsageError("error.dataset_corrupt")
+                    return installed.dataset_id
+                except UsageError as exc:
+                    error = format_error(exc, translator)
+                except Exception:
+                    error = translator.text("error.dataset_download_failed")
+                artifact = None
+                installing = None
+
+            title = translator.text("status.dataset_github_title")
+            if resolving is not None:
+                body = repository or "—"
+                controls = translator.text("status.dataset_github_loading_controls")
+                notices = (translator.text("status.dataset_github_resolving"),)
+            elif installing is not None:
+                body = repository
+                controls = translator.text("status.dataset_github_loading_controls")
+                notices = (translator.text("status.dataset_github_installing"),)
+            elif artifact is not None:
+                body = "\n".join(
+                    (
+                        repository,
+                        "",
+                        f"{artifact.release_tag} · {artifact.asset_name}",
+                        artifact.sha256,
+                        translator.text(
+                            "status.dataset_github_confirm", repository=artifact.repository
+                        ),
+                    )
+                )
+                controls = translator.text("status.dataset_github_confirm_controls")
+                notices = () if error is None else (error,)
+            else:
+                body = repository or "—"
+                controls = translator.text("status.dataset_github_controls")
+                notices = () if error is None else (error,)
+            if paint_choices is None:
+                screen.paint(compose_frame(body, title, controls, notices, height=height))
+            else:
+                paint_choices(body, title, controls, notices)
+
+            event = read_input() if read_input is not None else read_event(decoder, 0.1)
+            if (
+                isinstance(event, PasteEvent)
+                and artifact is None
+                and resolving is None
+                and installing is None
+            ):
+                repository += event.value
+                error = None
+                continue
+            if not isinstance(event, KeyEvent):
+                continue
+            key = event.value
+            if key == "\x1b":
+                if resolving is not None or installing is not None:
+                    continue
+                if artifact is not None:
+                    artifact = None
+                    error = None
+                    continue
+                return None
+            if resolving is not None or installing is not None:
+                continue
+            if artifact is not None:
+                if key in {"\r", "\n"}:
+                    installing = executor.submit(service.install_resolved_github_artifact, artifact)
+                continue
+            if key in {"\r", "\n"}:
+                if repository.strip():
+                    resolving = executor.submit(service.resolve_github_repository, repository)
+                    error = None
+                continue
+            if key in {"\x7f", "\b"}:
+                repository = repository[:-1]
+                error = None
+            elif len(key) == 1 and key.isprintable():
+                repository += key
+                error = None
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
+
+
+def _choose_dataset_pane_config(
+    screen: FramePainter,
+    translator: Translator,
+    decoder: InputDecoder,
+    *,
+    height: int,
+    dashboard: DashboardLaunch,
+    initial: CustomChartConfig | None = None,
+    paint_choices: Callable[[str, str, str, tuple[str, ...]], None] | None = None,
+    read_input: Callable[[], object] | None = None,
+) -> CustomChartPaneConfig | None:
+    """Select an installed source or retain the advanced local-command route."""
+
+    from ccusage_viz.datasets.models import DatasetStatus
+    from ccusage_viz.datasets.service import DatasetService
+
+    service = DatasetService()
+    try:
+        statuses = service.status()
+    except UsageError as exc:
+        statuses = ()
+        error: str | None = format_error(exc, translator)
+    else:
+        error = None
+    index = 0
+    offset = 0
+    while True:
+        entries: list[tuple[str, object]] = [("local", None)]
+        entries.extend(("dataset", status) for status in statuses)
+        entries.extend((("browse", None), ("github", None)))
+        index %= len(entries)
+        choices: list[str] = []
+        for item_index, (kind, value) in enumerate(entries):
+            selected = "›" if item_index == index else " "
+            if kind == "local":
+                choices.append(f"{selected} {translator.text('label.dataset_local_command')}")
+                continue
+            if kind == "browse":
+                choices.append(f"{selected} {translator.text('label.dataset_browse_official')}")
+                continue
+            if kind == "github":
+                choices.append(f"{selected} {translator.text('label.dataset_github_release')}")
+                continue
+            status = cast(DatasetStatus, value)
+            if status.corrupt:
+                assert status.dataset_id is not None
+                choices.append(
+                    f"{selected} {status.dataset_id} · {translator.text('status.dataset_corrupt')}"
+                )
+                continue
+            assert status.installed is not None
+            state = (
+                translator.text("status.dataset_ready")
+                if status.ready
+                else translator.text("status.dataset_setup_required")
+            )
+            choices.append(
+                f"{selected} {status.installed.dataset_id} {status.installed.version} · {state}"
+            )
+        title = translator.text("status.dataset_chooser_title")
+        controls = translator.text("status.dataset_chooser_controls")
+        notices = () if error is None else (error,)
+        body, offset = _chooser_viewport(
+            choices,
+            index=index,
+            offset=offset,
+            height=height,
+            reserved_rows=2 + len(notices),
+        )
+        if paint_choices is None:
+            screen.paint(compose_frame(body, title, controls, notices, height=height))
+        else:
+            paint_choices(body, title, controls, notices)
+        event = read_input() if read_input is not None else read_event(decoder, 0.1)
+        if not isinstance(event, KeyEvent):
+            continue
+        key = event.value
+        if key == "\x1b":
+            return None
+        if key in {"j", "\x1b[B"}:
+            index = (index + 1) % len(entries)
+            continue
+        if key in {"k", "\x1b[A"}:
+            index = (index - 1) % len(entries)
+            continue
+        if key not in {"\r", "\n"}:
+            continue
+        kind, value = entries[index]
+        if kind == "local":
+            selected = _choose_custom_pane_config(
+                screen,
+                translator,
+                decoder,
+                height=height,
+                dashboard=dashboard,
+                initial=initial,
+                paint_choices=paint_choices,
+                read_input=read_input,
+            )
+            if selected is None:
+                continue
+            return selected
+        if kind == "browse":
+            dataset_id = _browse_dataset_catalog(
+                screen,
+                translator,
+                decoder,
+                service=service,
+                height=height,
+                paint_choices=paint_choices,
+                read_input=read_input,
+            )
+            if dataset_id is None:
+                continue
+            view = _choose_dataset_view(
+                screen,
+                translator,
+                decoder,
+                height=height,
+                paint_choices=paint_choices,
+                read_input=read_input,
+            )
+            if view is None:
+                continue
+            try:
+                statuses = service.status()
+                source = service.installed_command_source(dataset_id)
+            except UsageError as exc:
+                error = format_error(exc, translator)
+                continue
+            return default_custom_pane(view, source=source, dashboard=dashboard)
+        if kind == "github":
+            dataset_id = _install_github_dataset(
+                screen,
+                translator,
+                decoder,
+                service=service,
+                height=height,
+                paint_choices=paint_choices,
+                read_input=read_input,
+            )
+            if dataset_id is None:
+                continue
+            try:
+                statuses = service.status()
+                source = service.installed_command_source(dataset_id)
+            except UsageError as exc:
+                error = format_error(exc, translator)
+                continue
+            view = _choose_dataset_view(
+                screen,
+                translator,
+                decoder,
+                height=height,
+                paint_choices=paint_choices,
+                read_input=read_input,
+            )
+            if view is None:
+                continue
+            return default_custom_pane(view, source=source, dashboard=dashboard)
+        status = cast(DatasetStatus, value)
+        if status.corrupt:
+            assert status.dataset_id is not None
+            error = translator.text("error.dataset_corrupt", dataset_id=status.dataset_id)
+            continue
+        if not status.ready or status.installed is None:
+            missing = ", ".join(item.requirement.name for item in status.missing_required)
+            error = translator.text("status.dataset_setup_required")
+            if missing:
+                error = f"{error}: {missing}"
+            continue
+        view = _choose_dataset_view(
+            screen,
+            translator,
+            decoder,
+            height=height,
+            paint_choices=paint_choices,
+            read_input=read_input,
+        )
+        if view is None:
+            continue
+        try:
+            source = service.installed_command_source(status.installed.dataset_id)
+        except UsageError as exc:
+            error = format_error(exc, translator)
+            continue
+        return default_custom_pane(view, source=source, dashboard=dashboard)
+
+
 def _choose_pane_type(
     screen: FramePainter,
     translator: Translator,
@@ -2685,23 +3530,25 @@ def _choose_pane_type(
     *,
     height: int,
     action: str = "add",
-    paint_choices: Callable[[str, str, str], None] | None = None,
+    paint_choices: Callable[[str, str, str, tuple[str, ...]], None] | None = None,
     read_input: Callable[[], object] | None = None,
     on_help: Callable[[str], None] | None = None,
 ) -> str | None:
     index = 0
+    offset = 0
     while True:
-        choices = "\n".join(
+        rows = [
             f"{'›' if item == _PANE_COMMANDS[index] else ' '} "
             f"{translator.text(f'label.pane_{item}')}"
             for item in _PANE_COMMANDS
-        )
+        ]
         title = translator.text(f"status.tui_{action}_title")
         controls = translator.text(f"status.tui_{action}_controls")
+        choices, offset = _chooser_viewport(rows, index=index, offset=offset, height=height)
         if paint_choices is None:
             screen.paint(compose_frame(choices, title, controls, height=height))
         else:
-            paint_choices(choices, title, controls)
+            paint_choices(choices, title, controls, ())
         event = read_input() if read_input is not None else read_event(decoder, 0.1)
         if not isinstance(event, KeyEvent):
             continue
@@ -2743,7 +3590,6 @@ def _custom_standalone_actions(
             ("d", "density"),
             ("t/T", "theme"),
             ("s/S", "style"),
-            ("e", "custom_source"),
             ("L", "custom_logs"),
         )
     )
@@ -2759,11 +3605,13 @@ def _custom_standalone_render(
     pending: bool,
 ) -> PaneRender:
     if component.error is not None and component.model is None:
-        error = component.error
-        return PaneRender(
-            format_error(error, translator, color=terminal.color)
-            if isinstance(error, VizError)
-            else str(error)
+        return _render_custom_failure(
+            component,
+            translator,
+            terminal,
+            accepted_at=component.accepted_at,
+            interval=interval,
+            surface=standalone_surface(component.candidate.kind),
         )
     if component.model is None:
         return PaneRender(translator.text("status.loading"))
@@ -2791,7 +3639,10 @@ def _custom_standalone_render(
         surface=standalone_surface((component.accepted_config or component.candidate).kind),
     )
     return (
-        PaneRender(rendered.chart, (*rendered.notices, str(component.error)))
+        PaneRender(
+            rendered.chart,
+            (*rendered.notices, format_error(component.error, translator, color=False)),
+        )
         if component.error is not None
         else rendered
     )
@@ -2904,19 +3755,7 @@ def _run_custom_standalone_adjustment(
                     and capability is not None
                     and capability.group_by
                 ):
-                    values = (None, *capability.group_by)
-                    value = current.group_by if current.group_by in values else values[0]
-                    group_by = values[(values.index(value) + 1) % len(values)]
-                    presentation = current.presentation
-                    styles = compatible_styles(current.kind, group_by)
-                    if presentation.style not in styles:
-                        presentation = replace(presentation, style=styles[0])
-                    updated = replace(
-                        current,
-                        group_by=group_by,
-                        top=(current.top or 3) if group_by else None,
-                        presentation=presentation,
-                    )
+                    updated = _cycle_custom_grouping(current, capability.group_by)
                 if updated != current:
                     current = updated
                     paint()
@@ -2941,6 +3780,9 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
     current = options.chart
     controls_hidden = False
     body_view = "chart"
+    error_offset = 0
+    error_line_count = 0
+    error_visible_rows = 0
     logs: list[CustomLogRecord] = []
     copy_feedback = TransientFeedback()
     last_size: tuple[int, int] | None = None
@@ -2949,6 +3791,13 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
         logs.append(CustomLogRecord(datetime.now().astimezone(), status, detail))
         logs[:] = logs[-20:]
 
+    def record_warnings(response: object) -> None:
+        for warning in getattr(response, "warnings", ()):
+            record(
+                "warning",
+                warning.message.zh_cn if translator.language == "zh" else warning.message.en,
+            )
+
     def start(operation: OperationToken) -> tuple[Future[CustomOutcome], Callable[[], None]]:
         purpose = "comparison" if component.comparison_is_pending else "primary"
         config = (
@@ -2956,8 +3805,11 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
         )
         if config is None:
             raise RuntimeError("custom comparison request is no longer required")
+        if options.host.timezone is None:
+            raise RuntimeError("custom Dataset requests require a timezone")
         intent = custom_historical_query_intent(
             config,
+            timezone=options.host.timezone,
             owner_id=operation.owner_id,
             generation=operation.generation,
             trigger=query_trigger(operation.trigger),
@@ -2977,7 +3829,9 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
         if roll_range:
             refreshed = replace(
                 component.candidate,
-                date_range=refresh_date_range(component.candidate.date_range),
+                date_range=refresh_date_range(
+                    component.candidate.date_range, timezone=options.host.timezone
+                ),
             )
             component.configure(refreshed, data_affecting=refreshed != component.candidate)
             current = component.candidate
@@ -3004,7 +3858,7 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
         )
 
     def paint(*, force: bool = False) -> None:
-        nonlocal last_size
+        nonlocal last_size, error_offset, error_line_count, error_visible_rows
         size = get_terminal_size()
         last_size = (size.columns, size.lines)
         terminal = Terminal(
@@ -3068,6 +3922,15 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
                     format_full_command(replace(options, chart=current)), size.columns
                 )
             )
+        error_body = body_view == "chart" and provisional.error_body
+        if error_body:
+            body_rows = wrap_text_rows(body, width=size.columns)
+            error_visible_rows = body_height
+            error_line_count = len(body_rows)
+            error_offset = min(error_offset, max(0, error_line_count - error_visible_rows))
+            body = render_text_viewport(
+                body_rows, offset=error_offset, visible_rows=error_visible_rows
+            ).body
         screen.paint(
             compose_frame(
                 body,
@@ -3102,12 +3965,16 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
                     paint()
                     return 1
                 lifecycle.complete(operation, generation=outcome.generation)
+                record_warnings(outcome.result.custom_response)
                 current = component.candidate
                 comparison = component.start_comparison()
                 if comparison is not None:
                     try:
+                        if options.host.timezone is None:
+                            raise RuntimeError("custom Dataset requests require a timezone")
                         intent = custom_historical_query_intent(
                             comparison,
+                            timezone=options.host.timezone,
                             owner_id=operation.owner_id,
                             generation=operation.generation,
                             trigger=query_trigger(LifecycleTrigger.CONFIGURATION),
@@ -3164,6 +4031,7 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
                             )
                             if accepted:
                                 lifecycle.complete(operation, generation=operation.generation)
+                                record_warnings(outcome.result.custom_response)
                                 current = component.candidate
                                 record("ok", getattr(outcome.result, "diagnostics", "") or "ok")
                                 if (
@@ -3192,7 +4060,20 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
                 key = read_key(0.05)
                 if key == "\x03":
                     raise KeyboardInterrupt
-                if body_view == "chart" and key == "r":
+                error_body = (
+                    body_view == "chart" and component.error is not None and component.model is None
+                )
+                if error_body and key in {"\x1b[A", "\x1b[B", "\x1b[H", "e"}:
+                    updated_offset = next_text_offset(
+                        key,
+                        offset=error_offset,
+                        line_count=error_line_count,
+                        visible_rows=error_visible_rows,
+                    )
+                    assert updated_offset is not None
+                    error_offset = updated_offset
+                    paint(force=True)
+                elif body_view == "chart" and key == "r":
                     request(LifecycleTrigger.MANUAL, replace_active=True)
                     paint(force=True)
                 elif body_view == "chart" and key in {"h", "H"}:
@@ -3298,6 +4179,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
     dashboard_text_line_count = 0
     dashboard_text_visible_rows = 0
     chooser_overlay: tuple[int, str] | None = None
+    dataset_modal: DashboardDatasetModalState | None = None
     overlay_editor: OverlayEditorState | None = None
     overlay_history: OverlayHistoryState | None = None
     custom_logs_pane: int | None = None
@@ -3306,6 +4188,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
     last_click: tuple[int, float] | None = None
     copy_feedback = TransientFeedback()
     manual_refresh_operations: set[OperationToken] = set()
+    displayed_custom_warnings: set[tuple[str, str]] = set()
 
     last_successful_update: datetime | None = None
     last_size: tuple[int, int] | None = None
@@ -3452,6 +4335,17 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         pane.logs.append(CustomLogRecord(datetime.now().astimezone(), status, detail))
         pane.logs[:] = pane.logs[-20:]
 
+    def record_custom_warnings(source: CustomCommandSource, response: object) -> None:
+        for warning in getattr(response, "warnings", ()):
+            identity = (source.dataset_id, warning.code)
+            if identity in displayed_custom_warnings:
+                continue
+            displayed_custom_warnings.add(identity)
+            message = warning.message.zh_cn if translator.language == "zh" else warning.message.en
+            for pane in (item for item in panes if isinstance(item, TuiCustomPane)):
+                if pane.component.candidate.source.dataset_id == source.dataset_id:
+                    record_custom_log(pane, "warning", message)
+
     def start_custom_submission(
         pane: TuiCustomPane, operation: OperationToken
     ) -> tuple[Future[CustomOutcome], Callable[[], None]]:
@@ -3463,8 +4357,11 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         )
         if config is None:
             raise RuntimeError("custom comparison request is no longer required")
+        if options.host.timezone is None:
+            raise RuntimeError("custom Dataset requests require a timezone")
         intent = custom_historical_query_intent(
             config,
+            timezone=options.host.timezone,
             owner_id=operation.owner_id,
             generation=operation.generation,
             trigger=query_trigger(operation.trigger),
@@ -3484,16 +4381,22 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         if summary is None:
             raise RuntimeError("custom Pane has no summary lifecycle")
         config = pane.component.candidate
+        if options.host.timezone is None:
+            raise RuntimeError("custom Dataset requests require a timezone")
         plan = (
             range_summary_query_plan(config.date_range)
             if config.date_range.fixed_bounds
-            else summary_query_plan(local_today(), cast(SummaryScope, config.granularity))
+            else summary_query_plan(
+                local_today(timezone=options.host.timezone),
+                cast(SummaryScope, config.granularity),
+            )
         )
         summary.select(config.source, config.filters)
         intent = custom_summary_query_intent(
             config.source,
             plan,
             filters=config.filters,
+            timezone=options.host.timezone,
             owner_id=operation.owner_id,
             generation=operation.generation,
             trigger=query_trigger(operation.trigger),
@@ -3523,8 +4426,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         config = pane.component.candidate
         source_changed = summary.source != config.source or summary.filters != config.filters
         if source_changed or summary_affecting:
-            summary.generation += 1
-            summary.lifecycle.detach_active()
+            summary.invalidate()
         try:
             return summary.lifecycle.request(
                 trigger,
@@ -3558,7 +4460,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             if isinstance(pane, TuiCustomPane) and pane.component.fail(
                 exc, generation=pane.component.generation
             ):
-                record_custom_log(pane, "error", str(exc))
+                record_custom_log(pane, "error", _custom_failure_log_detail(exc, translator))
             return False
         return False
 
@@ -3594,7 +4496,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 component.configure(
                     replace(
                         component.candidate,
-                        date_range=refresh_date_range(component.candidate.date_range),
+                        date_range=refresh_date_range(
+                            component.candidate.date_range, timezone=options.host.timezone
+                        ),
                     ),
                     data_affecting=True,
                 )
@@ -3624,7 +4528,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 return chart_requested or summary_requested
             except BaseException as exc:
                 if pane.component.fail(exc, generation=pane.component.generation):
-                    record_custom_log(pane, "error", str(exc))
+                    record_custom_log(pane, "error", _custom_failure_log_detail(exc, translator))
                 return False
         if not isinstance(pane, TuiChartPane):
             return False
@@ -3637,7 +4541,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 current,
                 chart=replace(
                     current.chart,
-                    date_range=refresh_date_range(current.chart.date_range),
+                    date_range=refresh_date_range(
+                        current.chart.date_range, timezone=options.host.timezone
+                    ),
                 ),
             )
             component.configure(submitted, data_affecting=True)
@@ -3660,12 +4566,18 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         selection = selections.get(summary.source.dataset_id)
         if selection is None:
             raise RuntimeError("custom Dashboard source is no longer visible")
-        summary.select(selection.source, selection.filters)
-        plan = summary_query_plan(local_today(), cast(SummaryScope, header.summary_period))
+        summary.select(selection.source, ())
+        if options.host.timezone is None:
+            raise RuntimeError("custom Dataset requests require a timezone")
+        plan = summary_query_plan(
+            local_today(timezone=options.host.timezone),
+            cast(SummaryScope, header.summary_period),
+        )
         intent = custom_summary_query_intent(
             summary.source,
             plan,
             filters=summary.filters,
+            timezone=options.host.timezone,
             owner_id=operation.owner_id,
             generation=operation.generation,
             trigger=query_trigger(operation.trigger),
@@ -3870,6 +4782,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                             "custom provider result does not contain a summary response"
                         )
                     summary.response = response
+                    record_custom_warnings(summary.source, response)
                     summary.error = None
                     summary.accepted_at = datetime.now().astimezone()
                     summary.accepted_period = summary.requested_period
@@ -3908,6 +4821,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     if not isinstance(response, CustomSummaryResponse):
                         raise TypeError("custom provider result does not contain a Pane summary")
                     summary.response = response
+                    record_custom_warnings(summary.source, response)
                     summary.error = None
                     summary.accepted_at = datetime.now().astimezone()
                     summary.accepted_period = summary.requested_period
@@ -3943,7 +4857,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         if pane.component.fail(
                             outcome.error, generation=outcome.generation, purpose=outcome.purpose
                         ):
-                            record_custom_log(pane, "error", str(outcome.error))
+                            record_custom_log(
+                                pane, "error", _custom_failure_log_detail(outcome.error, translator)
+                            )
                             pane.lifecycle.complete(operation, generation=outcome.generation)
                             changed = True
                         else:
@@ -3953,11 +4869,13 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     elif pane.component.apply_provider_result(
                         outcome.result, purpose=outcome.purpose
                     ):
-                        diagnostics = outcome.result.diagnostics.decode("utf-8", "replace").strip()
+                        record_custom_warnings(
+                            pane.component.candidate.source, outcome.result.custom_response
+                        )
                         record_custom_log(
                             pane,
                             "ok",
-                            diagnostics or translator.text("status.custom_query_succeeded"),
+                            translator.text("status.custom_query_succeeded"),
                         )
                         pane.lifecycle.complete(operation, generation=outcome.generation)
                         last_successful_update = pane.component.accepted_at
@@ -3979,7 +4897,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         if pane.component.fail(
                             exc, generation=operation.generation, purpose="primary"
                         ):
-                            record_custom_log(pane, "error", str(exc))
+                            record_custom_log(pane, "error", _custom_failure_log_detail(exc, translator))
                             changed = True
                 retire_manual_refresh(operation)
                 start_pane(index, now=observed_at)
@@ -4143,7 +5061,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     DashboardPaneState(
                         pane.pane_id,
                         CustomChartPaneConfig(pane.component.candidate),
-                        "chart",
+                        pane.body_view,
                     )
                 )
             elif isinstance(pane, TuiAnimationPane):
@@ -4226,7 +5144,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     refresh_indexes.append((len(reconciled), True, True))
                 elif isinstance(pane, TuiChartPane):
                     refresh_indexes.append((len(reconciled), True, False))
-            if isinstance(pane, (TuiChartPane, TuiAnimationPane)):
+            if isinstance(pane, (TuiChartPane, TuiAnimationPane, TuiCustomPane)):
                 pane.body_view = pane_state.body_view
             if isinstance(pane, TuiAnimationPane):
                 assert isinstance(pane_state.config, AnimationPaneConfig)
@@ -4545,7 +5463,10 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             )
         elif mode == "pane" and focused is not None:
             focused_pane = panes[focused]
-            if isinstance(focused_pane, TuiChartPane) and focused_pane.body_view != "chart":
+            if (
+                isinstance(focused_pane, (TuiChartPane, TuiCustomPane))
+                and focused_pane.body_view != "chart"
+            ):
                 text_children = [(translator.text("status.tui_help_content_view"), ())]
                 if text_viewport_overflows(
                     line_count=focused_pane.text_line_counts.get(focused_pane.body_view, 0),
@@ -4899,6 +5820,17 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     global_operations(width),
                 )
             if isinstance(pane, TuiCustomPane):
+                if pane.body_view != "chart":
+                    return (
+                        *_text_view_footer(
+                            pane.body_view,
+                            translator,
+                            width,
+                            line_count=pane.text_line_counts.get(pane.body_view, 0),
+                            visible_rows=pane.text_visible_rows.get(pane.body_view, 0),
+                        ),
+                        global_operations(width),
+                    )
                 return (
                     *_custom_adjustment_footer(
                         pane,
@@ -5139,7 +6071,11 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
 
     def paint(*, force: bool = False) -> None:
         nonlocal help_was_active, last_size, dashboard_text_offset, dashboard_text_line_count
-        nonlocal dashboard_text_visible_rows
+        nonlocal dashboard_text_visible_rows, chooser_overlay
+        if dataset_modal is None:
+            chooser_overlay = None
+        else:
+            _paint_dataset_modal()
         size = get_terminal_size()
         atomic = (
             help_overlay is not None
@@ -5312,6 +6248,8 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         if "defer_animation_overlay" not in str(error):
                             raise
                         rendered = _pane_render(pane, translator, terminal)
+                elif isinstance(pane, TuiCustomPane):
+                    rendered = _pane_render(pane, translator, terminal, dashboard=options)
                 else:
                     rendered = _pane_render(pane, translator, terminal)
                 if isinstance(pane, TuiAnimationPane):
@@ -5350,23 +6288,41 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     if isinstance(pane, TuiChartPane) and pane.body_view == "chart"
                     else rendered.chart
                 )
-                text_pane = pane if isinstance(pane, (TuiChartPane, TuiAnimationPane)) else None
+                text_pane = (
+                    pane
+                    if isinstance(pane, (TuiChartPane, TuiAnimationPane, TuiCustomPane))
+                    else None
+                )
+                error_body = isinstance(text_pane, TuiCustomPane) and rendered.error_body
+                scrollable = text_pane is not None and (
+                    text_pane.body_view != "chart" or error_body
+                )
                 pane_content = _local_pane_content(
                     chart,
                     local_notices,
+                    width=interior_width,
                     height=interior_height,
-                    offset=text_pane.text_offsets.get(text_pane.body_view, 0)
+                    offset=(
+                        text_pane.error_offset
+                        if error_body
+                        else text_pane.text_offsets.get(text_pane.body_view, 0)
+                    )
                     if text_pane is not None
                     else 0,
-                    scrollable=text_pane is not None and text_pane.body_view != "chart",
+                    scrollable=scrollable,
                     return_metadata=True,
                 )
                 assert isinstance(pane_content, tuple)
                 content, offset, line_count, visible_rows = pane_content
-                if text_pane is not None and text_pane.body_view != "chart":
-                    text_pane.text_offsets[text_pane.body_view] = offset
-                    text_pane.text_line_counts[text_pane.body_view] = line_count
-                    text_pane.text_visible_rows[text_pane.body_view] = visible_rows
+                if text_pane is not None and scrollable:
+                    if error_body:
+                        text_pane.error_offset = offset
+                        text_pane.error_line_count = line_count
+                        text_pane.error_visible_rows = visible_rows
+                    else:
+                        text_pane.text_offsets[text_pane.body_view] = offset
+                        text_pane.text_line_counts[text_pane.body_view] = line_count
+                        text_pane.text_visible_rows[text_pane.body_view] = visible_rows
                 rendered_panes.append(content)
             return rendered_panes, tuple(overlays)
 
@@ -5412,12 +6368,33 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 return
             process_help_event(event)
 
-    def choose_pane_type(
+    def choose_pane_type_blocking(
         action: str, pane_index: int, *, initial: CustomChartConfig | None = None
     ) -> CustomChartPaneConfig | str | None:
         nonlocal chooser_overlay
 
-        def paint_choices(choices: str, title: str, chooser_controls: str) -> None:
+        def chooser_height() -> int:
+            size = get_terminal_size()
+            header_rows = len(
+                _header_lines(
+                    header,
+                    header_style,
+                    translator,
+                    Terminal(size.columns, 4, dashboard_theme != "no-color", options.host.ascii),
+                    last_successful_update,
+                )
+            )
+            layout = grid_geometry(size.columns, size.lines, header_rows, 0)
+            cell_height = layout.pane(pane_index).height
+            framed = frame_style != "none" or pane_index == focused
+            return max(1, cell_height - 2 if framed else cell_height)
+
+        def paint_choices(
+            choices: str,
+            title: str,
+            chooser_controls: str,
+            chooser_notices: tuple[str, ...],
+        ) -> None:
             nonlocal chooser_overlay
             size = get_terminal_size()
             header_rows = len(
@@ -5433,10 +6410,19 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             cell_height = layout.pane(pane_index).height
             framed = frame_style != "none" or pane_index == focused
             interior_height = max(1, cell_height - 2 if framed else cell_height)
+            formatted_notices = format_notice_lines(
+                chooser_notices,
+                width=size.columns,
+                color=dashboard_theme != "no-color",
+                ascii=options.host.ascii,
+                translator=translator,
+                color_scheme=dashboard_theme,
+            )
             chooser_frame = compose_frame(
                 choices,
                 title,
                 chooser_controls,
+                formatted_notices,
                 height=interior_height,
             )
             chooser_overlay = (pane_index, "\n".join(chooser_frame.rows))
@@ -5447,26 +6433,540 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 screen,
                 translator,
                 decoder,
-                height=get_terminal_size().lines,
+                height=chooser_height(),
                 action=action,
                 paint_choices=paint_choices,
                 read_input=lambda: raise_if_interrupt(read_adjustment_event(decoder)),
                 on_help=lambda selected: show_chooser_help(action, selected),
             )
-            if choice != "custom":
+            if choice != "datasets":
                 return choice
-            return _choose_custom_pane_config(
+            return _choose_dataset_pane_config(
                 screen,
                 translator,
                 decoder,
-                height=get_terminal_size().lines,
+                height=chooser_height(),
                 dashboard=options,
+                initial=initial,
                 paint_choices=paint_choices,
                 read_input=lambda: raise_if_interrupt(read_adjustment_event(decoder)),
-                initial=initial,
             )
         finally:
             chooser_overlay = None
+
+    def open_dataset_modal(
+        action: str, pane_index: int, *, initial: CustomChartConfig | None = None
+    ) -> None:
+        """Start a Dataset chooser without taking ownership of the event loop."""
+
+        nonlocal dataset_modal
+        from ccusage_viz.datasets.service import DatasetService
+
+        service = DatasetService()
+        try:
+            statuses = tuple(service.status())
+            error = None
+        except UsageError as exc:
+            statuses = ()
+            error = format_error(exc, translator)
+        draft = CustomPaneDraft(
+            kind=initial.kind if initial is not None else "timeline",
+            dataset_id=initial.source.dataset_id if initial is not None else "",
+            command=shlex.join(initial.source.command_argv) if initial is not None else "",
+        )
+        dataset_modal = DashboardDatasetModalState(
+            action, pane_index, initial, statuses, service, draft=draft, error=error
+        )
+
+    def _dataset_modal_height(pane_index: int) -> int:
+        size = get_terminal_size()
+        header_rows = len(
+            _header_lines(
+                header,
+                header_style,
+                translator,
+                Terminal(size.columns, 4, dashboard_theme != "no-color", options.host.ascii),
+                last_successful_update,
+            )
+        )
+        layout = grid_geometry(size.columns, size.lines, header_rows, 0)
+        cell_height = layout.pane(pane_index).height
+        framed = frame_style != "none" or pane_index == focused
+        return max(1, cell_height - 2 if framed else cell_height)
+
+    def _paint_dataset_modal() -> None:
+        """Render the active Dataset state in its target pane."""
+
+        nonlocal chooser_overlay
+        assert dataset_modal is not None
+        modal = dataset_modal
+        height = _dataset_modal_height(modal.pane_index)
+        notices = () if modal.error is None else (modal.error,)
+        if modal.stage == "pane":
+            rows = [
+                f"{'›' if item == _PANE_COMMANDS[modal.index] else ' '} "
+                f"{translator.text(f'label.pane_{item}')}"
+                for item in _PANE_COMMANDS
+            ]
+            body, modal.offset = _chooser_viewport(
+                rows, index=modal.index, offset=modal.offset, height=height
+            )
+            title = translator.text(f"status.tui_{modal.action}_title")
+            controls = translator.text(f"status.tui_{modal.action}_controls")
+        elif modal.stage == "source":
+            entries: list[tuple[str, object | None]] = [("local", None)]
+            entries.extend(("dataset", status) for status in modal.statuses)
+            entries.extend((("browse", None), ("github", None)))
+            modal.index %= len(entries)
+            rows = []
+            for item_index, (kind, value) in enumerate(entries):
+                selected = "›" if item_index == modal.index else " "
+                if kind == "local":
+                    rows.append(f"{selected} {translator.text('label.dataset_local_command')}")
+                elif kind == "browse":
+                    rows.append(f"{selected} {translator.text('label.dataset_browse_official')}")
+                elif kind == "github":
+                    rows.append(f"{selected} {translator.text('label.dataset_github_release')}")
+                else:
+                    from ccusage_viz.datasets.models import DatasetStatus
+
+                    status = cast(DatasetStatus, value)
+                    if status.corrupt:
+                        rows.append(
+                            f"{selected} {status.dataset_id} · "
+                            f"{translator.text('status.dataset_corrupt')}"
+                        )
+                    else:
+                        assert status.installed is not None
+                        state = (
+                            translator.text("status.dataset_ready")
+                            if status.ready
+                            else translator.text("status.dataset_setup_required")
+                        )
+                        rows.append(
+                            f"{selected} {status.installed.dataset_id} "
+                            f"{status.installed.version} · {state}"
+                        )
+            body, modal.offset = _chooser_viewport(
+                rows,
+                index=modal.index,
+                offset=modal.offset,
+                height=height,
+                reserved_rows=2 + len(notices),
+            )
+            title = translator.text("status.dataset_chooser_title")
+            controls = translator.text("status.dataset_chooser_controls")
+        elif modal.stage == "browse":
+            if modal.future is not None:
+                body = ""
+                title = translator.text("status.dataset_browse_title")
+                controls = translator.text("status.dataset_browse_controls")
+                notices = (translator.text("status.dataset_catalog_loading"),)
+            elif not modal.entries:
+                body = ""
+                title = translator.text("status.dataset_browse_title")
+                controls = translator.text("status.dataset_browse_controls")
+                notices = (translator.text("status.datasets_official_empty"),)
+            else:
+                rows = [
+                    f"{'›' if item_index == modal.index else ' '} "
+                    f"{entry.title.zh_cn if translator.language == 'zh' else entry.title.en} · {entry.id}"
+                    for item_index, entry in enumerate(modal.entries)
+                ]
+                body, modal.offset = _chooser_viewport(
+                    rows, index=modal.index, offset=modal.offset, height=height
+                )
+                title = translator.text("status.dataset_browse_title")
+                controls = translator.text("status.dataset_browse_controls")
+        elif modal.stage == "github":
+            body = modal.draft.command or "—"
+            title = translator.text("status.dataset_github_title")
+            if modal.future is not None:
+                controls = translator.text("status.dataset_github_loading_controls")
+                notices = (translator.text("status.dataset_github_resolving"),)
+            elif modal.artifact is not None:
+                body = "\n".join(
+                    (
+                        modal.draft.command,
+                        "",
+                        f"{modal.artifact.release_tag} · {modal.artifact.asset_name}",
+                        modal.artifact.sha256,
+                        translator.text(
+                            "status.dataset_github_confirm",
+                            repository=modal.artifact.repository,
+                        ),
+                    )
+                )
+                controls = translator.text("status.dataset_github_confirm_controls")
+            else:
+                controls = translator.text("status.dataset_github_controls")
+        elif modal.stage == "github_installing":
+            body = modal.draft.command
+            title = translator.text("status.dataset_github_title")
+            controls = translator.text("status.dataset_github_loading_controls")
+            notices = (translator.text("status.dataset_github_installing"),)
+        elif modal.stage == "browse_confirm":
+            selected = modal.entries[modal.index]
+            host_os, host_arch = cast(tuple[str, str], modal.service.platform)
+            artifact = next(
+                artifact
+                for artifact in selected.artifacts
+                if artifact.os == host_os and artifact.arch == host_arch
+            )
+            body = "\n".join(
+                (
+                    selected.description.zh_cn
+                    if translator.language == "zh"
+                    else selected.description.en,
+                    f"{artifact.repository} · {artifact.release_tag} · {host_os}/{host_arch}",
+                    translator.text(
+                        "status.dataset_browse_confirm",
+                        dataset_id=selected.id,
+                        repository=artifact.repository,
+                    ),
+                )
+            )
+            title = translator.text("status.dataset_browse_title")
+            controls = translator.text("status.dataset_browse_confirm_controls")
+        elif modal.stage == "installing":
+            body = modal.selected_dataset_id or ""
+            title = translator.text("status.dataset_browse_title")
+            controls = translator.text("status.dataset_browse_confirm_controls")
+            notices = (
+                translator.text(
+                    "status.dataset_browse_installing", dataset_id=modal.selected_dataset_id
+                ),
+            )
+        elif modal.stage == "installed":
+            rows = [
+                f"{'›' if item_index == modal.index else ' '} {translator.text(f'label.pane_{kind}')}"
+                for item_index, kind in enumerate(_DATASET_VIEW_KINDS)
+            ]
+            body, modal.offset = _chooser_viewport(
+                rows, index=modal.index, offset=modal.offset, height=height
+            )
+            title = translator.text("status.dataset_chooser_title")
+            controls = translator.text("status.dataset_chooser_controls")
+        else:
+            fields = (
+                translator.text("label.custom_kind"),
+                translator.text("label.custom_dataset"),
+                translator.text("label.custom_command"),
+            )
+            values = (modal.draft.kind, modal.draft.dataset_id, modal.draft.command)
+            body = "\n".join(
+                f"{'›' if index == modal.draft.field else ' '} {label}: {value or '—'}"
+                for index, (label, value) in enumerate(zip(fields, values, strict=True))
+            )
+            title = translator.text("status.custom_pane_title")
+            controls = translator.text("status.custom_pane_controls")
+        size = get_terminal_size()
+        formatted_notices = format_notice_lines(
+            notices,
+            width=size.columns,
+            color=dashboard_theme != "no-color",
+            ascii=options.host.ascii,
+            translator=translator,
+            color_scheme=dashboard_theme,
+        )
+        chooser_overlay = (
+            modal.pane_index,
+            "\n".join(compose_frame(body, title, controls, formatted_notices, height=height).rows),
+        )
+
+    def finish_dataset_modal(choice: CustomChartPaneConfig | str | None) -> None:
+        """Apply one completed modal choice through the normal history transaction."""
+
+        nonlocal active_grid, focused, dataset_modal, chooser_overlay
+        assert dataset_modal is not None
+        modal = dataset_modal
+        dataset_modal = None
+        chooser_overlay = None
+        if choice is None:
+            return
+        if modal.action == "replace":
+            record_mutation(
+                ("pane", modal.pane_index, "replace"),
+                lambda choice=choice, index=modal.pane_index: _replace_pane(
+                    panes, index, create_pane(choice), start=start_new_pane
+                ),
+            )
+            return
+        insert_at = modal.pane_index if modal.action == "insert_before" else modal.pane_index + 1
+
+        def insert(
+            choice: CustomChartPaneConfig | str = choice, insert_at: int = insert_at
+        ) -> None:
+            nonlocal active_grid, focused
+            active_grid = _grid_for_pane_count(active_grid, len(panes) + 1)
+            _insert_pane(panes, insert_at, create_pane(choice), start=start_new_pane)
+            focused = insert_at
+
+        record_mutation(("pane", modal.pane_index, modal.action), insert)
+
+    def collect_dataset_modal() -> bool:
+        """Consume a completed Dataset catalog request without blocking the Dashboard."""
+
+        assert dataset_modal is not None
+        modal = dataset_modal
+        if modal.future is None or not modal.future.done():
+            return False
+        if modal.stage == "browse":
+            try:
+                modal.entries = tuple(modal.future.result())
+                modal.error = None
+            except UsageError as exc:
+                modal.error = format_error(exc, translator)
+            except Exception:
+                modal.error = translator.text("status.dataset_catalog_unavailable")
+            modal.future = None
+            return True
+        if modal.stage == "installing":
+            try:
+                modal.future.result()
+                modal.statuses = tuple(modal.service.status())
+                modal.draft.dataset_id = modal.selected_dataset_id or ""
+                modal.stage, modal.index, modal.offset = "installed", 0, 0
+                modal.error = None
+            except UsageError as exc:
+                modal.stage = "browse_confirm"
+                modal.error = format_error(exc, translator)
+            except Exception:
+                modal.stage = "browse_confirm"
+                modal.error = translator.text("error.dataset_download_failed")
+            modal.future = None
+            return True
+        if modal.stage == "github":
+            try:
+                modal.artifact = modal.future.result()
+                modal.error = None
+            except UsageError as exc:
+                modal.error = format_error(exc, translator)
+            except Exception:
+                modal.error = translator.text("error.dataset_download_failed")
+            modal.future = None
+            return True
+        if modal.stage == "github_installing":
+            try:
+                status = modal.future.result()
+                installed = status.installed
+                if installed is None:
+                    raise UsageError("error.dataset_corrupt")
+                modal.draft.dataset_id = installed.dataset_id
+                modal.statuses = tuple(modal.service.status())
+                modal.stage, modal.index, modal.offset = "installed", 0, 0
+                modal.error = None
+            except UsageError as exc:
+                modal.stage = "github"
+                modal.error = format_error(exc, translator)
+            except Exception:
+                modal.stage = "github"
+                modal.error = translator.text("error.dataset_download_failed")
+            modal.future = None
+            return True
+        return False
+
+    def handle_dataset_modal(event: object) -> None:
+        """Apply one event to the active Dataset modal without blocking Dashboard work."""
+
+        nonlocal dataset_modal
+        assert dataset_modal is not None
+        modal = dataset_modal
+        if not isinstance(event, (KeyEvent, PasteEvent)):
+            return
+        if isinstance(event, PasteEvent):
+            if modal.stage == "local" and modal.draft.field in {1, 2}:
+                if modal.draft.field == 1:
+                    modal.draft.dataset_id += event.value
+                else:
+                    modal.draft.command += event.value
+            return
+        key = event.value
+        if key == "\x03":
+            raise KeyboardInterrupt
+        if modal.stage == "pane":
+            if key == "\x1b":
+                finish_dataset_modal(None)
+            elif key in {"j", "\x1b[B"}:
+                modal.index = (modal.index + 1) % len(_PANE_COMMANDS)
+            elif key in {"k", "\x1b[A"}:
+                modal.index = (modal.index - 1) % len(_PANE_COMMANDS)
+            elif key in {"\r", "\n"}:
+                choice = _PANE_COMMANDS[modal.index]
+                if choice == "datasets":
+                    modal.stage, modal.index, modal.offset = "source", 0, 0
+                else:
+                    finish_dataset_modal(choice)
+            return
+        if modal.stage == "source":
+            entries: list[tuple[str, object | None]] = [("local", None)]
+            entries.extend(("dataset", status) for status in modal.statuses)
+            entries.extend((("browse", None), ("github", None)))
+            if key == "\x1b":
+                modal.stage, modal.index, modal.offset = "pane", 0, 0
+            elif key in {"j", "\x1b[B"}:
+                modal.index = (modal.index + 1) % len(entries)
+            elif key in {"k", "\x1b[A"}:
+                modal.index = (modal.index - 1) % len(entries)
+            elif key in {"\r", "\n"}:
+                kind, value = entries[modal.index]
+                if kind == "local":
+                    modal.stage, modal.offset = "local", 0
+                elif kind == "dataset":
+                    from ccusage_viz.datasets.models import DatasetStatus
+
+                    status = cast(DatasetStatus, value)
+                    if status.corrupt:
+                        modal.error = translator.text(
+                            "error.dataset_corrupt", dataset_id=status.dataset_id
+                        )
+                    elif not status.ready or status.installed is None:
+                        modal.error = translator.text("status.dataset_setup_required")
+                    else:
+                        modal.draft.dataset_id = status.installed.dataset_id
+                        modal.stage, modal.index, modal.offset = "installed", 0, 0
+                elif kind == "browse":
+                    modal.stage, modal.index, modal.offset = "browse", 0, 0
+                    modal.error = None
+                    modal.future = executor.submit(
+                        cast(Callable[[], object], modal.service.official_entries)
+                    )
+                else:
+                    modal.stage, modal.index, modal.offset = "github", 0, 0
+                    modal.draft.command = ""
+                    modal.artifact = None
+                    modal.error = None
+            return
+        if modal.stage == "github":
+            if key == "\x1b":
+                if modal.future is not None:
+                    return
+                if modal.artifact is not None:
+                    modal.artifact = None
+                    modal.error = None
+                else:
+                    modal.stage, modal.index, modal.offset = "source", 0, 0
+            elif modal.future is not None:
+                return
+            elif modal.artifact is not None:
+                if key in {"\r", "\n"}:
+                    modal.stage = "github_installing"
+                    modal.future = executor.submit(
+                        cast(
+                            Callable[[object], object],
+                            modal.service.install_resolved_github_artifact,
+                        ),
+                        modal.artifact,
+                    )
+            elif key in {"\r", "\n"}:
+                if modal.draft.command.strip():
+                    modal.future = executor.submit(
+                        cast(Callable[[str], object], modal.service.resolve_github_repository),
+                        modal.draft.command,
+                    )
+                    modal.error = None
+            elif key in {"\x7f", "\b"}:
+                modal.draft.command = modal.draft.command[:-1]
+                modal.error = None
+            elif len(key) == 1 and key.isprintable():
+                modal.draft.command += key
+                modal.error = None
+            return
+        if modal.stage == "github_installing":
+            return
+        if modal.stage == "browse":
+            if key == "\x1b":
+                if modal.future is not None:
+                    modal.future.cancel()
+                modal.future = None
+                modal.stage, modal.index, modal.offset = "source", 0, 0
+            elif modal.future is None and modal.entries:
+                if key in {"j", "\x1b[B"}:
+                    modal.index = (modal.index + 1) % len(modal.entries)
+                elif key in {"k", "\x1b[A"}:
+                    modal.index = (modal.index - 1) % len(modal.entries)
+                elif key in {"\r", "\n"}:
+                    selected = modal.entries[modal.index]
+                    host_os, host_arch = cast(tuple[str, str], modal.service.platform)
+                    if not any(
+                        artifact.os == host_os and artifact.arch == host_arch
+                        for artifact in selected.artifacts
+                    ):
+                        modal.error = translator.text(
+                            "status.dataset_catalog_unavailable_platform",
+                            platform=f"{host_os}/{host_arch}",
+                        )
+                    else:
+                        modal.selected_dataset_id = selected.id
+                        modal.stage = "browse_confirm"
+            return
+        if modal.stage == "browse_confirm":
+            if key == "\x1b":
+                modal.stage = "browse"
+                modal.error = None
+            elif key in {"\r", "\n"}:
+                assert modal.selected_dataset_id is not None
+                modal.stage = "installing"
+                modal.future = executor.submit(
+                    cast(Callable[[str], object], modal.service.install_official),
+                    modal.selected_dataset_id,
+                )
+            return
+        if modal.stage == "installing":
+            return
+        if modal.stage == "installed":
+            if key == "\x1b":
+                modal.stage, modal.index, modal.offset = "source", 0, 0
+            elif key in {"j", "\x1b[B"}:
+                modal.index = (modal.index + 1) % len(_DATASET_VIEW_KINDS)
+            elif key in {"k", "\x1b[A"}:
+                modal.index = (modal.index - 1) % len(_DATASET_VIEW_KINDS)
+            elif key in {"\r", "\n"}:
+                try:
+                    source = modal.service.installed_command_source(modal.draft.dataset_id)
+                except UsageError as exc:
+                    modal.error = format_error(exc, translator)
+                else:
+                    finish_dataset_modal(
+                        default_custom_pane(
+                            _DATASET_VIEW_KINDS[modal.index], source=source, dashboard=options
+                        )
+                    )
+            return
+        if key == "\x1b":
+            modal.stage, modal.index, modal.offset = "source", 0, 0
+        elif key in {"\t", "\x1b[B"}:
+            modal.draft.field = (modal.draft.field + 1) % 3
+        elif key == "\x1b[A":
+            modal.draft.field = (modal.draft.field - 1) % 3
+        elif modal.draft.field == 0 and key in {"j", "\x1b[C"}:
+            kinds = _CUSTOM_PANE_KINDS
+            modal.draft.kind = kinds[(kinds.index(modal.draft.kind) + 1) % len(kinds)]
+        elif modal.draft.field == 0 and key in {"k", "\x1b[D"}:
+            kinds = _CUSTOM_PANE_KINDS
+            modal.draft.kind = kinds[(kinds.index(modal.draft.kind) - 1) % len(kinds)]
+        elif key in {"\r", "\n"}:
+            try:
+                source = CustomCommandSource(
+                    modal.draft.dataset_id.strip(), tuple(shlex.split(modal.draft.command))
+                )
+                finish_dataset_modal(
+                    default_custom_pane(modal.draft.kind, source=source, dashboard=options)
+                )
+            except ValueError as exc:
+                modal.error = str(exc)
+        elif modal.draft.field in {1, 2}:
+            value = modal.draft.dataset_id if modal.draft.field == 1 else modal.draft.command
+            if key in {"\x7f", "\b"}:
+                value = value[:-1]
+            elif len(key) == 1 and key.isprintable():
+                value += key
+            else:
+                return
+            if modal.draft.field == 1:
+                modal.draft.dataset_id = value
+            else:
+                modal.draft.command = value
 
     def create_pane(command: PaneConfig | str, *, pane_id: int | None = None) -> TuiPane:
         pane_id = allocate_pane_id() if pane_id is None else pane_id
@@ -5500,6 +7000,8 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 if (size.columns, size.lines) != last_size:
                     paint(force=True)
                 changed = collect()
+                if dataset_modal is not None:
+                    changed = collect_dataset_modal() or changed
                 now = time.monotonic()
                 if header_style != "hidden" and header.scheduler.due(now=now):
                     refresh_header(trigger=LifecycleTrigger.PERIODIC)
@@ -5531,6 +7033,10 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     continue
                 if help_overlay is not None:
                     process_help_event(event)
+                    continue
+                if dataset_modal is not None:
+                    handle_dataset_modal(event)
+                    paint()
                     continue
                 if isinstance(event, MouseEvent):
                     if handle_pane_mouse(event):
@@ -5830,8 +7336,19 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         if now is not None:
                             paint()
                             continue
+                    if isinstance(pane, TuiCustomPane) and key in {"v", "V"}:
+                        record_mutation(
+                            ("pane", focused_index, "view"),
+                            lambda pane=pane: setattr(
+                                pane,
+                                "body_view",
+                                cycle_body_view(pane.body_view, step=1 if key == "v" else -1),
+                            ),
+                        )
+                        paint()
+                        continue
                     if isinstance(pane, TuiCustomPane) and (
-                        key == "a"
+                        key in {"a", "f"}
                         or key in _custom_pane_adjustment_keys(pane, adjustment_page)
                         or key
                         in _custom_pane_adjustment_keys(
@@ -5903,12 +7420,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                             and capability is not None
                             and capability.group_by
                         ):
-                            values = (None, *capability.group_by)
-                            current = base.group_by if base.group_by in values else values[0]
-                            group_by = values[(values.index(current) + 1) % len(values)]
-                            updated = replace(
-                                base, group_by=group_by, top=(base.top or 3) if group_by else None
-                            )
+                            updated = _cycle_custom_grouping(base, capability.group_by)
                             if updated != base:
                                 record_mutation(
                                     ("pane", focused_index, "custom-group"),
@@ -5919,6 +7431,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         elif (
                             key == "f"
                             and capability is not None
+                            and capability.filters
                             and component.accepted_response is not None
                         ):
                             response = component.accepted_response
@@ -5964,6 +7477,8 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                         config, mutation="filters"
                                     ),
                                 )
+                        elif key == "f":
+                            copy_feedback.show(translator.text("status.custom_filter_unavailable"))
                         elif key in {"d", "t", "T", "s", "S", "k", "l", "o", "+", "=", "-", "_"}:
                             updated = adjust_custom_chart(base, key)
                             if updated != base:
@@ -5978,66 +7493,64 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                     ("pane", focused_index, "custom-presentation"),
                                     apply_custom_presentation,
                                 )
-                        elif key == "e":
-                            try:
-                                updated = _choose_custom_pane_config(
-                                    screen,
-                                    translator,
-                                    decoder,
-                                    height=get_terminal_size().lines,
-                                    dashboard=options,
-                                    initial=pane.component.candidate,
-                                    read_input=lambda: raise_if_interrupt(
-                                        read_adjustment_event(decoder)
-                                    ),
-                                )
-                            except AdjustmentTimeout:
-                                end_adjustment()
-                                paint()
-                                continue
-                            if updated is not None and updated.chart != pane.component.candidate:
-
-                                def apply_custom_source(
-                                    pane: TuiCustomPane = pane,
-                                    config: CustomChartConfig = updated.chart,
-                                    pane_index: int = focused_index,
-                                ) -> None:
-                                    pane.component.configure(config, data_affecting=True)
-                                    refresh(
-                                        pane_index,
-                                        trigger=LifecycleTrigger.CONFIGURATION,
-                                        data_affecting=False,
-                                        summary_affecting=True,
-                                    )
-
-                                record_mutation(
-                                    ("pane", focused_index, "custom-source"), apply_custom_source
-                                )
                         paint()
                         continue
-                    if isinstance(pane, TuiChartPane) and pane.body_view != "chart":
+                    error_body = (
+                        isinstance(pane, TuiCustomPane)
+                        and pane.body_view == "chart"
+                        and pane.component.error is not None
+                        and pane.component.model is None
+                    )
+                    if isinstance(pane, (TuiChartPane, TuiCustomPane)) and (
+                        pane.body_view != "chart" or error_body
+                    ):
+                        handled_body_key = False
                         if key in {"\x1b[A", "\x1b[B", "\x1b[H", "e"}:
                             offset = next_text_offset(
                                 key,
-                                offset=pane.text_offsets.get(pane.body_view, 0),
-                                line_count=pane.text_line_counts.get(pane.body_view, 0),
-                                visible_rows=pane.text_visible_rows.get(pane.body_view, 0),
+                                offset=(
+                                    pane.error_offset
+                                    if error_body
+                                    else pane.text_offsets.get(pane.body_view, 0)
+                                ),
+                                line_count=(
+                                    pane.error_line_count
+                                    if error_body
+                                    else pane.text_line_counts.get(pane.body_view, 0)
+                                ),
+                                visible_rows=(
+                                    pane.error_visible_rows
+                                    if error_body
+                                    else pane.text_visible_rows.get(pane.body_view, 0)
+                                ),
                             )
                             assert offset is not None
-                            pane.text_offsets[pane.body_view] = offset
+                            if error_body:
+                                pane.error_offset = offset
+                            else:
+                                pane.text_offsets[pane.body_view] = offset
+                            handled_body_key = True
                         elif key in {"v", "V"}:
                             text_pane = pane
                             record_mutation(
                                 ("pane", focused, "view"),
                                 lambda pane=text_pane: setattr(
-                                    pane, "body_view", next_body_view(pane.body_view)
+                                    pane,
+                                    "body_view",
+                                    cycle_body_view(pane.body_view, step=1 if key == "v" else -1),
                                 ),
                             )
+                            handled_body_key = True
                         elif key in {"y", "Y"} and body_view_copy_kind(pane.body_view) is not None:
                             copy_kind = body_view_copy_kind(pane.body_view)
                             assert copy_kind is not None
                             copied = copy_command(
-                                _pane_copy_payload(pane, translator, pane_terminal(focused))
+                                _pane_copy_payload(
+                                    pane,
+                                    translator,
+                                    pane_terminal(focused),
+                                    dashboard=options,
+                                )
                             )
                             copy_feedback.show(
                                 translator.text(
@@ -6048,64 +7561,31 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                     else "status.command_copy_failed"
                                 )
                             )
-                        paint()
-                        continue
+                            handled_body_key = True
+                        if handled_body_key or not error_body:
+                            paint()
+                            continue
+                        # An error-only custom pane remains a Dashboard pane: keys it
+                        # does not own must reach the existing management routes below.
                     next_focused = _adjustment_target(focused, key, len(panes))
                     if next_focused != focused:
                         focused = next_focused
                         paint()
                         continue
                     if key == "r":
-                        try:
-                            choice = choose_pane_type(
-                                "replace",
-                                focused_index,
-                                initial=pane.component.candidate
-                                if isinstance(pane, TuiCustomPane)
-                                else None,
-                            )
-                        except AdjustmentTimeout:
-                            end_adjustment()
-                            paint()
-                            continue
-                        if choice is not None:
-                            record_mutation(
-                                ("pane", focused_index, "replace"),
-                                lambda choice=choice, index=focused_index: _replace_pane(
-                                    panes,
-                                    index,
-                                    create_pane(choice),
-                                    start=start_new_pane,
-                                ),
-                            )
+                        open_dataset_modal(
+                            "replace",
+                            focused_index,
+                            initial=pane.component.candidate
+                            if isinstance(pane, TuiCustomPane)
+                            else None,
+                        )
                         paint()
                         continue
                     if key in {"N", "n"}:
-                        action = "insert_before" if key == "N" else "insert_after"
-                        try:
-                            choice = choose_pane_type(action, focused_index)
-                        except AdjustmentTimeout:
-                            end_adjustment()
-                            paint()
-                            continue
-                        if choice is not None:
-                            insert_at = focused_index if key == "N" else focused_index + 1
-
-                            def insert(
-                                choice: CustomChartPaneConfig | str = choice,
-                                insert_at: int = insert_at,
-                            ) -> None:
-                                nonlocal active_grid, focused
-                                active_grid = _grid_for_pane_count(active_grid, len(panes) + 1)
-                                _insert_pane(
-                                    panes,
-                                    insert_at,
-                                    create_pane(choice),
-                                    start=start_new_pane,
-                                )
-                                focused = insert_at
-
-                            record_mutation(("pane", focused_index, action), insert)
+                        open_dataset_modal(
+                            "insert_before" if key == "N" else "insert_after", focused_index
+                        )
                         paint()
                         continue
                     if key in {"{", "}", "J", "K"}:
@@ -6235,11 +7715,13 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                 )
 
                             record_mutation(("pane", focused, "filters"), apply_filters)
-                    elif key == "v":
+                    elif key in {"v", "V"}:
                         record_mutation(
                             ("pane", focused, "view"),
                             lambda pane=chart_pane: setattr(
-                                pane, "body_view", next_body_view(pane.body_view)
+                                pane,
+                                "body_view",
+                                cycle_body_view(pane.body_view, step=1 if key == "v" else -1),
                             ),
                         )
                     elif (
@@ -6382,10 +7864,12 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                 refresh_custom_summaries(trigger=LifecycleTrigger.CONFIGURATION)
 
                         record_mutation(("header", "style"), cycle_header)
-                    elif key == "p":
+                    elif key in {"p", "P"}:
 
                         def cycle_summary() -> None:
-                            next_summary = _next_header_summary(header.summary_period)
+                            next_summary = _cycle_header_summary(
+                                header.summary_period, step=1 if key == "p" else -1
+                            )
                             header.summary_period = next_summary
                             header.generation += 1
                             header.lifecycle.detach_active()
@@ -6490,7 +7974,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
 
                     def cycle_dashboard_view() -> None:
                         nonlocal body_view
-                        body_view = next_dashboard_body_view(body_view)
+                        body_view = cycle_dashboard_body_view(
+                            body_view, step=1 if key == "v" else -1
+                        )
 
                     record_mutation(("dashboard", "view"), cycle_dashboard_view)
                 elif key in {"y", "Y"} and body_view != "chart":

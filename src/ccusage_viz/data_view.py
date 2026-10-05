@@ -16,6 +16,7 @@ from ccusage_viz.domain import TokenUsage, UsageRecord
 from ccusage_viz.formatting import format_tokens
 from ccusage_viz.options import RankingConfig
 from ccusage_viz.processing import process_historical
+from ccusage_viz.processing.custom_historical import CustomChartProjection, CustomProjectedSeries
 from ccusage_viz.processing.filtering import prepare_filtered_scope
 from ccusage_viz.project_identity import (
     ExactProjectDisplayKey,
@@ -47,15 +48,27 @@ _BODY_VIEWS: tuple[BodyView, ...] = (
 )
 
 
+def cycle_body_view(view: BodyView, *, step: int = 1) -> BodyView:
+    """Cycle a pane body view in either direction."""
+    return _BODY_VIEWS[(_BODY_VIEWS.index(view) + step) % len(_BODY_VIEWS)]
+
+
 def next_body_view(view: BodyView) -> BodyView:
     """Return the next transient interactive body view."""
-    return _BODY_VIEWS[(_BODY_VIEWS.index(view) + 1) % len(_BODY_VIEWS)]
+    return cycle_body_view(view)
+
+
+def cycle_dashboard_body_view(
+    view: DashboardBodyView, *, step: int = 1
+) -> DashboardBodyView:
+    """Cycle a full-screen Dashboard body view in either direction."""
+    views: tuple[DashboardBodyView, ...] = ("chart", "full-command")
+    return views[(views.index(view) + step) % len(views)]
 
 
 def next_dashboard_body_view(view: DashboardBodyView) -> DashboardBodyView:
     """Return the next full-screen Dashboard body view."""
-    views: tuple[DashboardBodyView, ...] = ("chart", "full-command")
-    return views[(views.index(view) + 1) % len(views)]
+    return cycle_dashboard_body_view(view)
 
 
 def body_view_copy_kind(view: BodyView) -> CopyKind | None:
@@ -294,6 +307,57 @@ def render_snapshot_data(
         else _markdown(rows)
     )
     return payload
+
+
+def custom_data_payload(projection: CustomChartProjection, *, language: str) -> dict[str, object]:
+    """Return the exact displayed custom projection without Decimal float coercion."""
+
+    def label(series: CustomProjectedSeries) -> str:
+        localized = series.label
+        return localized.zh_cn if language == "zh" else localized.en
+
+    unit = projection.unit
+    return {
+        "kind": projection.kind,
+        "range": {
+            "start_date": projection.date_range.since.isoformat(),
+            "end_date": projection.date_range.until.isoformat(),
+        },
+        "granularity": projection.granularity,
+        "unit": {
+            "id": unit.id,
+            "label": unit.label.zh_cn if language == "zh" else unit.label.en,
+            "placement": unit.placement,
+            "decimal_places": unit.decimal_places,
+        },
+        "rows": [
+            {
+                "period": day.isoformat(),
+                "series_id": series.id,
+                "series": label(series),
+                "is_other": series.is_other,
+                "value": format(value, "f"),
+            }
+            for series in projection.series
+            for day, value in zip(projection.days, series.values, strict=True)
+        ],
+    }
+
+
+def render_custom_data(
+    projection: CustomChartProjection,
+    *,
+    language: str,
+    translator: Translator,
+    view: Literal["data-table", "data-json"] = "data-table",
+) -> str:
+    """Render the visible custom projection as Markdown or deterministic JSON."""
+    payload = custom_data_payload(projection, language=language)
+    rows = payload["rows"]
+    assert isinstance(rows, list)
+    if not rows:
+        return translator.text("message.no_data")
+    return json.dumps(payload, indent=2, ensure_ascii=False) if view == "data-json" else _markdown(rows)
 
 
 def _monitor_display_project(name: ProjectDisplayKey) -> str:
