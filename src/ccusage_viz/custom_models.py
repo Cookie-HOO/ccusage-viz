@@ -68,6 +68,37 @@ class CustomChartCapability:
 
 
 @dataclass(frozen=True, slots=True)
+class CustomChartDefaults:
+    period: str | None
+    group_by: str | None
+    top: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class CustomEnvironmentDeclaration:
+    name: str
+    required: bool
+    sensitive: bool
+    label: LocalizedText
+    how_to_get: LocalizedText
+    help_url: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class CustomProbeDescriptor:
+    revision: str
+    version: str
+    dataset: CustomDataset
+    capabilities: "CustomCapabilities"
+    defaults: Mapping[str, CustomChartDefaults]
+    environment: tuple[CustomEnvironmentDeclaration, ...]
+    source_timezone: str | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "defaults", MappingProxyType(dict(self.defaults)))
+
+
+@dataclass(frozen=True, slots=True)
 class CustomCapabilities:
     group_by: tuple[CustomDimension, ...]
     filters: tuple[CustomFilter, ...]

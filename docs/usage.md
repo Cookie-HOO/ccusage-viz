@@ -431,7 +431,7 @@ retain their existing first clock pane.
 ```bash
 ccuv dashboard --empty --grid 2x2 \
   --pane 'empty' \
-  --pane 'custom timeline --dataset weread --command "weread ccuv"' \
+  --pane 'chart timeline --dataset weread --command "weread ccuv"' \
   --pane 'empty' \
   --pane 'animate --style rain'
 ```
@@ -489,7 +489,7 @@ preset grid where required to make room.
 ### Build a custom Dashboard
 
 A pane fragment is one safely quoted chart command plus chart options. A custom
-fragment is `custom <kind>` with a Dataset ID and one source mode: an installed
+fragment is `chart <kind>` with a Dataset ID and one source mode: an installed
 Dataset uses a bare `--dataset ID`, while an arbitrary developer command uses `--command`.
 `empty` is a valid temporary fragment. The copied command preserves that source
 choice and uses `shlex.join` for arbitrary command argv, so token boundaries and
@@ -523,7 +523,7 @@ path or fixed dates:
 
 ```bash
 ccuv dashboard --empty --grid 1x1 \
-  --pane 'custom timeline --dataset weread'
+  --pane 'chart timeline --dataset weread'
 ```
 
 

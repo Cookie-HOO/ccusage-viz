@@ -2,10 +2,10 @@
 
 [简体中文](custom-command-protocol.zh-CN.md)
 
-`ccuv custom` adapts a command that can return one additive historical metric. It
-is for data such as reading, CI activity, spend amounts, build counts, or byte
-totals. ccuv owns terminal presentation; the command owns the source-specific
-query and aggregation.
+`ccuv chart <kind> --dataset ID` adapts a command that can return one additive
+historical metric. It is for data such as reading, CI activity, spend amounts,
+build counts, or byte totals. ccuv owns terminal presentation; the command owns
+the source-specific query and aggregation.
 
 This is a command protocol, not a plugin or persistence system. Version 1 does
 not support file, HTTP, stdin, Python-plugin, or Monitor sources. It does not
@@ -66,7 +66,7 @@ for developer integrations.
 ```bash
 ccuv dashboard --empty --grid 2x2 \
   --pane 'empty' \
-  --pane 'custom timeline --dataset weread' \
+  --pane 'chart timeline --dataset weread' \
   --pane 'empty' \
   --pane 'animate --style rain'
 ```
@@ -122,11 +122,26 @@ The protocol identifier is `ccuv.custom/v1`. ccuv generates `request_id` for
 each physical execution. Equivalent in-flight Dashboard requests may coalesce,
 so that ID identifies the one shared execution rather than a pane lifecycle.
 
-The first normal chart request also discovers capabilities. There is no separate
-`describe` request. Every successful chart result is self-describing: it carries
-the full capability manifest, localized dataset metadata, and data. Summary
-facts arrive through a separate request. The command must be stateless; a result
-must not depend on a previous command process.
+Every successful chart result remains self-describing: it carries the effective
+capability manifest, localized dataset metadata, and data. Summary facts arrive
+through a separate request. The command must be stateless; a result must not
+depend on a previous command process.
+
+A `probe` is a metadata-only request for Dataset registration and explicit
+refresh. It has no timezone, range, query, or summary fields. It must not read
+business data, verify credentials, mutate state, or create a business-data
+gateway. It returns the stable descriptor, including declared environment
+variables and chart defaults; a later chart response remains authoritative for
+that individual query.
+
+```json
+{
+  "protocol": "ccuv.custom/v1",
+  "request_id": "probe-request-id",
+  "request_kind": "probe",
+  "dataset_id": "weread"
+}
+```
 
 ## Requests
 

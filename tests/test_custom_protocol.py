@@ -9,6 +9,7 @@ from ccusage_viz.coverage import DateInterval
 from ccusage_viz.custom_protocol import (
     PROTOCOL_VERSION,
     CustomChartRequest,
+    CustomProbeRequest,
     CustomProtocolError,
     CustomSummaryRequest,
     canonical_custom_request_key,
@@ -54,6 +55,16 @@ def summary_request(**changes: object) -> CustomSummaryRequest:
     return CustomSummaryRequest(**values)  # type: ignore[arg-type]
 
 
+def probe_request(**changes: object) -> CustomProbeRequest:
+    values: dict[str, object] = {
+        "request_id": "probe-1",
+        "dataset_id": "weread",
+        "command_argv": ("reader", "ccuv"),
+    }
+    values.update(changes)
+    return CustomProbeRequest(**values)  # type: ignore[arg-type]
+
+
 def unit() -> dict[str, object]:
     return {"id": "page", "label": text("pages", "页"), "placement": "suffix", "decimal_places": 0}
 
@@ -72,6 +83,41 @@ def capabilities() -> dict[str, object]:
         "charts": {
             kind: {"granularities": ["day", "week"], "group_by": ["book"], "filters": ["category"]}
             for kind in ("timeline", "stack", "calendar", "ranking")
+        },
+    }
+
+
+def probe_response() -> dict[str, object]:
+    request = probe_request()
+    return {
+        "protocol": PROTOCOL_VERSION,
+        "request_id": request.request_id,
+        "request_kind": "probe",
+        "dataset_id": request.dataset_id,
+        "status": "ok",
+        "descriptor": {
+            "revision": "weread-1",
+            "version": "0.1.0",
+            "source_timezone": "Asia/Shanghai",
+            "dataset": {
+                "title": text("WeRead", "微信读书"),
+                "description": text("Daily reading time", "每日阅读时长"),
+                "unit": unit(),
+            },
+            "capabilities": capabilities(),
+            "defaults": {
+                "timeline": {"period": "14d", "group_by": None, "top": None},
+                "calendar": {"period": "14d", "group_by": None, "top": None},
+                "stack": {"period": "14d", "group_by": None, "top": None},
+                "ranking": {"period": "1mo", "group_by": "book", "top": 10},
+            },
+            "environment": [{
+                "name": "WEREAD_API_KEY",
+                "required": True,
+                "sensitive": True,
+                "label": text("WeRead API key", "微信读书 API 密钥"),
+                "how_to_get": text("Set the key in your environment.", "请通过环境变量设置密钥。"),
+            }],
         },
     }
 
@@ -127,6 +173,35 @@ def summary_response() -> dict[str, object]:
             }
         },
     }
+
+
+def test_probe_response_parses_dataset_capabilities_and_defaults() -> None:
+    result = parse_custom_response(json.dumps(probe_response()).encode(), probe_request())
+
+    descriptor = result.descriptor  # type: ignore[union-attr]
+    assert descriptor.dataset.title.zh_cn == "微信读书"
+    assert descriptor.defaults["ranking"].period == "1mo"
+    assert descriptor.defaults["ranking"].group_by == "book"
+    assert descriptor.defaults["ranking"].top == 10
+    assert descriptor.environment[0].required
+    assert descriptor.environment[0].sensitive
+
+
+def test_probe_request_has_no_query_or_timezone() -> None:
+    request = probe_request()
+
+    assert request.to_wire() == {
+        "protocol": PROTOCOL_VERSION,
+        "request_id": "probe-1",
+        "request_kind": "probe",
+        "dataset_id": "weread",
+    }
+    assert canonical_custom_request_key(request) == (
+        ("reader", "ccuv"),
+        (),
+        "weread",
+        "probe",
+    )
 
 
 def test_chart_response_accepts_exact_decimal_strings() -> None:

@@ -361,7 +361,7 @@ ccuv dashboard narrow --demo large
 ```bash
 ccuv dashboard --empty --grid 2x2 \
   --pane 'empty' \
-  --pane 'custom timeline --dataset weread' \
+  --pane 'chart timeline --dataset weread' \
   --pane 'empty' \
   --pane 'animate --style rain'
 ```
@@ -389,7 +389,7 @@ ccuv dashboard --empty --grid 2x2 \
 
 ### 构造自定义 Dashboard
 
-Pane 片段是一个安全引用的图表命令及图表参数。自定义片段形式为 `custom <kind>` 并带有 Dataset ID：不提供 `--command` 时解析已安装 Dataset，开发者自定义命令则提供 `--command`；`empty` 是有效的临时片段。复制后的命令会保留这一数据源选择，并使用 `shlex.join` 序列化自定义 argv，因此 token 边界和中间空 Pane 位置可往返保留：
+Pane 片段是一个安全引用的图表命令及图表参数。自定义片段形式为 `chart <kind>` 并带有 Dataset ID：不提供 `--command` 时解析已安装 Dataset，开发者自定义命令则提供 `--command`；`empty` 是有效的临时片段。复制后的命令会保留这一数据源选择，并使用 `shlex.join` 序列化自定义 argv，因此 token 边界和中间空 Pane 位置可往返保留：
 
 ```bash
 ccuv dashboard \
@@ -416,7 +416,7 @@ ccuv dashboard \
 
 ```bash
 ccuv dashboard --empty --grid 1x1 \
-  --pane 'custom timeline --dataset weread'
+  --pane 'chart timeline --dataset weread'
 ```
 
 

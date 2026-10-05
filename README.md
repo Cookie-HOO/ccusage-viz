@@ -58,7 +58,7 @@ remains available to the draft.
 > To start without default ccusage panes or requests, use `ccuv dashboard --empty`.
 > It fills the selected default grid or explicit `--grid`/layout with temporary
 > `empty` panes. Add an installed Dataset with only its chart type and Dataset ID:
-> `--pane 'custom timeline --dataset weread'`. Arbitrary commands add `--command`.
+> `--pane 'chart timeline --dataset weread'`. Arbitrary commands add `--command`.
 > See the [custom command protocol guide](docs/custom-command-protocol.md).
 
 ```bash

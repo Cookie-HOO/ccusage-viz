@@ -17,6 +17,9 @@ from ccusage_viz.custom_models import (
     CustomData,
     CustomDataset,
     CustomDimension,
+    CustomEnvironmentDeclaration,
+    CustomChartDefaults,
+    CustomProbeDescriptor,
     CustomFilter,
     CustomFilterOption,
     CustomPoint,
@@ -146,7 +149,31 @@ class CustomSummaryRequest:
         return _json_bytes(self.to_wire())
 
 
-CustomRequest: TypeAlias = CustomChartRequest | CustomSummaryRequest
+@dataclass(frozen=True, slots=True)
+class CustomProbeRequest:
+    request_id: str
+    dataset_id: str
+    command_argv: tuple[str, ...] = ()
+    execution_context: tuple[tuple[str, str], ...] = ()
+    request_kind: Literal["probe"] = "probe"
+
+    def __post_init__(self) -> None:
+        _require_id(self.request_id, "request ID")
+        _require_id(self.dataset_id, "dataset ID")
+
+    def to_wire(self) -> dict[str, object]:
+        return {
+            "protocol": PROTOCOL_VERSION,
+            "request_id": self.request_id,
+            "request_kind": self.request_kind,
+            "dataset_id": self.dataset_id,
+        }
+
+    def to_json_bytes(self) -> bytes:
+        return _json_bytes(self.to_wire())
+
+
+CustomRequest: TypeAlias = CustomChartRequest | CustomSummaryRequest | CustomProbeRequest
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,7 +190,13 @@ class CustomSummaryResponse:
     warnings: tuple[CustomProtocolWarning, ...] = field(default=(), kw_only=True)
 
 
-CustomResponse: TypeAlias = CustomChartResponse | CustomSummaryResponse
+@dataclass(frozen=True, slots=True)
+class CustomProbeResponse:
+    descriptor: CustomProbeDescriptor
+    warnings: tuple[CustomProtocolWarning, ...] = field(default=(), kw_only=True)
+
+
+CustomResponse: TypeAlias = CustomChartResponse | CustomSummaryResponse | CustomProbeResponse
 
 # Internal compatibility names. The wire protocol accepts only chart/summary.
 CustomPaneRequest = CustomChartRequest
@@ -185,9 +218,11 @@ def canonical_custom_request_key(request: CustomRequest) -> tuple[object, ...]:
         request.command_argv,
         request.execution_context,
         request.dataset_id,
-        request.timezone,
         request.request_kind,
     )
+    if isinstance(request, CustomProbeRequest):
+        return common
+    common += (request.timezone,)
     if isinstance(request, CustomChartRequest):
         return common + (
             request.start_date.isoformat(),
@@ -197,13 +232,15 @@ def canonical_custom_request_key(request: CustomRequest) -> tuple[object, ...]:
             request.group_by,
             request.granularity,
         )
-    return common + (
-        request.filters,
-        request.scope,
-        _interval_key(request.current),
-        _interval_key(request.sequential),
-        _interval_key(request.year_over_year),
-    )
+    if isinstance(request, CustomSummaryRequest):
+        return common + (
+            request.filters,
+            request.scope,
+            _interval_key(request.current),
+            _interval_key(request.sequential),
+            _interval_key(request.year_over_year),
+        )
+    return common
 
 
 def parse_custom_response(raw: bytes, request: CustomRequest) -> CustomResponse:
@@ -217,16 +254,17 @@ def parse_custom_response(raw: bytes, request: CustomRequest) -> CustomResponse:
         raise _parse_failure(root)
     if status != "ok":
         raise CustomProtocolError("response status must be 'ok' or 'error'")
+    warnings = _parse_warnings(root.get("warnings"))
     if isinstance(request, CustomChartRequest):
         return CustomChartResponse(
             _parse_dataset(root.get("dataset")),
             _parse_capabilities(root.get("capabilities")),
             _parse_data(root.get("data")),
-            warnings=_parse_warnings(root.get("warnings")),
+            warnings=warnings,
         )
-    return CustomSummaryResponse(
-        _parse_summary(root.get("summary")), warnings=_parse_warnings(root.get("warnings"))
-    )
+    if isinstance(request, CustomSummaryRequest):
+        return CustomSummaryResponse(_parse_summary(root.get("summary")), warnings=warnings)
+    return CustomProbeResponse(_parse_probe_descriptor(root.get("descriptor")), warnings=warnings)
 
 
 def _validate_envelope(root: dict[str, object], request: CustomRequest) -> None:
@@ -316,6 +354,74 @@ def _parse_capabilities(value: object) -> CustomCapabilities:
     _unique_ids(dimensions, "group-by dimensions")
     _unique_ids(filters, "filters")
     return CustomCapabilities(dimensions, filters, parsed)
+
+
+def _parse_probe_descriptor(value: object) -> CustomProbeDescriptor:
+    source = _mapping(value, "probe descriptor")
+    revision = _string(source.get("revision"), "probe descriptor revision")
+    version = _string(source.get("version"), "probe descriptor version")
+    source_timezone = source.get("source_timezone")
+    if source_timezone is not None:
+        source_timezone = _string(source_timezone, "probe descriptor source_timezone")
+        _validate_timezone(source_timezone)
+    defaults_source = _mapping(source.get("defaults"), "probe descriptor defaults")
+    defaults: dict[str, CustomChartDefaults] = {}
+    for kind, value in defaults_source.items():
+        if kind not in {"timeline", "calendar", "stack", "ranking"}:
+            raise CustomProtocolError(f"unsupported chart default: {kind}")
+        item = _mapping(value, f"chart default {kind}")
+        if set(item) != {"period", "group_by", "top"}:
+            raise CustomProtocolError(f"chart default {kind} must contain period, group_by, and top")
+        period = item["period"]
+        group_by = item["group_by"]
+        top = item["top"]
+        if period is not None:
+            period = _string(period, f"chart default {kind} period")
+            try:
+                parse_period(period)
+            except ValueError as exc:
+                raise CustomProtocolError(f"chart default {kind} period must be valid") from exc
+        if group_by is not None:
+            group_by = _string(group_by, f"chart default {kind} group_by")
+        if top is not None and (not isinstance(top, int) or isinstance(top, bool) or top < 1):
+            raise CustomProtocolError(f"chart default {kind} top must be a positive integer")
+        defaults[kind] = CustomChartDefaults(period, group_by, top)
+    environment = tuple(
+        _parse_environment_declaration(item) for item in _sequence(source.get("environment"), "environment")
+    )
+    if len({item.name for item in environment}) != len(environment):
+        raise CustomProtocolError("environment names must be unique")
+    return CustomProbeDescriptor(
+        revision,
+        version,
+        _parse_dataset(source.get("dataset")),
+        _parse_capabilities(source.get("capabilities")),
+        defaults,
+        environment,
+        source_timezone,
+    )
+
+
+def _parse_environment_declaration(value: object) -> CustomEnvironmentDeclaration:
+    source = _mapping(value, "environment declaration")
+    expected = {"name", "required", "sensitive", "label", "how_to_get"}
+    if set(source) - (expected | {"help_url"}) or not expected <= set(source):
+        raise CustomProtocolError("environment declaration has invalid fields")
+    required = source["required"]
+    sensitive = source["sensitive"]
+    if not isinstance(required, bool) or not isinstance(sensitive, bool):
+        raise CustomProtocolError("environment declaration required and sensitive must be booleans")
+    help_url = source.get("help_url")
+    if help_url is not None:
+        help_url = _string(help_url, "environment declaration help_url")
+    return CustomEnvironmentDeclaration(
+        _string(source["name"], "environment declaration name"),
+        required,
+        sensitive,
+        _parse_localized(source["label"], "environment declaration label"),
+        _parse_localized(source["how_to_get"], "environment declaration how_to_get"),
+        help_url,
+    )
 
 
 def _parse_dimension(value: object, name: str) -> CustomDimension:

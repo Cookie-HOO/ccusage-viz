@@ -2,7 +2,7 @@
 
 [English](custom-command-protocol.md)
 
-`ccuv custom` 用一个命令适配可相加的历史指标，可用于阅读、CI 活动、金额、构建次数或字节总量等数据。ccuv 负责终端呈现；命令负责数据源特有的查询与聚合。
+`ccuv chart <kind> --dataset ID` 用一个命令适配可相加的历史指标，可用于阅读、CI 活动、金额、构建次数或字节总量等数据。ccuv 负责终端呈现；命令负责数据源特有的查询与聚合。
 
 这是命令协议，不是插件或持久化系统。v1 不支持文件、HTTP、stdin、Python 插件或 Monitor 数据源；也不支持已完成结果缓存、命令发现、范围合并或不可相加指标。
 
@@ -38,7 +38,7 @@ ccuv chart timeline --dataset example --command "sh -lc 'collector | adapter'"
 ```bash
 ccuv dashboard --empty --grid 2x2 \
   --pane 'empty' \
-  --pane 'custom timeline --dataset weread' \
+  --pane 'chart timeline --dataset weread' \
   --pane 'empty' \
   --pane 'animate --style rain'
 ```
@@ -70,7 +70,18 @@ Dashboard 预设仍是内置的 token 消耗统计模板；添加 Dataset Pane �
 
 协议标识为 `ccuv.custom/v1`。ccuv 为每次物理执行生成 `request_id`。等价的 Dashboard 进行中请求可能合并，因此该 ID 代表一次共享执行，而不是 Pane 生命周期。
 
-第一次普通 Chart 请求也用于发现 capability，不存在单独的 `describe` 请求。每次成功 Chart 响应都必须自描述，携带完整 capability manifest、本地化数据集元数据和数据；汇总事实通过独立请求返回。命令必须是无状态的：不能依赖此前的命令进程响应。
+每次成功 Chart 响应仍必须自描述，携带该查询有效的 capability、本地化数据集元数据和数据；汇总事实通过独立请求返回。命令必须是无状态的：不能依赖此前的命令进程响应。
+
+`probe` 是 Dataset 注册和显式刷新使用的仅元数据请求，不携带 timezone、range、query 或 summary。它不得读取业务数据、校验凭据、修改状态，或创建业务数据网关。它返回稳定 descriptor，包括声明的环境变量和图表默认值；后续 Chart 响应仍是特定查询的权威结果。
+
+```json
+{
+  "protocol": "ccuv.custom/v1",
+  "request_id": "probe-request-id",
+  "request_kind": "probe",
+  "dataset_id": "weread"
+}
+```
 
 ## 请求
 
