@@ -15,6 +15,7 @@ from ccusage_viz import __version__
 from ccusage_viz.animation import animation_spec, default_animation_spec
 from ccusage_viz.animation_overlay import OVERLAY_COLORS, OVERLAY_POSITIONS, OverlayConfig
 from ccusage_viz.application import run
+from ccusage_viz.core.time import system_timezone, validate_timezone
 from ccusage_viz.dashboard import DASHBOARD_PRESETS
 from ccusage_viz.dashboard_layout import (
     NAMED_LAYOUTS,
@@ -80,6 +81,7 @@ _COMMANDS = (
     "dashboard",
     "animate",
     "custom",
+    "datasets",
     "text",
 )
 _TUI_COMMANDS = ("timeline", "calendar", "stack", "ranking", "monitor")
@@ -95,6 +97,7 @@ _PANE_FORBIDDEN_OPTIONS = frozenset(
         "--lang",
         "--ccusage-bin",
         "--query-timeout",
+        "--timezone",
         "--pane",
         "--grid",
         "--refresh-interval",
@@ -175,6 +178,7 @@ def _add_presentation(parser: argparse.ArgumentParser, tr: Translator, command: 
     parser.add_argument("--lang", choices=("en", "zh"), help=tr.text("help.lang"))
     parser.add_argument("--ccusage-bin", default="ccusage", help=tr.text("help.ccusage_bin"))
     parser.add_argument("--query-timeout", type=float, default=30.0, help=argparse.SUPPRESS)
+    parser.add_argument("--timezone", metavar="AREA/LOCATION", help=tr.text("help.timezone"))
     parser.add_argument("--ascii", action="store_true", help=tr.text("help.ascii"))
     parser.add_argument(
         "--theme",
@@ -310,6 +314,7 @@ def _add_tui(parser: argparse.ArgumentParser, tr: Translator) -> None:
     parser.add_argument("--lang", choices=("en", "zh"), help=tr.text("help.lang"))
     parser.add_argument("--ccusage-bin", default="ccusage", help=tr.text("help.ccusage_bin"))
     parser.add_argument("--query-timeout", type=float, default=30.0, help=argparse.SUPPRESS)
+    parser.add_argument("--timezone", metavar="AREA/LOCATION", help=tr.text("help.timezone"))
     parser.add_argument("--ascii", action="store_true", help=tr.text("help.ascii"))
     parser.add_argument(
         "--theme",
@@ -322,7 +327,7 @@ def _add_tui(parser: argparse.ArgumentParser, tr: Translator) -> None:
 
 def _add_custom_history(parser: argparse.ArgumentParser, tr: Translator, command: str) -> None:
     parser.add_argument("--dataset", required=True, metavar="ID")
-    parser.add_argument("--command", dest="command_text", required=True, metavar="TEXT")
+    parser.add_argument("--command", dest="command_text", metavar="TEXT")
     parser.add_argument("--period", help=tr.text("help.period"))
     parser.add_argument("--since", help=tr.text("help.since"))
     parser.add_argument("--until", help=tr.text("help.until"))
@@ -446,6 +451,36 @@ def build_parser(tr: Translator) -> argparse.ArgumentParser:
         custom_parser = custom_subparsers.add_parser(command)
         _add_custom_history(custom_parser, tr, command)
 
+    datasets = subparsers.add_parser(
+        "datasets", help=tr.text("help.datasets"), description=tr.text("help.datasets")
+    )
+    dataset_subparsers = datasets.add_subparsers(
+        dest="datasets_command", required=True, metavar="COMMAND"
+    )
+    dataset_subparsers.add_parser("list", help=tr.text("help.datasets_list"))
+    show = dataset_subparsers.add_parser("show", help=tr.text("help.datasets_show"))
+    show.add_argument("dataset_id", metavar="ID")
+    status = dataset_subparsers.add_parser("status", help=tr.text("help.datasets_status"))
+    status.add_argument("dataset_id", nargs="?", metavar="ID")
+    remove = dataset_subparsers.add_parser("remove", help=tr.text("help.datasets_remove"))
+    remove.add_argument("dataset_id", metavar="ID")
+    install = dataset_subparsers.add_parser("install", help=tr.text("help.datasets_install"))
+    install_subparsers = install.add_subparsers(
+        dest="dataset_source", required=True, metavar="SOURCE"
+    )
+    github = install_subparsers.add_parser("github")
+    github.add_argument("repository", metavar="OWNER/REPOSITORY")
+    github.add_argument("--release", required=True, metavar="TAG")
+    github.add_argument("--asset", required=True, metavar="NAME")
+    github.add_argument("--sha256", required=True, metavar="HEX")
+    github.add_argument("--replace", action="store_true")
+    official = install_subparsers.add_parser("official")
+    official.add_argument("dataset_id", metavar="ID")
+    official.add_argument("--replace", action="store_true")
+    update = dataset_subparsers.add_parser("update", help=tr.text("help.datasets_update"))
+    update.add_argument("dataset_id", nargs="?", metavar="ID")
+    update.add_argument("--replace", action="store_true")
+
     animate = subparsers.add_parser(
         "animate", help=tr.text("help.animate"), description=tr.text("help.animate")
     )
@@ -522,7 +557,7 @@ def _inject_default_command(argv: list[str]) -> list[str]:
     return ["timeline", *argv]
 
 
-def _chart_from_namespace(namespace: argparse.Namespace):
+def _chart_from_namespace(namespace: argparse.Namespace, *, timezone: str | None = None):
     command = namespace.command or "timeline"
     filters = Filters(
         tuple(namespace.agent), tuple(namespace.model), tuple(getattr(namespace, "project", ()))
@@ -557,6 +592,7 @@ def _chart_from_namespace(namespace: argparse.Namespace):
         period=namespace.period,
         since=namespace.since,
         until=namespace.until,
+        timezone=timezone,
     )
     if command == "timeline":
         return TimelineConfig(
@@ -595,21 +631,37 @@ def _chart_from_namespace(namespace: argparse.Namespace):
     )
 
 
-def _custom_chart_from_namespace(namespace: argparse.Namespace) -> CustomChartConfig:
+def _request_timezone(namespace: argparse.Namespace) -> str:
+    try:
+        timezone = getattr(namespace, "timezone", None)
+        return validate_timezone(timezone) if timezone else system_timezone()
+    except ValueError as exc:
+        raise UsageError("error.arguments", detail=str(exc)) from exc
+
+
+def _custom_chart_from_namespace(
+    namespace: argparse.Namespace, *, timezone: str | None = None
+) -> CustomChartConfig:
     filters: dict[str, set[str]] = {}
     for value in namespace.custom_filters:
         filter_id, separator, option_id = value.partition("=")
         if not separator or not filter_id or not option_id:
             raise UsageError("error.arguments", detail="--filter must use ID=OPTION")
         filters.setdefault(filter_id, set()).add(option_id)
-    try:
-        command_argv = tuple(shlex.split(namespace.command_text))
-    except ValueError as exc:
-        raise UsageError(
-            "error.arguments", detail="--command contains invalid shell quoting"
-        ) from exc
-    if not command_argv:
-        raise UsageError("error.arguments", detail="--command must not be empty")
+    if namespace.command_text is None:
+        from ccusage_viz.datasets.service import DatasetService
+
+        source = DatasetService().installed_command_source(namespace.dataset)
+    else:
+        try:
+            command_argv = tuple(shlex.split(namespace.command_text))
+        except ValueError as exc:
+            raise UsageError(
+                "error.arguments", detail="--command contains invalid shell quoting"
+            ) from exc
+        if not command_argv:
+            raise UsageError("error.arguments", detail="--command must not be empty")
+        source = CustomCommandSource(namespace.dataset, command_argv)
     kind = namespace.custom_kind
     group_by = namespace.group_by
     top = getattr(namespace, "top", None)
@@ -620,12 +672,17 @@ def _custom_chart_from_namespace(namespace: argparse.Namespace) -> CustomChartCo
     style = namespace.style or compatible_styles(kind, group_by)[0]
     if style not in compatible_styles(kind, group_by):
         raise UsageError("error.style_incompatible", style=style, mode=group_by or "total")
+    date_range = resolve_date_range(
+        kind,
+        period=namespace.period,
+        since=namespace.since,
+        until=namespace.until,
+        timezone=timezone,
+    )
     return CustomChartConfig(
         kind=kind,
-        source=CustomCommandSource(namespace.dataset, command_argv),
-        date_range=resolve_date_range(
-            kind, period=namespace.period, since=namespace.since, until=namespace.until
-        ),
+        source=source,
+        date_range=date_range,
         filters=tuple(
             (filter_id, tuple(sorted(option_ids)))
             for filter_id, option_ids in sorted(filters.items())
@@ -713,7 +770,9 @@ def parse_pane_fragment(
             raise UsageError("error.tui_panel", value=fragment)
         try:
             namespace = build_parser(Translator("en", dict(CATALOGS["en"]))).parse_args(tokens)
-            chart = _custom_chart_from_namespace(namespace)
+            chart = _custom_chart_from_namespace(
+                namespace, timezone=host.host.timezone if host is not None else None
+            )
             explicit = _explicit_fields(tokens)
             if "density" not in explicit:
                 chart = replace(chart, presentation=replace(chart.presentation, density="compact"))
@@ -783,7 +842,9 @@ def parse_pane_fragment(
     explicit = _explicit_fields(tokens)
     try:
         namespace = build_parser(Translator("en", dict(CATALOGS["en"]))).parse_args(tokens)
-        chart = _chart_from_namespace(namespace)
+        chart = _chart_from_namespace(
+            namespace, timezone=host.host.timezone if host is not None else None
+        )
         if "density" not in explicit:
             chart = replace(
                 chart,
@@ -810,7 +871,8 @@ def _to_options(
 ) -> LaunchConfig:
     command = namespace.command or "timeline"
     if command == "custom":
-        chart = _custom_chart_from_namespace(namespace)
+        timezone = _request_timezone(namespace)
+        chart = _custom_chart_from_namespace(namespace, timezone=timezone)
         process = ProcessConfig(
             ccusage_bin=namespace.ccusage_bin,
             query_timeout=namespace.query_timeout,
@@ -820,7 +882,7 @@ def _to_options(
                 "error.arguments", detail="--query-timeout must be positive and finite"
             )
         return StandaloneLaunch(
-            process, StandaloneHostConfig(ascii=namespace.ascii), chart, explicit
+            process, StandaloneHostConfig(ascii=namespace.ascii, timezone=timezone), chart, explicit
         )
     if command == "animate":
         has_source = (
@@ -881,6 +943,7 @@ def _to_options(
         raise UsageError("error.arguments", detail="--query-timeout must be positive and finite")
     demo_seed = _demo_seed(namespace)
     if command == "dashboard":
+        timezone = _request_timezone(namespace)
         preset_name = namespace.preset
         if namespace.empty and preset_name is not None:
             raise UsageError(
@@ -976,6 +1039,7 @@ def _to_options(
             ascii=namespace.ascii,
             demo_size=namespace.demo,
             demo_seed=demo_seed,
+            timezone=timezone,
             grid=grid,
             layout=layout,
             column_weights=column_weights,
@@ -1018,10 +1082,12 @@ def _to_options(
                     *panes[1:],
                 )
         return replace(launch, panes=panes)
-    chart = _chart_from_namespace(namespace)
+    timezone = _request_timezone(namespace)
+    chart = _chart_from_namespace(namespace, timezone=timezone)
     interval = _validate_chart(namespace, chart, explicit=explicit, demo=namespace.demo)
     host = StandaloneHostConfig(
         ascii=namespace.ascii,
+        timezone=timezone,
         demo_size=namespace.demo,
         demo_seed=demo_seed,
         watch=not getattr(namespace, "no_watch", False),
@@ -1053,6 +1119,109 @@ def _route(options: LaunchConfig) -> LaunchRoute:
     return StandaloneRoute(options)
 
 
+def _run_datasets(namespace: argparse.Namespace, translator: Translator) -> int:
+    from ccusage_viz.datasets.service import DatasetService
+
+    service = DatasetService()
+    command = namespace.datasets_command
+    if command == "status":
+        statuses = service.status(getattr(namespace, "dataset_id", None))
+        if not statuses:
+            print(translator.text("status.datasets_empty"))
+            return 0
+        for status in statuses:
+            if status.installed is None:
+                if status.corrupt:
+                    print(
+                        translator.text(
+                            "error.dataset_corrupt",
+                            dataset_id=status.dataset_id or namespace.dataset_id,
+                        )
+                    )
+                elif getattr(namespace, "dataset_id", None) is not None:
+                    print(
+                        translator.text(
+                            "status.dataset_not_installed", dataset_id=namespace.dataset_id
+                        )
+                    )
+                continue
+            state = (
+                translator.text("status.dataset_ready")
+                if status.ready
+                else translator.text("status.dataset_setup_required")
+            )
+            print(f"{status.installed.dataset_id} {status.installed.version} · {state}")
+            for missing in status.missing_required:
+                print(f"  {missing.requirement.name}: {missing.requirement.how_to_get.en}")
+        return 0
+    if command == "show":
+        status = service.status(namespace.dataset_id)[0]
+        if status.corrupt:
+            raise UsageError("error.dataset_corrupt", dataset_id=namespace.dataset_id)
+        if status.installed is None or status.manifest is None:
+            raise UsageError("error.dataset_not_installed", dataset_id=namespace.dataset_id)
+        print(f"{status.installed.dataset_id} {status.installed.version}")
+        print(status.manifest.metric.title.en)
+        return 0
+    if command == "list":
+        catalog = service.official_catalog()
+        if not catalog.entries:
+            print(translator.text("status.datasets_official_empty"))
+            return 0
+        host_os, host_arch = service.platform
+        platform_name = f"{host_os}/{host_arch}"
+        for entry in catalog.entries:
+            available = any(
+                artifact.os == host_os and artifact.arch == host_arch
+                for artifact in entry.artifacts
+            )
+            state = (
+                translator.text("status.dataset_catalog_available")
+                if available
+                else translator.text(
+                    "status.dataset_catalog_unavailable_platform", platform=platform_name
+                )
+            )
+            print(f"{entry.id} · {entry.title.en} · {state}")
+            print(f"  {entry.description.en}")
+        return 0
+    if command == "remove":
+        service.remove(namespace.dataset_id)
+        print(translator.text("status.dataset_removed", dataset_id=namespace.dataset_id))
+        return 0
+    if command == "install":
+        if namespace.dataset_source == "official":
+            status = service.install_official(namespace.dataset_id, replace=namespace.replace)
+            assert status.installed is not None
+            print(
+                translator.text(
+                    "status.dataset_installed_official", dataset_id=status.installed.dataset_id
+                )
+            )
+            return 0
+        status = service.install_github(
+            repository=namespace.repository,
+            release_tag=namespace.release,
+            asset_name=namespace.asset,
+            sha256=namespace.sha256,
+            replace=namespace.replace,
+        )
+        assert status.installed is not None
+        print(translator.text("status.dataset_installed", dataset_id=status.installed.dataset_id))
+        return 0
+    if command == "update":
+        statuses = service.update_official(namespace.dataset_id, replace=namespace.replace)
+        for status in statuses:
+            assert status.installed is not None
+            print(
+                translator.text(
+                    "status.dataset_installed_official", dataset_id=status.installed.dataset_id
+                )
+            )
+        return 0
+    raise AssertionError("unsupported datasets command")
+
+
 def _validate_configuration(options: LaunchConfig) -> None:
     if options.host.ascii and options.was_explicit("color_scheme"):
         raise UsageError(
@@ -1075,6 +1244,8 @@ def main(argv: list[str] | None = None) -> int:
         namespace = parser.parse_args(args)
         if hasattr(namespace, "lang") and namespace.lang is None:
             namespace.lang = language
+        if namespace.command == "datasets":
+            return _run_datasets(namespace, tr)
         if namespace.command == "text":
             from ccusage_viz.clock_overlay import describe_time_state, render_time_state
 

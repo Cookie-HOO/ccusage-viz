@@ -82,7 +82,7 @@ def monitor_options(*, by: str | None = None, demo_size: str | None = None) -> S
 def test_custom_dashboard_summary_intent_uses_dashboard_header_period() -> None:
     dashboard = DashboardLaunch(
         ProcessConfig(query_timeout=12.0, output_limit=2048),
-        DashboardHostConfig(header_summary="quarter"),
+        DashboardHostConfig(header_summary="quarter", timezone="Asia/Shanghai"),
         (),
     )
 
@@ -120,6 +120,7 @@ def test_matching_custom_header_and_pane_summaries_have_the_same_physical_input(
     pane_summary = custom_summary_query_intent(
         source,
         plan,
+        timezone="Asia/Shanghai",
         owner_id="dashboard:pane:1:summary",
         generation=2,
         trigger=QueryTrigger.REFRESH,
@@ -127,12 +128,14 @@ def test_matching_custom_header_and_pane_summaries_have_the_same_physical_input(
     header_summary = custom_summary_query_intent(
         source,
         plan,
+        timezone="Asia/Shanghai",
         owner_id="dashboard:header:custom:reading",
         generation=4,
         trigger=QueryTrigger.REFRESH,
     )
     chart_intent = custom_historical_query_intent(
         chart,
+        timezone="Asia/Shanghai",
         owner_id="dashboard:pane:1",
         generation=2,
         trigger=QueryTrigger.REFRESH,

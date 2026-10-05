@@ -22,6 +22,17 @@ PERIOD_PRESETS = {
     "quarter": ("2q", "4q", "8q", "12q", "20q"),
     "year": ("1y", "3y", "5y", "10y"),
 }
+INTERACTIVE_PERIOD_PRESETS = (
+    "7d",
+    "14d",
+    "30d",
+    "90d",
+    "180d",
+    "365d",
+    "1w",
+    "1mo",
+    "1y",
+)
 DEFAULT_PERIODS = {
     "day": "14d",
     "week": "8w",
@@ -37,7 +48,7 @@ COMMAND_STYLES = {
     "timeline": ("linear", "step", "no-line", "points", "line-points", "stem", "area"),
     "calendar": ("relative", "grid"),
     "stack": ("stacked", "stacked-pattern", "grouped", "grouped-thin", "normalized"),
-    "ranking": ("bar", "dot", "dots"),
+    "ranking": ("dot", "bar", "dots"),
     "monitor": (
         "bars",
         "line",
@@ -135,7 +146,7 @@ class RankingConfig:
     kind: Literal["ranking"]
     date_range: DateRange
     filters: Filters = Filters()
-    presentation: ChartPresentation = ChartPresentation(style="bar")
+    presentation: ChartPresentation = ChartPresentation(style="dot")
     by: Dimension = "project"
     top: int = 10
     other: str = "show"
@@ -157,16 +168,19 @@ class MonitorConfig:
 
 @dataclass(frozen=True, slots=True)
 class CustomCommandSource:
-    """The stable identity and argv for a command-backed custom dataset."""
+    """The stable identity and argv of a custom dataset."""
 
     dataset_id: str
     command_argv: tuple[str, ...]
+    source_kind: Literal["command", "installed"] = "command"
 
     def __post_init__(self) -> None:
         if not self.dataset_id:
             raise ValueError("custom dataset_id must not be empty")
         if not self.command_argv:
             raise ValueError("custom command argv must not be empty")
+        if self.source_kind not in {"command", "installed"}:
+            raise ValueError("custom source_kind must be command or installed")
 
 
 CustomFilters: TypeAlias = tuple[tuple[str, tuple[str, ...]], ...]
@@ -200,6 +214,7 @@ class StandaloneHostConfig:
     watch: bool = True
     interval: float = 10.0
     demo_seed: int | None = None
+    timezone: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -234,6 +249,7 @@ class DashboardHostConfig:
     ascii: bool = False
     demo_size: str | None = None
     demo_seed: int | None = None
+    timezone: str | None = None
     grid: str = "2x2"
     layout: str | None = None
     column_weights: tuple[int, ...] | None = None
@@ -356,10 +372,10 @@ def _adjust_period(date_range: DateRange, key: str) -> DateRange:
         return date_range
     _, unit = parse_period(date_range.period)
     granularity = UNIT_GRANULARITIES[unit]
-    presets = PERIOD_PRESETS[granularity]
-    if date_range.period in presets:
-        index = presets.index(date_range.period)
-        period = presets[min(len(presets) - 1, max(0, index + (1 if key == "p" else -1)))]
+    if date_range.period in INTERACTIVE_PERIOD_PRESETS:
+        period = _cycle(
+            INTERACTIVE_PERIOD_PRESETS, date_range.period, 1 if key == "p" else -1
+        )
     else:
         period = DEFAULT_PERIODS[granularity]
     value, preset_unit = parse_period(period)
@@ -578,8 +594,9 @@ def resolve_date_range(
     since: str | None,
     until: str | None,
     today: date | None = None,
+    timezone: str | None = None,
 ) -> DateRange:
-    current = local_today(today)
+    current = local_today(today, timezone=timezone)
     if period is not None and (since is not None or until is not None):
         raise UsageError("error.date_conflict")
     if until is not None and since is None:

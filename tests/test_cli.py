@@ -1,5 +1,6 @@
 import math
 from argparse import Namespace
+from datetime import date
 
 import pytest
 
@@ -9,6 +10,7 @@ from ccusage_viz.cli import (
     ShortCircuitKind,
     _explicit_fields,
     _inject_default_command,
+    _run_datasets,
     _to_options,
     build_parser,
     main,
@@ -84,6 +86,65 @@ def test_text_and_animate_help_describe_public_interfaces(
         assert option in animate_help
     assert "--overlay-time-band" not in animate_help
     assert "Seconds between command-overlay refreshes" in animate_help
+
+
+def test_datasets_cli_parses_official_and_explicit_github_installation() -> None:
+    parser = build_parser(load_translator("en"))
+
+    github = parser.parse_args(
+        [
+            "datasets",
+            "install",
+            "github",
+            "Cookie-HOO/ccuv-dataset-weread",
+            "--release",
+            "v1.0.0",
+            "--asset",
+            "weread-darwin-arm64.tar.gz",
+            "--sha256",
+            "a" * 64,
+        ]
+    )
+    official = parser.parse_args(["datasets", "install", "official", "weread", "--replace"])
+    update = parser.parse_args(["datasets", "update", "weread"])
+
+    assert github.dataset_source == "github"
+    assert official.dataset_source == "official"
+    assert official.dataset_id == "weread"
+    assert official.replace is True
+    assert update.datasets_command == "update"
+    assert update.dataset_id == "weread"
+
+
+def test_datasets_cli_dispatches_official_install_and_update(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    installed = type("Installed", (), {"dataset_id": "weread"})()
+    status = type("Status", (), {"installed": installed})()
+
+    class Service:
+        def install_official(self, dataset_id: str, *, replace: bool) -> object:
+            assert dataset_id == "weread"
+            assert replace is False
+            return status
+
+        def update_official(self, dataset_id: str | None, *, replace: bool) -> tuple[object, ...]:
+            assert dataset_id == "weread"
+            assert replace is True
+            return (status,)
+
+    monkeypatch.setattr("ccusage_viz.datasets.service.DatasetService", Service)
+    parser = build_parser(load_translator("en"))
+    translator = load_translator("en")
+
+    install = parser.parse_args(["datasets", "install", "official", "weread"])
+    assert _run_datasets(install, translator) == 0
+    assert capsys.readouterr().out == "Installed official dataset weread\n"
+
+    update = parser.parse_args(["datasets", "update", "weread", "--replace"])
+    assert _run_datasets(update, translator) == 0
+    assert capsys.readouterr().out == "Installed official dataset weread\n"
 
 
 def test_text_time_state_writes_a_localized_dynamic_status(
@@ -162,8 +223,73 @@ def test_custom_pane_fragment_preserves_normalized_filters_and_compact_density()
     assert pane.chart.presentation.density == "compact"
 
 
+def test_bare_custom_dataset_routes_through_installed_source(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parser = build_parser(load_translator("en"))
+    installed = CustomCommandSource("weread", ("dataset-weread", "ccuv"), source_kind="installed")
+    monkeypatch.setattr(
+        "ccusage_viz.datasets.service.DatasetService.installed_command_source",
+        lambda _service, dataset_id: installed if dataset_id == "weread" else None,
+    )
+
+    launch = _to_options(parser.parse_args(["custom", "timeline", "--dataset", "weread"]))
+
+    assert isinstance(launch.chart, CustomChartConfig)
+    assert launch.chart.source == installed
+
+
+@pytest.mark.parametrize("kind", ("timeline", "stack", "ranking", "calendar"))
+def test_installed_dataset_defaults_use_host_timezone_today(
+    monkeypatch: pytest.MonkeyPatch, kind: str
+) -> None:
+    parser = build_parser(load_translator("en"))
+    installed = CustomCommandSource("weread", ("dataset-weread", "ccuv"), source_kind="installed")
+    monkeypatch.setattr(
+        "ccusage_viz.datasets.service.DatasetService.installed_command_source",
+        lambda _service, dataset_id: installed,
+    )
+
+    launch = _to_options(
+        parser.parse_args(["custom", kind, "--dataset", "weread", "--timezone", "Asia/Shanghai"])
+    )
+
+    assert isinstance(launch.chart, CustomChartConfig)
+    assert launch.chart.date_range.until == date.today()
+    assert launch.host.timezone == "Asia/Shanghai"
+
+
+def test_installed_dataset_accepts_explicit_current_day_date(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parser = build_parser(load_translator("en"))
+    installed = CustomCommandSource("weread", ("dataset-weread", "ccuv"), source_kind="installed")
+    monkeypatch.setattr(
+        "ccusage_viz.datasets.service.DatasetService.installed_command_source",
+        lambda _service, dataset_id: installed,
+    )
+
+    launch = _to_options(
+        parser.parse_args(
+            [
+                "custom",
+                "timeline",
+                "--dataset",
+                "weread",
+                "--since",
+                "2026-09-18",
+                "--until",
+                "2026-09-20",
+            ]
+        )
+    )
+
+    assert isinstance(launch.chart, CustomChartConfig)
+    assert launch.chart.date_range.until == date(2026, 9, 20)
+
+
 def test_standalone_conversion_preserves_custom_source_and_chart() -> None:
-    source = CustomCommandSource("wechat-reading", ("reader", "ccuv"))
+    source = CustomCommandSource("weread", ("reader", "ccuv"))
     chart = CustomChartConfig(
         "timeline",
         source,
@@ -643,6 +769,20 @@ def test_global_language_options_precede_a_subcommand() -> None:
     ]
 
 
+def test_ranking_defaults_to_dot_for_builtin_and_custom_commands() -> None:
+    parser = build_parser(load_translator("en"))
+
+    builtin = _to_options(parser.parse_args(["ranking"]))
+    custom = _to_options(
+        parser.parse_args(
+            ["custom", "ranking", "--dataset", "reading", "--command", "reader ccuv"]
+        )
+    )
+
+    assert builtin.chart.presentation.style == "dot"
+    assert custom.chart.presentation.style == "dot"
+
+
 def test_large_top_values_are_accepted() -> None:
     parser = build_parser(load_translator("en"))
     assert _to_options(parser.parse_args(["ranking", "--top", "999"])).chart.top == 999
@@ -929,6 +1069,7 @@ def test_dashboard_narrow_and_all_presets_expand_to_concrete_state() -> None:
     )
     assert narrow.host.style == "framed"
     assert narrow.panes[0].chart.presentation.style == "line-points"
+    assert narrow.panes[1].chart.presentation.style == "dot"
     assert narrow.panes[1].chart.by == "project"
     assert narrow.panes[1].chart.top == 10
     assert narrow.panes[2].chart.window_seconds == 3600

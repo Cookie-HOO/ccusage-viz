@@ -8,6 +8,7 @@ from threading import Event
 
 from ccusage_viz.coverage import DateCoverage
 from ccusage_viz.custom_protocol import (
+    CustomProtocolError,
     CustomRequest,
     canonical_custom_request_key,
     parse_custom_response,
@@ -129,6 +130,13 @@ class CustomCommandProvider:
             raise ValueError("custom command result lacks its request payload")
         try:
             response = parse_custom_response(result.payload, request)
+        except CustomProtocolError as exc:
+            raise QueryError(
+                "error.custom_command_protocol",
+                detail=str(exc),
+                stderr=_decode_stderr(result.diagnostics),
+                custom_failure=exc.failure,
+            ) from exc
         except ValueError as exc:
             raise QueryError(
                 "error.custom_command_protocol",

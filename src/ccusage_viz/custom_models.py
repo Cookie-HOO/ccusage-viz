@@ -30,6 +30,17 @@ class CustomDataset:
 
 
 @dataclass(frozen=True, slots=True)
+class CustomPresentationDescriptor:
+    """Validated metadata that may outlive a chart response's numeric facts."""
+
+    dataset: CustomDataset
+    group_labels: Mapping[str, LocalizedText]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "group_labels", MappingProxyType(dict(self.group_labels)))
+
+
+@dataclass(frozen=True, slots=True)
 class CustomDimension:
     id: str
     label: LocalizedText
@@ -127,6 +138,12 @@ class CustomMetric:
 @dataclass(frozen=True, slots=True)
 class CustomPaneSummary:
     metric: CustomMetric
+
+
+@dataclass(frozen=True, slots=True)
+class CustomProtocolWarning:
+    code: str
+    message: LocalizedText
 
 
 @dataclass(frozen=True, slots=True)

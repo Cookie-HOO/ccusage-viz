@@ -7,7 +7,9 @@ from datetime import datetime
 from typing import Any, Literal
 
 from ccusage_viz.core.time import DateRange
+from ccusage_viz.custom_models import CustomPresentationDescriptor, CustomProtocolFailure
 from ccusage_viz.custom_protocol import CustomChartResponse
+from ccusage_viz.errors import QueryError
 from ccusage_viz.options import CustomChartConfig, has_complete_content
 from ccusage_viz.processing.custom_historical import (
     CustomChartProjection,
@@ -46,6 +48,45 @@ def custom_summary_replacement_required(
 CustomPurpose = Literal["primary", "comparison"]
 
 
+def _invalidates_accepted_chart(error: BaseException) -> bool:
+    """Whether a Dataset rejected the selected rolling-period semantic."""
+
+    if not isinstance(error, QueryError):
+        return False
+    failure = error.values.get("custom_failure")
+    return (
+        isinstance(failure, CustomProtocolFailure)
+        and failure.code == "unsupported_query"
+        and failure.unsupported is not None
+        and failure.unsupported.get("field") == "range.period"
+    )
+
+
+def _is_non_period_selection_rejection(error: BaseException) -> bool:
+    if not isinstance(error, QueryError):
+        return False
+    failure = error.values.get("custom_failure")
+    return (
+        isinstance(failure, CustomProtocolFailure)
+        and failure.code == "unsupported_query"
+        and failure.unsupported is not None
+        and failure.unsupported.get("field") != "range.period"
+    )
+
+
+def _query_identity(config: CustomChartConfig) -> tuple[object, ...]:
+    """Return the data-affecting portion of a custom query configuration."""
+
+    return (
+        config.source,
+        config.kind,
+        config.date_range,
+        config.filters,
+        config.group_by,
+        config.granularity,
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class CustomCompletion:
     generation: int
@@ -75,6 +116,7 @@ class CustomHistoricalComponent:
         "generation",
         "model",
         "pending_generation",
+        "presentation",
         "render_revision",
     )
 
@@ -91,6 +133,7 @@ class CustomHistoricalComponent:
         self.generation = 0
         self.model: CustomChartProjection | None = None
         self.pending_generation: int | None = None
+        self.presentation: CustomPresentationDescriptor | None = None
         self.render_revision = 0
 
     @property
@@ -175,6 +218,13 @@ class CustomHistoricalComponent:
             return False
         self.accepted_config = self.candidate
         self.accepted_response = completion.response
+        self.presentation = CustomPresentationDescriptor(
+            completion.response.dataset,
+            {
+                dimension.id: dimension.label
+                for dimension in completion.response.capabilities.group_by
+            },
+        )
         self.comparison_config = None
         self.comparison_response = None
         self.comparison_error = None
@@ -231,5 +281,19 @@ class CustomHistoricalComponent:
             self.comparison_error = error
             return True
         self.pending_generation = None
+        replacement_failed = (
+            self.accepted_config is not None
+            and _query_identity(self.accepted_config) != _query_identity(self.candidate)
+            and not _is_non_period_selection_rejection(error)
+        )
+        if _invalidates_accepted_chart(error) or replacement_failed:
+            self.model = None
+            self.accepted_config = None
+            self.accepted_response = None
+            self.accepted_at = None
+            self.comparison_config = None
+            self.comparison_error = None
+            self.comparison_response = None
+            self.comparison_pending_generation = None
         self.error = error
         return True

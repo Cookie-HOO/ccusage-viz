@@ -26,6 +26,7 @@ from ccusage_viz.options import (
     Filters,
     MonitorConfig,
     ProcessConfig,
+    RankingConfig,
     StandaloneHostConfig,
     StandaloneLaunch,
     TimelineConfig,
@@ -40,18 +41,22 @@ from ccusage_viz.options import (
 
 
 def test_custom_source_requires_dataset_and_nonempty_argv() -> None:
-    assert CustomCommandSource("wechat-reading", ("reader", "ccuv")).dataset_id == "wechat-reading"
+    source = CustomCommandSource("weread", ("reader", "ccuv"))
+    assert source.dataset_id == "weread"
+    assert source.source_kind == "command"
     with pytest.raises(ValueError, match="dataset"):
         CustomCommandSource("", ("reader",))
     with pytest.raises(ValueError, match="command"):
-        CustomCommandSource("wechat-reading", ())
+        CustomCommandSource("weread", ())
+    with pytest.raises(ValueError, match="source_kind"):
+        CustomCommandSource("weread", ("reader",), source_kind="other")  # type: ignore[arg-type]
 
 
 def test_custom_pane_and_empty_pane_are_discriminated() -> None:
     dashboard = DashboardLaunch(ProcessConfig(), DashboardHostConfig(), ())
     custom = default_custom_pane(
         "timeline",
-        source=CustomCommandSource("wechat-reading", ("reader", "ccuv")),
+        source=CustomCommandSource("weread", ("reader", "ccuv")),
         dashboard=dashboard,
     )
 
@@ -78,6 +83,26 @@ def test_custom_display_adjustments_stay_local() -> None:
     assert adjust_custom_chart(chart, "d").presentation.density == DENSITIES[0]
 
 
+def test_installed_custom_command_round_trips_without_executable_path() -> None:
+    chart = CustomChartConfig(
+        "timeline",
+        CustomCommandSource(
+            "weread",
+            ("/private/datasets/weread/bin/ccuv-dataset-weread", "ccuv"),
+            source_kind="installed",
+        ),
+        resolve_date_range("timeline", period="14d", since=None, until=None),
+    )
+    launch = StandaloneLaunch(ProcessConfig(), StandaloneHostConfig(), chart)
+
+    command = format_command(launch)
+
+    assert "--dataset weread" in command
+    assert "/private/datasets" not in command
+    assert "--command" not in command
+    assert "--installed" not in shlex.split(command)
+
+
 def test_custom_standalone_command_round_trips() -> None:
     parser = build_parser(load_translator("en"))
     chart = CustomChartConfig(
@@ -92,7 +117,9 @@ def test_custom_standalone_command_round_trips() -> None:
         granularity="month",
         presentation=ChartPresentation(style="step", density="compact"),
     )
-    launch = StandaloneLaunch(ProcessConfig(query_timeout=12), StandaloneHostConfig(), chart)
+    launch = StandaloneLaunch(
+        ProcessConfig(query_timeout=12), StandaloneHostConfig(timezone="Asia/Shanghai"), chart
+    )
 
     command = format_full_command(launch)
     reparsed = _to_options(parser.parse_args(shlex.split(command)[1:]))
@@ -109,11 +136,36 @@ def test_custom_standalone_command_round_trips() -> None:
     assert reparsed == expected
 
 
+def test_installed_custom_pane_uses_dashboard_timezone_today() -> None:
+    dashboard = DashboardLaunch(ProcessConfig(), DashboardHostConfig(timezone="Asia/Shanghai"), ())
+    source = CustomCommandSource("weread", ("reader", "ccuv"), source_kind="installed")
+
+    pane = default_custom_pane("timeline", source=source, dashboard=dashboard)
+
+    assert pane.chart.date_range.until == local_today(timezone="Asia/Shanghai")
+    assert pane.chart.date_range.period == "14d"
+
+
+def test_ranking_defaults_to_dot_across_programmatic_and_dashboard_entry_points() -> None:
+    dashboard = DashboardLaunch(ProcessConfig(), DashboardHostConfig(), ())
+    date_range = resolve_date_range("ranking", period=None, since=None, until=None)
+    native = default_pane("ranking", dashboard=dashboard)
+    custom = default_custom_pane(
+        "ranking",
+        source=CustomCommandSource("weread", ("reader", "ccuv")),
+        dashboard=dashboard,
+    )
+
+    assert RankingConfig("ranking", date_range).presentation.style == "dot"
+    assert native.chart.presentation == ChartPresentation(style="dot", density="compact")
+    assert custom.chart.presentation == native.chart.presentation
+
+
 def test_custom_timeline_defaults_to_existing_historical_period_and_presentation() -> None:
     dashboard = DashboardLaunch(ProcessConfig(), DashboardHostConfig(), ())
     pane = default_custom_pane(
         "timeline",
-        source=CustomCommandSource("wechat-reading", ("reader", "ccuv")),
+        source=CustomCommandSource("weread", ("reader", "ccuv")),
         dashboard=dashboard,
     )
     native = default_pane("timeline", dashboard=dashboard)
@@ -157,9 +209,15 @@ def test_wrap_command_breaks_at_tokens_within_display_width() -> None:
 def test_concise_commands_omit_effective_defaults() -> None:
     parser = build_parser(load_translator("en"))
 
-    assert format_command(_to_options(parser.parse_args(["timeline"]))) == "ccuv timeline"
-    assert format_command(_to_options(parser.parse_args(["ranking"]))) == "ccuv ranking"
-    assert format_command(_to_options(parser.parse_args(["monitor"]))) == "ccuv monitor"
+    assert format_command(_to_options(parser.parse_args(["timeline"]))) == (
+        "ccuv timeline --timezone Asia/Shanghai"
+    )
+    assert format_command(_to_options(parser.parse_args(["ranking"]))) == (
+        "ccuv ranking --timezone Asia/Shanghai"
+    )
+    assert format_command(_to_options(parser.parse_args(["monitor"]))) == (
+        "ccuv monitor --timezone Asia/Shanghai"
+    )
 
     explicit = _to_options(
         parser.parse_args(
@@ -182,18 +240,19 @@ def test_concise_commands_omit_effective_defaults() -> None:
             ]
         )
     )
-    assert format_command(explicit) == "ccuv timeline"
+    assert format_command(explicit) == "ccuv timeline --timezone Asia/Shanghai"
 
 
 def test_concise_monitor_command_uses_grouped_effective_defaults() -> None:
     parser = build_parser(load_translator("en"))
     grouped = _to_options(parser.parse_args(["monitor", "--by", "model"]))
 
-    assert format_command(grouped) == "ccuv monitor --by model"
+    assert format_command(grouped) == "ccuv monitor --by model --timezone Asia/Shanghai"
     non_default = _to_options(
         parser.parse_args(["monitor", "--by", "model", "--top", "4", "--style", "points"])
     )
-    assert format_command(non_default).endswith("--by model --top 4 --style points")
+    assert format_command(non_default).endswith("--timezone Asia/Shanghai --style points")
+    assert "--by model --top 4" in format_command(non_default)
 
 
 def test_concise_command_keeps_effect_bearing_private_project_filter() -> None:
@@ -203,7 +262,7 @@ def test_concise_command_keeps_effect_bearing_private_project_filter() -> None:
     command = format_command(launch)
     reparsed = _to_options(parser.parse_args(shlex.split(command)[1:]))
 
-    assert command == "ccuv timeline --project /private/project"
+    assert command == "ccuv timeline --project /private/project --timezone Asia/Shanghai"
     assert reparsed.chart.filters == launch.chart.filters
 
 
@@ -211,7 +270,9 @@ def test_project_aggregation_round_trips_in_commands() -> None:
     parser = build_parser(load_translator("en"))
     launch = _to_options(parser.parse_args(["ranking", "--project-aggregation", "exact"]))
 
-    assert format_command(launch) == "ccuv ranking --project-aggregation exact"
+    assert format_command(launch) == (
+        "ccuv ranking --project-aggregation exact --timezone Asia/Shanghai"
+    )
     reparsed = _to_options(parser.parse_args(shlex.split(format_command(launch))[1:]))
     assert reparsed.chart.project_aggregation == "exact"
 
@@ -322,7 +383,7 @@ def test_calendar_style_key_cycles_between_relative_and_grid() -> None:
     assert adjust_standalone(grid, "s").chart.presentation.style == "relative"
 
 
-def test_period_keys_adjust_within_the_active_time_view() -> None:
+def test_period_keys_adjust_through_the_shared_historical_cycle() -> None:
     source = timeline()
 
     larger = adjust_standalone(source, "p")
@@ -335,7 +396,21 @@ def test_period_keys_adjust_within_the_active_time_view() -> None:
     assert smaller.chart.date_range.since == date(2026, 9, 6)
     assert weekly.chart.granularity == "week"
     assert weekly.chart.date_range.period == "8w"
-    assert adjust_standalone(weekly, "P").chart.date_range.period == "4w"
+    assert adjust_standalone(weekly, "P").chart.date_range.period == "8w"
+    week_to_date = adjust_standalone(
+        replace(source, chart=replace(source.chart, date_range=replace(source.chart.date_range, period="365d"))),
+        "p",
+    )
+    assert week_to_date.chart.date_range.period == "1w"
+    assert week_to_date.chart.date_range.since == date(2026, 9, 7)
+    assert adjust_standalone(week_to_date, "p").chart.date_range.period == "1mo"
+    assert adjust_standalone(
+        adjust_standalone(week_to_date, "p"), "p"
+    ).chart.date_range.period == "1y"
+    assert adjust_standalone(
+        replace(source, chart=replace(source.chart, date_range=replace(source.chart.date_range, period="7d"))),
+        "P",
+    ).chart.date_range.period == "1y"
     assert adjust_standalone(timeline(rolling=False), "P") == timeline(rolling=False)
 
 

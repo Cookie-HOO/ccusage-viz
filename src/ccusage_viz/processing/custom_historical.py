@@ -13,7 +13,7 @@ from decimal import Decimal
 from typing import Literal
 
 from ccusage_viz.core.time import DateRange
-from ccusage_viz.custom_models import CustomUnit, LocalizedText
+from ccusage_viz.custom_models import CustomPresentationDescriptor, CustomUnit, LocalizedText
 from ccusage_viz.custom_protocol import CustomChartResponse
 from ccusage_viz.options import CustomChartConfig
 from ccusage_viz.processing.summaries import period_end, period_start
@@ -46,6 +46,8 @@ class CustomChartProjection:
     unit: CustomUnit
     date_range: DateRange
     granularity: str
+    config: CustomChartConfig | None = None
+    presentation: CustomPresentationDescriptor | None = None
 
     @property
     def total(self) -> Decimal:
@@ -120,6 +122,11 @@ def process_custom_historical(
         response.dataset.unit,
         config.date_range,
         config.granularity,
+        config,
+        CustomPresentationDescriptor(
+            response.dataset,
+            {dimension.id: dimension.label for dimension in response.capabilities.group_by},
+        ),
     )
 
 

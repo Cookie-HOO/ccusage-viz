@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Literal, TypeAlias
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from ccusage_viz.core.time import parse_period
 from ccusage_viz.coverage import DateInterval
 from ccusage_viz.custom_models import (
     CustomCapabilities,
@@ -19,6 +21,7 @@ from ccusage_viz.custom_models import (
     CustomFilterOption,
     CustomPoint,
     CustomProtocolFailure,
+    CustomProtocolWarning,
     CustomSeries,
     CustomSummary,
     CustomSummaryCurrent,
@@ -47,13 +50,19 @@ _DATE_RE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}$")
 class CustomProtocolError(ValueError):
     """A command response violates the custom-command protocol."""
 
+    def __init__(self, message: str, *, failure: CustomProtocolFailure | None = None) -> None:
+        super().__init__(message)
+        self.failure = failure
+
 
 @dataclass(frozen=True, slots=True)
 class CustomChartRequest:
     request_id: str
     dataset_id: str
+    timezone: str
     start_date: date
     end_date: date
+    period: str | None = None
     filters: tuple[tuple[str, tuple[str, ...]], ...] = ()
     group_by: str | None = None
     granularity: str = "day"
@@ -64,8 +73,14 @@ class CustomChartRequest:
     def __post_init__(self) -> None:
         _require_id(self.request_id, "request ID")
         _require_id(self.dataset_id, "dataset ID")
+        _validate_timezone(self.timezone)
         if self.end_date < self.start_date:
             raise ValueError("custom request range end date must not precede start date")
+        if self.period is not None:
+            try:
+                parse_period(self.period)
+            except ValueError as exc:
+                raise ValueError("custom request period must be a valid period") from exc
         object.__setattr__(self, "filters", _canonical_filters(self.filters))
 
     def to_wire(self) -> dict[str, object]:
@@ -74,9 +89,11 @@ class CustomChartRequest:
             "request_id": self.request_id,
             "request_kind": self.request_kind,
             "dataset_id": self.dataset_id,
+            "timezone": self.timezone,
             "range": {
                 "start_date": self.start_date.isoformat(),
                 "end_date": self.end_date.isoformat(),
+                "period": self.period,
             },
             "query": {
                 "filters": {key: list(values) for key, values in self.filters},
@@ -93,6 +110,7 @@ class CustomChartRequest:
 class CustomSummaryRequest:
     request_id: str
     dataset_id: str
+    timezone: str
     scope: str
     current: DateInterval
     sequential: DateInterval | None = None
@@ -105,6 +123,7 @@ class CustomSummaryRequest:
     def __post_init__(self) -> None:
         _require_id(self.request_id, "request ID")
         _require_id(self.dataset_id, "dataset ID")
+        _validate_timezone(self.timezone)
         object.__setattr__(self, "filters", _canonical_filters(self.filters))
 
     def to_wire(self) -> dict[str, object]:
@@ -118,6 +137,7 @@ class CustomSummaryRequest:
             "request_id": self.request_id,
             "request_kind": self.request_kind,
             "dataset_id": self.dataset_id,
+            "timezone": self.timezone,
             "query": {"filters": {key: list(values) for key, values in self.filters}},
             "summary": {"scope": self.scope, "intervals": intervals},
         }
@@ -134,11 +154,13 @@ class CustomChartResponse:
     dataset: CustomDataset
     capabilities: CustomCapabilities
     data: CustomData
+    warnings: tuple[CustomProtocolWarning, ...] = field(default=(), kw_only=True)
 
 
 @dataclass(frozen=True, slots=True)
 class CustomSummaryResponse:
     summary: CustomSummary
+    warnings: tuple[CustomProtocolWarning, ...] = field(default=(), kw_only=True)
 
 
 CustomResponse: TypeAlias = CustomChartResponse | CustomSummaryResponse
@@ -163,12 +185,14 @@ def canonical_custom_request_key(request: CustomRequest) -> tuple[object, ...]:
         request.command_argv,
         request.execution_context,
         request.dataset_id,
+        request.timezone,
         request.request_kind,
     )
     if isinstance(request, CustomChartRequest):
         return common + (
             request.start_date.isoformat(),
             request.end_date.isoformat(),
+            request.period,
             request.filters,
             request.group_by,
             request.granularity,
@@ -198,20 +222,33 @@ def parse_custom_response(raw: bytes, request: CustomRequest) -> CustomResponse:
             _parse_dataset(root.get("dataset")),
             _parse_capabilities(root.get("capabilities")),
             _parse_data(root.get("data")),
+            warnings=_parse_warnings(root.get("warnings")),
         )
-    return CustomSummaryResponse(_parse_summary(root.get("summary")))
+    return CustomSummaryResponse(
+        _parse_summary(root.get("summary")), warnings=_parse_warnings(root.get("warnings"))
+    )
 
 
 def _validate_envelope(root: dict[str, object], request: CustomRequest) -> None:
     if root.get("protocol") != PROTOCOL_VERSION:
         raise CustomProtocolError(f"unsupported protocol version: {root.get('protocol')!r}")
-    for field, expected in (
+    for field_name, expected in (
         ("request_id", request.request_id),
         ("dataset_id", request.dataset_id),
         ("request_kind", request.request_kind),
     ):
-        if root.get(field) != expected:
-            raise CustomProtocolError(f"response {field} does not match request")
+        received = root.get(field_name)
+        if received != expected:
+            detail = (
+                f"response {field_name} does not match request "
+                f"(expected {expected!r}, received {received!r})"
+            )
+            if field_name == "request_id" and root.get("status") == "error":
+                detail += (
+                    "; the local command did not echo this request ID, which usually means "
+                    "a protocol-incompatible command version"
+                )
+            raise CustomProtocolError(detail)
 
 
 def _parse_failure(root: dict[str, object]) -> CustomProtocolError:
@@ -221,16 +258,30 @@ def _parse_failure(root: dict[str, object]) -> CustomProtocolError:
         raise CustomProtocolError(f"unknown protocol error code: {code}")
     message = _parse_localized(error.get("message"), "error message")
     detail = error.get("unsupported")
+    unsupported: dict[str, str] | None = None
     if detail is not None:
-        unsupported = _mapping(detail, "unsupported error detail")
-        if set(unsupported) != {"field", "value"} or not all(
-            isinstance(item, str) for item in unsupported.values()
+        parsed = _mapping(detail, "unsupported error detail")
+        if set(parsed) != {"field", "value"} or not all(
+            isinstance(item, str) for item in parsed.values()
         ):
             raise CustomProtocolError(
                 "unsupported error detail must contain string field and value"
             )
-    CustomProtocolFailure(code, message)
-    return CustomProtocolError(f"{code}: {message.en}")
+        unsupported = {key: value for key, value in parsed.items() if isinstance(value, str)}
+    failure = CustomProtocolFailure(code, message, unsupported)
+    return CustomProtocolError(f"{code}: {message.en}", failure=failure)
+
+
+def _parse_warnings(value: object) -> tuple[CustomProtocolWarning, ...]:
+    if value is None:
+        return ()
+    return tuple(
+        CustomProtocolWarning(
+            _string(_mapping(item, "warning").get("code"), "warning code"),
+            _parse_localized(_mapping(item, "warning").get("message"), "warning message"),
+        )
+        for item in _sequence(value, "warnings")
+    )
 
 
 def _parse_dataset(value: object) -> CustomDataset:
@@ -452,6 +503,15 @@ def _unique_ids(
 ) -> None:
     if len({item.id for item in items}) != len(items):
         raise CustomProtocolError(f"{name} IDs must be unique")
+
+
+def _validate_timezone(value: str) -> None:
+    if not isinstance(value, str) or not value:
+        raise ValueError("timezone must not be empty")
+    try:
+        ZoneInfo(value)
+    except ZoneInfoNotFoundError as error:
+        raise ValueError(f"timezone must be a valid IANA timezone: {value}") from error
 
 
 def _require_id(value: str, name: str) -> None:

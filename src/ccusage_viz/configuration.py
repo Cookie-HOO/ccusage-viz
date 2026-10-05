@@ -27,7 +27,7 @@ def _default_dashboard_chart_presentation(kind: str) -> ChartPresentation:
             "timeline": "linear",
             "calendar": "relative",
             "stack": "stacked",
-            "ranking": "bar",
+            "ranking": "dot",
             "monitor": "bars",
         }[kind],
         density="compact",
@@ -40,7 +40,9 @@ def default_pane(kind: str, *, dashboard: DashboardLaunch) -> ChartPaneConfig:
     if kind == "monitor":
         chart = MonitorConfig("monitor", 3600, presentation=presentation)
     else:
-        date_range = resolve_date_range(kind, period=None, since=None, until=None)
+        date_range = resolve_date_range(
+            kind, period=None, since=None, until=None, timezone=dashboard.host.timezone
+        )
         if kind == "timeline":
             chart = TimelineConfig("timeline", date_range, presentation=presentation)
         elif kind == "calendar":
@@ -61,13 +63,9 @@ def default_custom_pane(
     if kind not in {"timeline", "calendar", "stack", "ranking"}:
         raise ValueError(f"unknown custom chart kind: {kind}")
     presentation = _default_dashboard_chart_presentation(kind)
+    date_range = resolve_date_range(kind, period=None, since=None, until=None)
     return CustomChartPaneConfig(
-        CustomChartConfig(
-            kind,
-            source,
-            resolve_date_range(kind, period=None, since=None, until=None),
-            presentation=presentation,
-        )
+        CustomChartConfig(kind, source, date_range, presentation=presentation)
     )
 
 
@@ -82,6 +80,7 @@ def standalone_from_chart_pane(
     )
     host = StandaloneHostConfig(
         provider=dashboard.host.provider,
+        timezone=dashboard.host.timezone,
         ascii=dashboard.host.ascii,
         demo_size=dashboard.host.demo_size,
         demo_seed=dashboard.host.demo_seed,

@@ -145,6 +145,7 @@ def historical_query_intent(
 def custom_historical_query_intent(
     config: CustomChartConfig,
     *,
+    timezone: str,
     owner_id: str,
     generation: int,
     trigger: QueryTrigger,
@@ -157,8 +158,10 @@ def custom_historical_query_intent(
     request = CustomChartRequest(
         request_id=f"{owner_id}:{generation}{request_id_suffix}",
         dataset_id=config.source.dataset_id,
+        timezone=timezone,
         start_date=interval.since,
         end_date=interval.until,
+        period=config.date_range.period if config.date_range.relative_until else None,
         filters=config.filters,
         group_by=config.group_by,
         granularity=config.granularity,
@@ -187,6 +190,7 @@ def custom_summary_query_intent(
     plan: SummaryQueryPlan,
     *,
     filters: tuple[tuple[str, tuple[str, ...]], ...] = (),
+    timezone: str,
     owner_id: str,
     generation: int,
     trigger: QueryTrigger,
@@ -197,6 +201,7 @@ def custom_summary_query_intent(
     request = CustomSummaryRequest(
         request_id=f"{owner_id}:{generation}",
         dataset_id=source.dataset_id,
+        timezone=timezone,
         scope=plan.scope,
         current=plan.current,
         sequential=plan.sequential,
@@ -236,9 +241,13 @@ def custom_dashboard_summary_query_intent(
     if period not in {"day", "week", "month", "quarter", "year"}:
         raise ValueError("custom Dashboard summary requires a supported scope")
 
+    timezone = dashboard.host.timezone
+    if timezone is None:
+        raise ValueError("custom Dashboard summary requires a timezone")
     return custom_summary_query_intent(
         source,
-        summary_query_plan(local_today(as_of_date), cast(SummaryScope, period)),
+        summary_query_plan(local_today(as_of_date, timezone=timezone), cast(SummaryScope, period)),
+        timezone=timezone,
         owner_id=owner_id,
         generation=generation,
         trigger=trigger,

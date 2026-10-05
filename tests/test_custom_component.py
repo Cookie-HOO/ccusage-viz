@@ -24,6 +24,7 @@ from ccusage_viz.custom_models import (
     CustomMetric,
     CustomPaneSummary,
     CustomPoint,
+    CustomProtocolFailure,
     CustomSeries,
     CustomUnit,
     LocalizedText,
@@ -33,7 +34,7 @@ from ccusage_viz.custom_protocol import (
     CustomPaneResponse,
     CustomSummaryResponse,
 )
-from ccusage_viz.errors import UsageError
+from ccusage_viz.errors import QueryError, UsageError
 from ccusage_viz.formatting import display_width
 from ccusage_viz.i18n import load_translator
 from ccusage_viz.options import (
@@ -256,20 +257,85 @@ def test_component_rejects_stale_or_unrequested_comparison_response() -> None:
     assert component.comparison_response is None
 
 
-def test_component_preserves_accepted_projection_after_failed_source_edit() -> None:
+def test_component_clears_accepted_projection_after_failed_source_replacement() -> None:
     component = CustomHistoricalComponent(config())
     accepted_at = datetime(2026, 9, 2, tzinfo=UTC)
     assert component.accept_response(response(), accepted_at=accepted_at)
-    accepted = component.model
     changed = replace(component.candidate, source=CustomCommandSource("other", ("other",)))
     component.configure(changed, data_affecting=True)
 
     assert component.is_pending
     assert component.fail(RuntimeError("source unavailable"), generation=component.generation)
-    assert component.model is accepted
-    assert component.accepted_config is not None
-    assert component.accepted_config.source == SOURCE
+    assert component.model is None
+    assert component.accepted_config is None
+    assert component.presentation is not None
     assert component.error is not None
+
+
+def test_component_preserves_accepted_projection_after_same_query_refresh_failure() -> None:
+    component = CustomHistoricalComponent(config())
+    assert component.accept_response(response())
+    accepted = component.model
+
+    assert component.fail(RuntimeError("source unavailable"), generation=component.generation)
+    assert component.model is accepted
+
+
+def test_component_clears_month_projection_after_week_replacement_failure() -> None:
+    monthly = config(
+        kind="ranking",
+        date_range=DateRange(date(2026, 9, 1), date(2026, 9, 30), period="1mo"),
+    )
+    component = CustomHistoricalComponent(monthly)
+    assert component.accept_response(response())
+    weekly = replace(
+        monthly, date_range=DateRange(date(2026, 9, 28), date(2026, 10, 5), period="1w")
+    )
+    component.configure(weekly, data_affecting=True)
+
+    assert component.fail(RuntimeError("source unavailable"), generation=component.generation)
+    assert component.model is None
+    assert component.accepted_response is None
+    assert component.presentation is not None
+    assert component.candidate.date_range.period == "1w"
+
+
+def test_period_unsupported_failure_clears_an_accepted_projection() -> None:
+    component = CustomHistoricalComponent(config())
+    assert component.accept_response(response())
+    failure = QueryError(
+        "error.custom_command_protocol",
+        custom_failure=CustomProtocolFailure(
+            "unsupported_query",
+            LocalizedText("Period unavailable", "周期不可用"),
+            {"field": "range.period", "value": "14d"},
+        ),
+    )
+
+    assert component.fail(failure, generation=component.generation)
+    assert component.model is None
+    assert component.accepted_config is None
+    assert component.accepted_response is None
+    assert component.error is failure
+
+
+def test_non_period_unsupported_failure_retains_an_accepted_projection() -> None:
+    component = CustomHistoricalComponent(config())
+    assert component.accept_response(response())
+    accepted = component.model
+    failure = QueryError(
+        "error.custom_command_protocol",
+        custom_failure=CustomProtocolFailure(
+            "unsupported_query",
+            LocalizedText("Grouping unavailable", "分组不可用"),
+            {"field": "query.group_by", "value": "author"},
+        ),
+    )
+
+    assert component.fail(failure, generation=component.generation)
+    assert component.model is accepted
+    assert component.accepted_response is not None
+    assert component.error is failure
 
 
 def test_custom_replacement_requires_only_source_query_fields() -> None:
@@ -436,6 +502,22 @@ def test_custom_charts_use_native_layout_primitives(kind: str, style: str, expec
     assert expected in output
 
 
+def test_custom_ranking_heading_is_centered_once() -> None:
+    projection = process_custom_historical(
+        response(),
+        config(kind="ranking", presentation=ChartPresentation(style="dot")),
+    )
+    context = RenderContext(80, 20, load_translator("zh"), color=False, period="14d", style="dot")
+
+    heading = render_custom_projection(projection, context).splitlines()[0]
+
+    assert heading.lstrip() == "阅读 · book · 累计排名 · 14d"
+    assert (
+        len(heading) - len(heading.lstrip())
+        == (context.width - display_width(heading.lstrip())) // 2
+    )
+
+
 def test_custom_calendar_preserves_decimal_values_for_shared_grid(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -456,6 +538,35 @@ def test_custom_calendar_preserves_decimal_values_for_shared_grid(
     values = captured["values"]
     assert isinstance(values, dict)
     assert values[date(2026, 9, 1)] == Decimal("1.234567890123456789")
+
+
+@pytest.mark.parametrize(
+    ("density", "has_footer", "has_streaks", "has_legend"),
+    (
+        ("minimal", False, False, False),
+        ("compact", False, False, False),
+        ("full", True, False, False),
+        ("detailed", True, True, True),
+    ),
+)
+def test_custom_calendar_uses_shared_density_footer(
+    density: str, has_footer: bool, has_streaks: bool, has_legend: bool
+) -> None:
+    projection = process_custom_historical(
+        response((("total", "10"),)), config(kind="calendar", group_by=None, top=None)
+    )
+
+    output = render_custom_projection(
+        projection,
+        RenderContext(100, 24, load_translator("en"), color=False, ascii=True, density=density),
+    )
+
+    assert ("Active days 1" in output) is has_footer
+    assert ("Daily average 5.00 pages" in output) is has_footer
+    assert ("Peak 2026-09-01 · 10.00 pages" in output) is has_footer
+    assert ("Current streak 0" in output) is has_streaks
+    assert ("Longest streak 1" in output) is has_streaks
+    assert ("Less . o O # More" in output) is has_legend
 
 
 def test_custom_timeline_preserves_decimal_values_until_plot_adapter(
@@ -486,7 +597,7 @@ def test_custom_timeline_preserves_decimal_values_until_plot_adapter(
             Decimal("0.92592591759259259175"),
             Decimal("1.234567890123456789"),
         ],
-        ["0.00 pages", "0.31 pages", "0.62 pages", "0.93 pages", "1.23 pages"],
+        ["0.00", "0.31", "0.62", "0.93", "1.23"],
     )
 
 
@@ -525,6 +636,35 @@ def test_custom_timeline_matches_native_total_palette_identity() -> None:
 
     assert f"\x1b[38;5;{categorical_color('total')}m" in output
     assert "pages" in output
+
+
+def test_custom_timeline_labels_unit_once_and_keeps_numeric_ticks_unit_free() -> None:
+    projection = process_custom_historical(
+        response((("total", "10"),)), config(group_by=None, top=None)
+    )
+    output = render_custom_projection(
+        projection, RenderContext(80, 20, load_translator("en"), color=False, style="points")
+    )
+
+    assert "Timeline · 2026-09-01–2026-09-02 · pages" in output
+    assert "0.00 pages" not in output
+    assert "2.50 pages" not in output
+
+
+def test_custom_timeline_places_prefix_unit_before_heading() -> None:
+    prefix_unit = CustomUnit("credit", LocalizedText("$", "元"), "prefix", 2)
+    projection = process_custom_historical(
+        replace(
+            response((("total", "10"),)), dataset=replace(response().dataset, unit=prefix_unit)
+        ),
+        config(group_by=None, top=None),
+    )
+    output = render_custom_projection(
+        projection, RenderContext(80, 20, load_translator("en"), color=False, style="points")
+    )
+
+    assert "$ · Reading · Timeline · 2026-09-01–2026-09-02" in output
+    assert "$0.00" not in output
 
 
 def test_custom_timeline_uses_native_area_validation() -> None:

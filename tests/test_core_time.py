@@ -8,6 +8,8 @@ from ccusage_viz.core.time import (
     natural_period_start,
     parse_period,
     refresh_date_range,
+    system_timezone,
+    validate_timezone,
 )
 
 
@@ -56,6 +58,13 @@ def test_local_today_uses_explicit_override() -> None:
     expected = date(2026, 9, 13)
 
     assert local_today(expected) == expected
+
+
+def test_timezone_helpers_require_iana_names() -> None:
+    assert validate_timezone("Asia/Shanghai") == "Asia/Shanghai"
+    assert validate_timezone(system_timezone()) == system_timezone()
+    with pytest.raises(ValueError, match="invalid IANA"):
+        validate_timezone("PST")
 
 
 def test_refresh_date_range_advances_only_rolling_ranges() -> None:

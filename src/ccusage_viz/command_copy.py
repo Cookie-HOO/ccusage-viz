@@ -11,6 +11,7 @@ from ccusage_viz.options import (
     AnimationPaneConfig,
     CustomChartConfig,
     CustomChartPaneConfig,
+    CustomCommandSource,
     DashboardLaunch,
     EmptyPaneConfig,
     MonitorConfig,
@@ -82,6 +83,8 @@ def _chart_args(config: StandaloneLaunch, *, full: bool, pane: bool = False) -> 
             args.extend(("--model", value))
         for value in chart.filters.projects:
             args.extend(("--project", value))
+    if not pane and config.host.timezone is not None:
+        args.extend(("--timezone", config.host.timezone))
     if not pane and not isinstance(chart, MonitorConfig):
         if not config.host.watch:
             args.append("--no-watch")
@@ -115,18 +118,18 @@ def _chart_args(config: StandaloneLaunch, *, full: bool, pane: bool = False) -> 
     return args
 
 
+def _custom_source_args(source: CustomCommandSource) -> list[str]:
+    args = ["--dataset", source.dataset_id]
+    if source.source_kind == "installed":
+        return args
+    return [*args, "--command", shlex.join(source.command_argv)]
+
+
 def _custom_chart_args(options: StandaloneLaunch, *, full: bool) -> list[str]:
     chart = options.chart
     if not isinstance(chart, CustomChartConfig):
         raise TypeError("custom command formatting requires a custom chart")
-    args = [
-        "custom",
-        chart.kind,
-        "--dataset",
-        chart.source.dataset_id,
-        "--command",
-        shlex.join(chart.source.command_argv),
-    ]
+    args = ["custom", chart.kind, *_custom_source_args(chart.source)]
     date_range = chart.date_range
     if date_range.relative_until and date_range.period is not None:
         if full or date_range.period != COMMAND_DEFAULT_PERIODS[chart.kind]:
@@ -148,6 +151,8 @@ def _custom_chart_args(options: StandaloneLaunch, *, full: bool) -> list[str]:
         args.extend(("--granularity", chart.granularity))
     if chart.weekdays != "show":
         args.extend(("--weekdays", chart.weekdays))
+    if options.host.timezone is not None:
+        args.extend(("--timezone", options.host.timezone))
     if full:
         args.extend(("--query-timeout", f"{options.process.query_timeout:g}"))
     if not options.host.ascii and (full or chart.presentation.theme != "classic"):
@@ -209,6 +214,8 @@ def format_full_dashboard_command(
 ) -> str:
     host = options.host
     args = [options.launcher, "dashboard"]
+    if host.timezone is not None:
+        args.extend(("--timezone", host.timezone))
     from ccusage_viz.configuration import standalone_from_chart_pane
 
     for pane_config in panes or options.panes:
@@ -216,14 +223,7 @@ def format_full_dashboard_command(
             fragment = "empty"
         elif isinstance(pane_config, CustomChartPaneConfig):
             chart = pane_config.chart
-            fragment_args = [
-                "custom",
-                chart.kind,
-                "--dataset",
-                chart.source.dataset_id,
-                "--command",
-                shlex.join(chart.source.command_argv),
-            ]
+            fragment_args = ["custom", chart.kind, *_custom_source_args(chart.source)]
             date_range = chart.date_range
             if date_range.relative_until and date_range.period is not None:
                 fragment_args.extend(("--period", date_range.period))

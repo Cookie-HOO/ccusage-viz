@@ -24,8 +24,10 @@ def chart_request(**changes: object) -> CustomChartRequest:
     values: dict[str, object] = {
         "request_id": "chart-1",
         "dataset_id": "weread",
+        "timezone": "Asia/Shanghai",
         "start_date": date(2026, 9, 17),
         "end_date": date(2026, 9, 30),
+        "period": "14d",
         "filters": (("category", ("literature",)),),
         "group_by": "book",
         "granularity": "day",
@@ -40,6 +42,7 @@ def summary_request(**changes: object) -> CustomSummaryRequest:
     values: dict[str, object] = {
         "request_id": "summary-1",
         "dataset_id": "weread",
+        "timezone": "Asia/Shanghai",
         "scope": "month",
         "current": DateInterval(date(2026, 9, 1), date(2026, 9, 30)),
         "sequential": DateInterval(date(2026, 8, 1), date(2026, 8, 31)),
@@ -146,6 +149,37 @@ def test_chart_response_does_not_require_or_accept_a_summary() -> None:
     assert not hasattr(result, "summary")
 
 
+@pytest.mark.parametrize(
+    ("request_factory", "response_factory"),
+    [(chart_request, chart_response), (summary_request, summary_response)],
+)
+def test_success_response_parses_unknown_warning_codes(
+    request_factory: object, response_factory: object
+) -> None:
+    payload = response_factory()  # type: ignore[operator]
+    payload["warnings"] = [  # type: ignore[index]
+        {"code": "future_source_notice", "message": text("Heads up", "提示")}
+    ]
+
+    result = parse_custom_response(  # type: ignore[arg-type,operator]
+        json.dumps(payload).encode(), request_factory()
+    )
+
+    assert result.warnings[0].code == "future_source_notice"
+    assert result.warnings[0].message.zh_cn == "提示"
+
+
+@pytest.mark.parametrize(
+    "warning", [{"code": "notice"}, {"message": text("Heads up", "提示")}, "notice"]
+)
+def test_success_response_rejects_malformed_warnings(warning: object) -> None:
+    response = chart_response()
+    response["warnings"] = [warning]
+
+    with pytest.raises(CustomProtocolError, match="warning"):
+        parse_custom_response(json.dumps(response).encode(), chart_request())
+
+
 def test_summary_response_uses_current_decimal_and_source_display() -> None:
     result = parse_custom_response(json.dumps(summary_response()).encode(), summary_request())
 
@@ -184,8 +218,15 @@ def test_request_wire_shapes_keep_chart_and_summary_inputs_separate() -> None:
     summary = summary_request()
 
     assert chart.to_wire()["request_kind"] == "chart"
+    assert chart.to_wire()["timezone"] == "Asia/Shanghai"
+    assert chart.to_wire()["range"] == {
+        "start_date": "2026-09-17",
+        "end_date": "2026-09-30",
+        "period": "14d",
+    }
     assert "summary" not in chart.to_wire()
     assert summary.to_wire()["request_kind"] == "summary"
+    assert summary.to_wire()["timezone"] == "Asia/Shanghai"
     assert "range" not in summary.to_wire()
     assert summary.to_wire()["summary"] == {
         "scope": "month",
@@ -212,11 +253,34 @@ def test_canonical_summary_identity_excludes_chart_inputs_and_request_id() -> No
 
 def test_chart_identity_contains_graph_inputs() -> None:
     assert canonical_custom_request_key(chart_request()) != canonical_custom_request_key(
+        chart_request(period="1w")
+    )
+    assert canonical_custom_request_key(chart_request()) != canonical_custom_request_key(
         chart_request(granularity="week")
     )
     assert canonical_custom_request_key(chart_request()) != canonical_custom_request_key(
         chart_request(start_date=date(2026, 9, 18))
     )
+    assert canonical_custom_request_key(chart_request()) != canonical_custom_request_key(
+        chart_request(timezone="America/Los_Angeles")
+    )
+
+
+@pytest.mark.parametrize("request_factory", [chart_request, summary_request])
+@pytest.mark.parametrize("timezone", ["", "Mars/Olympus"])
+def test_requests_require_a_valid_iana_timezone(request_factory: object, timezone: str) -> None:
+    with pytest.raises(ValueError, match="timezone"):
+        request_factory(timezone=timezone)  # type: ignore[operator]
+
+
+@pytest.mark.parametrize("period", ["week", "0d", "1W"])
+def test_chart_request_rejects_invalid_period(period: str) -> None:
+    with pytest.raises(ValueError, match="period"):
+        chart_request(period=period)
+
+
+def test_fixed_chart_request_serializes_null_period() -> None:
+    assert chart_request(period=None).to_wire()["range"]["period"] is None
 
 
 @pytest.mark.parametrize("field", ["protocol", "request_id", "dataset_id", "request_kind"])
@@ -224,4 +288,46 @@ def test_response_envelope_must_match_request(field: str) -> None:
     response = chart_response()
     response[field] = "other"
     with pytest.raises(CustomProtocolError):
+        parse_custom_response(json.dumps(response).encode(), chart_request())
+
+
+def test_error_response_preserves_structured_dataset_failure() -> None:
+    response = chart_response()
+    response.update(
+        {
+            "status": "error",
+            "error": {
+                "code": "unsupported_query",
+                "message": {"en": "Select another period.", "zh-CN": "请选择其他周期。"},
+                "unsupported": {"field": "range.period", "value": "14d"},
+            },
+        }
+    )
+
+    with pytest.raises(CustomProtocolError) as raised:
+        parse_custom_response(json.dumps(response).encode(), chart_request())
+
+    assert raised.value.failure is not None
+    assert raised.value.failure.code == "unsupported_query"
+    assert raised.value.failure.message.zh_cn == "请选择其他周期。"
+    assert dict(raised.value.failure.unsupported or {}) == {
+        "field": "range.period",
+        "value": "14d",
+    }
+
+
+def test_error_response_id_mismatch_explains_protocol_compatibility() -> None:
+    response = chart_response()
+    response.update(
+        {
+            "request_id": "invalid-request",
+            "status": "error",
+            "error": {"code": "invalid_request", "message": {"en": "Invalid.", "zh-CN": "无效。"}},
+        }
+    )
+
+    with pytest.raises(
+        CustomProtocolError,
+        match="expected 'chart-1'.*received 'invalid-request'.*protocol-incompatible",
+    ):
         parse_custom_response(json.dumps(response).encode(), chart_request())
