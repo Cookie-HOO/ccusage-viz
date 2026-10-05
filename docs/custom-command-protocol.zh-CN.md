@@ -12,19 +12,19 @@
 
 ```bash
 # 已安装 Dataset：只需图表类型和 Dataset ID。
-ccuv custom timeline --dataset weread
+ccuv chart timeline --dataset weread
 
 # 开发者任意命令：图表类型、Dataset ID 与命令 argv。
-ccuv custom timeline --dataset example --command 'example-reader ccuv'
-ccuv custom stack --dataset example --command 'example-reader ccuv'
-ccuv custom calendar --dataset example --command 'example-reader ccuv'
-ccuv custom ranking --dataset example --command 'example-reader ccuv'
+ccuv chart timeline --dataset example --command 'example-reader ccuv'
+ccuv chart stack --dataset example --command 'example-reader ccuv'
+ccuv chart calendar --dataset example --command 'example-reader ccuv'
+ccuv chart ranking --dataset example --command 'example-reader ccuv'
 ```
 
 `--dataset` 必填，是数据源的稳定身份；每个响应都必须原样回显它。不提供 `--command` 时，`--dataset ID` 会解析并验证本地已安装 Dataset，不要求用户提供可执行文件路径。`--command` 使用 `shlex.split` 拆成 argv，并且不经 shell 执行。若明确需要 shell 行为，请自行将 shell 放入 argv：
 
 ```bash
-ccuv custom timeline --dataset example --command "sh -lc 'collector | adapter'"
+ccuv chart timeline --dataset example --command "sh -lc 'collector | adapter'"
 ```
 
 自定义图表初始为 14 天、未分组总计的图表窗口和按天汇总；自定义数据不能用于 `monitor`。Dashboard Pane 始终提供 `p`/`P` 在共享滚动范围序列 `7d → 14d → 30d → 90d → 180d → 365d → 1w → 1mo → 1y` 中循环；`1w`、`1mo`、`1y` 分别表示本周、本月和本年。首次成功响应后，才会按 capability 额外提供查询控制：`g` 循环已声明粒度，`b` 循环总计与已声明分组，`f` 编辑已声明的筛选选项；这些调整都会发起新的命令查询。`r` 打开替换流程，可重新选择 Dataset 并在本地命令模式下编辑命令；`L` 显示诊断日志。小写 `l` 循环自定义 Timeline/Stack 的图例；大写 `L` 专用于日志。

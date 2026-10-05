@@ -1,6 +1,7 @@
 MESSAGES = {
     "app.description": "基于 ccusage Token 数据的无状态终端可视化工具",
-    "help.command": "要绘制的图表（默认：timeline）",
+    "help.command": "要执行的命令（默认：chart timeline）",
+    "help.chart": "绘制独立图表",
     "help.timeline": "将每日 Token 用量绘制为折线图",
     "help.calendar": "将每日 Token 用量绘制为日历热力图",
     "help.stack": "将每日 Token 构成绘制为堆叠柱状图",

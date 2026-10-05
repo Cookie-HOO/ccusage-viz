@@ -26,7 +26,7 @@ python -m ccusage_viz --help
 
 ```bash
 ccuv
-ccuv timeline
+ccuv chart timeline
 ccuv --demo
 ccuv --lang zh --demo
 ```
@@ -41,11 +41,11 @@ ccuv --lang zh --demo
 首次体验可从 Demo 数据开始：
 
 ```bash
-ccuv timeline --demo
-ccuv calendar --demo
-ccuv stack --demo --cache split
-ccuv ranking --demo --by project
-ccuv monitor --demo --by model
+ccuv chart timeline --demo
+ccuv chart calendar --demo
+ccuv chart stack --demo --cache split
+ccuv chart ranking --demo --by project
+ccuv chart monitor --demo --by model
 ccuv dashboard wide --demo
 ```
 
@@ -148,7 +148,7 @@ Pane 继承 Dashboard 时区，不能单独覆盖；复制的命令会保留 `--
 **Agent A 或 B**，使用**模型 X**，且属于**项目 one 或 two**：
 
 ```bash
-ccuv timeline --agent A --agent B --model X --project one --project two
+ccuv chart timeline --agent A --agent B --model X --project one --project two
 ```
 
 所有 Agent、模型和项目选择器都是**完整值、不区分大小写的精确匹配**。ccusage-viz
@@ -248,7 +248,7 @@ Exact 或其他未合并项目。编号从 `0` 开始，只在当前输出内按
 ### Timeline
 
 ```bash
-ccuv timeline --period 30d --by model --top 5 --style line-points
+ccuv chart timeline --period 30d --by model --top 5 --style line-points
 ```
 
 | 参数 | 值/默认值 | 含义 |
@@ -265,7 +265,7 @@ ccuv timeline --period 30d --by model --top 5 --style line-points
 ### Calendar
 
 ```bash
-ccuv calendar --period 1y --style grid
+ccuv chart calendar --period 1y --style grid
 ```
 
 | 参数 | 值/默认值 | 含义 |
@@ -278,7 +278,7 @@ Calendar 没有分组、Top、Other、粒度、星期标签或图例参数。
 ### Stack
 
 ```bash
-ccuv stack --period 30d --granularity month --cache split
+ccuv chart stack --period 30d --granularity month --cache split
 ```
 
 | 参数 | 值/默认值 | 含义 |
@@ -292,13 +292,13 @@ ccuv stack --period 30d --granularity month --cache split
 例如：
 
 ```bash
-ccuv stack --demo --cache split --style stacked-pattern
+ccuv chart stack --demo --cache split --style stacked-pattern
 ```
 
 ### Ranking
 
 ```bash
-ccuv ranking --period 30d --by project --top 15 --other hide --style dots
+ccuv chart ranking --period 30d --by project --top 15 --other hide --style dots
 ```
 
 | 参数 | 值/默认值 | 含义 |
@@ -312,7 +312,7 @@ ccuv ranking --period 30d --by project --top 15 --other hide --style dots
 ### Monitor
 
 ```bash
-ccuv monitor --window 30m --by model --top 5 --style ranking
+ccuv chart monitor --window 30m --by model --top 5 --style ranking
 ```
 
 Monitor 在本次运行期间从重复累计快照观测吞吐量。第一个被接受的快照建立基线；观测历史仅属于

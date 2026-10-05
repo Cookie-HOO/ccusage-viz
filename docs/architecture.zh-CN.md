@@ -59,7 +59,7 @@ Dashboard Route 不调用 Standalone Route。两者都从同一 Definition 创�
 
 | 层级 | 所属概念 | 具体例子 |
 | --- | --- | --- |
-| **1. Route** | Route、launch request | `ccuv monitor` 选择 Standalone Monitor 操作；`ccuv dashboard` 选择 Dashboard 并描述其中的 Pane。Route 不拥有运行节奏或 Component 状态。 |
+| **1. Route** | Route、launch request | `ccuv chart monitor` 选择 Standalone Monitor 操作；`ccuv dashboard` 选择 Dashboard 并描述其中的 Pane。Route 不拥有运行节奏或 Component 状态。 |
 | **2. Query / Data Acquisition** | Config 中的数据范围、Query Intent、Provider、Provider Result | Monitor Config 指定 `by=model` 和 Filters；逻辑规划器结合 Host context 生成 Query Intent；`ccusage` Provider 执行查询并返回规范化累计 records。 |
 | **3. Result Processing** | Processor/projector、语义 Chart Model | Monitor processing 使用 Component 保存的 previous snapshot 与 Observer 推导增量、TPM 和时间桶，再投影为 Timeline 或 Ranking Model；历史 processing 独立聚合每日 records。 |
 | **4. Rendering** | Chart renderer、Chart Model、Theme、Style、Chart Render、Host composition、Painter | 选中的 Timeline 或 Ranking renderer 消费投影后的 Model。Host 加入 Controls、Header、边框等产品内容并创建完整 Frame；Painter 只比较 Frame 并写入变化行。 |

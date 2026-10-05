@@ -28,7 +28,7 @@ the scale. Bare `--demo` means `--demo medium`. Demo mode neither runs
 
 ```bash
 ccuv
-ccuv timeline
+ccuv chart timeline
 ccuv --demo
 ccuv --lang zh --demo
 ```
@@ -44,11 +44,11 @@ background rather than as a command reference.
 Start with demo data when exploring the program:
 
 ```bash
-ccuv timeline --demo
-ccuv calendar --demo
-ccuv stack --demo --cache split
-ccuv ranking --demo --by project
-ccuv monitor --demo --by model
+ccuv chart timeline --demo
+ccuv chart calendar --demo
+ccuv chart stack --demo --cache split
+ccuv chart ranking --demo --by project
+ccuv chart monitor --demo --by model
 ccuv animate rain
 ccuv dashboard wide --demo
 ```
@@ -175,7 +175,7 @@ dimensions together. For example, the following means **Agent A or B**, using
 **model X**, in **project one or two**:
 
 ```bash
-ccuv timeline --agent A --agent B --model X --project one --project two
+ccuv chart timeline --agent A --agent B --model X --project one --project two
 ```
 
 All Agent, Model, and Project selectors are **complete, case-insensitive exact
@@ -306,7 +306,7 @@ agent plus ccusage version.
 ### Timeline
 
 ```bash
-ccuv timeline --period 30d --by model --top 5 --style line-points
+ccuv chart timeline --period 30d --by model --top 5 --style line-points
 ```
 
 | Option | Values/default | Meaning |
@@ -323,7 +323,7 @@ ccuv timeline --period 30d --by model --top 5 --style line-points
 ### Calendar
 
 ```bash
-ccuv calendar --period 1y --style grid
+ccuv chart calendar --period 1y --style grid
 ```
 
 | Option | Values/default | Meaning |
@@ -337,7 +337,7 @@ option.
 ### Stack
 
 ```bash
-ccuv stack --period 30d --granularity month --cache split
+ccuv chart stack --period 30d --granularity month --cache split
 ```
 
 | Option | Values/default | Meaning |
@@ -351,13 +351,13 @@ ccuv stack --period 30d --granularity month --cache split
 For example:
 
 ```bash
-ccuv stack --demo --cache split --style stacked-pattern
+ccuv chart stack --demo --cache split --style stacked-pattern
 ```
 
 ### Ranking
 
 ```bash
-ccuv ranking --period 30d --by project --top 15 --other hide --style dots
+ccuv chart ranking --period 30d --by project --top 15 --other hide --style dots
 ```
 
 | Option | Values/default | Meaning |
@@ -371,7 +371,7 @@ ccuv ranking --period 30d --by project --top 15 --other hide --style dots
 ### Monitor
 
 ```bash
-ccuv monitor --window 30m --by model --top 5 --style ranking
+ccuv chart monitor --window 30m --by model --top 5 --style ranking
 ```
 
 Monitor observes throughput from repeated cumulative snapshots during this

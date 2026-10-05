@@ -1,6 +1,7 @@
 MESSAGES = {
     "app.description": "Stateless terminal visualizations for ccusage token data",
-    "help.command": "Chart to render (default: timeline)",
+    "help.command": "Command to run (default: chart timeline)",
+    "help.chart": "Render a standalone chart",
     "help.timeline": "Render daily token usage as a line chart",
     "help.calendar": "Render daily token usage as a calendar heatmap",
     "help.stack": "Render daily token components as stacked bars",

@@ -49,7 +49,7 @@ def test_subcommand_help_is_localized(
 ) -> None:
     parser = build_parser(load_translator(language))
     with pytest.raises(SystemExit) as caught:
-        parser.parse_args([command, "--help"])
+        parser.parse_args(["chart", command, "--help"])
     assert caught.value.code == 0
     assert description in capsys.readouterr().out
 
@@ -233,7 +233,7 @@ def test_bare_custom_dataset_routes_through_installed_source(
         lambda _service, dataset_id: installed if dataset_id == "weread" else None,
     )
 
-    launch = _to_options(parser.parse_args(["custom", "timeline", "--dataset", "weread"]))
+    launch = _to_options(parser.parse_args(["chart", "timeline", "--dataset", "weread"]))
 
     assert isinstance(launch.chart, CustomChartConfig)
     assert launch.chart.source == installed
@@ -251,7 +251,7 @@ def test_installed_dataset_defaults_use_host_timezone_today(
     )
 
     launch = _to_options(
-        parser.parse_args(["custom", kind, "--dataset", "weread", "--timezone", "Asia/Shanghai"])
+        parser.parse_args(["chart", kind, "--dataset", "weread", "--timezone", "Asia/Shanghai"])
     )
 
     assert isinstance(launch.chart, CustomChartConfig)
@@ -272,7 +272,7 @@ def test_installed_dataset_accepts_explicit_current_day_date(
     launch = _to_options(
         parser.parse_args(
             [
-                "custom",
+                "chart",
                 "timeline",
                 "--dataset",
                 "weread",
@@ -331,12 +331,12 @@ def test_default_command_injection_preserves_animate() -> None:
 
 def test_route_probe_identifies_only_help_and_version() -> None:
     assert probe_short_circuit(["--version"]).kind is ShortCircuitKind.VERSION
-    route = probe_short_circuit(["timeline", "--lang", "zh", "--help"])
+    route = probe_short_circuit(["chart", "timeline", "--lang", "zh", "--help"])
     assert route is not None
     assert route.kind is ShortCircuitKind.HELP
-    assert route.command == "timeline"
+    assert route.command == "chart timeline"
     assert route.language == "zh"
-    assert probe_short_circuit(["timeline", "--period", "14d"]) is None
+    assert probe_short_circuit(["chart", "timeline", "--period", "14d"]) is None
 
 
 def test_version_short_circuits_before_translation_or_runtime(
@@ -358,41 +358,41 @@ def test_version_short_circuits_before_translation_or_runtime(
 @pytest.mark.parametrize("mode", ("below-title", "inside", "hidden"))
 def test_timeline_and_monitor_accept_legend_modes(command: str, mode: str) -> None:
     parser = build_parser(load_translator("en"))
-    assert parser.parse_args([command, "--legend", mode]).legend == mode
+    assert parser.parse_args(["chart", command, "--legend", mode]).legend == mode
 
 
 def test_monitor_accepts_values_legend_mode() -> None:
     parser = build_parser(load_translator("en"))
-    assert parser.parse_args(["monitor", "--legend", "values"]).legend == "values"
+    assert parser.parse_args(["chart", "monitor", "--legend", "values"]).legend == "values"
 
 
 @pytest.mark.parametrize("mode", ("below-title", "hidden"))
 def test_stack_accepts_supported_legend_modes(mode: str) -> None:
     parser = build_parser(load_translator("en"))
-    assert parser.parse_args(["stack", "--legend", mode]).legend == mode
+    assert parser.parse_args(["chart", "stack", "--legend", mode]).legend == mode
 
 
 def test_all_commands_accept_exactly_four_density_values() -> None:
     parser = build_parser(load_translator("en"))
     for command in ("timeline", "calendar", "stack", "ranking", "monitor"):
         for density in ("minimal", "compact", "full", "detailed"):
-            assert parser.parse_args([command, "--density", density]).density == density
-        assert parser.parse_args([command]).density == "detailed"
+            assert parser.parse_args(["chart", command, "--density", density]).density == density
+        assert parser.parse_args(["chart", command]).density == "detailed"
     with pytest.raises(UsageError) as caught:
-        parser.parse_args(["timeline", "--density", "standard"])
+        parser.parse_args(["chart", "timeline", "--density", "standard"])
     assert caught.value.key == "error.arguments"
 
 
 @pytest.mark.parametrize("command", ("timeline", "ranking", "monitor"))
 def test_project_aggregation_defaults_to_name_and_accepts_exact(command: str) -> None:
     parser = build_parser(load_translator("en"))
-    assert parser.parse_args([command]).project_aggregation == "name"
+    assert parser.parse_args(["chart", command]).project_aggregation == "name"
     assert (
-        parser.parse_args([command, "--project-aggregation", "exact"]).project_aggregation
+        parser.parse_args(["chart", command, "--project-aggregation", "exact"]).project_aggregation
         == "exact"
     )
     with pytest.raises(UsageError):
-        parser.parse_args([command, "--project-aggregation", "agent"])
+        parser.parse_args(["chart", command, "--project-aggregation", "agent"])
 
 
 def test_animate_help_is_localized(capsys: pytest.CaptureFixture[str]) -> None:
@@ -455,9 +455,9 @@ def test_all_commands_accept_themes() -> None:
     parser = build_parser(load_translator("en"))
     for command in ("timeline", "calendar", "stack", "ranking", "monitor"):
         for theme in COLOR_SCHEMES:
-            assert parser.parse_args([command, "--theme", theme]).color_scheme == theme
+            assert parser.parse_args(["chart", command, "--theme", theme]).color_scheme == theme
     with pytest.raises(UsageError) as caught:
-        parser.parse_args(["timeline", "--theme", "unknown"])
+        parser.parse_args(["chart", "timeline", "--theme", "unknown"])
     assert caught.value.key == "error.arguments"
 
 
@@ -493,21 +493,21 @@ def test_all_commands_accept_themes() -> None:
 )
 def test_commands_accept_their_own_styles(command: str, style: str) -> None:
     parser = build_parser(load_translator("en"))
-    assert parser.parse_args([command, "--style", style]).style == style
+    assert parser.parse_args(["chart", command, "--style", style]).style == style
 
 
 @pytest.mark.parametrize("style", ("step", "absolute"))
 def test_style_is_rejected_for_the_wrong_command(style: str) -> None:
     parser = build_parser(load_translator("en"))
     with pytest.raises(UsageError) as caught:
-        parser.parse_args(["calendar", "--style", style])
+        parser.parse_args(["chart", "calendar", "--style", style])
     assert caught.value.key == "error.arguments"
 
 
 def test_historical_ranking_rejects_monitor_list_style() -> None:
     parser = build_parser(load_translator("en"))
     with pytest.raises(UsageError) as caught:
-        parser.parse_args(["ranking", "--style", "list"])
+        parser.parse_args(["chart", "ranking", "--style", "list"])
     assert caught.value.key == "error.arguments"
 
 
@@ -515,14 +515,14 @@ def test_historical_charts_reject_monitor_distribution_style() -> None:
     parser = build_parser(load_translator("en"))
     for command in ("timeline", "calendar", "stack", "ranking"):
         with pytest.raises(UsageError) as caught:
-            parser.parse_args([command, "--style", "cumulative-bars"])
+            parser.parse_args(["chart", command, "--style", "cumulative-bars"])
         assert caught.value.key == "error.arguments"
 
 
 def test_timeline_rejects_removed_point_style() -> None:
     parser = build_parser(load_translator("en"))
     with pytest.raises(UsageError) as caught:
-        parser.parse_args(["timeline", "--style", "point"])
+        parser.parse_args(["chart", "timeline", "--style", "point"])
     assert caught.value.key == "error.arguments"
 
 
@@ -534,8 +534,7 @@ def test_root_help_lists_localized_subcommand_summaries(
         parser.parse_args(["--help"])
     assert caught.value.code == 0
     output = capsys.readouterr().out
-    assert "将每日 Token 用量绘制为折线图" in output
-    assert "将累计 Token 用量绘制为排名" in output
+    assert "绘制独立图表" in output
     assert "animate" in output
 
 
@@ -574,18 +573,18 @@ def namespace(**overrides: object) -> Namespace:
 
 def test_historical_lifecycle_defaults_and_validation() -> None:
     parser = build_parser(load_translator("en"))
-    default = _to_options(parser.parse_args(["timeline"]))
+    default = _to_options(parser.parse_args(["chart", "timeline"]))
     assert default.host.interval == 10
     assert default.host.watch
 
     one_shot = _to_options(
-        parser.parse_args(["timeline", "--no-watch"]), explicit=frozenset({"no_watch"})
+        parser.parse_args(["chart", "timeline", "--no-watch"]), explicit=frozenset({"no_watch"})
     )
     assert not one_shot.host.watch
 
     with pytest.raises(UsageError, match="error.arguments"):
         _to_options(
-            parser.parse_args(["timeline", "--interval", "20", "--no-watch"]),
+            parser.parse_args(["chart", "timeline", "--interval", "20", "--no-watch"]),
             explicit=frozenset({"interval", "no_watch"}),
         )
 
@@ -593,9 +592,9 @@ def test_historical_lifecycle_defaults_and_validation() -> None:
 def test_continuous_routes_reject_ambiguous_lifecycle_options() -> None:
     parser = build_parser(load_translator("en"))
     with pytest.raises(UsageError, match="error.arguments"):
-        _to_options(parser.parse_args(["monitor", "--no-watch"]), explicit=frozenset({"no_watch"}))
+        _to_options(parser.parse_args(["chart", "monitor", "--no-watch"]), explicit=frozenset({"no_watch"}))
     for arguments in (
-        ["timeline", "--watch"],
+        ["chart", "timeline", "--watch"],
         ["dashboard", "--watch"],
         ["dashboard", "--no-watch"],
         ["dashboard", "--interval", "20"],
@@ -621,9 +620,9 @@ def test_dashboard_uses_launcher_from_local_wrapper_environment(
 
 def test_ascii_conflicts_only_with_explicit_theme(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("ccusage_viz.cli.run", lambda *_args: 0)
-    assert main(["timeline", "--demo", "small", "--ascii"]) == 0
+    assert main(["chart", "timeline", "--demo", "small", "--ascii"]) == 0
     for theme in ("classic", "no-color"):
-        assert main(["timeline", "--demo", "small", "--ascii", "--theme", theme]) == 2
+        assert main(["chart", "timeline", "--demo", "small", "--ascii", "--theme", theme]) == 2
 
 
 @pytest.mark.parametrize(
@@ -667,7 +666,7 @@ def test_grouped_timeline_defaults_to_top_three(dimension: str) -> None:
 @pytest.mark.parametrize("dimension", ("agent", "model", "project"))
 def test_grouped_monitor_defaults_to_top_three(dimension: str) -> None:
     parser = build_parser(load_translator("en"))
-    options = _to_options(parser.parse_args(["monitor", "--by", dimension]))
+    options = _to_options(parser.parse_args(["chart", "monitor", "--by", dimension]))
 
     assert options.chart.top == 3
 
@@ -704,6 +703,7 @@ def test_monitor_parser_keeps_startup_selectors() -> None:
     options = _to_options(
         parser.parse_args(
             [
+                "chart",
                 "monitor",
                 "--agent",
                 "claude",
@@ -727,7 +727,7 @@ def test_monitor_parser_keeps_startup_selectors() -> None:
 def test_monitor_parser_rejects_unknown_grouping() -> None:
     parser = build_parser(load_translator("en"))
     with pytest.raises(UsageError) as caught:
-        parser.parse_args(["monitor", "--by", "token"])
+        parser.parse_args(["chart", "monitor", "--by", "token"])
     assert caught.value.key == "error.arguments"
 
 
@@ -763,6 +763,7 @@ def test_demo_seed_is_shared_by_dashboard_panes_and_varies_between_invocations()
 
 def test_global_language_options_precede_a_subcommand() -> None:
     assert _inject_default_command(["--lang", "zh", "timeline"]) == [
+        "chart",
         "timeline",
         "--lang",
         "zh",
@@ -772,10 +773,10 @@ def test_global_language_options_precede_a_subcommand() -> None:
 def test_ranking_defaults_to_dot_for_builtin_and_custom_commands() -> None:
     parser = build_parser(load_translator("en"))
 
-    builtin = _to_options(parser.parse_args(["ranking"]))
+    builtin = _to_options(parser.parse_args(["chart", "ranking"]))
     custom = _to_options(
         parser.parse_args(
-            ["custom", "ranking", "--dataset", "reading", "--command", "reader ccuv"]
+            ["chart", "ranking", "--dataset", "reading", "--command", "reader ccuv"]
         )
     )
 
@@ -783,9 +784,30 @@ def test_ranking_defaults_to_dot_for_builtin_and_custom_commands() -> None:
     assert custom.chart.presentation.style == "dot"
 
 
+def test_command_requires_a_dataset_source() -> None:
+    parser = build_parser(load_translator("en"))
+
+    with pytest.raises(UsageError) as caught:
+        _to_options(parser.parse_args(["chart", "timeline", "--command", "reader ccuv"]))
+
+    assert caught.value.key == "error.arguments"
+
+
+def test_custom_ranking_rejects_an_explicit_top_without_grouping() -> None:
+    parser = build_parser(load_translator("en"))
+    namespace = parser.parse_args(
+        ["chart", "ranking", "--dataset", "reading", "--command", "reader ccuv", "--top", "10"]
+    )
+
+    with pytest.raises(UsageError) as caught:
+        _to_options(namespace, explicit=frozenset({"top"}))
+
+    assert caught.value.key == "error.top_requires_by"
+
+
 def test_large_top_values_are_accepted() -> None:
     parser = build_parser(load_translator("en"))
-    assert _to_options(parser.parse_args(["ranking", "--top", "999"])).chart.top == 999
+    assert _to_options(parser.parse_args(["chart", "ranking", "--top", "999"])).chart.top == 999
 
 
 @pytest.mark.parametrize("timeout", ("0", "nan", "inf"))
@@ -1227,7 +1249,7 @@ def test_dashboard_rejects_removed_or_ambiguous_options(arguments: list[str]) ->
 )
 def test_obsolete_appearance_flags_are_rejected(flag: str) -> None:
     parser = build_parser(load_translator("en"))
-    args = ["timeline", flag, "nord"] if flag == "--color-scheme" else ["timeline", flag]
+    args = ["chart", "timeline", flag, "nord"] if flag == "--color-scheme" else ["chart", "timeline", flag]
     with pytest.raises(UsageError) as caught:
         parser.parse_args(args)
     assert caught.value.key == "error.arguments"

@@ -501,7 +501,7 @@ def test_dashboard_pane_height_keys_adjust_only_shared_row_weights(
 
 def test_dashboard_pane_adjustment_preserves_chart_top_shortcuts() -> None:
     parser = build_parser(load_translator("en"))
-    base = _to_options(parser.parse_args(["ranking"]))
+    base = _to_options(parser.parse_args(["chart", "ranking"]))
 
     assert tui_module.adjust_standalone(base, "+").chart.top == base.chart.top + 1
     assert tui_module.adjust_standalone(base, "-").chart.top == base.chart.top - 1

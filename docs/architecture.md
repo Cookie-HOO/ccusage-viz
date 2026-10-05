@@ -59,7 +59,7 @@ Chart products use four conceptual layers:
 
 | Layer | Concepts | Example |
 | --- | --- | --- |
-| **1. Route** | Route, launch request | `ccuv monitor` selects the Standalone Monitor operation. `ccuv dashboard` selects Dashboard and describes its Panes. Routing does not own runtime cadence or Component state. |
+| **1. Route** | Route, launch request | `ccuv chart monitor` selects the Standalone Monitor operation. `ccuv dashboard` selects Dashboard and describes its Panes. Routing does not own runtime cadence or Component state. |
 | **2. Query / Data Acquisition** | Config data scope, Query Intent, Provider, Provider Result | A Monitor Config specifies `by=model` and Filters. The logical planner combines them with Host context to produce a Query Intent. The `ccusage` Provider runs the query and returns normalized cumulative records. |
 | **3. Result Processing** | Processor/projector, semantic Chart Model | Monitor processing uses the Component's previous snapshot and Observer to derive increments, TPM, and time buckets, then projects those semantics to a Timeline or Ranking Model. Historical processing aggregates daily records independently. |
 | **4. Rendering** | Chart renderer, Chart Model, Theme, Style, Chart Render, Host composition, Painter | The selected Timeline or Ranking renderer consumes the projected Model. The Host adds Controls, Header, borders, and other product content to create a complete Frame; the Painter only diffs Frames and writes changed rows. |

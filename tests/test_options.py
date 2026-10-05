@@ -199,7 +199,7 @@ def timeline(
 
 
 def test_wrap_command_breaks_at_tokens_within_display_width() -> None:
-    command = "ccuv timeline --period 14d --by model --top 3"
+    command = "ccuv chart timeline --period 14d --by model --top 3"
     wrapped = wrap_command(command, 20)
     assert "\n" in wrapped
     assert " ".join(wrapped.splitlines()) == command
@@ -209,19 +209,20 @@ def test_wrap_command_breaks_at_tokens_within_display_width() -> None:
 def test_concise_commands_omit_effective_defaults() -> None:
     parser = build_parser(load_translator("en"))
 
-    assert format_command(_to_options(parser.parse_args(["timeline"]))) == (
-        "ccuv timeline --timezone Asia/Shanghai"
+    assert format_command(_to_options(parser.parse_args(["chart", "timeline"]))) == (
+        "ccuv chart timeline --timezone Asia/Shanghai"
     )
-    assert format_command(_to_options(parser.parse_args(["ranking"]))) == (
-        "ccuv ranking --timezone Asia/Shanghai"
+    assert format_command(_to_options(parser.parse_args(["chart", "ranking"]))) == (
+        "ccuv chart ranking --timezone Asia/Shanghai"
     )
-    assert format_command(_to_options(parser.parse_args(["monitor"]))) == (
-        "ccuv monitor --timezone Asia/Shanghai"
+    assert format_command(_to_options(parser.parse_args(["chart", "monitor"]))) == (
+        "ccuv chart monitor --timezone Asia/Shanghai"
     )
 
     explicit = _to_options(
         parser.parse_args(
             [
+                "chart",
                 "timeline",
                 "--period",
                 "14d",
@@ -240,16 +241,16 @@ def test_concise_commands_omit_effective_defaults() -> None:
             ]
         )
     )
-    assert format_command(explicit) == "ccuv timeline --timezone Asia/Shanghai"
+    assert format_command(explicit) == "ccuv chart timeline --timezone Asia/Shanghai"
 
 
 def test_concise_monitor_command_uses_grouped_effective_defaults() -> None:
     parser = build_parser(load_translator("en"))
-    grouped = _to_options(parser.parse_args(["monitor", "--by", "model"]))
+    grouped = _to_options(parser.parse_args(["chart", "monitor", "--by", "model"]))
 
-    assert format_command(grouped) == "ccuv monitor --by model --timezone Asia/Shanghai"
+    assert format_command(grouped) == "ccuv chart monitor --by model --timezone Asia/Shanghai"
     non_default = _to_options(
-        parser.parse_args(["monitor", "--by", "model", "--top", "4", "--style", "points"])
+        parser.parse_args(["chart", "monitor", "--by", "model", "--top", "4", "--style", "points"])
     )
     assert format_command(non_default).endswith("--timezone Asia/Shanghai --style points")
     assert "--by model --top 4" in format_command(non_default)
@@ -257,21 +258,21 @@ def test_concise_monitor_command_uses_grouped_effective_defaults() -> None:
 
 def test_concise_command_keeps_effect_bearing_private_project_filter() -> None:
     parser = build_parser(load_translator("en"))
-    launch = _to_options(parser.parse_args(["timeline", "--project", "/private/project"]))
+    launch = _to_options(parser.parse_args(["chart", "timeline", "--project", "/private/project"]))
 
     command = format_command(launch)
     reparsed = _to_options(parser.parse_args(shlex.split(command)[1:]))
 
-    assert command == "ccuv timeline --project /private/project --timezone Asia/Shanghai"
+    assert command == "ccuv chart timeline --project /private/project --timezone Asia/Shanghai"
     assert reparsed.chart.filters == launch.chart.filters
 
 
 def test_project_aggregation_round_trips_in_commands() -> None:
     parser = build_parser(load_translator("en"))
-    launch = _to_options(parser.parse_args(["ranking", "--project-aggregation", "exact"]))
+    launch = _to_options(parser.parse_args(["chart", "ranking", "--project-aggregation", "exact"]))
 
     assert format_command(launch) == (
-        "ccuv ranking --project-aggregation exact --timezone Asia/Shanghai"
+        "ccuv chart ranking --project-aggregation exact --timezone Asia/Shanghai"
     )
     reparsed = _to_options(parser.parse_args(shlex.split(format_command(launch))[1:]))
     assert reparsed.chart.project_aggregation == "exact"
@@ -482,12 +483,12 @@ def test_monitor_copy_keeps_startup_selection() -> None:
             by="model",
         ),
     )
-    assert format_command(launch) == "ccuv monitor --by model --agent claude --model sonnet"
+    assert format_command(launch) == "ccuv chart monitor --by model --agent claude --model sonnet"
 
 
 def test_full_command_preserves_implicit_until_semantics() -> None:
     parser = build_parser(load_translator("en"))
-    launch = _to_options(parser.parse_args(["timeline", "--since", "2026-09-01"]))
+    launch = _to_options(parser.parse_args(["chart", "timeline", "--since", "2026-09-01"]))
 
     reparsed = _to_options(parser.parse_args(shlex.split(format_full_command(launch))[1:]))
 

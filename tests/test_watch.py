@@ -1084,6 +1084,7 @@ def test_demo_watch_ignores_space_and_restores_terminal() -> None:
             sys.executable,
             "-m",
             "ccusage_viz",
+            "chart",
             "ranking",
             "--demo",
             "small",
@@ -1109,10 +1110,23 @@ def test_demo_watch_ignores_space_and_restores_terminal() -> None:
 
         os.write(master, b" ")
         time.sleep(0.1)
+        while True:
+            readable, _, _ = select.select([master], [], [], 0)
+            if not readable:
+                break
+            output.extend(os.read(master, 8192))
         assert b"paused" not in output
 
         os.write(master, b"\x03")
-        assert process.wait(timeout=3) == 0
+        deadline = time.monotonic() + 3
+        while process.poll() is None and time.monotonic() < deadline:
+            readable, _, _ = select.select([master], [], [], 0.1)
+            if readable:
+                try:
+                    output.extend(os.read(master, 8192))
+                except OSError:
+                    break
+        assert process.wait(timeout=0) == 0
         while True:
             readable, _, _ = select.select([master], [], [], 0.1)
             if not readable:

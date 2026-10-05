@@ -43,7 +43,7 @@ def _is_default_top(chart: object, by: str | None, top: int | None) -> bool:
 
 def _chart_args(config: StandaloneLaunch, *, full: bool, pane: bool = False) -> list[str]:
     chart = config.chart
-    args = [chart.kind]
+    args = [chart.kind] if pane else ["chart", chart.kind]
     if isinstance(chart, MonitorConfig):
         if full or chart.window_seconds != 3600:
             args.extend(("--window", _window_duration(chart.window_seconds)))
@@ -129,7 +129,7 @@ def _custom_chart_args(options: StandaloneLaunch, *, full: bool) -> list[str]:
     chart = options.chart
     if not isinstance(chart, CustomChartConfig):
         raise TypeError("custom command formatting requires a custom chart")
-    args = ["custom", chart.kind, *_custom_source_args(chart.source)]
+    args = ["chart", chart.kind, *_custom_source_args(chart.source)]
     date_range = chart.date_range
     if date_range.relative_until and date_range.period is not None:
         if full or date_range.period != COMMAND_DEFAULT_PERIODS[chart.kind]:
@@ -223,7 +223,7 @@ def format_full_dashboard_command(
             fragment = "empty"
         elif isinstance(pane_config, CustomChartPaneConfig):
             chart = pane_config.chart
-            fragment_args = ["custom", chart.kind, *_custom_source_args(chart.source)]
+            fragment_args = ["chart", chart.kind, *_custom_source_args(chart.source)]
             date_range = chart.date_range
             if date_range.relative_until and date_range.period is not None:
                 fragment_args.extend(("--period", date_range.period))

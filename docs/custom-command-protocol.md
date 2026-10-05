@@ -18,13 +18,13 @@ Choose a chart kind and a stable Dataset ID. Select exactly one source mode:
 
 ```bash
 # Installed Dataset: chart kind + Dataset ID, validated from ccuv's Dataset store.
-ccuv custom timeline --dataset weread
+ccuv chart timeline --dataset weread
 
 # Arbitrary developer command: chart kind + Dataset ID + command argv.
-ccuv custom timeline --dataset example --command 'example-reader ccuv'
-ccuv custom stack --dataset example --command 'example-reader ccuv'
-ccuv custom calendar --dataset example --command 'example-reader ccuv'
-ccuv custom ranking --dataset example --command 'example-reader ccuv'
+ccuv chart timeline --dataset example --command 'example-reader ccuv'
+ccuv chart stack --dataset example --command 'example-reader ccuv'
+ccuv chart calendar --dataset example --command 'example-reader ccuv'
+ccuv chart ranking --dataset example --command 'example-reader ccuv'
 ```
 
 `--dataset` is required. It is the stable identity of the source and every
@@ -35,7 +35,7 @@ executable path.
 deliberately use shell behavior, make the shell part of argv yourself:
 
 ```bash
-ccuv custom timeline --dataset example --command "sh -lc 'collector | adapter'"
+ccuv chart timeline --dataset example --command "sh -lc 'collector | adapter'"
 ```
 
 A custom chart begins with a 14-day, ungrouped total graph and a day-period

@@ -73,14 +73,9 @@ from ccusage_viz.options import (
 from ccusage_viz.render.palette import COLOR_SCHEMES
 
 _COMMANDS = (
-    "timeline",
-    "calendar",
-    "stack",
-    "ranking",
-    "monitor",
+    "chart",
     "dashboard",
     "animate",
-    "custom",
     "datasets",
     "text",
 )
@@ -141,6 +136,10 @@ def probe_short_circuit(argv: list[str]) -> ShortCircuitRoute | None:
     if not any(argument in help_flags for argument in argv):
         return None
     command = next((argument for argument in argv if argument in _COMMANDS), None)
+    if command == "chart":
+        chart_kind = next((argument for argument in argv if argument in _TUI_COMMANDS), None)
+        if chart_kind is not None:
+            command = f"chart {chart_kind}"
     language = None
     for index, argument in enumerate(argv[:-1]):
         if argument == "--lang" and argv[index + 1] in {"en", "zh"}:
@@ -155,7 +154,7 @@ def _render_short_circuit(route: ShortCircuitRoute) -> int:
         return 0
     tr = load_translator(route.language or detect_language())
     parser = build_parser(tr)
-    parser.parse_args([route.command, "--help"] if route.command else ["--help"])
+    parser.parse_args(route.command.split() + ["--help"] if route.command else ["--help"])
     raise AssertionError("argparse help did not exit")
 
 
@@ -378,60 +377,50 @@ def build_parser(tr: Translator) -> argparse.ArgumentParser:
         dest="command", metavar="COMMAND", help=tr.text("help.command")
     )
 
-    timeline = subparsers.add_parser(
-        "timeline", help=tr.text("help.timeline"), description=tr.text("help.timeline")
+    chart = subparsers.add_parser(
+        "chart", help=tr.text("help.chart"), description=tr.text("help.chart")
     )
-    _add_history_shared(timeline, tr, "timeline")
-    timeline.add_argument(
-        "--by",
-        choices=("agent", "model", "project"),
-        default=None,
-        help=tr.text("help.by"),
-    )
-    timeline.add_argument("--top", type=int, default=None, help=tr.text("help.top"))
-    timeline.add_argument(
-        "--project-aggregation",
-        choices=PROJECT_AGGREGATIONS,
-        default="name",
-        help=tr.text("help.project_aggregation"),
-    )
-    timeline.add_argument(
-        "--other", choices=OTHER_MODES, default="show", help=tr.text("help.other")
-    )
+    chart_subparsers = chart.add_subparsers(dest="chart_kind", required=True, metavar="KIND")
 
-    calendar = subparsers.add_parser(
-        "calendar", help=tr.text("help.calendar"), description=tr.text("help.calendar")
-    )
-    _add_history_shared(calendar, tr, "calendar")
+    def add_custom_source_arguments(chart_parser: argparse.ArgumentParser) -> None:
+        chart_parser.add_argument("--dataset", metavar="ID")
+        chart_parser.add_argument("--command", dest="command_text", metavar="TEXT")
+        chart_parser.add_argument(
+            "--filter", dest="custom_filters", action="append", default=[], metavar="ID=OPTION"
+        )
+        chart_parser.add_argument("--group-by")
 
-    stack = subparsers.add_parser(
-        "stack", help=tr.text("help.stack"), description=tr.text("help.stack")
-    )
-    _add_history_shared(stack, tr, "stack")
-    stack.add_argument(
-        "--cache", choices=CACHE_MODES, default="combined", help=tr.text("help.cache")
-    )
-
-    ranking = subparsers.add_parser(
-        "ranking", help=tr.text("help.ranking"), description=tr.text("help.ranking")
-    )
-    _add_history_shared(ranking, tr, "ranking")
-    ranking.add_argument(
-        "--by", choices=("agent", "model", "project"), default="project", help=tr.text("help.by")
-    )
-    ranking.add_argument("--top", type=int, default=10, help=tr.text("help.top"))
-    ranking.add_argument(
-        "--project-aggregation",
-        choices=PROJECT_AGGREGATIONS,
-        default="name",
-        help=tr.text("help.project_aggregation"),
-    )
-    ranking.add_argument("--other", choices=OTHER_MODES, default="show", help=tr.text("help.other"))
-
-    monitor = subparsers.add_parser(
-        "monitor", help=tr.text("help.monitor"), description=tr.text("help.monitor")
-    )
-    _add_monitor(monitor, tr)
+    for command in _TUI_COMMANDS:
+        chart_parser = chart_subparsers.add_parser(
+            command, help=tr.text(f"help.{command}"), description=tr.text(f"help.{command}")
+        )
+        if command == "monitor":
+            _add_monitor(chart_parser, tr)
+        else:
+            _add_history_shared(chart_parser, tr, command)
+            if command == "timeline":
+                chart_parser.add_argument(
+                    "--by", choices=("agent", "model", "project"), default=None, help=tr.text("help.by")
+                )
+                chart_parser.add_argument("--top", type=int, default=None, help=tr.text("help.top"))
+                chart_parser.add_argument(
+                    "--project-aggregation", choices=PROJECT_AGGREGATIONS, default="name",
+                    help=tr.text("help.project_aggregation"),
+                )
+                chart_parser.add_argument("--other", choices=OTHER_MODES, default="show", help=tr.text("help.other"))
+            elif command == "stack":
+                chart_parser.add_argument("--cache", choices=CACHE_MODES, default="combined", help=tr.text("help.cache"))
+            elif command == "ranking":
+                chart_parser.add_argument(
+                    "--by", choices=("agent", "model", "project"), default="project", help=tr.text("help.by")
+                )
+                chart_parser.add_argument("--top", type=int, default=10, help=tr.text("help.top"))
+                chart_parser.add_argument(
+                    "--project-aggregation", choices=PROJECT_AGGREGATIONS, default="name",
+                    help=tr.text("help.project_aggregation"),
+                )
+                chart_parser.add_argument("--other", choices=OTHER_MODES, default="show", help=tr.text("help.other"))
+        add_custom_source_arguments(chart_parser)
 
     tui = subparsers.add_parser(
         "dashboard", help=tr.text("help.dashboard"), description=tr.text("help.dashboard")
@@ -444,12 +433,6 @@ def build_parser(tr: Translator) -> argparse.ArgumentParser:
     )
     tui.add_argument("--empty", action="store_true", help=argparse.SUPPRESS)
     _add_tui(tui, tr)
-
-    custom = subparsers.add_parser("custom", help="Render a custom command-backed chart")
-    custom_subparsers = custom.add_subparsers(dest="custom_kind", required=True, metavar="COMMAND")
-    for command in _CUSTOM_COMMANDS:
-        custom_parser = custom_subparsers.add_parser(command)
-        _add_custom_history(custom_parser, tr, command)
 
     datasets = subparsers.add_parser(
         "datasets", help=tr.text("help.datasets"), description=tr.text("help.datasets")
@@ -542,23 +525,29 @@ def _parse_window(value: str) -> int:
 
 def _inject_default_command(argv: list[str]) -> list[str]:
     if not argv:
-        return ["timeline"]
+        return ["chart", "timeline"]
     if argv[0] in _COMMANDS or argv[0] in {"-h", "--help", "--version"}:
         return argv
     leading: list[str] = []
     remaining = list(argv)
     while remaining and remaining[0] == "--lang":
         if len(remaining) < 2:
-            return ["timeline", *argv]
+            return ["chart", "timeline", *argv]
         leading.extend(remaining[:2])
         remaining = remaining[2:]
     if remaining and remaining[0] in _COMMANDS:
         return [remaining[0], *leading, *remaining[1:]]
-    return ["timeline", *argv]
+    if remaining and remaining[0] in _TUI_COMMANDS:
+        return ["chart", remaining[0], *leading, *remaining[1:]]
+    return ["chart", "timeline", *argv]
+
+
+def _chart_kind(namespace: argparse.Namespace) -> str:
+    return getattr(namespace, "chart_kind", None) or namespace.command or "timeline"
 
 
 def _chart_from_namespace(namespace: argparse.Namespace, *, timezone: str | None = None):
-    command = namespace.command or "timeline"
+    command = _chart_kind(namespace)
     filters = Filters(
         tuple(namespace.agent), tuple(namespace.model), tuple(getattr(namespace, "project", ()))
     )
@@ -640,8 +629,18 @@ def _request_timezone(namespace: argparse.Namespace) -> str:
 
 
 def _custom_chart_from_namespace(
-    namespace: argparse.Namespace, *, timezone: str | None = None
+    namespace: argparse.Namespace,
+    *,
+    timezone: str | None = None,
+    explicit: frozenset[str] = frozenset(),
 ) -> CustomChartConfig:
+    unsupported = explicit & {"agent", "model", "project", "by", "project_aggregation", "cache"}
+    if unsupported:
+        names = ", ".join(f"--{name.replace('_', '-')}" for name in sorted(unsupported))
+        raise UsageError(
+            "error.arguments",
+            detail=f"{names} cannot be combined with --dataset; use --filter or --group-by",
+        )
     filters: dict[str, set[str]] = {}
     for value in namespace.custom_filters:
         filter_id, separator, option_id = value.partition("=")
@@ -662,9 +661,11 @@ def _custom_chart_from_namespace(
         if not command_argv:
             raise UsageError("error.arguments", detail="--command must not be empty")
         source = CustomCommandSource(namespace.dataset, command_argv)
-    kind = namespace.custom_kind
+    kind = _chart_kind(namespace)
     group_by = namespace.group_by
     top = getattr(namespace, "top", None)
+    if kind == "ranking" and group_by is None and top == 10 and "top" not in explicit:
+        top = None
     if top is not None and top < 1:
         raise UsageError("error.top_positive")
     if top is not None and group_by is None:
@@ -708,9 +709,10 @@ def _validate_chart(
     by = getattr(chart, "by", None)
     if top is not None and top < 1:
         raise UsageError("error.top_positive")
-    if namespace.command in {"timeline", "monitor"} and top is not None and by is None:
+    command = _chart_kind(namespace)
+    if command in {"timeline", "monitor"} and top is not None and by is None:
         raise UsageError("error.top_requires_by")
-    if chart.presentation.style not in compatible_styles(namespace.command, by):
+    if chart.presentation.style not in compatible_styles(command, by):
         raise UsageError(
             "error.style_incompatible", style=chart.presentation.style, mode=by or "total"
         )
@@ -718,16 +720,16 @@ def _validate_chart(
     requested = getattr(namespace, "interval", None)
     if no_watch and "interval" in explicit:
         raise UsageError("error.arguments", detail="--interval cannot be combined with --no-watch")
-    if namespace.command == "monitor" and no_watch:
+    if command == "monitor" and no_watch:
         raise UsageError("error.arguments", detail="monitor does not support --no-watch")
     interval = requested
-    if namespace.command == "monitor" and interval is None:
+    if command == "monitor" and interval is None:
         interval = 1.0 if demo is not None else 15.0
     minimum = (
         1
-        if namespace.command == "monitor" and demo is not None
+        if command == "monitor" and demo is not None
         else 5
-        if namespace.command == "monitor"
+        if command == "monitor"
         else 2
     )
     if interval is not None and (not math.isfinite(interval) or interval < minimum):
@@ -761,7 +763,11 @@ def parse_pane_fragment(
         return EmptyPaneConfig()
     if not tokens:
         raise UsageError("error.tui_panel", value=fragment)
-    if tokens[0] == "custom":
+    is_custom_pane = tokens[0] == "custom" or (
+        tokens[0] == "chart"
+        and any(token == "--dataset" or token.startswith("--dataset=") for token in tokens[1:])
+    )
+    if is_custom_pane:
         if any(
             token.split("=", 1)[0] in _PANE_FORBIDDEN_OPTIONS
             or token.split("=", 1)[0].startswith("--header-")
@@ -769,11 +775,15 @@ def parse_pane_fragment(
         ):
             raise UsageError("error.tui_panel", value=fragment)
         try:
-            namespace = build_parser(Translator("en", dict(CATALOGS["en"]))).parse_args(tokens)
-            chart = _custom_chart_from_namespace(
-                namespace, timezone=host.host.timezone if host is not None else None
+            namespace = build_parser(Translator("en", dict(CATALOGS["en"]))).parse_args(
+                ["chart", *tokens[1:]]
             )
             explicit = _explicit_fields(tokens)
+            chart = _custom_chart_from_namespace(
+                namespace,
+                timezone=host.host.timezone if host is not None else None,
+                explicit=explicit,
+            )
             if "density" not in explicit:
                 chart = replace(chart, presentation=replace(chart.presentation, density="compact"))
             if host is not None and host.host.ascii and "color_scheme" in explicit:
@@ -841,7 +851,9 @@ def parse_pane_fragment(
         raise UsageError("error.tui_panel", value=fragment)
     explicit = _explicit_fields(tokens)
     try:
-        namespace = build_parser(Translator("en", dict(CATALOGS["en"]))).parse_args(tokens)
+        namespace = build_parser(Translator("en", dict(CATALOGS["en"]))).parse_args(
+            ["chart", *tokens]
+        )
         chart = _chart_from_namespace(
             namespace, timezone=host.host.timezone if host is not None else None
         )
@@ -869,10 +881,12 @@ def _to_options(
     explicit: frozenset[str] = frozenset(),
     launcher: str = "ccuv",
 ) -> LaunchConfig:
-    command = namespace.command or "timeline"
-    if command == "custom":
+    command = namespace.command or "chart"
+    if getattr(namespace, "command_text", None) is not None and getattr(namespace, "dataset", None) is None:
+        raise UsageError("error.arguments", detail="--command requires --dataset")
+    if getattr(namespace, "dataset", None) is not None:
         timezone = _request_timezone(namespace)
-        chart = _custom_chart_from_namespace(namespace, timezone=timezone)
+        chart = _custom_chart_from_namespace(namespace, timezone=timezone, explicit=explicit)
         process = ProcessConfig(
             ccusage_bin=namespace.ccusage_bin,
             query_timeout=namespace.query_timeout,

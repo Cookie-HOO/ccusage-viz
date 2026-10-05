@@ -366,13 +366,13 @@ def test_dashboard_pane_copy_materializes_canonical_standalone_interval() -> Non
 
     assert format_dashboard_pane_command(
         standalone_from_chart_pane(base, timeline), refresh_interval=30
-    ) == ("ccuv timeline --period 7d --timezone Asia/Shanghai --interval 30 --density compact")
+    ) == ("ccuv chart timeline --period 7d --timezone Asia/Shanghai --interval 30 --density compact")
     assert format_dashboard_pane_command(
         standalone_from_chart_pane(base, stack), refresh_interval=30
-    ) == ("ccuv stack --timezone Asia/Shanghai --interval 30 --density compact")
+    ) == ("ccuv chart stack --timezone Asia/Shanghai --interval 30 --density compact")
     assert format_dashboard_pane_command(
         standalone_from_chart_pane(base, monitor), refresh_interval=30, sampling_interval=15
-    ) == ("ccuv monitor --by model --timezone Asia/Shanghai --density compact")
+    ) == ("ccuv chart monitor --by model --timezone Asia/Shanghai --density compact")
 
 
 def test_dashboard_pane_command_views_wrap_without_affecting_copy_payload() -> None:
@@ -443,7 +443,7 @@ def test_dashboard_monitor_default_does_not_change_explicit_or_standalone_total(
     parser = build_parser(load_translator("en"))
     dashboard = _to_options(parser.parse_args(["dashboard", "--pane", "monitor"]))
     panel = dashboard.panes[0]
-    standalone = _to_options(parser.parse_args(["monitor"]))
+    standalone = _to_options(parser.parse_args(["chart", "monitor"]))
 
     assert _new_pane_options("monitor", dashboard).chart.by == "model"
     assert panel.chart.by is None
