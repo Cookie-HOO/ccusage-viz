@@ -8,6 +8,7 @@ from threading import Event
 
 from ccusage_viz.coverage import DateCoverage
 from ccusage_viz.custom_protocol import (
+    CustomProbeRequest,
     CustomProtocolError,
     CustomRequest,
     canonical_custom_request_key,
@@ -49,7 +50,10 @@ class CustomCommandProvider:
         custom_request = intent.payload
         if not isinstance(custom_request, CustomRequest):
             raise ValueError("custom-command intent requires a custom request")
-        if intent.provider.source_id != custom_request.dataset_id:
+        if (
+            not isinstance(custom_request, CustomProbeRequest)
+            and intent.provider.source_id != custom_request.dataset_id
+        ):
             raise ValueError("custom-command provider source must match request dataset")
         arguments = tuple(
             json.dumps(value, separators=(",", ":"), ensure_ascii=True)

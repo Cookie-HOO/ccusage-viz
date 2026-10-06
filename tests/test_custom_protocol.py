@@ -58,7 +58,6 @@ def summary_request(**changes: object) -> CustomSummaryRequest:
 def probe_request(**changes: object) -> CustomProbeRequest:
     values: dict[str, object] = {
         "request_id": "probe-1",
-        "dataset_id": "weread",
         "command_argv": ("reader", "ccuv"),
     }
     values.update(changes)
@@ -93,7 +92,7 @@ def probe_response() -> dict[str, object]:
         "protocol": PROTOCOL_VERSION,
         "request_id": request.request_id,
         "request_kind": "probe",
-        "dataset_id": request.dataset_id,
+        "dataset_id": "weread",
         "status": "ok",
         "descriptor": {
             "revision": "weread-1",
@@ -179,6 +178,7 @@ def test_probe_response_parses_dataset_capabilities_and_defaults() -> None:
     result = parse_custom_response(json.dumps(probe_response()).encode(), probe_request())
 
     descriptor = result.descriptor  # type: ignore[union-attr]
+    assert result.dataset_id == "weread"  # type: ignore[union-attr]
     assert descriptor.dataset.title.zh_cn == "微信读书"
     assert descriptor.defaults["ranking"].period == "1y"
     assert descriptor.defaults["ranking"].group_by == "book"
@@ -194,12 +194,10 @@ def test_probe_request_has_no_query_or_timezone() -> None:
         "protocol": PROTOCOL_VERSION,
         "request_id": "probe-1",
         "request_kind": "probe",
-        "dataset_id": "weread",
     }
     assert canonical_custom_request_key(request) == (
         ("reader", "ccuv"),
         (),
-        "weread",
         "probe",
     )
 
@@ -358,12 +356,19 @@ def test_fixed_chart_request_serializes_null_period() -> None:
     assert chart_request(period=None).to_wire()["range"]["period"] is None
 
 
-@pytest.mark.parametrize("field", ["protocol", "request_id", "dataset_id", "request_kind"])
+@pytest.mark.parametrize("field", ["protocol", "request_id", "request_kind"])
 def test_response_envelope_must_match_request(field: str) -> None:
     response = chart_response()
     response[field] = "other"
     with pytest.raises(CustomProtocolError):
         parse_custom_response(json.dumps(response).encode(), chart_request())
+
+
+def test_chart_response_does_not_require_dataset_id_echo() -> None:
+    response = chart_response()
+    response.pop("dataset_id")
+
+    assert parse_custom_response(json.dumps(response).encode(), chart_request())
 
 
 def test_error_response_preserves_structured_dataset_failure() -> None:

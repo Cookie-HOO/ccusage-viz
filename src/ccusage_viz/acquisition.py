@@ -158,14 +158,13 @@ def custom_probe_query_intent(
     process = process or ProcessConfig()
     request = CustomProbeRequest(
         request_id=f"{owner_id}:{generation}:probe",
-        dataset_id=source.dataset_id,
         command_argv=source.command_argv,
     )
     return QueryIntent(
         owner_id=owner_id,
         generation=generation,
         trigger=trigger,
-        provider=ProviderRef("custom-command", source.dataset_id),
+        provider=ProviderRef("custom-command"),
         scope=DataScope(()),
         missing_intervals=(),
         resolution=DataResolution.DATE,

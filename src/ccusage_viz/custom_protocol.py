@@ -13,16 +13,16 @@ from ccusage_viz.coverage import DateInterval
 from ccusage_viz.custom_models import (
     CustomCapabilities,
     CustomChartCapability,
+    CustomChartDefaults,
     CustomComparison,
     CustomData,
     CustomDataset,
     CustomDimension,
     CustomEnvironmentDeclaration,
-    CustomChartDefaults,
-    CustomProbeDescriptor,
     CustomFilter,
     CustomFilterOption,
     CustomPoint,
+    CustomProbeDescriptor,
     CustomProtocolFailure,
     CustomProtocolWarning,
     CustomSeries,
@@ -152,21 +152,18 @@ class CustomSummaryRequest:
 @dataclass(frozen=True, slots=True)
 class CustomProbeRequest:
     request_id: str
-    dataset_id: str
     command_argv: tuple[str, ...] = ()
     execution_context: tuple[tuple[str, str], ...] = ()
     request_kind: Literal["probe"] = "probe"
 
     def __post_init__(self) -> None:
         _require_id(self.request_id, "request ID")
-        _require_id(self.dataset_id, "dataset ID")
 
     def to_wire(self) -> dict[str, object]:
         return {
             "protocol": PROTOCOL_VERSION,
             "request_id": self.request_id,
             "request_kind": self.request_kind,
-            "dataset_id": self.dataset_id,
         }
 
     def to_json_bytes(self) -> bytes:
@@ -192,6 +189,7 @@ class CustomSummaryResponse:
 
 @dataclass(frozen=True, slots=True)
 class CustomProbeResponse:
+    dataset_id: str
     descriptor: CustomProbeDescriptor
     warnings: tuple[CustomProtocolWarning, ...] = field(default=(), kw_only=True)
 
@@ -214,14 +212,14 @@ CustomDashboardSummaryResponse = CustomSummaryResponse
 
 
 def canonical_custom_request_key(request: CustomRequest) -> tuple[object, ...]:
+    if isinstance(request, CustomProbeRequest):
+        return (request.command_argv, request.execution_context, request.request_kind)
     common: tuple[object, ...] = (
         request.command_argv,
         request.execution_context,
         request.dataset_id,
         request.request_kind,
     )
-    if isinstance(request, CustomProbeRequest):
-        return common
     common += (request.timezone,)
     if isinstance(request, CustomChartRequest):
         return common + (
@@ -264,7 +262,11 @@ def parse_custom_response(raw: bytes, request: CustomRequest) -> CustomResponse:
         )
     if isinstance(request, CustomSummaryRequest):
         return CustomSummaryResponse(_parse_summary(root.get("summary")), warnings=warnings)
-    return CustomProbeResponse(_parse_probe_descriptor(root.get("descriptor")), warnings=warnings)
+    return CustomProbeResponse(
+        _string(root.get("dataset_id"), "probe response dataset ID"),
+        _parse_probe_descriptor(root.get("descriptor")),
+        warnings=warnings,
+    )
 
 
 def _validate_envelope(root: dict[str, object], request: CustomRequest) -> None:
@@ -272,7 +274,6 @@ def _validate_envelope(root: dict[str, object], request: CustomRequest) -> None:
         raise CustomProtocolError(f"unsupported protocol version: {root.get('protocol')!r}")
     for field_name, expected in (
         ("request_id", request.request_id),
-        ("dataset_id", request.dataset_id),
         ("request_kind", request.request_kind),
     ):
         received = root.get(field_name)
