@@ -4,8 +4,11 @@ import os
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Literal, cast
 
+from ccusage_viz.custom_models import CustomEnvironmentDeclaration, CustomProbeDescriptor
+from ccusage_viz.custom_protocol import parse_probe_descriptor, probe_descriptor_to_wire
 from ccusage_viz.errors import UsageError
 
 _DATASET_ID = re.compile(r"[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
@@ -499,3 +502,146 @@ def parse_sha256(value: str) -> str:
     if not _SHA256.fullmatch(value):
         raise UsageError("error.dataset_invalid_sha256")
     return value
+
+
+@dataclass(frozen=True, slots=True)
+class LocalDatasetSource:
+    command_argv: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if not self.command_argv or any(not item for item in self.command_argv):
+            raise ValueError("local Dataset command is invalid")
+
+
+@dataclass(frozen=True, slots=True)
+class DatasetProbeSnapshot:
+    dataset_id: str
+    descriptor: CustomProbeDescriptor
+    refreshed_at: str
+
+    def __post_init__(self) -> None:
+        if not _DATASET_ID.fullmatch(self.dataset_id):
+            raise ValueError("Dataset probe ID is invalid")
+        try:
+            datetime.fromisoformat(self.refreshed_at)
+        except ValueError as exc:
+            raise ValueError("Dataset probe timestamp is invalid") from exc
+
+
+@dataclass(frozen=True, slots=True)
+class DatasetRegistration:
+    dataset_id: str
+    source: LocalDatasetSource
+    enabled: bool
+    created_at: str
+    updated_at: str
+    probe: DatasetProbeSnapshot
+    last_probe_error: str | None = None
+
+    def __post_init__(self) -> None:
+        if not _DATASET_ID.fullmatch(self.dataset_id):
+            raise ValueError("Dataset registration ID is invalid")
+        if self.probe.dataset_id != self.dataset_id:
+            raise ValueError("Dataset registration ID must match probe ID")
+        for value in (self.created_at, self.updated_at):
+            try:
+                datetime.fromisoformat(value)
+            except ValueError as exc:
+                raise ValueError("Dataset registration timestamp is invalid") from exc
+        if self.last_probe_error is not None and not self.last_probe_error.strip():
+            raise ValueError("Dataset probe error is invalid")
+
+    def to_wire(self) -> dict[str, object]:
+        return {
+            "schema": 1,
+            "dataset_id": self.dataset_id,
+            "source": {"kind": "local", "command_argv": list(self.source.command_argv)},
+            "enabled": self.enabled,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+            "probe": {
+                "dataset_id": self.probe.dataset_id,
+                "descriptor": probe_descriptor_to_wire(self.probe.descriptor),
+                "refreshed_at": self.probe.refreshed_at,
+            },
+            **({"last_probe_error": self.last_probe_error} if self.last_probe_error else {}),
+        }
+
+    @classmethod
+    def parse(cls, value: object) -> DatasetRegistration:
+        if not isinstance(value, Mapping) or value.get("schema") != 1:
+            raise ValueError("Dataset registration is invalid")
+        allowed = {
+            "schema",
+            "dataset_id",
+            "source",
+            "enabled",
+            "created_at",
+            "updated_at",
+            "probe",
+            "last_probe_error",
+        }
+        if not set(value).issubset(allowed) or {
+            "schema", "dataset_id", "source", "enabled", "created_at", "updated_at", "probe"
+        } - set(value):
+            raise ValueError("Dataset registration has unsupported or missing fields")
+        dataset_id = value.get("dataset_id")
+        source = value.get("source")
+        probe = value.get("probe")
+        created_at = value.get("created_at")
+        updated_at = value.get("updated_at")
+        enabled = value.get("enabled")
+        last_probe_error = value.get("last_probe_error")
+        if (
+            not isinstance(dataset_id, str)
+            or not isinstance(source, Mapping)
+            or set(source) != {"kind", "command_argv"}
+            or source.get("kind") != "local"
+            or not isinstance(source.get("command_argv"), list)
+            or not all(isinstance(item, str) for item in source["command_argv"])
+            or not isinstance(probe, Mapping)
+            or set(probe) != {"dataset_id", "descriptor", "refreshed_at"}
+            or not isinstance(created_at, str)
+            or not isinstance(updated_at, str)
+            or not isinstance(enabled, bool)
+            or (last_probe_error is not None and not isinstance(last_probe_error, str))
+        ):
+            raise ValueError("Dataset registration is invalid")
+        probe_id = probe.get("dataset_id")
+        refreshed_at = probe.get("refreshed_at")
+        if not isinstance(probe_id, str) or not isinstance(refreshed_at, str):
+            raise ValueError("Dataset registration probe is invalid")
+        return cls(
+            dataset_id,
+            LocalDatasetSource(tuple(cast(list[str], source["command_argv"]))),
+            enabled,
+            created_at,
+            updated_at,
+            DatasetProbeSnapshot(
+                probe_id,
+                parse_probe_descriptor(probe.get("descriptor")),
+                refreshed_at,
+            ),
+            last_probe_error,
+        )
+
+
+DatasetAvailability = Literal["ready", "setup_required", "unavailable", "disabled"]
+RegistrationResultKind = Literal["created", "already_registered", "conflict", "replaced"]
+
+
+@dataclass(frozen=True, slots=True)
+class DatasetRegistrationStatus:
+    registration: DatasetRegistration
+    availability: DatasetAvailability
+    missing_environment: tuple[CustomEnvironmentDeclaration, ...] = ()
+
+    @property
+    def ready(self) -> bool:
+        return self.availability == "ready"
+
+
+@dataclass(frozen=True, slots=True)
+class RegisterResult:
+    kind: RegistrationResultKind
+    registration: DatasetRegistration

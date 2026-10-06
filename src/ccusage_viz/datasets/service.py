@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import os
 import platform as system_platform
 import shutil
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
 
+from ccusage_viz.acquisition import custom_probe_query_intent
+from ccusage_viz.custom_protocol import CustomProbeResponse
 from ccusage_viz.datasets.archive import extract_dataset_archive, sha256_bytes
 from ccusage_viz.datasets.github import (
     download_release_artifact,
@@ -13,7 +18,12 @@ from ccusage_viz.datasets.github import (
     resolve_official_artifact,
 )
 from ccusage_viz.datasets.models import (
+    DatasetProbeSnapshot,
+    DatasetRegistration,
+    DatasetRegistrationStatus,
     DatasetStatus,
+    LocalDatasetSource,
+    RegisterResult,
     ReleaseArtifact,
     environment_status,
     parse_dataset_id,
@@ -21,6 +31,7 @@ from ccusage_viz.datasets.models import (
 from ccusage_viz.datasets.paths import dataset_state_root
 from ccusage_viz.datasets.store import DatasetStore
 from ccusage_viz.errors import UsageError
+from ccusage_viz.lifecycle import QueryTrigger
 from ccusage_viz.options import CustomCommandSource
 
 
@@ -41,10 +52,97 @@ class DatasetService:
         root: Path | None = None,
         environ: Mapping[str, str] | None = None,
         platform: tuple[str, str] | None = None,
+        probe_runner: Callable[[tuple[str, ...]], CustomProbeResponse] | None = None,
     ) -> None:
         self.environ = environ
         self.store = DatasetStore(dataset_state_root(environ=environ) if root is None else root)
         self.platform = host_platform() if platform is None else platform
+        self.probe_runner = self._run_probe if probe_runner is None else probe_runner
+
+    def _run_probe(self, command_argv: tuple[str, ...]) -> CustomProbeResponse:
+        from ccusage_viz.bootstrap import build_query_runtime
+
+        source = CustomCommandSource("probe", command_argv)
+        intent = custom_probe_query_intent(
+            source,
+            owner_id="dataset:registration",
+            generation=0,
+            trigger=QueryTrigger.STARTUP,
+        )
+        result = build_query_runtime(max_parallel=1).acquire(intent)
+        response = result.custom_response
+        if not isinstance(response, CustomProbeResponse):
+            raise RuntimeError("custom probe did not return a probe response")
+        return response
+
+    def registrations(self) -> tuple[DatasetRegistrationStatus, ...]:
+        statuses: list[DatasetRegistrationStatus] = []
+        for registration in self.store.registrations():
+            if not registration.enabled:
+                statuses.append(DatasetRegistrationStatus(registration, "disabled"))
+                continue
+            if registration.last_probe_error is not None:
+                statuses.append(DatasetRegistrationStatus(registration, "unavailable"))
+                continue
+            missing = tuple(
+                item
+                for item in registration.probe.descriptor.environment
+                if item.required and not self._environment_present(item.name)
+            )
+            statuses.append(
+                DatasetRegistrationStatus(
+                    registration,
+                    "setup_required" if missing else "ready",
+                    missing,
+                )
+            )
+        return tuple(statuses)
+
+    def _environment_present(self, name: str) -> bool:
+        return bool((self.environ if self.environ is not None else os.environ).get(name))
+
+    def registered_command_source(self, dataset_id: str) -> CustomCommandSource:
+        registration = self.store.load_registration(parse_dataset_id(dataset_id))
+        status = next(
+            (item for item in self.registrations() if item.registration.dataset_id == registration.dataset_id),
+            None,
+        )
+        if status is None or not status.ready:
+            raise UsageError("error.dataset_environment_missing", dataset_id=registration.dataset_id)
+        return CustomCommandSource(registration.dataset_id, registration.source.command_argv)
+
+    def register_local_command(
+        self, command_argv: tuple[str, ...], *, replace: bool = False
+    ) -> RegisterResult:
+        source = LocalDatasetSource(command_argv)
+        probe = self.probe_runner(source.command_argv)
+        identifier = parse_dataset_id(probe.dataset_id)
+        now = datetime.now(UTC).isoformat()
+        snapshot = DatasetProbeSnapshot(identifier, probe.descriptor, now)
+        candidate = DatasetRegistration(identifier, source, True, now, now, snapshot)
+        try:
+            current = self.store.load_registration(identifier)
+        except UsageError as error:
+            if error.key != "error.dataset_not_installed":
+                raise
+            self.store.save_registration(candidate)
+            return RegisterResult("created", candidate)
+        if current.source == candidate.source:
+            return RegisterResult("already_registered", current)
+        if not replace:
+            return RegisterResult("conflict", candidate)
+        replacement = replace_registration(current, candidate)
+        self.store.save_registration(replacement)
+        return RegisterResult("replaced", replacement)
+
+    def set_enabled(self, dataset_id: str, enabled: bool) -> DatasetRegistration:
+        current = self.store.load_registration(parse_dataset_id(dataset_id))
+        updated = replace(current, enabled=enabled, updated_at=datetime.now(UTC).isoformat())
+        self.store.save_registration(updated)
+        return updated
+
+    def remove_registration(self, dataset_id: str) -> None:
+        self.store.remove_registration(parse_dataset_id(dataset_id))
 
     def status(self, dataset_id: str | None = None) -> tuple[DatasetStatus, ...]:
         if dataset_id is not None:
@@ -225,3 +323,12 @@ class DatasetService:
 
     def remove(self, dataset_id: str) -> None:
         self.store.remove(dataset_id)
+
+
+def replace_registration(current: DatasetRegistration, candidate: DatasetRegistration) -> DatasetRegistration:
+    return replace(
+        candidate,
+        enabled=True,
+        created_at=current.created_at,
+        updated_at=datetime.now(UTC).isoformat(),
+    )

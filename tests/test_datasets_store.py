@@ -5,7 +5,21 @@ from pathlib import Path
 
 import pytest
 
-from ccusage_viz.datasets.models import DatasetManifest
+from ccusage_viz.custom_models import (
+    CustomCapabilities,
+    CustomChartCapability,
+    CustomChartDefaults,
+    CustomDataset,
+    CustomProbeDescriptor,
+    CustomUnit,
+    LocalizedText,
+)
+from ccusage_viz.datasets.models import (
+    DatasetManifest,
+    DatasetProbeSnapshot,
+    DatasetRegistration,
+    LocalDatasetSource,
+)
 from ccusage_viz.datasets.store import DatasetStore
 from ccusage_viz.errors import UsageError
 
@@ -41,6 +55,26 @@ def write_staged_dataset(path: Path) -> DatasetManifest:
     executable.write_text("#!/bin/sh\nexit 0\n")
     executable.chmod(0o755)
     return manifest
+
+
+def registration() -> DatasetRegistration:
+    text = LocalizedText("WeRead", "微信读书")
+    descriptor = CustomProbeDescriptor(
+        "weread-1",
+        "0.1.0",
+        CustomDataset(text, text, CustomUnit("minute", text, "suffix", 2)),
+        CustomCapabilities((), (), {"timeline": CustomChartCapability(("day",), (), ())}),
+        {"timeline": CustomChartDefaults("14d", None, None)},
+        (),
+    )
+    return DatasetRegistration(
+        "weread",
+        LocalDatasetSource(("weread", "ccuv")),
+        True,
+        "2026-10-07T00:00:00+00:00",
+        "2026-10-07T00:00:00+00:00",
+        DatasetProbeSnapshot("weread", descriptor, "2026-10-07T00:00:00+00:00"),
+    )
 
 
 def test_store_installs_loads_and_removes_active_version(tmp_path: Path) -> None:
@@ -150,3 +184,18 @@ def test_store_detects_tampered_manifest_as_corrupt(tmp_path: Path) -> None:
         store.load("reading-time")
 
     assert caught.value.key == "error.dataset_corrupt"
+
+
+def test_store_round_trips_local_registration_without_a_managed_artifact(tmp_path: Path) -> None:
+    store = DatasetStore(tmp_path / "datasets")
+    record = registration()
+
+    store.save_registration(record)
+
+    assert store.registration_ids() == ("weread",)
+    assert store.load_registration("weread") == record
+    assert store.registrations() == (record,)
+    assert not (tmp_path / "datasets" / "weread").exists()
+
+    store.remove_registration("weread")
+    assert store.registration_ids() == ()

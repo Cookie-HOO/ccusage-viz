@@ -403,6 +403,87 @@ def _parse_probe_descriptor(value: object) -> CustomProbeDescriptor:
     )
 
 
+def parse_probe_descriptor(value: object) -> CustomProbeDescriptor:
+    """Parse a persisted static Dataset descriptor without a response envelope."""
+
+    return _parse_probe_descriptor(value)
+
+
+def probe_descriptor_to_wire(descriptor: CustomProbeDescriptor) -> dict[str, object]:
+    """Serialize the safe static metadata persisted for a managed Dataset."""
+
+    def localized(value: LocalizedText) -> dict[str, str]:
+        return {"en": value.en, "zh-CN": value.zh_cn}
+
+    def unit(value: CustomUnit) -> dict[str, object]:
+        return {
+            "id": value.id,
+            "label": localized(value.label),
+            "placement": value.placement,
+            "decimal_places": value.decimal_places,
+        }
+
+    def dataset(value: CustomDataset) -> dict[str, object]:
+        return {
+            "title": localized(value.title),
+            "description": localized(value.description),
+            "unit": unit(value.unit),
+        }
+
+    capabilities = {
+        "group_by": [
+            {"id": item.id, "label": localized(item.label)}
+            for item in descriptor.capabilities.group_by
+        ],
+        "filters": [
+            {
+                "id": item.id,
+                "label": localized(item.label),
+                "mode": item.mode,
+                "options": [
+                    {"id": option.id, "label": localized(option.label)}
+                    for option in item.options
+                ],
+            }
+            for item in descriptor.capabilities.filters
+        ],
+        "charts": {
+            kind: {
+                "granularities": list(value.granularities),
+                "group_by": list(value.group_by),
+                "filters": list(value.filters),
+            }
+            for kind, value in sorted(descriptor.capabilities.charts.items())
+        },
+    }
+    return {
+        "revision": descriptor.revision,
+        "version": descriptor.version,
+        **(
+            {"source_timezone": descriptor.source_timezone}
+            if descriptor.source_timezone is not None
+            else {}
+        ),
+        "dataset": dataset(descriptor.dataset),
+        "capabilities": capabilities,
+        "defaults": {
+            kind: {"period": value.period, "group_by": value.group_by, "top": value.top}
+            for kind, value in sorted(descriptor.defaults.items())
+        },
+        "environment": [
+            {
+                "name": item.name,
+                "required": item.required,
+                "sensitive": item.sensitive,
+                "label": localized(item.label),
+                "how_to_get": localized(item.how_to_get),
+                **({"help_url": item.help_url} if item.help_url is not None else {}),
+            }
+            for item in descriptor.environment
+        ],
+    }
+
+
 def _parse_environment_declaration(value: object) -> CustomEnvironmentDeclaration:
     source = _mapping(value, "environment declaration")
     expected = {"name", "required", "sensitive", "label", "how_to_get"}

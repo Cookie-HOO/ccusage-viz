@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
-from ccusage_viz.datasets.models import DatasetManifest, InstalledDataset
+from ccusage_viz.datasets.models import DatasetManifest, DatasetRegistration, InstalledDataset
 from ccusage_viz.datasets.paths import dataset_directory
 from ccusage_viz.errors import UsageError
 
@@ -26,6 +26,9 @@ class DatasetStore:
 
     def _version_path(self, dataset_id: str, version: str) -> Path:
         return dataset_directory(self.root, dataset_id) / "versions" / version
+
+    def _registration_path(self, dataset_id: str) -> Path:
+        return self.root / "registrations" / f"{dataset_id}.json"
 
     def load(self, dataset_id: str) -> tuple[InstalledDataset, DatasetManifest, Path]:
         current_path = self._current_path(dataset_id)
@@ -66,6 +69,46 @@ class DatasetStore:
 
     def list(self) -> tuple[tuple[InstalledDataset, DatasetManifest, Path], ...]:
         return tuple(self.load(dataset_id) for dataset_id in self.dataset_ids())
+
+    def registration_ids(self) -> tuple[str, ...]:
+        directory = self.root / "registrations"
+        if not directory.is_dir():
+            return ()
+        return tuple(candidate.stem for candidate in sorted(directory.glob("*.json")))
+
+    def load_registration(self, dataset_id: str) -> DatasetRegistration:
+        path = self._registration_path(dataset_id)
+        try:
+            registration = DatasetRegistration.parse(json.loads(path.read_text()))
+        except FileNotFoundError as exc:
+            raise UsageError("error.dataset_not_installed", dataset_id=dataset_id) from exc
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            raise UsageError("error.dataset_corrupt", dataset_id=dataset_id) from exc
+        if registration.dataset_id != dataset_id:
+            raise UsageError("error.dataset_corrupt", dataset_id=dataset_id)
+        return registration
+
+    def registrations(self) -> tuple[DatasetRegistration, ...]:
+        return tuple(self.load_registration(dataset_id) for dataset_id in self.registration_ids())
+
+    def save_registration(self, registration: DatasetRegistration) -> None:
+        directory = self.root / "registrations"
+        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+        target = self._registration_path(registration.dataset_id)
+        temporary = directory / f".{registration.dataset_id}.{uuid.uuid4().hex}.tmp"
+        try:
+            temporary.write_text(json.dumps(registration.to_wire(), sort_keys=True) + "\n")
+            os.chmod(temporary, 0o600)
+            temporary.replace(target)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+    def remove_registration(self, dataset_id: str) -> None:
+        path = self._registration_path(dataset_id)
+        try:
+            path.unlink()
+        except FileNotFoundError as exc:
+            raise UsageError("error.dataset_not_installed", dataset_id=dataset_id) from exc
 
     def install(
         self,
