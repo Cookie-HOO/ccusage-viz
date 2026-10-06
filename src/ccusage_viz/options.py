@@ -200,6 +200,7 @@ class CustomChartConfig:
     other: str = "show"
     granularity: str = "day"
     weekdays: str = "show"
+    initial_explicit: frozenset[str] = frozenset()
 
 
 HistoricalChartConfig: TypeAlias = TimelineConfig | CalendarConfig | StackConfig | RankingConfig

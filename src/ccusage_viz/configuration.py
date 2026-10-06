@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+from ccusage_viz.custom_models import CustomProbeDescriptor
+from ccusage_viz.custom_protocol import CustomProtocolError
 from ccusage_viz.options import (
     CalendarConfig,
     ChartPaneConfig,
@@ -54,6 +56,46 @@ def default_pane(kind: str, *, dashboard: DashboardLaunch) -> ChartPaneConfig:
         else:
             raise ValueError(f"unknown chart kind: {kind}")
     return ChartPaneConfig(chart)
+
+
+def apply_custom_probe_defaults(
+    config: CustomChartConfig,
+    descriptor: CustomProbeDescriptor,
+    *,
+    timezone: str,
+) -> CustomChartConfig:
+    """Merge a Dataset's initial chart defaults into an uncustomized chart.
+
+    Probe data is source metadata, rather than a preference store: callers apply
+    it exactly once before their first chart request.  A malformed or
+    contradictory descriptor is rejected here instead of falling back to the
+    host's unrelated generic defaults.
+    """
+    defaults = descriptor.defaults.get(config.kind)
+    capability = descriptor.capabilities.charts.get(config.kind)
+    if defaults is None or capability is None:
+        raise CustomProtocolError(f"probe descriptor does not support {config.kind} charts")
+
+    explicit = config.initial_explicit
+    group_by = config.group_by if "group_by" in explicit else defaults.group_by
+    top = config.top if "top" in explicit else defaults.top
+    if group_by is not None and group_by not in capability.group_by:
+        raise CustomProtocolError(
+            f"probe default group_by {group_by!r} is not supported by {config.kind}"
+        )
+    if top is not None and group_by is None:
+        raise CustomProtocolError("probe default top requires a group_by value")
+
+    date_range = config.date_range
+    if not explicit & {"period", "since", "until"} and defaults.period is not None:
+        date_range = resolve_date_range(
+            config.kind,
+            period=defaults.period,
+            since=None,
+            until=None,
+            timezone=timezone,
+        )
+    return replace(config, date_range=date_range, group_by=group_by, top=top)
 
 
 def default_custom_pane(

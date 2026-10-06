@@ -109,7 +109,7 @@ def probe_response() -> dict[str, object]:
                 "timeline": {"period": "14d", "group_by": None, "top": None},
                 "calendar": {"period": "14d", "group_by": None, "top": None},
                 "stack": {"period": "14d", "group_by": None, "top": None},
-                "ranking": {"period": "1mo", "group_by": "book", "top": 10},
+                "ranking": {"period": "1y", "group_by": "book", "top": 10},
             },
             "environment": [{
                 "name": "WEREAD_API_KEY",
@@ -180,7 +180,7 @@ def test_probe_response_parses_dataset_capabilities_and_defaults() -> None:
 
     descriptor = result.descriptor  # type: ignore[union-attr]
     assert descriptor.dataset.title.zh_cn == "微信读书"
-    assert descriptor.defaults["ranking"].period == "1mo"
+    assert descriptor.defaults["ranking"].period == "1y"
     assert descriptor.defaults["ranking"].group_by == "book"
     assert descriptor.defaults["ranking"].top == 10
     assert descriptor.environment[0].required

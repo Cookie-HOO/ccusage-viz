@@ -538,7 +538,7 @@ def _inject_default_command(argv: list[str]) -> list[str]:
     if remaining and remaining[0] in _COMMANDS:
         return [remaining[0], *leading, *remaining[1:]]
     if remaining and remaining[0] in _TUI_COMMANDS:
-        return ["chart", remaining[0], *leading, *remaining[1:]]
+        return [*leading, *remaining]
     return ["chart", "timeline", *argv]
 
 
@@ -699,6 +699,7 @@ def _custom_chart_from_namespace(
         other=getattr(namespace, "other", "show"),
         granularity=getattr(namespace, "granularity", "day"),
         weekdays=getattr(namespace, "weekdays", "show"),
+        initial_explicit=explicit & {"period", "since", "until", "group_by", "top"},
     )
 
 

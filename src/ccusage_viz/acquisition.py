@@ -6,7 +6,11 @@ from typing import cast
 
 from ccusage_viz.core.time import local_today
 from ccusage_viz.coverage import DateCoverage, DateInterval
-from ccusage_viz.custom_protocol import CustomChartRequest, CustomSummaryRequest
+from ccusage_viz.custom_protocol import (
+    CustomChartRequest,
+    CustomProbeRequest,
+    CustomSummaryRequest,
+)
 from ccusage_viz.options import (
     CustomChartConfig,
     CustomCommandSource,
@@ -139,6 +143,39 @@ def historical_query_intent(
         dimensions=("project",) if project_required else ("agent",),
         execution_options=execution_options,
         execution_context=execution_context,
+    )
+
+
+def custom_probe_query_intent(
+    source: CustomCommandSource,
+    *,
+    owner_id: str,
+    generation: int,
+    trigger: QueryTrigger,
+    process: ProcessConfig | None = None,
+) -> QueryIntent:
+    """Plan one metadata-only custom Dataset capability probe."""
+    process = process or ProcessConfig()
+    request = CustomProbeRequest(
+        request_id=f"{owner_id}:{generation}:probe",
+        dataset_id=source.dataset_id,
+        command_argv=source.command_argv,
+    )
+    return QueryIntent(
+        owner_id=owner_id,
+        generation=generation,
+        trigger=trigger,
+        provider=ProviderRef("custom-command", source.dataset_id),
+        scope=DataScope(()),
+        missing_intervals=(),
+        resolution=DataResolution.DATE,
+        execution_context=ExecutionContext(
+            source.command_argv[0],
+            process.query_timeout,
+            process.output_limit,
+            process.environment,
+        ),
+        payload=request,
     )
 
 

@@ -7,8 +7,21 @@ import pytest
 
 from ccusage_viz.cli import _to_options, build_parser
 from ccusage_viz.command_copy import format_command, format_full_command, wrap_command
-from ccusage_viz.configuration import default_custom_pane, default_pane
+from ccusage_viz.configuration import (
+    apply_custom_probe_defaults,
+    default_custom_pane,
+    default_pane,
+)
 from ccusage_viz.core.time import DateRange, local_today, refresh_date_range
+from ccusage_viz.custom_models import (
+    CustomCapabilities,
+    CustomChartCapability,
+    CustomChartDefaults,
+    CustomDataset,
+    CustomProbeDescriptor,
+    CustomUnit,
+    LocalizedText,
+)
 from ccusage_viz.errors import UsageError
 from ccusage_viz.formatting import display_width
 from ccusage_viz.i18n import load_translator
@@ -40,6 +53,28 @@ from ccusage_viz.options import (
 )
 
 
+def _probe_descriptor() -> CustomProbeDescriptor:
+    text = LocalizedText("WeRead", "微信读书")
+    return CustomProbeDescriptor(
+        "weread-1",
+        "0.1.0",
+        CustomDataset(text, text, CustomUnit("page", text, "suffix", 0)),
+        CustomCapabilities(
+            (),
+            (),
+            {
+                "ranking": CustomChartCapability(("day",), ("book",), ()),
+                "timeline": CustomChartCapability(("day",), (), ()),
+            },
+        ),
+        {
+            "ranking": CustomChartDefaults("1y", "book", 10),
+            "timeline": CustomChartDefaults("14d", None, None),
+        },
+        (),
+    )
+
+
 def test_custom_source_requires_dataset_and_nonempty_argv() -> None:
     source = CustomCommandSource("weread", ("reader", "ccuv"))
     assert source.dataset_id == "weread"
@@ -50,6 +85,39 @@ def test_custom_source_requires_dataset_and_nonempty_argv() -> None:
         CustomCommandSource("weread", ())
     with pytest.raises(ValueError, match="source_kind"):
         CustomCommandSource("weread", ("reader",), source_kind="other")  # type: ignore[arg-type]
+
+
+def test_custom_probe_defaults_apply_to_an_unconfigured_ranking_chart() -> None:
+    source = CustomCommandSource("weread", ("reader", "ccuv"))
+    initial = CustomChartConfig(
+        "ranking",
+        source,
+        resolve_date_range("ranking", period=None, since=None, until=None, today=date(2026, 9, 30)),
+    )
+
+    resolved = apply_custom_probe_defaults(initial, _probe_descriptor(), timezone="UTC")
+
+    assert resolved.date_range.period == "1y"
+    assert resolved.date_range.since == date(2026, 1, 1)
+    assert resolved.date_range.until == local_today(timezone="UTC")
+    assert resolved.group_by == "book"
+    assert resolved.top == 10
+
+
+def test_custom_probe_defaults_preserve_explicit_range_grouping_and_top() -> None:
+    source = CustomCommandSource("weread", ("reader", "ccuv"))
+    initial = CustomChartConfig(
+        "ranking",
+        source,
+        DateRange(date(2026, 8, 1), date(2026, 8, 31), fixed_bounds=True),
+        group_by="book",
+        top=3,
+        initial_explicit=frozenset({"since", "until", "group_by", "top"}),
+    )
+
+    resolved = apply_custom_probe_defaults(initial, _probe_descriptor(), timezone="UTC")
+
+    assert resolved == initial
 
 
 def test_custom_pane_and_empty_pane_are_discriminated() -> None:

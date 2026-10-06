@@ -761,13 +761,13 @@ def test_demo_seed_is_shared_by_dashboard_panes_and_varies_between_invocations()
     )
 
 
-def test_global_language_options_precede_a_subcommand() -> None:
-    assert _inject_default_command(["--lang", "zh", "timeline"]) == [
-        "chart",
-        "timeline",
-        "--lang",
-        "zh",
-    ]
+@pytest.mark.parametrize("kind", ("timeline", "calendar", "stack", "ranking", "monitor"))
+@pytest.mark.parametrize("prefix", ([], ["--lang", "zh"]))
+def test_removed_root_chart_commands_are_rejected(kind: str, prefix: list[str]) -> None:
+    args = [*prefix, kind]
+
+    assert _inject_default_command(args) == args
+    assert main(args) == 2
 
 
 def test_ranking_defaults_to_dot_for_builtin_and_custom_commands() -> None:

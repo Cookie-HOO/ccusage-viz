@@ -16,13 +16,15 @@ def test_tui_input_decodes_keys_and_fragmented_mouse_press() -> None:
     assert decoder.next() == MouseEvent(0, 20, 5, True, 0)
 
 
-def test_tui_input_preserves_return_ctrl_j_and_ctrl_k() -> None:
+def test_tui_input_preserves_control_keys() -> None:
     decoder = InputDecoder()
-    decoder.feed("\r\n\x0b")
+    decoder.feed("\r\n\x0b\x15\x19")
 
     assert decoder.next() == KeyEvent("\r")
     assert decoder.next() == KeyEvent("\n")
     assert decoder.next() == KeyEvent("\x0b")
+    assert decoder.next() == KeyEvent("\x15")
+    assert decoder.next() == KeyEvent("\x19")
 
 
 def test_tui_input_ignores_trackpad_wheel_reports() -> None:

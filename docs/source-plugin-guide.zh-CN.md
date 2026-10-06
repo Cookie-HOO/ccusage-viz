@@ -2,7 +2,7 @@
 
 > **状态：**未来 Source 插件的数据契约。插件系统尚未实现；本文用于约束后续协议设计。
 >
-> 已实现的 `ccuv custom` 不同：它是静态、命令驱动、只支持可相加历史数据的适配器，不是公开的 Source 插件注册、发现系统，也不是文件/HTTP/Python 扩展系统。详见[自定义命令协议](custom-command-protocol.zh-CN.md)。
+> 已实现的 `ccuv chart <kind> --dataset ID` 不同：它是静态、命令驱动、只支持可相加历史数据的适配器，不是公开的 Source 插件注册、发现系统，也不是文件/HTTP/Python 扩展系统。详见[自定义命令协议](custom-command-protocol.zh-CN.md)。
 
 Source 插件把一个外部 Token 数据来源转换为 ccuv 可以合并和绘图的标准记录。插件只提供数据，不负责图表、TPM、筛选、分组或终端渲染。
 

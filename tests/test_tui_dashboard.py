@@ -1,8 +1,10 @@
 import shlex
 import threading
+import time
 from contextlib import nullcontext
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
 
 import pytest
 
@@ -21,6 +23,20 @@ from ccusage_viz.command_copy import (
 from ccusage_viz.configuration import default_custom_pane, standalone_from_chart_pane
 from ccusage_viz.core.time import DateRange
 from ccusage_viz.coverage import DateCoverage, DateInterval
+from ccusage_viz.custom_models import (
+    CustomCapabilities,
+    CustomChartCapability,
+    CustomChartDefaults,
+    CustomData,
+    CustomDataset,
+    CustomDimension,
+    CustomPoint,
+    CustomProbeDescriptor,
+    CustomSeries,
+    CustomUnit,
+    LocalizedText,
+)
+from ccusage_viz.custom_protocol import CustomChartResponse, CustomProbeResponse
 from ccusage_viz.domain import Notice, SourceKind, TokenUsage, UsageRecord
 from ccusage_viz.errors import QueryError, SchemaError, UsageError
 from ccusage_viz.formatting import display_width
@@ -37,7 +53,7 @@ from ccusage_viz.options import (
     MonitorConfig,
     TimelineConfig,
 )
-from ccusage_viz.query.models import QueryTrigger
+from ccusage_viz.query.models import DataResolution, ProviderResult, QueryTrigger
 from ccusage_viz.terminal import Terminal
 from ccusage_viz.tui import (
     _adjustment_controls,
@@ -366,7 +382,9 @@ def test_dashboard_pane_copy_materializes_canonical_standalone_interval() -> Non
 
     assert format_dashboard_pane_command(
         standalone_from_chart_pane(base, timeline), refresh_interval=30
-    ) == ("ccuv chart timeline --period 7d --timezone Asia/Shanghai --interval 30 --density compact")
+    ) == (
+        "ccuv chart timeline --period 7d --timezone Asia/Shanghai --interval 30 --density compact"
+    )
     assert format_dashboard_pane_command(
         standalone_from_chart_pane(base, stack), refresh_interval=30
     ) == ("ccuv chart stack --timezone Asia/Shanghai --interval 30 --density compact")
@@ -1805,6 +1823,115 @@ def test_dashboard_historical_pane_normalizes_titles_like_standalone(
 
     assert rendered.chart == "timeline"
     assert captured["normalize_titles"] is True
+
+
+def test_dashboard_submits_chart_immediately_after_custom_probe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dashboard = _to_options(
+        build_parser(load_translator("en")).parse_args(
+            [
+                "dashboard",
+                "--empty",
+                "--refresh-interval",
+                "3600",
+                "--header-style",
+                "hidden",
+            ]
+        )
+    )
+    source = CustomCommandSource("reading", ("reader", "ccuv"))
+    options = replace(
+        dashboard, panes=(default_custom_pane("ranking", source=source, dashboard=dashboard),)
+    )
+    submitted: list[object] = []
+    chart_submitted = threading.Event()
+    point = CustomPoint(date(2026, 1, 1), Decimal("1"))
+    text = LocalizedText("Reading", "阅读")
+    dataset = CustomDataset("Reading", text, CustomUnit("minute", text, "suffix", 0))
+    capabilities = CustomCapabilities(
+        (CustomDimension("book", text),),
+        (),
+        {"ranking": CustomChartCapability(("day",), ("book",), ())},
+    )
+    probe = CustomProbeResponse(
+        CustomProbeDescriptor(
+            "reading-1",
+            "0.1.0",
+            dataset,
+            capabilities,
+            {"ranking": CustomChartDefaults("1y", "book", 10)},
+            (),
+        )
+    )
+    chart = CustomChartResponse(
+        dataset,
+        capabilities,
+        CustomData((CustomSeries("book-1", text, (point,)),)),
+    )
+
+    class Handle:
+        def __init__(self, response: object, *, wait: threading.Event | None = None) -> None:
+            self.response = response
+            self.wait = wait
+
+        def result(self) -> object:
+            if self.wait is not None and not self.wait.wait(1):
+                raise TimeoutError("chart request was not submitted immediately after the probe")
+            return ProviderResult(
+                (), (), DataResolution.DATE, DateCoverage(), custom_response=self.response
+            )
+
+        def cancel(self) -> None:
+            pass
+
+    class Runtime:
+        def submit(self, intent: object) -> Handle:
+            submitted.append(intent)
+            request = intent.payload  # type: ignore[union-attr]
+            if request.request_kind == "probe":
+                return Handle(probe)
+            if request.request_kind == "chart":
+                chart_submitted.set()
+                return Handle(chart)
+            return Handle(chart)
+
+        def cancel(self) -> None:
+            pass
+
+    class Screen:
+        def __init__(self, _stream: object) -> None:
+            pass
+
+        def paint(self, _frame: object, **_kwargs: object) -> None:
+            pass
+
+        def finish(self) -> None:
+            pass
+
+    deadline = time.monotonic() + 1
+
+    def read_until_chart(_decoder: object, _timeout: float) -> KeyEvent | None:
+        if chart_submitted.is_set():
+            return KeyEvent("\x03")
+        if time.monotonic() >= deadline:
+            raise AssertionError(
+                f"chart request was not submitted immediately after the probe: {submitted!r}"
+            )
+        time.sleep(0.01)
+        return None
+
+    monkeypatch.setattr(tui_module, "build_query_runtime", Runtime)
+    monkeypatch.setattr(tui_module, "FramePainter", Screen)
+    monkeypatch.setattr(tui_module, "tui_input_mode", nullcontext)
+    monkeypatch.setattr(tui_module, "read_event", read_until_chart)
+    monkeypatch.setattr(
+        tui_module, "get_terminal_size", lambda: __import__("os").terminal_size((80, 24))
+    )
+
+    assert tui_module.run_tui(options, load_translator("en")) == 0
+    assert [intent.payload.request_kind for intent in submitted[:2]] == ["probe", "chart"]
+    assert chart_submitted.is_set()
 
 
 def test_error_only_custom_pane_keeps_scrolling_and_replace_management(

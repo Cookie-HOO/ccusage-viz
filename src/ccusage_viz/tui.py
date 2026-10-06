@@ -15,6 +15,7 @@ from typing import Literal, cast
 from ccusage_viz import __version__
 from ccusage_viz.acquisition import (
     custom_historical_query_intent,
+    custom_probe_query_intent,
     custom_summary_query_intent,
     historical_provider_id,
     historical_query_intent,
@@ -63,7 +64,7 @@ from ccusage_viz.command_copy import (
     format_full_dashboard_command,
     wrap_command,
 )
-from ccusage_viz.configuration import default_custom_pane
+from ccusage_viz.configuration import apply_custom_probe_defaults, default_custom_pane
 from ccusage_viz.core.time import (
     DateRange,
     local_today,
@@ -82,7 +83,11 @@ from ccusage_viz.custom_models import (
     CustomFilter,
     CustomProtocolFailure,
 )
-from ccusage_viz.custom_protocol import CustomSummaryRequest, CustomSummaryResponse
+from ccusage_viz.custom_protocol import (
+    CustomProbeResponse,
+    CustomSummaryRequest,
+    CustomSummaryResponse,
+)
 from ccusage_viz.dashboard_history import DashboardHistory
 from ccusage_viz.dashboard_layout import (
     PaneLayout as ResolvedPaneLayout,
@@ -292,7 +297,7 @@ class CustomOutcome:
     generation: int
     result: ProviderResult | None = None
     error: BaseException | None = None
-    purpose: Literal["primary", "comparison"] = "primary"
+    purpose: Literal["probe", "primary", "comparison"] = "primary"
 
 
 @dataclass(frozen=True, slots=True)
@@ -309,6 +314,7 @@ class TuiCustomPane:
     lifecycle: LifecycleOperation[Future[CustomOutcome]]
     process: ProcessConfig
     summary: CustomDashboardSummary | None = None
+    probe_complete: bool = False
     pane_id: int = -1
     logs: list[CustomLogRecord] = field(default_factory=list)
     body_view: BodyView = "chart"
@@ -1271,7 +1277,7 @@ def _new_pane(
 def _await_custom_submission(
     handle: QueryHandle[ProviderResult],
     generation: int,
-    purpose: Literal["primary", "comparison"] = "primary",
+    purpose: Literal["probe", "primary", "comparison"] = "primary",
 ) -> CustomOutcome:
     try:
         return CustomOutcome(generation, result=handle.result(), purpose=purpose)
@@ -3798,7 +3804,22 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
                 warning.message.zh_cn if translator.language == "zh" else warning.message.en,
             )
 
+    probe_complete = False
+
     def start(operation: OperationToken) -> tuple[Future[CustomOutcome], Callable[[], None]]:
+        if not probe_complete:
+            intent = custom_probe_query_intent(
+                component.candidate.source,
+                owner_id=operation.owner_id,
+                generation=operation.generation,
+                trigger=query_trigger(operation.trigger),
+                process=options.process,
+            )
+            handle = runtime.submit(intent)
+            return (
+                executor.submit(_await_custom_submission, handle, operation.generation, "probe"),
+                handle.cancel,
+            )
         purpose = "comparison" if component.comparison_is_pending else "primary"
         config = (
             component.candidate if purpose == "primary" else component.comparison_request_config()
@@ -3951,20 +3972,48 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
                 paint()
                 return 1
             try:
-                outcome = future.result()
-                if outcome.error is not None or outcome.result is None:
-                    error = outcome.error or RuntimeError("custom command returned no result")
-                    component.fail(error, generation=outcome.generation)
-                    record("error", str(error))
-                    paint()
-                    return 1
-                if not lifecycle.accepts(operation, generation=outcome.generation):
-                    paint()
-                    return 1
-                if not component.apply_provider_result(outcome.result):
-                    paint()
-                    return 1
-                lifecycle.complete(operation, generation=outcome.generation)
+                while True:
+                    outcome = future.result()
+                    if outcome.error is not None or outcome.result is None:
+                        error = outcome.error or RuntimeError("custom command returned no result")
+                        component.fail(error, generation=outcome.generation)
+                        record("error", str(error))
+                        paint()
+                        return 1
+                    if not lifecycle.accepts(operation, generation=outcome.generation):
+                        paint()
+                        return 1
+                    if outcome.purpose == "probe":
+                        response = outcome.result.custom_response
+                        if not isinstance(response, CustomProbeResponse):
+                            raise TypeError(
+                                "custom provider result does not contain a probe response"
+                            )
+                        if options.host.timezone is None:
+                            raise RuntimeError("custom Dataset requests require a timezone")
+                        component.configure(
+                            apply_custom_probe_defaults(
+                                component.candidate,
+                                response.descriptor,
+                                timezone=options.host.timezone,
+                            ),
+                            data_affecting=False,
+                        )
+                        current = component.candidate
+                        probe_complete = True
+                        lifecycle.complete(operation, generation=outcome.generation)
+                        record_warnings(response)
+                        request(LifecycleTrigger.STARTUP, roll_range=False)
+                        operation = lifecycle.operation
+                        future = lifecycle.submission
+                        if operation is None or future is None:
+                            raise RuntimeError("custom probe did not schedule a chart request")
+                        continue
+                    if not component.apply_provider_result(outcome.result, purpose=outcome.purpose):
+                        paint()
+                        return 1
+                    lifecycle.complete(operation, generation=outcome.generation)
+                    break
                 record_warnings(outcome.result.custom_response)
                 current = component.candidate
                 comparison = component.start_comparison()
@@ -4026,26 +4075,52 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
                         outcome = future.result()
                         purpose = outcome.purpose
                         if active and outcome.error is None and outcome.result is not None:
-                            accepted = component.apply_provider_result(
-                                outcome.result, purpose=purpose
-                            )
-                            if accepted:
-                                lifecycle.complete(operation, generation=operation.generation)
-                                record_warnings(outcome.result.custom_response)
+                            if purpose == "probe":
+                                response = outcome.result.custom_response
+                                if not isinstance(response, CustomProbeResponse):
+                                    raise TypeError(
+                                        "custom provider result does not contain a probe response"
+                                    )
+                                if options.host.timezone is None:
+                                    raise RuntimeError("custom Dataset requests require a timezone")
+                                component.configure(
+                                    apply_custom_probe_defaults(
+                                        component.candidate,
+                                        response.descriptor,
+                                        timezone=options.host.timezone,
+                                    ),
+                                    data_affecting=False,
+                                )
                                 current = component.candidate
-                                record("ok", getattr(outcome.result, "diagnostics", "") or "ok")
-                                if (
-                                    purpose == "primary"
-                                    and component.start_comparison() is not None
-                                ):
-                                    request(LifecycleTrigger.CONFIGURATION, roll_range=False)
+                                probe_complete = True
+                                lifecycle.complete(operation, generation=operation.generation)
+                                record_warnings(response)
+                                request(LifecycleTrigger.STARTUP, roll_range=False)
                             else:
-                                lifecycle.abandon(operation)
+                                accepted = component.apply_provider_result(
+                                    outcome.result, purpose=purpose
+                                )
+                                if accepted:
+                                    lifecycle.complete(operation, generation=operation.generation)
+                                    record_warnings(outcome.result.custom_response)
+                                    current = component.candidate
+                                    record("ok", getattr(outcome.result, "diagnostics", "") or "ok")
+                                    if (
+                                        purpose == "primary"
+                                        and component.start_comparison() is not None
+                                    ):
+                                        request(LifecycleTrigger.CONFIGURATION, roll_range=False)
+                                else:
+                                    lifecycle.abandon(operation)
                         elif active:
                             error = outcome.error or RuntimeError(
                                 "custom command returned no result"
                             )
-                            component.fail(error, generation=outcome.generation, purpose=purpose)
+                            component.fail(
+                                error,
+                                generation=outcome.generation,
+                                purpose="primary" if purpose == "probe" else purpose,
+                            )
                             record("error", str(error))
                             lifecycle.abandon(operation)
                         else:
@@ -4349,6 +4424,19 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
     def start_custom_submission(
         pane: TuiCustomPane, operation: OperationToken
     ) -> tuple[Future[CustomOutcome], Callable[[], None]]:
+        if not pane.probe_complete:
+            intent = custom_probe_query_intent(
+                pane.component.candidate.source,
+                owner_id=operation.owner_id,
+                generation=operation.generation,
+                trigger=query_trigger(operation.trigger),
+                process=pane.process,
+            )
+            handle = runtime.submit(intent)
+            return (
+                executor.submit(_await_custom_submission, handle, operation.generation, "probe"),
+                handle.cancel,
+            )
         purpose = "comparison" if pane.component.comparison_is_pending else "primary"
         config = (
             pane.component.comparison_request_config()
@@ -4425,7 +4513,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             return False
         config = pane.component.candidate
         source_changed = summary.source != config.source or summary.filters != config.filters
-        if source_changed or summary_affecting:
+        if source_changed:
             summary.invalidate()
         try:
             return summary.lifecycle.request(
@@ -4447,8 +4535,12 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     now=now,
                     start=lambda operation: start_custom_submission(pane, operation),
                 )
-                summary_started = refresh_custom_pane_summary(
-                    pane, trigger=LifecycleTrigger.STARTUP, summary_affecting=True
+                summary_started = (
+                    refresh_custom_pane_summary(
+                        pane, trigger=LifecycleTrigger.STARTUP, summary_affecting=True
+                    )
+                    if pane.probe_complete
+                    else False
                 )
                 return chart_started or summary_started
             if isinstance(pane, TuiChartPane):
@@ -4522,7 +4614,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         replace_active=replace_active,
                         summary_affecting=summary_affecting,
                     )
-                    if should_refresh_summary
+                    if should_refresh_summary and pane.probe_complete
                     else False
                 )
                 return chart_requested or summary_requested
@@ -4855,7 +4947,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         pane.lifecycle.abandon(operation)
                     elif outcome.error is not None:
                         if pane.component.fail(
-                            outcome.error, generation=outcome.generation, purpose=outcome.purpose
+                            outcome.error,
+                            generation=outcome.generation,
+                            purpose="primary" if outcome.purpose == "probe" else outcome.purpose,
                         ):
                             record_custom_log(
                                 pane, "error", _custom_failure_log_detail(outcome.error, translator)
@@ -4866,6 +4960,31 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                             pane.lifecycle.abandon(operation)
                     elif outcome.result is None:
                         pane.lifecycle.abandon(operation)
+                    elif outcome.purpose == "probe":
+                        response = outcome.result.custom_response
+                        if not isinstance(response, CustomProbeResponse):
+                            raise TypeError(
+                                "custom provider result does not contain a probe response"
+                            )
+                        if options.host.timezone is None:
+                            raise RuntimeError("custom Dataset requests require a timezone")
+                        pane.component.configure(
+                            apply_custom_probe_defaults(
+                                pane.component.candidate,
+                                response.descriptor,
+                                timezone=options.host.timezone,
+                            ),
+                            data_affecting=False,
+                        )
+                        pane.probe_complete = True
+                        record_custom_warnings(pane.component.candidate.source, response)
+                        pane.lifecycle.complete(operation, generation=outcome.generation)
+                        refresh(
+                            index,
+                            trigger=LifecycleTrigger.STARTUP,
+                            data_affecting=False,
+                        )
+                        changed = True
                     elif pane.component.apply_provider_result(
                         outcome.result, purpose=outcome.purpose
                     ):
@@ -4897,7 +5016,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         if pane.component.fail(
                             exc, generation=operation.generation, purpose="primary"
                         ):
-                            record_custom_log(pane, "error", _custom_failure_log_detail(exc, translator))
+                            record_custom_log(
+                                pane, "error", _custom_failure_log_detail(exc, translator)
+                            )
                             changed = True
                 retire_manual_refresh(operation)
                 start_pane(index, now=observed_at)
@@ -5163,6 +5284,8 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         current, pane_state.config.chart
                     )
                     pane.component.configure(pane_state.config.chart, data_affecting=data_affecting)
+                    if current.source != pane_state.config.chart.source:
+                        pane.probe_complete = False
                     if data_affecting or summary_affecting:
                         refresh_indexes.append((len(reconciled), data_affecting, summary_affecting))
             elif isinstance(pane, TuiChartPane):
@@ -6945,6 +7068,22 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         elif modal.draft.field == 0 and key in {"k", "\x1b[D"}:
             kinds = _CUSTOM_PANE_KINDS
             modal.draft.kind = kinds[(kinds.index(modal.draft.kind) - 1) % len(kinds)]
+        elif key == "\x19":
+            value = (modal.draft.kind, modal.draft.dataset_id, modal.draft.command)[
+                modal.draft.field
+            ]
+            modal.error = translator.text(
+                "status.command_copied" if copy_command(value) else "status.command_copy_failed"
+            )
+        elif key == "\x15":
+            if modal.draft.field == 0:
+                modal.error = translator.text("status.custom_pane_kind_required")
+            elif modal.draft.field == 1:
+                modal.draft.dataset_id = ""
+                modal.error = translator.text("status.custom_pane_field_cleared")
+            else:
+                modal.draft.command = ""
+                modal.error = translator.text("status.custom_pane_field_cleared")
         elif key in {"\r", "\n"}:
             try:
                 source = CustomCommandSource(
