@@ -111,6 +111,20 @@ class DatasetService:
             raise UsageError("error.dataset_environment_missing", dataset_id=registration.dataset_id)
         return CustomCommandSource(registration.dataset_id, registration.source.command_argv)
 
+    def command_source(self, dataset_id: str) -> CustomCommandSource:
+        """Resolve a managed registration first, then a legacy installed artifact."""
+
+        try:
+            return self.registered_command_source(dataset_id)
+        except UsageError as error:
+            if error.key != "error.dataset_not_installed":
+                raise
+        return self.installed_command_source(dataset_id)
+
+    def discover_local_command(self, command_argv: tuple[str, ...]) -> CustomCommandSource:
+        response = self.probe_runner(command_argv)
+        return CustomCommandSource(parse_dataset_id(response.dataset_id), command_argv)
+
     def ready_registered_sources(self) -> tuple[DatasetRegistrationStatus, ...]:
         return tuple(status for status in self.registrations() if status.ready)
 
@@ -130,8 +144,6 @@ class DatasetService:
                 raise
             self.store.save_registration(candidate)
             return RegisterResult("created", candidate)
-        if current.source == candidate.source:
-            return RegisterResult("already_registered", current)
         if not replace:
             return RegisterResult("conflict", candidate)
         replacement = replace_registration(current, candidate)

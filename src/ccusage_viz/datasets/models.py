@@ -7,7 +7,10 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal, cast
 
-from ccusage_viz.custom_models import CustomEnvironmentDeclaration, CustomProbeDescriptor
+from ccusage_viz.custom_models import (
+    CustomEnvironmentDeclaration,
+    CustomProbeDescriptor,
+)
 from ccusage_viz.custom_protocol import parse_probe_descriptor, probe_descriptor_to_wire
 from ccusage_viz.errors import UsageError
 
@@ -164,6 +167,8 @@ class DatasetManifest:
     def parse(cls, value: object) -> DatasetManifest:
         if not isinstance(value, Mapping):
             raise ValueError("manifest must be an object")
+        if set(value) == {"schema", "protocol", "entrypoint", "platform", "probe"}:
+            return cls._parse_static_probe(value)
         allowed = {
             "schema",
             "id",
@@ -227,6 +232,70 @@ class DatasetManifest:
             DatasetMetric.parse(value.get("metric")),
             tuple(charts),
             requirements,
+        )
+
+    @classmethod
+    def _parse_static_probe(cls, value: Mapping[str, object]) -> DatasetManifest:
+        if value.get("schema") != DATASET_MANIFEST_SCHEMA or value.get("protocol") != CUSTOM_PROTOCOL:
+            raise ValueError("manifest schema or protocol is unsupported")
+        entrypoint = value.get("entrypoint")
+        platform = value.get("platform")
+        probe = value.get("probe")
+        if (
+            not isinstance(entrypoint, str)
+            or not entrypoint.startswith("bin/")
+            or "/" in entrypoint[4:]
+            or "\\" in entrypoint
+            or not isinstance(platform, Mapping)
+            or set(platform) != {"os", "arch"}
+            or not isinstance(probe, Mapping)
+            or set(probe) != {"dataset_id", "descriptor"}
+        ):
+            raise ValueError("manifest is invalid")
+        identifier = probe.get("dataset_id")
+        platform_os = platform.get("os")
+        platform_arch = platform.get("arch")
+        if (
+            not isinstance(identifier, str)
+            or not _DATASET_ID.fullmatch(identifier)
+            or not isinstance(platform_os, str)
+            or not platform_os
+            or not isinstance(platform_arch, str)
+            or not platform_arch
+        ):
+            raise ValueError("manifest is invalid")
+        descriptor = parse_probe_descriptor(probe.get("descriptor"))
+        metric = DatasetMetric(
+            descriptor.dataset.unit.id,
+            descriptor.dataset.title,
+            DatasetUnit(
+                descriptor.dataset.unit.id,
+                descriptor.dataset.unit.label,
+                descriptor.dataset.unit.placement,
+                descriptor.dataset.unit.decimal_places,
+            ),
+        )
+        environment = tuple(
+            EnvironmentRequirement(
+                item.name,
+                item.required,
+                item.sensitive,
+                LocalizedText(item.label.en, item.label.zh_cn),
+                LocalizedText(item.how_to_get.en, item.how_to_get.zh_cn),
+                item.help_url,
+            )
+            for item in descriptor.environment
+        )
+        return cls(
+            identifier,
+            descriptor.version,
+            CUSTOM_PROTOCOL,
+            entrypoint,
+            platform_os,
+            platform_arch,
+            metric,
+            tuple(descriptor.capabilities.charts),
+            environment,
         )
 
 

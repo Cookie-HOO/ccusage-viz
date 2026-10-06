@@ -14,13 +14,14 @@ support non-additive metrics.
 
 ## Start a custom chart
 
-Choose a chart kind and a stable Dataset ID. Select exactly one source mode:
+Choose a chart kind and one source mode. A Dataset declares its stable ID through
+its metadata-only probe; ccuv does not ask a local command user to invent one.
 
 ```bash
-# Installed Dataset: chart kind + Dataset ID, validated from ccuv's Dataset store.
+# Registered Dataset: chart kind + Dataset ID, resolved from ccuv's Dataset store.
 ccuv chart timeline --dataset weread
 
-# Arbitrary developer command: chart kind + Dataset ID + command argv.
+# Arbitrary developer command: chart kind + temporary Dataset ID + command argv.
 ccuv chart timeline --dataset example --command 'example-reader ccuv'
 ccuv chart stack --dataset example --command 'example-reader ccuv'
 ccuv chart calendar --dataset example --command 'example-reader ccuv'
@@ -138,8 +139,7 @@ that individual query.
 {
   "protocol": "ccuv.custom/v1",
   "request_id": "probe-request-id",
-  "request_kind": "probe",
-  "dataset_id": "weread"
+  "request_kind": "probe"
 }
 ```
 

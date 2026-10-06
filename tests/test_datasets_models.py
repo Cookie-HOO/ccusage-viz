@@ -45,6 +45,45 @@ def test_manifest_requires_exact_supported_contract() -> None:
         DatasetManifest.parse(invalid)
 
 
+def test_manifest_accepts_static_probe_descriptor_without_duplicate_metadata() -> None:
+    manifest = DatasetManifest.parse(
+        {
+            "schema": "ccuv.dataset/v1",
+            "protocol": "ccuv.custom/v1",
+            "entrypoint": "bin/reading-time",
+            "platform": {"os": "darwin", "arch": "arm64"},
+            "probe": {
+                "dataset_id": "reading-time",
+                "descriptor": {
+                    "revision": "reading-1",
+                    "version": "1.2.3",
+                    "dataset": {
+                        "title": {"en": "Reading time", "zh-CN": "阅读时长"},
+                        "description": {"en": "Daily reading", "zh-CN": "每日阅读"},
+                        "unit": {
+                            "id": "minutes",
+                            "label": {"en": "minutes", "zh-CN": "分钟"},
+                            "placement": "suffix",
+                            "decimal_places": 0,
+                        },
+                    },
+                    "capabilities": {
+                        "group_by": [],
+                        "filters": [],
+                        "charts": {"timeline": {"granularities": ["day"], "group_by": [], "filters": []}},
+                    },
+                    "defaults": {"timeline": {"period": "14d", "group_by": None, "top": None}},
+                    "environment": [],
+                },
+            },
+        }
+    )
+
+    assert manifest.id == "reading-time"
+    assert manifest.version == "1.2.3"
+    assert manifest.charts == ("timeline",)
+
+
 def test_environment_status_never_retains_values() -> None:
     manifest = DatasetManifest.parse(
         manifest_wire(

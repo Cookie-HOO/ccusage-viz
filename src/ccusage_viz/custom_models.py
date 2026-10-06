@@ -89,7 +89,7 @@ class CustomProbeDescriptor:
     revision: str
     version: str
     dataset: CustomDataset
-    capabilities: "CustomCapabilities"
+    capabilities: CustomCapabilities
     defaults: Mapping[str, CustomChartDefaults]
     environment: tuple[CustomEnvironmentDeclaration, ...]
     source_timezone: str | None = None

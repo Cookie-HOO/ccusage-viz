@@ -8,13 +8,13 @@
 
 ## 启动自定义图表
 
-选择图表类型和稳定的 Dataset ID，并且只选择一种数据源：
+选择图表类型和一种数据源。Dataset 会通过只含元数据的 probe 声明稳定 ID；本地命令用户无需自行发明 ID：
 
 ```bash
-# 已安装 Dataset：只需图表类型和 Dataset ID。
+# 已注册 Dataset：只需图表类型和 Dataset ID。
 ccuv chart timeline --dataset weread
 
-# 开发者任意命令：图表类型、Dataset ID 与命令 argv。
+# 开发者任意命令：图表类型、临时 Dataset ID 与命令 argv。
 ccuv chart timeline --dataset example --command 'example-reader ccuv'
 ccuv chart stack --dataset example --command 'example-reader ccuv'
 ccuv chart calendar --dataset example --command 'example-reader ccuv'
@@ -78,8 +78,7 @@ Dashboard 预设仍是内置的 token 消耗统计模板；添加 Dataset Pane �
 {
   "protocol": "ccuv.custom/v1",
   "request_id": "probe-request-id",
-  "request_kind": "probe",
-  "dataset_id": "weread"
+  "request_kind": "probe"
 }
 ```
 

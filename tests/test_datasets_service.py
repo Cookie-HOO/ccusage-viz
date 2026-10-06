@@ -66,6 +66,7 @@ def test_register_local_command_uses_probe_identity_and_preserves_argv(tmp_path:
     assert result.registration.dataset_id == "weread"
     assert result.registration.source.command_argv == ("reader", "ccuv")
     assert service.registrations()[0].availability == "ready"
+    assert service.discover_local_command(("reader", "ccuv")).dataset_id == "weread"
 
 
 def test_register_local_command_requires_explicit_replace_for_conflict(tmp_path: Path) -> None:
@@ -78,6 +79,15 @@ def test_register_local_command_requires_explicit_replace_for_conflict(tmp_path:
     assert conflict.kind == "conflict"
     assert replacement.kind == "replaced"
     assert service.registrations()[0].registration.source.command_argv == ("reader-b", "ccuv")
+
+
+def test_registering_same_local_command_still_requires_explicit_replace(tmp_path: Path) -> None:
+    service = DatasetService(root=tmp_path, environ={}, probe_runner=lambda _argv: probe())
+    service.register_local_command(("reader", "ccuv"))
+
+    result = service.register_local_command(("reader", "ccuv"))
+
+    assert result.kind == "conflict"
 
 
 def test_local_registration_can_be_disabled_reenabled_and_removed_without_target_deletion(
