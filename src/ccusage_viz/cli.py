@@ -627,9 +627,11 @@ def _custom_chart_from_namespace(
             raise UsageError("error.arguments", detail="--filter must use ID=OPTION")
         filters.setdefault(filter_id, set()).add(option_id)
     if namespace.command_text is None:
+        if namespace.dataset is None:
+            raise UsageError("error.arguments", detail="--dataset or --command is required")
         from ccusage_viz.datasets.service import DatasetService
 
-        source = DatasetService().installed_command_source(namespace.dataset)
+        source = DatasetService().command_source(namespace.dataset)
     else:
         try:
             command_argv = tuple(shlex.split(namespace.command_text))
@@ -639,6 +641,8 @@ def _custom_chart_from_namespace(
             ) from exc
         if not command_argv:
             raise UsageError("error.arguments", detail="--command must not be empty")
+        if namespace.dataset is None:
+            raise UsageError("error.arguments", detail="--command requires --dataset")
         source = CustomCommandSource(namespace.dataset, command_argv)
     kind = _chart_kind(namespace)
     group_by = namespace.group_by

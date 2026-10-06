@@ -197,7 +197,7 @@ def test_bare_custom_dataset_routes_through_installed_source(
     parser = build_parser(load_translator("en"))
     installed = CustomCommandSource("weread", ("dataset-weread", "ccuv"), source_kind="installed")
     monkeypatch.setattr(
-        "ccusage_viz.datasets.service.DatasetService.installed_command_source",
+        "ccusage_viz.datasets.service.DatasetService.command_source",
         lambda _service, dataset_id: installed if dataset_id == "weread" else None,
     )
 
@@ -214,7 +214,7 @@ def test_installed_dataset_defaults_use_host_timezone_today(
     parser = build_parser(load_translator("en"))
     installed = CustomCommandSource("weread", ("dataset-weread", "ccuv"), source_kind="installed")
     monkeypatch.setattr(
-        "ccusage_viz.datasets.service.DatasetService.installed_command_source",
+        "ccusage_viz.datasets.service.DatasetService.command_source",
         lambda _service, dataset_id: installed,
     )
 
@@ -233,7 +233,7 @@ def test_installed_dataset_accepts_explicit_current_day_date(
     parser = build_parser(load_translator("en"))
     installed = CustomCommandSource("weread", ("dataset-weread", "ccuv"), source_kind="installed")
     monkeypatch.setattr(
-        "ccusage_viz.datasets.service.DatasetService.installed_command_source",
+        "ccusage_viz.datasets.service.DatasetService.command_source",
         lambda _service, dataset_id: installed,
     )
 
