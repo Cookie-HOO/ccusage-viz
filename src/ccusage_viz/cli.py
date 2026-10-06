@@ -76,7 +76,7 @@ _COMMANDS = (
     "chart",
     "dashboard",
     "animate",
-    "datasets",
+    "dataset",
     "text",
 )
 _TUI_COMMANDS = ("timeline", "calendar", "stack", "ranking", "monitor")
@@ -434,35 +434,14 @@ def build_parser(tr: Translator) -> argparse.ArgumentParser:
     tui.add_argument("--empty", action="store_true", help=argparse.SUPPRESS)
     _add_tui(tui, tr)
 
-    datasets = subparsers.add_parser(
-        "datasets", help=tr.text("help.datasets"), description=tr.text("help.datasets")
+    dataset = subparsers.add_parser(
+        "dataset", help=tr.text("help.dataset"), description=tr.text("help.dataset")
     )
-    dataset_subparsers = datasets.add_subparsers(
-        dest="datasets_command", required=True, metavar="COMMAND"
+    dataset.add_argument("--lang", choices=("en", "zh"), help=tr.text("help.lang"))
+    dataset_subparsers = dataset.add_subparsers(
+        dest="dataset_command", metavar="COMMAND"
     )
-    dataset_subparsers.add_parser("list", help=tr.text("help.datasets_list"))
-    show = dataset_subparsers.add_parser("show", help=tr.text("help.datasets_show"))
-    show.add_argument("dataset_id", metavar="ID")
-    status = dataset_subparsers.add_parser("status", help=tr.text("help.datasets_status"))
-    status.add_argument("dataset_id", nargs="?", metavar="ID")
-    remove = dataset_subparsers.add_parser("remove", help=tr.text("help.datasets_remove"))
-    remove.add_argument("dataset_id", metavar="ID")
-    install = dataset_subparsers.add_parser("install", help=tr.text("help.datasets_install"))
-    install_subparsers = install.add_subparsers(
-        dest="dataset_source", required=True, metavar="SOURCE"
-    )
-    github = install_subparsers.add_parser("github")
-    github.add_argument("repository", metavar="OWNER/REPOSITORY")
-    github.add_argument("--release", required=True, metavar="TAG")
-    github.add_argument("--asset", required=True, metavar="NAME")
-    github.add_argument("--sha256", required=True, metavar="HEX")
-    github.add_argument("--replace", action="store_true")
-    official = install_subparsers.add_parser("official")
-    official.add_argument("dataset_id", metavar="ID")
-    official.add_argument("--replace", action="store_true")
-    update = dataset_subparsers.add_parser("update", help=tr.text("help.datasets_update"))
-    update.add_argument("dataset_id", nargs="?", metavar="ID")
-    update.add_argument("--replace", action="store_true")
+    dataset_subparsers.add_parser("list", help=tr.text("help.dataset_list"))
 
     animate = subparsers.add_parser(
         "animate", help=tr.text("help.animate"), description=tr.text("help.animate")
@@ -1134,109 +1113,6 @@ def _route(options: LaunchConfig) -> LaunchRoute:
     return StandaloneRoute(options)
 
 
-def _run_datasets(namespace: argparse.Namespace, translator: Translator) -> int:
-    from ccusage_viz.datasets.service import DatasetService
-
-    service = DatasetService()
-    command = namespace.datasets_command
-    if command == "status":
-        statuses = service.status(getattr(namespace, "dataset_id", None))
-        if not statuses:
-            print(translator.text("status.datasets_empty"))
-            return 0
-        for status in statuses:
-            if status.installed is None:
-                if status.corrupt:
-                    print(
-                        translator.text(
-                            "error.dataset_corrupt",
-                            dataset_id=status.dataset_id or namespace.dataset_id,
-                        )
-                    )
-                elif getattr(namespace, "dataset_id", None) is not None:
-                    print(
-                        translator.text(
-                            "status.dataset_not_installed", dataset_id=namespace.dataset_id
-                        )
-                    )
-                continue
-            state = (
-                translator.text("status.dataset_ready")
-                if status.ready
-                else translator.text("status.dataset_setup_required")
-            )
-            print(f"{status.installed.dataset_id} {status.installed.version} · {state}")
-            for missing in status.missing_required:
-                print(f"  {missing.requirement.name}: {missing.requirement.how_to_get.en}")
-        return 0
-    if command == "show":
-        status = service.status(namespace.dataset_id)[0]
-        if status.corrupt:
-            raise UsageError("error.dataset_corrupt", dataset_id=namespace.dataset_id)
-        if status.installed is None or status.manifest is None:
-            raise UsageError("error.dataset_not_installed", dataset_id=namespace.dataset_id)
-        print(f"{status.installed.dataset_id} {status.installed.version}")
-        print(status.manifest.metric.title.en)
-        return 0
-    if command == "list":
-        catalog = service.official_catalog()
-        if not catalog.entries:
-            print(translator.text("status.datasets_official_empty"))
-            return 0
-        host_os, host_arch = service.platform
-        platform_name = f"{host_os}/{host_arch}"
-        for entry in catalog.entries:
-            available = any(
-                artifact.os == host_os and artifact.arch == host_arch
-                for artifact in entry.artifacts
-            )
-            state = (
-                translator.text("status.dataset_catalog_available")
-                if available
-                else translator.text(
-                    "status.dataset_catalog_unavailable_platform", platform=platform_name
-                )
-            )
-            print(f"{entry.id} · {entry.title.en} · {state}")
-            print(f"  {entry.description.en}")
-        return 0
-    if command == "remove":
-        service.remove(namespace.dataset_id)
-        print(translator.text("status.dataset_removed", dataset_id=namespace.dataset_id))
-        return 0
-    if command == "install":
-        if namespace.dataset_source == "official":
-            status = service.install_official(namespace.dataset_id, replace=namespace.replace)
-            assert status.installed is not None
-            print(
-                translator.text(
-                    "status.dataset_installed_official", dataset_id=status.installed.dataset_id
-                )
-            )
-            return 0
-        status = service.install_github(
-            repository=namespace.repository,
-            release_tag=namespace.release,
-            asset_name=namespace.asset,
-            sha256=namespace.sha256,
-            replace=namespace.replace,
-        )
-        assert status.installed is not None
-        print(translator.text("status.dataset_installed", dataset_id=status.installed.dataset_id))
-        return 0
-    if command == "update":
-        statuses = service.update_official(namespace.dataset_id, replace=namespace.replace)
-        for status in statuses:
-            assert status.installed is not None
-            print(
-                translator.text(
-                    "status.dataset_installed_official", dataset_id=status.installed.dataset_id
-                )
-            )
-        return 0
-    raise AssertionError("unsupported datasets command")
-
-
 def _validate_configuration(options: LaunchConfig) -> None:
     if options.host.ascii and options.was_explicit("color_scheme"):
         raise UsageError(
@@ -1259,8 +1135,15 @@ def main(argv: list[str] | None = None) -> int:
         namespace = parser.parse_args(args)
         if hasattr(namespace, "lang") and namespace.lang is None:
             namespace.lang = language
-        if namespace.command == "datasets":
-            return _run_datasets(namespace, tr)
+        if namespace.command == "dataset":
+            from ccusage_viz.datasets.manager import format_dataset_list, run_dataset_manager
+            from ccusage_viz.datasets.service import DatasetService
+
+            service = DatasetService()
+            if namespace.dataset_command == "list":
+                print(format_dataset_list(service.registrations(), tr))
+                return 0
+            return run_dataset_manager(service, tr)
         if namespace.command == "text":
             from ccusage_viz.clock_overlay import describe_time_state, render_time_state
 

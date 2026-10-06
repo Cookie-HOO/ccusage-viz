@@ -10,7 +10,6 @@ from ccusage_viz.cli import (
     ShortCircuitKind,
     _explicit_fields,
     _inject_default_command,
-    _run_datasets,
     _to_options,
     build_parser,
     main,
@@ -88,63 +87,32 @@ def test_text_and_animate_help_describe_public_interfaces(
     assert "Seconds between command-overlay refreshes" in animate_help
 
 
-def test_datasets_cli_parses_official_and_explicit_github_installation() -> None:
+def test_dataset_cli_parses_manager_and_local_list() -> None:
     parser = build_parser(load_translator("en"))
 
-    github = parser.parse_args(
-        [
-            "datasets",
-            "install",
-            "github",
-            "Cookie-HOO/ccuv-dataset-weread",
-            "--release",
-            "v1.0.0",
-            "--asset",
-            "weread-darwin-arm64.tar.gz",
-            "--sha256",
-            "a" * 64,
-        ]
-    )
-    official = parser.parse_args(["datasets", "install", "official", "weread", "--replace"])
-    update = parser.parse_args(["datasets", "update", "weread"])
+    manager = parser.parse_args(["dataset"])
+    listing = parser.parse_args(["dataset", "list"])
 
-    assert github.dataset_source == "github"
-    assert official.dataset_source == "official"
-    assert official.dataset_id == "weread"
-    assert official.replace is True
-    assert update.datasets_command == "update"
-    assert update.dataset_id == "weread"
+    assert manager.command == "dataset"
+    assert manager.dataset_command is None
+    assert listing.dataset_command == "list"
 
 
-def test_datasets_cli_dispatches_official_install_and_update(
+def test_dataset_list_reads_registered_records_without_running_probes(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    installed = type("Installed", (), {"dataset_id": "weread"})()
-    status = type("Status", (), {"installed": installed})()
-
     class Service:
-        def install_official(self, dataset_id: str, *, replace: bool) -> object:
-            assert dataset_id == "weread"
-            assert replace is False
-            return status
+        def registrations(self) -> tuple[object, ...]:
+            return ()
 
-        def update_official(self, dataset_id: str | None, *, replace: bool) -> tuple[object, ...]:
-            assert dataset_id == "weread"
-            assert replace is True
-            return (status,)
+        def __init__(self) -> None:
+            self.probe_calls = 0
 
     monkeypatch.setattr("ccusage_viz.datasets.service.DatasetService", Service)
-    parser = build_parser(load_translator("en"))
-    translator = load_translator("en")
 
-    install = parser.parse_args(["datasets", "install", "official", "weread"])
-    assert _run_datasets(install, translator) == 0
-    assert capsys.readouterr().out == "Installed official dataset weread\n"
-
-    update = parser.parse_args(["datasets", "update", "weread", "--replace"])
-    assert _run_datasets(update, translator) == 0
-    assert capsys.readouterr().out == "Installed official dataset weread\n"
+    assert main(["dataset", "--lang", "en", "list"]) == 0
+    assert capsys.readouterr().out == "No registered datasets\n"
 
 
 def test_text_time_state_writes_a_localized_dynamic_status(
