@@ -269,7 +269,13 @@ def run_dataset_manager(service: DatasetService, translator: Translator) -> int:
                         service.remove_registration(current.dataset_id)
                         selected = max(0, selected - 1)
                 elif key == "r":
-                    notice = translator.text("status.dataset_refresh_unavailable")
+                    refreshed = service.refresh_all()
+                    unavailable = sum(
+                        item.availability == "unavailable" for item in refreshed
+                    )
+                    notice = translator.text(
+                        "status.dataset_refresh_complete", unavailable=unavailable
+                    )
     finally:
         screen.finish()
         set_cursor_visible(sys.stdout, True)

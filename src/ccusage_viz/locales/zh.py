@@ -86,7 +86,7 @@ MESSAGES = {
     "status.dataset_remove_title": "删除数据集",
     "status.dataset_remove_confirm": "删除已注册的数据集 {dataset_id}？",
     "status.dataset_remove_controls": "Enter 删除 · Esc 取消",
-    "status.dataset_refresh_unavailable": "刷新功能暂不可用。",
+    "status.dataset_refresh_complete": "已刷新数据集；{unavailable} 个不可用。",
     "status.dataset_chooser_title": "数据集",
     "status.dataset_chooser_controls": "j/k 选择 · Enter 确认 · Esc 返回",
     "status.dataset_browse_title": "浏览官方数据集",

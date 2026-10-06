@@ -96,3 +96,22 @@ def test_local_registration_can_be_disabled_reenabled_and_removed_without_target
 
     assert target.exists()
     assert service.registrations() == ()
+
+
+def test_refresh_preserves_last_successful_snapshot_when_probe_fails(tmp_path: Path) -> None:
+    responses = [probe(), RuntimeError("command failed")]
+
+    def run_probe(_argv: tuple[str, ...]) -> CustomProbeResponse:
+        outcome = responses.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    service = DatasetService(root=tmp_path, environ={}, probe_runner=run_probe)
+    created = service.register_local_command(("reader", "ccuv")).registration
+
+    refreshed = service.refresh_all()[0]
+
+    assert refreshed.availability == "unavailable"
+    assert refreshed.registration.probe == created.probe
+    assert refreshed.registration.last_probe_error == "command failed"

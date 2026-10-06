@@ -144,6 +144,34 @@ class DatasetService:
         self.store.save_registration(updated)
         return updated
 
+    def refresh_all(self) -> tuple[DatasetRegistrationStatus, ...]:
+        refreshed: list[DatasetRegistrationStatus] = []
+        for status in self.registrations():
+            current = status.registration
+            if not current.enabled:
+                refreshed.append(status)
+                continue
+            now = datetime.now(UTC).isoformat()
+            try:
+                response = self.probe_runner(current.source.command_argv)
+                if response.dataset_id != current.dataset_id:
+                    raise ValueError("probe declared a different Dataset ID")
+            except Exception as exc:
+                updated = replace(
+                    current,
+                    updated_at=now,
+                    last_probe_error=str(exc),
+                )
+            else:
+                updated = replace(
+                    current,
+                    updated_at=now,
+                    probe=DatasetProbeSnapshot(current.dataset_id, response.descriptor, now),
+                    last_probe_error=None,
+                )
+            self.store.save_registration(updated)
+        return self.registrations()
+
     def remove_registration(self, dataset_id: str) -> None:
         self.store.remove_registration(parse_dataset_id(dataset_id))
 

@@ -86,7 +86,7 @@ MESSAGES = {
     "status.dataset_remove_title": "Remove dataset",
     "status.dataset_remove_confirm": "Remove registered dataset {dataset_id}?",
     "status.dataset_remove_controls": "Enter remove · Esc cancel",
-    "status.dataset_refresh_unavailable": "Refresh is not available yet.",
+    "status.dataset_refresh_complete": "Refreshed datasets; {unavailable} unavailable.",
     "status.dataset_chooser_title": "Datasets",
     "status.dataset_chooser_controls": "j/k select · Enter choose · Esc back",
     "status.dataset_browse_title": "Browse official datasets",
