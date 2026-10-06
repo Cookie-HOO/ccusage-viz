@@ -483,6 +483,11 @@ class DashboardDatasetModalState:
     entries: tuple[object, ...] = ()
     selected_dataset_id: str | None = None
     artifact: object | None = None
+    chart_kinds: tuple[str, ...] = ()
+
+
+def _dataset_title(value, translator: Translator) -> str:
+    return value.zh_cn if translator.language == "zh" else value.en
 
 
 _DOUBLE_CLICK_SECONDS = 0.35
@@ -3020,6 +3025,7 @@ def _choose_dataset_view(
     translator: Translator,
     decoder: InputDecoder,
     *,
+    kinds: tuple[str, ...] = _DATASET_VIEW_KINDS,
     height: int,
     paint_choices: Callable[[str, str, str, tuple[str, ...]], None] | None = None,
     read_input: Callable[[], object] | None = None,
@@ -3029,7 +3035,7 @@ def _choose_dataset_view(
     while True:
         rows = [
             f"{'›' if item_index == index else ' '} {translator.text(f'label.pane_{kind}')}"
-            for item_index, kind in enumerate(_DATASET_VIEW_KINDS)
+            for item_index, kind in enumerate(kinds)
         ]
         title = translator.text("status.dataset_chooser_title")
         controls = translator.text("status.dataset_chooser_controls")
@@ -3044,11 +3050,11 @@ def _choose_dataset_view(
         if event.value == "\x1b":
             return None
         if event.value in {"j", "\x1b[B"}:
-            index = (index + 1) % len(_DATASET_VIEW_KINDS)
+            index = (index + 1) % len(kinds)
         elif event.value in {"k", "\x1b[A"}:
-            index = (index - 1) % len(_DATASET_VIEW_KINDS)
+            index = (index - 1) % len(kinds)
         elif event.value in {"\r", "\n"}:
-            return _DATASET_VIEW_KINDS[index]
+            return kinds[index]
 
 
 def _browse_dataset_catalog(
@@ -3351,14 +3357,13 @@ def _choose_dataset_pane_config(
     paint_choices: Callable[[str, str, str, tuple[str, ...]], None] | None = None,
     read_input: Callable[[], object] | None = None,
 ) -> CustomChartPaneConfig | None:
-    """Select an installed source or retain the advanced local-command route."""
+    """Select a ready managed Dataset, then one declared chart kind."""
 
-    from ccusage_viz.datasets.models import DatasetStatus
     from ccusage_viz.datasets.service import DatasetService
 
     service = DatasetService()
     try:
-        statuses = service.status()
+        statuses = service.ready_registered_sources()
     except UsageError as exc:
         statuses = ()
         error: str | None = format_error(exc, translator)
@@ -3367,37 +3372,17 @@ def _choose_dataset_pane_config(
     index = 0
     offset = 0
     while True:
-        entries: list[tuple[str, object]] = [("local", None)]
-        entries.extend(("dataset", status) for status in statuses)
-        entries.extend((("browse", None), ("github", None)))
+        entries = list(statuses)
+        if not entries:
+            return None
         index %= len(entries)
         choices: list[str] = []
-        for item_index, (kind, value) in enumerate(entries):
+        for item_index, status in enumerate(entries):
             selected = "›" if item_index == index else " "
-            if kind == "local":
-                choices.append(f"{selected} {translator.text('label.dataset_local_command')}")
-                continue
-            if kind == "browse":
-                choices.append(f"{selected} {translator.text('label.dataset_browse_official')}")
-                continue
-            if kind == "github":
-                choices.append(f"{selected} {translator.text('label.dataset_github_release')}")
-                continue
-            status = cast(DatasetStatus, value)
-            if status.corrupt:
-                assert status.dataset_id is not None
-                choices.append(
-                    f"{selected} {status.dataset_id} · {translator.text('status.dataset_corrupt')}"
-                )
-                continue
-            assert status.installed is not None
-            state = (
-                translator.text("status.dataset_ready")
-                if status.ready
-                else translator.text("status.dataset_setup_required")
-            )
+            descriptor = status.registration.probe.descriptor
             choices.append(
-                f"{selected} {status.installed.dataset_id} {status.installed.version} · {state}"
+                f"{selected} {_dataset_title(descriptor.dataset.title, translator)} "
+                f"{descriptor.version} · {translator.text('status.dataset_ready')}"
             )
         title = translator.text("status.dataset_chooser_title")
         controls = translator.text("status.dataset_chooser_controls")
@@ -3427,102 +3412,23 @@ def _choose_dataset_pane_config(
             continue
         if key not in {"\r", "\n"}:
             continue
-        kind, value = entries[index]
-        if kind == "local":
-            selected = _choose_custom_pane_config(
-                screen,
-                translator,
-                decoder,
-                height=height,
-                dashboard=dashboard,
-                initial=initial,
-                paint_choices=paint_choices,
-                read_input=read_input,
-            )
-            if selected is None:
-                continue
-            return selected
-        if kind == "browse":
-            dataset_id = _browse_dataset_catalog(
-                screen,
-                translator,
-                decoder,
-                service=service,
-                height=height,
-                paint_choices=paint_choices,
-                read_input=read_input,
-            )
-            if dataset_id is None:
-                continue
-            view = _choose_dataset_view(
-                screen,
-                translator,
-                decoder,
-                height=height,
-                paint_choices=paint_choices,
-                read_input=read_input,
-            )
-            if view is None:
-                continue
-            try:
-                statuses = service.status()
-                source = service.installed_command_source(dataset_id)
-            except UsageError as exc:
-                error = format_error(exc, translator)
-                continue
-            return default_custom_pane(view, source=source, dashboard=dashboard)
-        if kind == "github":
-            dataset_id = _install_github_dataset(
-                screen,
-                translator,
-                decoder,
-                service=service,
-                height=height,
-                paint_choices=paint_choices,
-                read_input=read_input,
-            )
-            if dataset_id is None:
-                continue
-            try:
-                statuses = service.status()
-                source = service.installed_command_source(dataset_id)
-            except UsageError as exc:
-                error = format_error(exc, translator)
-                continue
-            view = _choose_dataset_view(
-                screen,
-                translator,
-                decoder,
-                height=height,
-                paint_choices=paint_choices,
-                read_input=read_input,
-            )
-            if view is None:
-                continue
-            return default_custom_pane(view, source=source, dashboard=dashboard)
-        status = cast(DatasetStatus, value)
-        if status.corrupt:
-            assert status.dataset_id is not None
-            error = translator.text("error.dataset_corrupt", dataset_id=status.dataset_id)
-            continue
-        if not status.ready or status.installed is None:
-            missing = ", ".join(item.requirement.name for item in status.missing_required)
-            error = translator.text("status.dataset_setup_required")
-            if missing:
-                error = f"{error}: {missing}"
+        status = entries[index]
+        kinds = tuple(status.registration.probe.descriptor.capabilities.charts)
+        if not kinds:
             continue
         view = _choose_dataset_view(
             screen,
             translator,
             decoder,
             height=height,
+            kinds=kinds,
             paint_choices=paint_choices,
             read_input=read_input,
         )
         if view is None:
             continue
         try:
-            source = service.installed_command_source(status.installed.dataset_id)
+            source = service.registered_command_source(status.registration.dataset_id)
         except UsageError as exc:
             error = format_error(exc, translator)
             continue
@@ -6587,7 +6493,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
 
         service = DatasetService()
         try:
-            statuses = tuple(service.status())
+            statuses = tuple(service.ready_registered_sources())
             error = None
         except UsageError as exc:
             statuses = ()
@@ -6637,39 +6543,16 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             title = translator.text(f"status.tui_{modal.action}_title")
             controls = translator.text(f"status.tui_{modal.action}_controls")
         elif modal.stage == "source":
-            entries: list[tuple[str, object | None]] = [("local", None)]
-            entries.extend(("dataset", status) for status in modal.statuses)
-            entries.extend((("browse", None), ("github", None)))
+            entries = modal.statuses
             modal.index %= len(entries)
             rows = []
-            for item_index, (kind, value) in enumerate(entries):
+            for item_index, status in enumerate(entries):
                 selected = "›" if item_index == modal.index else " "
-                if kind == "local":
-                    rows.append(f"{selected} {translator.text('label.dataset_local_command')}")
-                elif kind == "browse":
-                    rows.append(f"{selected} {translator.text('label.dataset_browse_official')}")
-                elif kind == "github":
-                    rows.append(f"{selected} {translator.text('label.dataset_github_release')}")
-                else:
-                    from ccusage_viz.datasets.models import DatasetStatus
-
-                    status = cast(DatasetStatus, value)
-                    if status.corrupt:
-                        rows.append(
-                            f"{selected} {status.dataset_id} · "
-                            f"{translator.text('status.dataset_corrupt')}"
-                        )
-                    else:
-                        assert status.installed is not None
-                        state = (
-                            translator.text("status.dataset_ready")
-                            if status.ready
-                            else translator.text("status.dataset_setup_required")
-                        )
-                        rows.append(
-                            f"{selected} {status.installed.dataset_id} "
-                            f"{status.installed.version} · {state}"
-                        )
+                descriptor = status.registration.probe.descriptor
+                rows.append(
+                    f"{selected} {_dataset_title(descriptor.dataset.title, translator)} "
+                    f"{descriptor.version} · {translator.text('status.dataset_ready')}"
+                )
             body, modal.offset = _chooser_viewport(
                 rows,
                 index=modal.index,
@@ -6763,7 +6646,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         elif modal.stage == "installed":
             rows = [
                 f"{'›' if item_index == modal.index else ' '} {translator.text(f'label.pane_{kind}')}"
-                for item_index, kind in enumerate(_DATASET_VIEW_KINDS)
+                for item_index, kind in enumerate(modal.chart_kinds)
             ]
             body, modal.offset = _chooser_viewport(
                 rows, index=modal.index, offset=modal.offset, height=height
@@ -6922,9 +6805,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     finish_dataset_modal(choice)
             return
         if modal.stage == "source":
-            entries: list[tuple[str, object | None]] = [("local", None)]
-            entries.extend(("dataset", status) for status in modal.statuses)
-            entries.extend((("browse", None), ("github", None)))
+            entries = modal.statuses
             if key == "\x1b":
                 modal.stage, modal.index, modal.offset = "pane", 0, 0
             elif key in {"j", "\x1b[B"}:
@@ -6932,33 +6813,11 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             elif key in {"k", "\x1b[A"}:
                 modal.index = (modal.index - 1) % len(entries)
             elif key in {"\r", "\n"}:
-                kind, value = entries[modal.index]
-                if kind == "local":
-                    modal.stage, modal.offset = "local", 0
-                elif kind == "dataset":
-                    from ccusage_viz.datasets.models import DatasetStatus
-
-                    status = cast(DatasetStatus, value)
-                    if status.corrupt:
-                        modal.error = translator.text(
-                            "error.dataset_corrupt", dataset_id=status.dataset_id
-                        )
-                    elif not status.ready or status.installed is None:
-                        modal.error = translator.text("status.dataset_setup_required")
-                    else:
-                        modal.draft.dataset_id = status.installed.dataset_id
-                        modal.stage, modal.index, modal.offset = "installed", 0, 0
-                elif kind == "browse":
-                    modal.stage, modal.index, modal.offset = "browse", 0, 0
-                    modal.error = None
-                    modal.future = executor.submit(
-                        cast(Callable[[], object], modal.service.official_entries)
-                    )
-                else:
-                    modal.stage, modal.index, modal.offset = "github", 0, 0
-                    modal.draft.command = ""
-                    modal.artifact = None
-                    modal.error = None
+                status = entries[modal.index]
+                modal.draft.dataset_id = status.registration.dataset_id
+                modal.chart_kinds = tuple(status.registration.probe.descriptor.capabilities.charts)
+                if modal.chart_kinds:
+                    modal.stage, modal.index, modal.offset = "installed", 0, 0
             return
         if modal.stage == "github":
             if key == "\x1b":
@@ -7041,18 +6900,18 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             if key == "\x1b":
                 modal.stage, modal.index, modal.offset = "source", 0, 0
             elif key in {"j", "\x1b[B"}:
-                modal.index = (modal.index + 1) % len(_DATASET_VIEW_KINDS)
+                modal.index = (modal.index + 1) % len(modal.chart_kinds)
             elif key in {"k", "\x1b[A"}:
-                modal.index = (modal.index - 1) % len(_DATASET_VIEW_KINDS)
+                modal.index = (modal.index - 1) % len(modal.chart_kinds)
             elif key in {"\r", "\n"}:
                 try:
-                    source = modal.service.installed_command_source(modal.draft.dataset_id)
+                    source = modal.service.registered_command_source(modal.draft.dataset_id)
                 except UsageError as exc:
                     modal.error = format_error(exc, translator)
                 else:
                     finish_dataset_modal(
                         default_custom_pane(
-                            _DATASET_VIEW_KINDS[modal.index], source=source, dashboard=options
+                            modal.chart_kinds[modal.index], source=source, dashboard=options
                         )
                     )
             return

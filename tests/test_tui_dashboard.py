@@ -1855,6 +1855,7 @@ def test_dashboard_submits_chart_immediately_after_custom_probe(
         {"ranking": CustomChartCapability(("day",), ("book",), ())},
     )
     probe = CustomProbeResponse(
+        "reading",
         CustomProbeDescriptor(
             "reading-1",
             "0.1.0",
@@ -1966,7 +1967,7 @@ def test_error_only_custom_pane_keeps_scrolling_and_replace_management(
     modal_actions: list[str] = []
 
     class DatasetService:
-        def status(self) -> tuple[object, ...]:
+        def ready_registered_sources(self) -> tuple[object, ...]:
             service_status_calls.append(None)
             return ()
 

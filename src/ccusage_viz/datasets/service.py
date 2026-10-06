@@ -111,6 +111,9 @@ class DatasetService:
             raise UsageError("error.dataset_environment_missing", dataset_id=registration.dataset_id)
         return CustomCommandSource(registration.dataset_id, registration.source.command_argv)
 
+    def ready_registered_sources(self) -> tuple[DatasetRegistrationStatus, ...]:
+        return tuple(status for status in self.registrations() if status.ready)
+
     def register_local_command(
         self, command_argv: tuple[str, ...], *, replace: bool = False
     ) -> RegisterResult:
