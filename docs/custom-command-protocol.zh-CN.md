@@ -6,6 +6,29 @@
 
 这是命令协议，不是插件或持久化系统。v1 不支持文件、HTTP、stdin、Python 插件或 Monitor 数据源；也不支持已完成结果缓存、命令发现、范围合并或不可相加指标。
 
+## V2 指标
+
+`ccuv.custom/v2` 将边界从“一个 Dataset 一个指标”升级为“一个 Dataset 声明多个指标”。使用顺序是 Dataset、指标、图表类型。命令可声明 `default_metric_id`；用户省略 `--metric` 时优先使用它。没有默认指标时，只有 Dataset 恰好只有一个指标才可省略。
+
+每个指标声明 `aggregation: "sum"` 或 `aggregation: "value"`。`sum` 允许 ccuv 对返回事实做历史投影聚合；`value` 是数据源拥有的最终事实，切换范围、分组、粒度、筛选或图表时 ccuv 必须重新请求，不能本地相加、平均或生成 Other。
+
+V2 指标可以声明 `monitor`。它声明固定业务口径 `window_seconds`，也可声明 `refresh_interval_seconds`。ccuv 的 Monitor 显示历史仅决定本地可见观测，不会修改指标业务窗口。Dashboard 现有全局采样周期仍是实际周期；若与声明周期不同，会显示警告。Custom Monitor 支持 bars、ranking 和 list，不提供 `cumulative-bars`，因为固定滚动观测不是互不重叠的累计增量。
+
+Custom Monitor 请求包含带时区的 `range.end_at`。Dataset 按声明的固定窗口计算该截止点的总值和分组；无法回答时返回 `range_not_available`，ccuv 显示错误，绝不替换成零。
+
+```json
+{
+  "protocol": "ccuv.custom/v2",
+  "request_id": "pane:router:2",
+  "request_kind": "monitor",
+  "dataset_id": "router",
+  "metric_id": "tokens",
+  "timezone": "Asia/Shanghai",
+  "range": {"end_at": "2026-10-08T10:00:00+08:00"},
+  "query": {"filters": {}, "group_by": "real_model"}
+}
+```
+
 ## 启动自定义图表
 
 选择图表类型和一种数据源。Dataset 会通过只含元数据的 probe 声明稳定 ID；本地命令用户无需自行发明 ID：

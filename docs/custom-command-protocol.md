@@ -12,6 +12,45 @@ not support file, HTTP, stdin, Python-plugin, or Monitor sources. It does not
 cache completed command results, discover commands, combine query ranges, or
 support non-additive metrics.
 
+## Version 2 metrics
+
+`ccuv.custom/v2` changes the Dataset boundary from one metric per Dataset to
+one Dataset with one or more declared metrics. Select a Dataset, then a metric,
+then a chart kind. A command may set `default_metric_id`; ccuv uses it only when
+`--metric` is omitted. Without a declared default, omission is allowed only when
+the Dataset has exactly one metric.
+
+Each metric declares `aggregation: "sum"` or `aggregation: "value"`.
+`sum` permits ccuv to aggregate returned facts for historical projections.
+`value` is source-owned: ccuv displays only the exact query result and asks the
+Dataset again whenever range, grouping, granularity, filters, or chart changes.
+
+V2 metrics may declare `monitor`. A Monitor metric declares its fixed business
+`window_seconds` and may declare `refresh_interval_seconds`. ccuv's Monitor
+display history remains local and does not alter the metric's business window.
+The existing Dashboard sampling interval remains authoritative; a differing
+declared refresh interval is shown as a warning. Custom Monitor supports bars,
+ranking, and list views. It does not offer `cumulative-bars`, because a fixed
+rolling observation is not a non-overlapping cumulative increment.
+
+Custom Monitor requests contain a timezone-aware `range.end_at`. The Dataset
+calculates its declared fixed window ending there and returns its source-owned
+total and groups. If the source cannot answer that window, it returns
+`range_not_available`; ccuv shows that error and never replaces it with zero.
+
+```json
+{
+  "protocol": "ccuv.custom/v2",
+  "request_id": "pane:router:2",
+  "request_kind": "monitor",
+  "dataset_id": "router",
+  "metric_id": "tokens",
+  "timezone": "Asia/Shanghai",
+  "range": {"end_at": "2026-10-08T10:00:00+08:00"},
+  "query": {"filters": {}, "group_by": "real_model"}
+}
+```
+
 ## Start a custom chart
 
 Choose a chart kind and one source mode. A Dataset declares its stable ID through
