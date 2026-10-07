@@ -12,6 +12,7 @@ from ccusage_viz.datasets.models import (
     DatasetRegistrationStatus,
     LocalDatasetSource,
 )
+from ccusage_viz.custom_models import V2ProbeDescriptor
 from ccusage_viz.datasets.service import DatasetService
 from ccusage_viz.diagnostics import format_error
 from ccusage_viz.formatting import clip_width, display_width, pad_width, wrap_width
@@ -35,6 +36,29 @@ class ManagerView:
 
 def _text(value, translator: Translator) -> str:
     return value.zh_cn if translator.language == "zh" else value.en
+
+
+def _descriptor_title(descriptor, translator: Translator) -> str:
+    return _text(descriptor.dataset.title, translator)
+
+
+def _descriptor_description(descriptor, translator: Translator) -> str:
+    return _text(descriptor.dataset.description, translator)
+
+
+def _descriptor_metric_rows(descriptor, translator: Translator) -> tuple[str, ...]:
+    if not isinstance(descriptor, V2ProbeDescriptor):
+        charts = " · ".join(
+            translator.text(f"label.pane_{kind}") for kind in descriptor.capabilities.charts
+        )
+        return (f"{_text(descriptor.dataset.unit.label, translator)} · {charts}",)
+    rows = []
+    for metric in descriptor.metrics:
+        charts = " · ".join(
+            translator.text(f"label.pane_{kind}") for kind in metric.capabilities.charts
+        )
+        rows.append(f"{_text(metric.title, translator)} · {metric.aggregation} · {charts}")
+    return tuple(rows)
 
 
 def _list_rows(
@@ -68,7 +92,7 @@ def _list_rows(
             index = statuses.index(item)
             descriptor = item.registration.probe.descriptor
             marker = "›" if index == selected else " "
-            title = clip_width(_text(descriptor.dataset.title, translator), name_width)
+            title = clip_width(_descriptor_title(descriptor, translator), name_width)
             source = translator.text(
                 "label.dataset_source_local"
                 if isinstance(item.registration.source, LocalDatasetSource)
@@ -113,15 +137,13 @@ def _detail_rows(status: DatasetRegistrationStatus, translator: Translator, widt
         )
     rows = [
         section("status.dataset_details_dataset"),
-        _text(descriptor.dataset.title, translator),
-        *wrap_width(_text(descriptor.dataset.description, translator), width),
-        f"{_text(descriptor.dataset.unit.label, translator)} · "
-        f"{descriptor.source_timezone or translator.text('status.dataset_timezone_unspecified')}",
+        _descriptor_title(descriptor, translator),
+        *wrap_width(_descriptor_description(descriptor, translator), width),
+        *(_descriptor_metric_rows(descriptor, translator)),
+        descriptor.source_timezone or translator.text("status.dataset_timezone_unspecified"),
         "",
         section("status.dataset_details_supports"),
-        " · ".join(
-            translator.text(f"label.pane_{kind}") for kind in descriptor.capabilities.charts
-        ),
+        *(_descriptor_metric_rows(descriptor, translator)),
         "",
         section("status.dataset_details_environment"),
         *environment_rows(required, translator.text("status.dataset_environment_required")),
@@ -155,12 +177,12 @@ def _manifest_rows(manifest: DatasetManifest, translator: Translator, width: int
 
     descriptor = manifest.descriptor
     title = (
-        _text(descriptor.dataset.title, translator)
+        _descriptor_title(descriptor, translator)
         if descriptor is not None
         else _text(manifest.metric.title, translator)
     )
     description = (
-        _text(descriptor.dataset.description, translator) if descriptor is not None else ""
+        _descriptor_description(descriptor, translator) if descriptor is not None else ""
     )
     def section(key: str) -> str:
         return emphasize(
@@ -435,7 +457,7 @@ def _manager_help_lines(
                     (
                         translator.text(
                             "status.dataset_help_setup_title",
-                            name=_text(descriptor.dataset.title, translator),
+                            name=_descriptor_title(descriptor, translator),
                         ),
                         (),
                     ),

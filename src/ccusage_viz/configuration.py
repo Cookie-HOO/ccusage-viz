@@ -99,15 +99,15 @@ def apply_custom_probe_defaults(
 
 
 def default_custom_pane(
-    kind: str, *, source: CustomCommandSource, dashboard: DashboardLaunch
+    kind: str, *, source: CustomCommandSource, dashboard: DashboardLaunch, metric_id: str | None = None
 ) -> CustomChartPaneConfig:
     """Create a default custom historical pane from a declared command source."""
-    if kind not in {"timeline", "calendar", "stack", "ranking"}:
+    if kind not in {"timeline", "calendar", "stack", "ranking", "monitor"}:
         raise ValueError(f"unknown custom chart kind: {kind}")
     presentation = _default_dashboard_chart_presentation(kind)
-    date_range = resolve_date_range(kind, period=None, since=None, until=None)
+    date_range = resolve_date_range("timeline" if kind == "monitor" else kind, period=None, since=None, until=None)
     return CustomChartPaneConfig(
-        CustomChartConfig(kind, source, date_range, presentation=presentation)
+        CustomChartConfig(kind, source, date_range, presentation=presentation, metric_id=metric_id)
     )
 
 
