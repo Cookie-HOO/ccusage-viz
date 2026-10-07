@@ -327,6 +327,8 @@ class V2ProbeResponse:
 @dataclass(frozen=True, slots=True)
 class V2ChartResponse:
     metric_id: str
+    dataset: CustomDataset
+    capabilities: CustomCapabilities
     data: CustomData
     warnings: tuple[CustomProtocolWarning, ...] = field(default=(), kw_only=True)
 
@@ -414,7 +416,11 @@ def parse_custom_response(raw: bytes, request: CustomRequest) -> CustomResponse:
     warnings = _parse_warnings(root.get("warnings"))
     if isinstance(request, V2ChartRequest):
         return V2ChartResponse(
-            _response_metric_id(root, request.metric_id), _parse_data(root.get("data")), warnings=warnings
+            _response_metric_id(root, request.metric_id),
+            _parse_dataset(root.get("dataset")),
+            _parse_capabilities(root.get("capabilities")),
+            _parse_data(root.get("data")),
+            warnings=warnings,
         )
     if isinstance(request, V2MonitorRequest):
         return V2MonitorResponse(
@@ -642,6 +648,9 @@ def _parse_v2_metric(value: object) -> V2MetricDescriptor:
     aggregation = _string(source.get("aggregation"), "v2 metric aggregation")
     if aggregation not in {"sum", "value"}:
         raise CustomProtocolError("v2 metric aggregation must be sum or value")
+    summary = source.get("summary", "comparisons")
+    if summary not in {"comparisons", "total", "none"}:
+        raise CustomProtocolError("v2 metric summary must be comparisons, total, or none")
     return V2MetricDescriptor(
         _string(source.get("id"), "v2 metric ID"),
         _parse_localized(source.get("title"), "v2 metric title"),
@@ -650,6 +659,7 @@ def _parse_v2_metric(value: object) -> V2MetricDescriptor:
         aggregation,  # type: ignore[arg-type]
         _parse_v2_capabilities(source.get("capabilities")),
         _parse_v2_defaults(source.get("defaults")),
+        summary,  # type: ignore[arg-type]
     )
 
 
@@ -684,10 +694,16 @@ def _parse_v2_capabilities(value: object) -> V2MetricCapabilities:
                 )
             charts[kind] = V2MonitorCapability(window_seconds, refresh, group_by, filters_value)
         elif kind in {"timeline", "calendar", "stack", "ranking"}:
+            periods = _string_tuple(chart.get("periods", []), f"v2 chart {kind} periods")
+            if kind != "ranking" and "all" in periods:
+                raise CustomProtocolError("v2 all period is supported only by ranking")
+            if "all" in periods and periods[-1] != "all":
+                raise CustomProtocolError("v2 ranking all period must be last")
             charts[kind] = V2HistoricalChartCapability(
                 _string_tuple(chart.get("granularities"), f"v2 chart {kind} granularities"),
                 group_by,
                 filters_value,
+                periods,
             )
         else:
             raise CustomProtocolError(f"unsupported v2 chart capability: {kind}")
@@ -809,7 +825,7 @@ def v2_probe_descriptor_to_wire(descriptor: V2ProbeDescriptor) -> dict[str, obje
         common = {"group_by": list(value.group_by), "filters": list(value.filters)}
         if isinstance(value, V2MonitorCapability):
             return {**common, "window_seconds": value.window_seconds, **({"refresh_interval_seconds": value.refresh_interval_seconds} if value.refresh_interval_seconds is not None else {})}
-        return {**common, "granularities": list(value.granularities)}
+        return {**common, "granularities": list(value.granularities), **({"periods": list(value.periods)} if value.periods else {})}
 
     return {
         "revision": descriptor.revision,
@@ -829,6 +845,7 @@ def v2_probe_descriptor_to_wire(descriptor: V2ProbeDescriptor) -> dict[str, obje
                     "charts": {kind: capability(item) for kind, item in metric.capabilities.charts.items()},
                 },
                 "defaults": {kind: {"period": item.period, "group_by": item.group_by, "top": item.top} for kind, item in metric.defaults.items()},
+                "summary": metric.summary,
             }
             for metric in descriptor.metrics
         ],

@@ -12,6 +12,7 @@ from ccusage_viz.custom_protocol import (
     CustomSummaryRequest,
     V2ProbeRequest,
     V2MonitorRequest,
+    V2ChartRequest,
 )
 from ccusage_viz.options import (
     CustomChartConfig,
@@ -293,9 +294,11 @@ def custom_historical_query_intent(
     """Plan one command-backed custom pane request without display-only fields."""
     process = process or ProcessConfig()
     interval = DateInterval(config.date_range.since, config.date_range.until)
-    request = CustomChartRequest(
+    request_type = V2ChartRequest if config.metric_id is not None else CustomChartRequest
+    request = request_type(
         request_id=f"{owner_id}:{generation}{request_id_suffix}",
         dataset_id=config.source.dataset_id,
+        **({"metric_id": config.metric_id} if config.metric_id is not None else {}),
         timezone=timezone,
         start_date=interval.since,
         end_date=interval.until,

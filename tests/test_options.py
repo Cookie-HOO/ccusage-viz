@@ -173,6 +173,22 @@ def test_ranking_period_cycle_includes_today_only() -> None:
     assert adjusted.chart.date_range.days == 1
 
 
+def test_ranking_period_cycle_includes_all_with_unix_epoch_anchor() -> None:
+    chart = RankingConfig("ranking", resolve_date_range("ranking", period="1y", since=None, until=None))
+
+    all_time = adjust_standalone(StandaloneLaunch(ProcessConfig(), StandaloneHostConfig(), chart), "p").chart
+    back_to_year = adjust_standalone(StandaloneLaunch(ProcessConfig(), StandaloneHostConfig(), all_time), "P").chart
+
+    assert all_time.date_range.period == "all"
+    assert all_time.date_range.since == date(1971, 1, 1)
+    assert back_to_year.date_range.period == "1y"
+
+
+def test_all_period_is_ranking_only() -> None:
+    with pytest.raises(UsageError):
+        resolve_date_range("timeline", period="all", since=None, until=None)
+
+
 def test_installed_custom_command_round_trips_without_executable_path() -> None:
     chart = CustomChartConfig(
         "timeline",

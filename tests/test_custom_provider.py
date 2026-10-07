@@ -9,7 +9,7 @@ import pytest
 
 from ccusage_viz.acquisition import custom_historical_query_intent, custom_v2_probe_query_intent
 from ccusage_viz.bootstrap import build_query_runtime
-from ccusage_viz.custom_protocol import CustomChartResponse, V2ProbeResponse
+from ccusage_viz.custom_protocol import CustomChartResponse, V2ChartResponse, V2ProbeResponse
 from ccusage_viz.errors import QueryError
 from ccusage_viz.lifecycle import QueryTrigger
 from ccusage_viz.options import (
@@ -136,6 +136,37 @@ def test_custom_provider_executes_a_v2_probe(tmp_path: Path) -> None:
 
     assert isinstance(response, V2ProbeResponse)
     assert response.descriptor.metrics[0].id == "tokens"
+
+
+def test_custom_provider_executes_a_v2_chart_metric(tmp_path: Path) -> None:
+    script = tmp_path / "chart-v2.py"
+    script.write_text(
+        dedent(
+            """
+            import json, sys
+            request = json.loads(sys.stdin.read())
+            text = {"en": "Reading", "zh-CN": "阅读"}
+            dataset = {"title": text, "description": text, "unit": {"id": "minute", "label": text, "placement": "suffix", "decimal_places": 2}}
+            capability = {"group_by": [], "filters": [], "charts": {"timeline": {"granularities": ["day"], "group_by": [], "filters": []}}}
+            data = {"series": [{"id": "total", "label": text, "points": [{"date": "2026-09-17", "value": "1.25"}]}]}
+            print(json.dumps({
+                "protocol": "ccuv.custom/v2", "request_id": request["request_id"], "request_kind": "chart",
+                "dataset_id": "weread", "metric_id": request["metric_id"], "status": "ok",
+                "dataset": dataset, "capabilities": capability, "data": data
+            }))
+            """
+        )
+    )
+    config = CustomChartConfig(
+        "timeline", CustomCommandSource("weread", (sys.executable, str(script))),
+        resolve_date_range("timeline", period="14d", since=None, until=None, today=date(2026, 9, 30)), metric_id="reading_time",
+    )
+    result = build_query_runtime().acquire(
+        custom_historical_query_intent(config, timezone="Asia/Shanghai", owner_id="pane", generation=1, trigger=QueryTrigger.STARTUP)
+    )
+
+    assert isinstance(result.custom_response, V2ChartResponse)
+    assert result.custom_response.metric_id == "reading_time"
 
 
 def test_custom_provider_uses_process_timeout_output_limit_and_environment(tmp_path: Path) -> None:

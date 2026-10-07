@@ -33,7 +33,8 @@ INTERACTIVE_PERIOD_PRESETS = (
     "1mo",
     "1y",
 )
-RANKING_INTERACTIVE_PERIOD_PRESETS = ("1d", *INTERACTIVE_PERIOD_PRESETS)
+RANKING_INTERACTIVE_PERIOD_PRESETS = ("1d", *INTERACTIVE_PERIOD_PRESETS, "all")
+ALL_PERIOD_START = date(1971, 1, 1)
 DEFAULT_PERIODS = {
     "day": "14d",
     "week": "8w",
@@ -377,6 +378,11 @@ def _adjust_period(date_range: DateRange, key: str, *, kind: str) -> DateRange:
     """Adjust a rolling time view without crossing its granularity boundary."""
     if not date_range.relative_until or date_range.period is None:
         return date_range
+    if kind == "ranking" and date_range.period == "all":
+        period = _cycle(
+            RANKING_INTERACTIVE_PERIOD_PRESETS, "all", 1 if key == "p" else -1
+        )
+        return resolve_date_range(kind, period=period, since=None, until=None)
     _, unit = parse_period(date_range.period)
     granularity = UNIT_GRANULARITIES[unit]
     presets = (
@@ -388,6 +394,8 @@ def _adjust_period(date_range: DateRange, key: str, *, kind: str) -> DateRange:
         )
     else:
         period = DEFAULT_PERIODS[granularity]
+    if kind == "ranking" and period == "all":
+        return DateRange(ALL_PERIOD_START, date_range.until, relative_until=True, period="all")
     value, preset_unit = parse_period(period)
     return replace(
         date_range,
@@ -611,6 +619,10 @@ def resolve_date_range(
     if until is not None and since is None:
         raise UsageError("error.date_order")
     end = _parse_date(until) if until else current
+    if command == "ranking" and period == "all":
+        if since is not None or until is not None:
+            raise UsageError("error.date_conflict")
+        return DateRange(ALL_PERIOD_START, end, relative_until=True, period="all")
     if end > current:
         raise UsageError("error.future_until")
     if since is not None:

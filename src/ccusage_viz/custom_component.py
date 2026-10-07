@@ -8,7 +8,7 @@ from typing import Any, Literal
 
 from ccusage_viz.core.time import DateRange
 from ccusage_viz.custom_models import CustomPresentationDescriptor, CustomProtocolFailure
-from ccusage_viz.custom_protocol import CustomChartResponse
+from ccusage_viz.custom_protocol import CustomChartResponse, V2ChartResponse
 from ccusage_viz.errors import QueryError
 from ccusage_viz.options import CustomChartConfig, has_complete_content
 from ccusage_viz.processing.custom_historical import (
@@ -267,6 +267,8 @@ class CustomHistoricalComponent:
     ) -> bool:
         """Apply the provider's typed optional custom payload when available."""
         payload = getattr(result, "custom_response", None)
+        if isinstance(payload, V2ChartResponse):
+            payload = CustomChartResponse(payload.dataset, payload.capabilities, payload.data, warnings=payload.warnings)
         if not isinstance(payload, CustomChartResponse):
             raise TypeError("custom provider result does not contain a chart response")
         return self.accept_response(payload, purpose=purpose, accepted_at=accepted_at)

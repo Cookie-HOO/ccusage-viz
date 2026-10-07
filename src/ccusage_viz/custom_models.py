@@ -122,6 +122,7 @@ class V2HistoricalChartCapability:
     granularities: tuple[str, ...]
     group_by: tuple[str, ...]
     filters: tuple[str, ...]
+    periods: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,6 +155,7 @@ class V2MetricDescriptor:
     aggregation: Aggregation
     capabilities: V2MetricCapabilities
     defaults: Mapping[str, CustomChartDefaults]
+    summary: Literal["comparisons", "total", "none"] = "comparisons"
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "defaults", MappingProxyType(dict(self.defaults)))
