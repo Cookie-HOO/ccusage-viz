@@ -193,9 +193,9 @@ CustomFilters: TypeAlias = tuple[tuple[str, tuple[str, ...]], ...]
 
 @dataclass(frozen=True, slots=True)
 class CustomChartConfig:
-    """Declarative historical chart configuration for a custom command source."""
+    """Declarative V1 historical or V2 Metric chart configuration."""
 
-    kind: Literal["timeline", "calendar", "stack", "ranking"]
+    kind: Literal["timeline", "calendar", "stack", "ranking", "monitor"]
     source: CustomCommandSource
     date_range: DateRange
     filters: CustomFilters = ()
@@ -206,6 +206,7 @@ class CustomChartConfig:
     granularity: str = "day"
     weekdays: str = "show"
     initial_explicit: frozenset[str] = frozenset()
+    metric_id: str | None = None
 
 
 HistoricalChartConfig: TypeAlias = TimelineConfig | CalendarConfig | StackConfig | RankingConfig

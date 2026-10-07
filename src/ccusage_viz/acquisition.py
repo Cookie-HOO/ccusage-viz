@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import cast
 
 from ccusage_viz.core.time import local_today
@@ -11,6 +11,7 @@ from ccusage_viz.custom_protocol import (
     CustomProbeRequest,
     CustomSummaryRequest,
     V2ProbeRequest,
+    V2MonitorRequest,
 )
 from ccusage_viz.options import (
     CustomChartConfig,
@@ -263,24 +264,6 @@ def custom_v2_probe_query_intent(
         ),
         payload=request,
     )
-    return QueryIntent(
-        owner_id=owner_id,
-        generation=generation,
-        trigger=trigger,
-        provider=ProviderRef("custom-command"),
-        scope=DataScope(()),
-        missing_intervals=(),
-        resolution=DataResolution.DATE,
-        execution_context=ExecutionContext(
-            source.command_argv[0],
-            process.query_timeout,
-            process.output_limit,
-            process.environment,
-        ),
-        payload=request,
-    )
-
-
 def custom_historical_query_intent(
     config: CustomChartConfig,
     *,
@@ -324,6 +307,46 @@ def custom_historical_query_intent(
     )
 
 
+def custom_v2_monitor_query_intent(
+    config: CustomChartConfig,
+    *,
+    timezone: str,
+    owner_id: str,
+    generation: int,
+    trigger: QueryTrigger,
+    end_at: datetime,
+    process: ProcessConfig | None = None,
+) -> QueryIntent:
+    """Plan one source-owned V2 Monitor observation endpoint request."""
+    if config.kind != "monitor" or config.metric_id is None:
+        raise ValueError("v2 monitor query requires a monitor chart and metric ID")
+    process = process or ProcessConfig()
+    request = V2MonitorRequest(
+        request_id=f"{owner_id}:{generation}",
+        dataset_id=config.source.dataset_id,
+        metric_id=config.metric_id,
+        timezone=timezone,
+        end_at=end_at,
+        filters=config.filters,
+        group_by=config.group_by,
+        command_argv=config.source.command_argv,
+    )
+    return QueryIntent(
+        owner_id=owner_id,
+        generation=generation,
+        trigger=trigger,
+        provider=ProviderRef("custom-command", config.source.dataset_id),
+        scope=DataScope(()),
+        missing_intervals=(),
+        resolution=DataResolution.DATE,
+        execution_context=ExecutionContext(
+            config.source.command_argv[0],
+            process.query_timeout,
+            process.output_limit,
+            process.environment,
+        ),
+        payload=request,
+    )
 def custom_summary_query_intent(
     source: CustomCommandSource,
     plan: SummaryQueryPlan,

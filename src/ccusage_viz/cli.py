@@ -377,6 +377,7 @@ def build_parser(tr: Translator) -> argparse.ArgumentParser:
 
     def add_custom_source_arguments(chart_parser: argparse.ArgumentParser) -> None:
         chart_parser.add_argument("--dataset", metavar="ID")
+        chart_parser.add_argument("--metric", metavar="ID")
         chart_parser.add_argument("--command", dest="command_text", metavar="TEXT")
         chart_parser.add_argument(
             "--filter", dest="custom_filters", action="append", default=[], metavar="ID=OPTION"
@@ -633,6 +634,8 @@ def _custom_chart_from_namespace(
             raise UsageError("error.arguments", detail="--command requires --dataset")
         source = CustomCommandSource(namespace.dataset, command_argv)
     kind = _chart_kind(namespace)
+    if kind == "monitor" and namespace.metric is None:
+        raise UsageError("error.arguments", detail="custom monitor requires --metric")
     group_by = namespace.group_by
     top = getattr(namespace, "top", None)
     if kind == "ranking" and group_by is None and top == 10 and "top" not in explicit:
@@ -645,10 +648,10 @@ def _custom_chart_from_namespace(
     if style not in compatible_styles(kind, group_by):
         raise UsageError("error.style_incompatible", style=style, mode=group_by or "total")
     date_range = resolve_date_range(
-        kind,
-        period=namespace.period,
-        since=namespace.since,
-        until=namespace.until,
+        "timeline" if kind == "monitor" else kind,
+        period=getattr(namespace, "period", None),
+        since=getattr(namespace, "since", None),
+        until=getattr(namespace, "until", None),
         timezone=timezone,
     )
     return CustomChartConfig(
@@ -671,6 +674,7 @@ def _custom_chart_from_namespace(
         granularity=getattr(namespace, "granularity", "day"),
         weekdays=getattr(namespace, "weekdays", "show"),
         initial_explicit=explicit & {"period", "since", "until", "group_by", "top"},
+        metric_id=namespace.metric,
     )
 
 
