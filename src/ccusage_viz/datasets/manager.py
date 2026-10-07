@@ -474,7 +474,7 @@ def _show_manager_help(
             translator,
             width=size.columns,
             height=size.lines,
-            color=screen.stream.isatty(),
+            color=True,
         )
     )
     while True:
@@ -715,7 +715,7 @@ def run_dataset_manager(service: DatasetService, translator: Translator) -> int:
                     selected = (selected + 1) % len(statuses)
                 elif key in {"k", "\x1b[A"} and statuses:
                     selected = (selected - 1) % len(statuses)
-                elif key == "i" and statuses:
+                elif key in {"\r", "\n"} and statuses:
                     details = not details
                 elif key == "h":
                     help_open = True

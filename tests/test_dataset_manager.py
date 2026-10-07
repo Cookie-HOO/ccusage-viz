@@ -25,6 +25,7 @@ from ccusage_viz.datasets.models import (
     LocalDatasetSource,
 )
 from ccusage_viz.i18n import load_translator
+from ccusage_viz.render.palette import get_color_scheme
 from ccusage_viz.terminal import Frame
 from ccusage_viz.tui_input import InputDecoder, KeyEvent
 
@@ -92,7 +93,7 @@ def test_manager_uses_a_separate_detail_page_on_narrow_terminals() -> None:
 
     assert "Daily reading time" in body
     assert "local command · Ready" not in body
-    assert rendered.frame.rows[-1] == "i details · Esc back"
+    assert rendered.frame.rows[-1] == "Enter / Esc back"
 
 
 def test_dataset_setup_help_expands_environment_instructions() -> None:
@@ -120,6 +121,13 @@ def test_manager_help_uses_dashboard_style_highlight_for_section_titles() -> Non
     assert "\x1b[" in "\n".join(frame.rows)
 
 
+def test_manager_help_highlights_sections_for_interactive_manager_default() -> None:
+    lines = _manager_help_lines(status(), load_translator("en"), details=False, width=80)
+    frame = _manager_help_frame(lines, load_translator("en"), width=100, height=24, color=True)
+
+    assert f"\x1b[38;5;{get_color_scheme('classic').highlight}m" in "\n".join(frame.rows)
+
+
 def test_manager_general_help_explains_the_dynamic_dataset_list() -> None:
     selected = status()
     lines = _manager_help_lines(
@@ -136,9 +144,10 @@ def test_manager_footer_follows_dashboard_browse_order_without_quit() -> None:
     rendered = render_dataset_manager((status(),), load_translator("en"), width=100, height=24)
 
     assert rendered.frame.rows[-1] == (
-        "r refresh all · + add · i details · d disable · x remove · j/k select · h help"
+        "r refresh all · + add · Enter details · d disable · x remove · j/k select · h help"
     )
     assert "q quit" not in rendered.frame.rows[-1]
+    assert "i details" not in rendered.frame.rows[-1]
 
 
 def test_dataset_list_formats_local_records_without_running_commands() -> None:
