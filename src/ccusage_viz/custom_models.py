@@ -108,6 +108,67 @@ class CustomCapabilities:
         object.__setattr__(self, "charts", MappingProxyType(dict(self.charts)))
 
 
+Aggregation = Literal["sum", "value"]
+
+
+@dataclass(frozen=True, slots=True)
+class V2Dataset:
+    title: LocalizedText
+    description: LocalizedText
+
+
+@dataclass(frozen=True, slots=True)
+class V2HistoricalChartCapability:
+    granularities: tuple[str, ...]
+    group_by: tuple[str, ...]
+    filters: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class V2MonitorCapability:
+    window_seconds: int
+    refresh_interval_seconds: int | None
+    group_by: tuple[str, ...]
+    filters: tuple[str, ...]
+
+
+V2ChartCapability = V2HistoricalChartCapability | V2MonitorCapability
+
+
+@dataclass(frozen=True, slots=True)
+class V2MetricCapabilities:
+    group_by: tuple[CustomDimension, ...]
+    filters: tuple[CustomFilter, ...]
+    charts: Mapping[str, V2ChartCapability]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "charts", MappingProxyType(dict(self.charts)))
+
+
+@dataclass(frozen=True, slots=True)
+class V2MetricDescriptor:
+    id: str
+    title: LocalizedText
+    description: LocalizedText
+    unit: CustomUnit
+    aggregation: Aggregation
+    capabilities: V2MetricCapabilities
+    defaults: Mapping[str, CustomChartDefaults]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "defaults", MappingProxyType(dict(self.defaults)))
+
+
+@dataclass(frozen=True, slots=True)
+class V2ProbeDescriptor:
+    revision: str
+    version: str
+    dataset: V2Dataset
+    metrics: tuple[V2MetricDescriptor, ...]
+    environment: tuple[CustomEnvironmentDeclaration, ...]
+    source_timezone: str | None = None
+
+
 @dataclass(frozen=True, slots=True)
 class CustomPoint:
     date: date

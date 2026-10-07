@@ -8,12 +8,14 @@ import pytest
 from ccusage_viz.coverage import DateInterval
 from ccusage_viz.custom_protocol import (
     PROTOCOL_VERSION,
+    V2_PROTOCOL_VERSION,
     CustomChartRequest,
     CustomProbeRequest,
     CustomProtocolError,
     CustomSummaryRequest,
     canonical_custom_request_key,
     parse_custom_response,
+    parse_v2_probe_descriptor,
 )
 
 
@@ -66,6 +68,94 @@ def probe_request(**changes: object) -> CustomProbeRequest:
 
 def unit() -> dict[str, object]:
     return {"id": "page", "label": text("pages", "页"), "placement": "suffix", "decimal_places": 0}
+
+
+def v2_probe_descriptor() -> dict[str, object]:
+    return {
+        "revision": "router-1",
+        "version": "0.1.0",
+        "dataset": {
+            "title": text("Local Router", "本地 Router"),
+            "description": text("Live Router metrics", "实时 Router 指标"),
+        },
+        "metrics": [
+            {
+                "id": "tokens",
+                "title": text("Token throughput", "Token 吞吐"),
+                "description": text("Recent token usage", "近期 Token 用量"),
+                "unit": {"id": "token", "label": text("tokens", "Token"), "placement": "suffix", "decimal_places": 0},
+                "aggregation": "sum",
+                "capabilities": {
+                    "group_by": [{"id": "real_model", "label": text("Real model", "真实模型")}],
+                    "filters": [],
+                    "charts": {
+                        "monitor": {
+                            "window_seconds": 60,
+                            "refresh_interval_seconds": 10,
+                            "group_by": ["real_model"],
+                            "filters": [],
+                        }
+                    },
+                },
+                "defaults": {},
+            },
+            {
+                "id": "average_tokens_per_request",
+                "title": text("Average tokens per request", "平均每请求 Token"),
+                "description": text("Recent request average", "近期请求均值"),
+                "unit": {"id": "token-per-request", "label": text("tokens/request", "Token/请求"), "placement": "suffix", "decimal_places": 1},
+                "aggregation": "value",
+                "capabilities": {
+                    "group_by": [{"id": "agent", "label": text("Agent", "Agent")}],
+                    "filters": [],
+                    "charts": {
+                        "monitor": {
+                            "window_seconds": 60,
+                            "group_by": ["agent"],
+                            "filters": [],
+                        }
+                    },
+                },
+                "defaults": {},
+            },
+        ],
+        "environment": [],
+    }
+
+
+def test_v2_probe_descriptor_parses_multiple_metrics_and_monitor_capabilities() -> None:
+    descriptor = parse_v2_probe_descriptor(v2_probe_descriptor())
+
+    assert V2_PROTOCOL_VERSION == "ccuv.custom/v2"
+    assert tuple(metric.id for metric in descriptor.metrics) == (
+        "tokens",
+        "average_tokens_per_request",
+    )
+    assert descriptor.metrics[0].aggregation == "sum"
+    monitor = descriptor.metrics[0].capabilities.charts["monitor"]
+    assert monitor.window_seconds == 60
+    assert monitor.refresh_interval_seconds == 10
+    assert descriptor.metrics[1].aggregation == "value"
+    assert descriptor.metrics[1].capabilities.charts["monitor"].refresh_interval_seconds is None
+
+
+@pytest.mark.parametrize(
+    ("mutate", "message"),
+    [
+        (lambda value: value["metrics"].append(value["metrics"][0].copy()), "metric IDs must be unique"),
+        (lambda value: value["metrics"][0].pop("aggregation"), "aggregation"),
+        (lambda value: value["metrics"][0].__setitem__("aggregation", "ratio"), "aggregation"),
+        (lambda value: value["metrics"][0]["capabilities"]["charts"]["monitor"].__setitem__("window_seconds", 0), "window_seconds"),
+    ],
+)
+def test_v2_probe_descriptor_rejects_invalid_metric_contract(
+    mutate: object, message: str
+) -> None:
+    descriptor = v2_probe_descriptor()
+    mutate(descriptor)  # type: ignore[operator]
+
+    with pytest.raises(CustomProtocolError, match=message):
+        parse_v2_probe_descriptor(descriptor)
 
 
 def capabilities() -> dict[str, object]:

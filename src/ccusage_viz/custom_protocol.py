@@ -31,9 +31,16 @@ from ccusage_viz.custom_models import (
     CustomSummaryMetric,
     CustomUnit,
     LocalizedText,
+    V2Dataset,
+    V2HistoricalChartCapability,
+    V2MetricCapabilities,
+    V2MetricDescriptor,
+    V2MonitorCapability,
+    V2ProbeDescriptor,
 )
 
 PROTOCOL_VERSION = "ccuv.custom/v1"
+V2_PROTOCOL_VERSION = "ccuv.custom/v2"
 _ERROR_CODES = frozenset(
     {
         "unsupported_dataset",
@@ -407,6 +414,127 @@ def parse_probe_descriptor(value: object) -> CustomProbeDescriptor:
     """Parse a persisted static Dataset descriptor without a response envelope."""
 
     return _parse_probe_descriptor(value)
+
+
+def parse_v2_probe_descriptor(value: object) -> V2ProbeDescriptor:
+    """Parse a V2 Dataset descriptor with Metric-owned capabilities."""
+
+    source = _mapping(value, "v2 probe descriptor")
+    revision = _string(source.get("revision"), "v2 probe descriptor revision")
+    version = _string(source.get("version"), "v2 probe descriptor version")
+    source_timezone = source.get("source_timezone")
+    if source_timezone is not None:
+        source_timezone = _string(source_timezone, "v2 probe descriptor source_timezone")
+        _validate_timezone(source_timezone)
+    dataset = _mapping(source.get("dataset"), "v2 dataset")
+    metrics = tuple(
+        _parse_v2_metric(item) for item in _sequence(source.get("metrics"), "v2 metrics")
+    )
+    if not metrics:
+        raise CustomProtocolError("v2 metrics must not be empty")
+    if len({metric.id for metric in metrics}) != len(metrics):
+        raise CustomProtocolError("v2 metric IDs must be unique")
+    environment = tuple(
+        _parse_environment_declaration(item)
+        for item in _sequence(source.get("environment"), "v2 environment")
+    )
+    if len({item.name for item in environment}) != len(environment):
+        raise CustomProtocolError("v2 environment names must be unique")
+    return V2ProbeDescriptor(
+        revision,
+        version,
+        V2Dataset(
+            _parse_localized(dataset.get("title"), "v2 dataset title"),
+            _parse_localized(dataset.get("description"), "v2 dataset description"),
+        ),
+        metrics,
+        environment,
+        source_timezone,
+    )
+
+
+def _parse_v2_metric(value: object) -> V2MetricDescriptor:
+    source = _mapping(value, "v2 metric")
+    aggregation = _string(source.get("aggregation"), "v2 metric aggregation")
+    if aggregation not in {"sum", "value"}:
+        raise CustomProtocolError("v2 metric aggregation must be sum or value")
+    return V2MetricDescriptor(
+        _string(source.get("id"), "v2 metric ID"),
+        _parse_localized(source.get("title"), "v2 metric title"),
+        _parse_localized(source.get("description"), "v2 metric description"),
+        _parse_unit(source.get("unit")),
+        aggregation,  # type: ignore[arg-type]
+        _parse_v2_capabilities(source.get("capabilities")),
+        _parse_v2_defaults(source.get("defaults")),
+    )
+
+
+def _parse_v2_capabilities(value: object) -> V2MetricCapabilities:
+    source = _mapping(value, "v2 metric capabilities")
+    dimensions = tuple(
+        _parse_dimension(item, "v2 group-by dimension")
+        for item in _sequence(source.get("group_by"), "v2 capabilities group_by")
+    )
+    filters = tuple(
+        _parse_filter(item) for item in _sequence(source.get("filters"), "v2 capabilities filters")
+    )
+    charts: dict[str, V2HistoricalChartCapability | V2MonitorCapability] = {}
+    for kind, raw in _mapping(source.get("charts"), "v2 capabilities charts").items():
+        chart = _mapping(raw, f"v2 chart capability {kind}")
+        group_by = _string_tuple(chart.get("group_by"), f"v2 chart {kind} group_by")
+        filters_value = _string_tuple(chart.get("filters"), f"v2 chart {kind} filters")
+        if kind == "monitor":
+            window_seconds = chart.get("window_seconds")
+            refresh = chart.get("refresh_interval_seconds")
+            if (
+                not isinstance(window_seconds, int)
+                or isinstance(window_seconds, bool)
+                or window_seconds < 1
+            ):
+                raise CustomProtocolError("v2 monitor window_seconds must be a positive integer")
+            if refresh is not None and (
+                not isinstance(refresh, int) or isinstance(refresh, bool) or refresh < 1
+            ):
+                raise CustomProtocolError(
+                    "v2 monitor refresh_interval_seconds must be a positive integer"
+                )
+            charts[kind] = V2MonitorCapability(window_seconds, refresh, group_by, filters_value)
+        elif kind in {"timeline", "calendar", "stack", "ranking"}:
+            charts[kind] = V2HistoricalChartCapability(
+                _string_tuple(chart.get("granularities"), f"v2 chart {kind} granularities"),
+                group_by,
+                filters_value,
+            )
+        else:
+            raise CustomProtocolError(f"unsupported v2 chart capability: {kind}")
+    _unique_ids(dimensions, "v2 group-by dimensions")
+    _unique_ids(filters, "v2 filters")
+    return V2MetricCapabilities(dimensions, filters, charts)
+
+
+def _parse_v2_defaults(value: object) -> dict[str, CustomChartDefaults]:
+    defaults: dict[str, CustomChartDefaults] = {}
+    for kind, raw in _mapping(value, "v2 metric defaults").items():
+        if kind not in {"timeline", "calendar", "stack", "ranking"}:
+            raise CustomProtocolError(f"unsupported v2 chart default: {kind}")
+        item = _mapping(raw, f"v2 chart default {kind}")
+        if set(item) != {"period", "group_by", "top"}:
+            raise CustomProtocolError(f"v2 chart default {kind} must contain period, group_by, and top")
+        period = item["period"]
+        group_by = item["group_by"]
+        top = item["top"]
+        if period is not None:
+            period = _string(period, f"v2 chart default {kind} period")
+            try:
+                parse_period(period)
+            except ValueError as exc:
+                raise CustomProtocolError(f"v2 chart default {kind} period must be valid") from exc
+        if group_by is not None:
+            group_by = _string(group_by, f"v2 chart default {kind} group_by")
+        if top is not None and (not isinstance(top, int) or isinstance(top, bool) or top < 1):
+            raise CustomProtocolError(f"v2 chart default {kind} top must be a positive integer")
+        defaults[kind] = CustomChartDefaults(period, group_by, top)
+    return defaults
 
 
 def probe_descriptor_to_wire(descriptor: CustomProbeDescriptor) -> dict[str, object]:
