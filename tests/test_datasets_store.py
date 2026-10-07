@@ -19,6 +19,7 @@ from ccusage_viz.datasets.models import (
     DatasetProbeSnapshot,
     DatasetRegistration,
     LocalDatasetSource,
+    ManagedDatasetSource,
 )
 from ccusage_viz.datasets.store import DatasetStore
 from ccusage_viz.errors import UsageError
@@ -199,3 +200,26 @@ def test_store_round_trips_local_registration_without_a_managed_artifact(tmp_pat
 
     store.remove_registration("weread")
     assert store.registration_ids() == ()
+
+
+def test_store_round_trips_managed_registration_provenance(tmp_path: Path) -> None:
+    store = DatasetStore(tmp_path / "datasets")
+    local = registration()
+    managed = DatasetRegistration(
+        local.dataset_id,
+        ManagedDatasetSource(
+            "github",
+            "example/reading-time",
+            "v1.2.3",
+            "reading-time-darwin-arm64.tar.gz",
+            "a" * 64,
+        ),
+        True,
+        local.created_at,
+        local.updated_at,
+        local.probe,
+    )
+
+    store.save_registration(managed)
+
+    assert store.load_registration("weread") == managed

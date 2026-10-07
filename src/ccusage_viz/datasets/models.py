@@ -583,6 +583,24 @@ class LocalDatasetSource:
 
 
 @dataclass(frozen=True, slots=True)
+class ManagedDatasetSource:
+    kind: Literal["official", "github"]
+    repository: str
+    release_tag: str
+    asset_name: str
+    sha256: str
+
+    def __post_init__(self) -> None:
+        if self.kind not in {"official", "github"} or not _REPOSITORY.fullmatch(self.repository):
+            raise ValueError("managed Dataset source is invalid")
+        if not self.release_tag or not self.asset_name or not _SHA256.fullmatch(self.sha256):
+            raise ValueError("managed Dataset source is invalid")
+
+
+DatasetSource = LocalDatasetSource | ManagedDatasetSource
+
+
+@dataclass(frozen=True, slots=True)
 class DatasetProbeSnapshot:
     dataset_id: str
     descriptor: CustomProbeDescriptor
@@ -600,7 +618,7 @@ class DatasetProbeSnapshot:
 @dataclass(frozen=True, slots=True)
 class DatasetRegistration:
     dataset_id: str
-    source: LocalDatasetSource
+    source: DatasetSource
     enabled: bool
     created_at: str
     updated_at: str
@@ -624,7 +642,17 @@ class DatasetRegistration:
         return {
             "schema": 1,
             "dataset_id": self.dataset_id,
-            "source": {"kind": "local", "command_argv": list(self.source.command_argv)},
+            "source": (
+                {"kind": "local", "command_argv": list(self.source.command_argv)}
+                if isinstance(self.source, LocalDatasetSource)
+                else {
+                    "kind": self.source.kind,
+                    "repository": self.source.repository,
+                    "release_tag": self.source.release_tag,
+                    "asset_name": self.source.asset_name,
+                    "sha256": self.source.sha256,
+                }
+            ),
             "enabled": self.enabled,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
@@ -664,10 +692,6 @@ class DatasetRegistration:
         if (
             not isinstance(dataset_id, str)
             or not isinstance(source, Mapping)
-            or set(source) != {"kind", "command_argv"}
-            or source.get("kind") != "local"
-            or not isinstance(source.get("command_argv"), list)
-            or not all(isinstance(item, str) for item in source["command_argv"])
             or not isinstance(probe, Mapping)
             or set(probe) != {"dataset_id", "descriptor", "refreshed_at"}
             or not isinstance(created_at, str)
@@ -676,13 +700,24 @@ class DatasetRegistration:
             or (last_probe_error is not None and not isinstance(last_probe_error, str))
         ):
             raise ValueError("Dataset registration is invalid")
+        source_kind = source.get("kind")
+        if source_kind == "local":
+            if set(source) != {"kind", "command_argv"} or not isinstance(source.get("command_argv"), list) or not all(isinstance(item, str) for item in source["command_argv"]):
+                raise ValueError("Dataset registration source is invalid")
+            parsed_source: DatasetSource = LocalDatasetSource(tuple(cast(list[str], source["command_argv"])))
+        elif source_kind in {"official", "github"}:
+            if set(source) != {"kind", "repository", "release_tag", "asset_name", "sha256"} or not all(isinstance(source.get(key), str) for key in ("repository", "release_tag", "asset_name", "sha256")):
+                raise ValueError("Dataset registration source is invalid")
+            parsed_source = ManagedDatasetSource(cast(Literal["official", "github"], source_kind), cast(str, source["repository"]), cast(str, source["release_tag"]), cast(str, source["asset_name"]), cast(str, source["sha256"]))
+        else:
+            raise ValueError("Dataset registration source is invalid")
         probe_id = probe.get("dataset_id")
         refreshed_at = probe.get("refreshed_at")
         if not isinstance(probe_id, str) or not isinstance(refreshed_at, str):
             raise ValueError("Dataset registration probe is invalid")
         return cls(
             dataset_id,
-            LocalDatasetSource(tuple(cast(list[str], source["command_argv"]))),
+            parsed_source,
             enabled,
             created_at,
             updated_at,

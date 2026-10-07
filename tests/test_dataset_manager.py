@@ -9,7 +9,11 @@ from ccusage_viz.custom_models import (
     CustomUnit,
     LocalizedText,
 )
-from ccusage_viz.datasets.manager import format_dataset_list, render_dataset_manager
+from ccusage_viz.datasets.manager import (
+    _choose_dataset_source,
+    format_dataset_list,
+    render_dataset_manager,
+)
 from ccusage_viz.datasets.models import (
     DatasetProbeSnapshot,
     DatasetRegistration,
@@ -17,6 +21,8 @@ from ccusage_viz.datasets.models import (
     LocalDatasetSource,
 )
 from ccusage_viz.i18n import load_translator
+from ccusage_viz.terminal import Frame
+from ccusage_viz.tui_input import InputDecoder, KeyEvent
 
 
 def status(*, availability: str = "ready") -> DatasetRegistrationStatus:
@@ -79,3 +85,25 @@ def test_dataset_list_formats_local_records_without_running_commands() -> None:
 
     assert "weread 0.1.0 · Ready" in output
     assert "Disabled" in output
+
+
+def test_add_source_chooser_lists_three_sources_and_selects_local() -> None:
+    frames: list[Frame] = []
+
+    class Screen:
+        def paint(self, frame: Frame, **_kwargs: object) -> None:
+            frames.append(frame)
+
+    events = iter((KeyEvent("j"), KeyEvent("j"), KeyEvent("\r")))
+    selected = _choose_dataset_source(
+        Screen(),  # type: ignore[arg-type]
+        load_translator("en"),
+        InputDecoder(),
+        read_input=lambda: next(events),
+    )
+
+    assert selected == "local"
+    output = "\n".join(frames[0].rows)
+    assert "Browse official datasets" in output
+    assert "Install from GitHub" in output
+    assert "Local command" in output

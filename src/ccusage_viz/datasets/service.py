@@ -23,6 +23,7 @@ from ccusage_viz.datasets.models import (
     DatasetRegistrationStatus,
     DatasetStatus,
     LocalDatasetSource,
+    ManagedDatasetSource,
     RegisterResult,
     ReleaseArtifact,
     environment_status,
@@ -109,7 +110,9 @@ class DatasetService:
         )
         if status is None or not status.ready:
             raise UsageError("error.dataset_environment_missing", dataset_id=registration.dataset_id)
-        return CustomCommandSource(registration.dataset_id, registration.source.command_argv)
+        if isinstance(registration.source, LocalDatasetSource):
+            return CustomCommandSource(registration.dataset_id, registration.source.command_argv)
+        return self.installed_command_source(registration.dataset_id)
 
     def command_source(self, dataset_id: str) -> CustomCommandSource:
         """Resolve a managed registration first, then a legacy installed artifact."""
@@ -165,7 +168,12 @@ class DatasetService:
                 continue
             now = datetime.now(UTC).isoformat()
             try:
-                response = self.probe_runner(current.source.command_argv)
+                argv = (
+                    current.source.command_argv
+                    if isinstance(current.source, LocalDatasetSource)
+                    else self.installed_command_source(current.dataset_id).command_argv
+                )
+                response = self.probe_runner(argv)
                 if response.dataset_id != current.dataset_id:
                     raise ValueError("probe declared a different Dataset ID")
             except Exception as exc:
@@ -185,7 +193,45 @@ class DatasetService:
         return self.registrations()
 
     def remove_registration(self, dataset_id: str) -> None:
-        self.store.remove_registration(parse_dataset_id(dataset_id))
+        identifier = parse_dataset_id(dataset_id)
+        registration = self.store.load_registration(identifier)
+        self.store.remove_registration(identifier)
+        if isinstance(registration.source, ManagedDatasetSource):
+            self.store.remove(identifier)
+
+    def register_installed_dataset(self, dataset_id: str, *, replace: bool = False) -> RegisterResult:
+        identifier = parse_dataset_id(dataset_id)
+        installed, manifest, executable = self.store.load(identifier)
+        response = self.probe_runner((str(executable), "ccuv"))
+        if response.dataset_id != manifest.id:
+            raise UsageError("error.dataset_manifest_invalid")
+        now = datetime.now(UTC).isoformat()
+        candidate = DatasetRegistration(
+            identifier,
+            ManagedDatasetSource(
+                installed.source_kind,
+                installed.repository,
+                installed.release_tag,
+                installed.asset_name,
+                installed.sha256,
+            ),
+            True,
+            now,
+            now,
+            DatasetProbeSnapshot(identifier, response.descriptor, now),
+        )
+        try:
+            current = self.store.load_registration(identifier)
+        except UsageError as error:
+            if error.key != "error.dataset_not_installed":
+                raise
+            self.store.save_registration(candidate)
+            return RegisterResult("created", candidate)
+        if not replace:
+            return RegisterResult("conflict", candidate)
+        replacement = replace_registration(current, candidate)
+        self.store.save_registration(replacement)
+        return RegisterResult("replaced", replacement)
 
     def status(self, dataset_id: str | None = None) -> tuple[DatasetStatus, ...]:
         if dataset_id is not None:

@@ -196,6 +196,46 @@ def _read_local_command(
             command += event.value
 
 
+def _choose_dataset_source(
+    screen: FramePainter,
+    translator: Translator,
+    decoder: InputDecoder,
+    *,
+    read_input: Callable[[], object] | None = None,
+) -> str | None:
+    sources = ("official", "github", "local")
+    labels = {
+        "official": translator.text("label.dataset_browse_official"),
+        "github": translator.text("label.dataset_github_release"),
+        "local": translator.text("label.dataset_local_command"),
+    }
+    index = 0
+    while True:
+        body = "\n".join(
+            f"{'›' if item_index == index else ' '} {labels[source]}"
+            for item_index, source in enumerate(sources)
+        )
+        screen.paint(
+            compose_frame(
+                body,
+                translator.text("status.dataset_add_source_title"),
+                translator.text("status.dataset_add_source_controls"),
+                height=get_terminal_size().lines,
+            )
+        )
+        event = read_input() if read_input is not None else read_event(decoder, 0.1)
+        if not isinstance(event, KeyEvent):
+            continue
+        if event.value == "\x1b":
+            return None
+        if event.value in {"j", "\x1b[B"}:
+            index = (index + 1) % len(sources)
+        elif event.value in {"k", "\x1b[A"}:
+            index = (index - 1) % len(sources)
+        elif event.value in {"\r", "\n"}:
+            return sources[index]
+
+
 def _confirm(
     screen: FramePainter,
     translator: Translator,
@@ -251,6 +291,171 @@ def _register_local(
     return translator.text(f"status.dataset_registration_{result.kind}", dataset_id=result.registration.dataset_id)
 
 
+def _register_result(
+    service: DatasetService,
+    result,
+    screen: FramePainter,
+    translator: Translator,
+    decoder: InputDecoder,
+    *,
+    read_input: Callable[[], object] | None = None,
+) -> str:
+    if result.kind == "conflict":
+        confirmed = _confirm(
+            screen,
+            translator,
+            decoder,
+            translator.text("status.dataset_registration_conflict", dataset_id=result.registration.dataset_id),
+            title=translator.text("status.dataset_registration_conflict_title"),
+            controls=translator.text("status.dataset_registration_conflict_controls"),
+            read_input=read_input,
+        )
+        if not confirmed:
+            return translator.text("status.dataset_registration_cancelled")
+        result = service.register_installed_dataset(result.registration.dataset_id, replace=True)
+    return translator.text(f"status.dataset_registration_{result.kind}", dataset_id=result.registration.dataset_id)
+
+
+def _register_official(
+    service: DatasetService,
+    screen: FramePainter,
+    translator: Translator,
+    decoder: InputDecoder,
+    *,
+    read_input: Callable[[], object] | None = None,
+) -> str | None:
+    try:
+        entries = service.official_entries()
+    except Exception as exc:
+        return format_error(exc, translator)
+    if not entries:
+        return translator.text("status.datasets_official_empty")
+    index = 0
+    while True:
+        rows = [
+            f"{'›' if item_index == index else ' '} "
+            f"{_text(entry.title, translator)} · {entry.id}"
+            for item_index, entry in enumerate(entries)
+        ]
+        screen.paint(
+            compose_frame(
+                "\n".join(rows),
+                translator.text("status.dataset_browse_title"),
+                translator.text("status.dataset_browse_controls"),
+                height=get_terminal_size().lines,
+            )
+        )
+        event = read_input() if read_input is not None else read_event(decoder, 0.1)
+        if not isinstance(event, KeyEvent):
+            continue
+        if event.value == "\x1b":
+            return None
+        if event.value in {"j", "\x1b[B"}:
+            index = (index + 1) % len(entries)
+            continue
+        if event.value in {"k", "\x1b[A"}:
+            index = (index - 1) % len(entries)
+            continue
+        if event.value not in {"\r", "\n"}:
+            continue
+        selected = entries[index]
+        if not _confirm(
+            screen,
+            translator,
+            decoder,
+            translator.text("status.dataset_browse_confirm", dataset_id=selected.id, repository=selected.artifacts[0].repository),
+            title=translator.text("status.dataset_browse_title"),
+            controls=translator.text("status.dataset_browse_confirm_controls"),
+            read_input=read_input,
+        ):
+            continue
+        try:
+            service.install_official(selected.id)
+            return _register_result(
+                service,
+                service.register_installed_dataset(selected.id),
+                screen,
+                translator,
+                decoder,
+                read_input=read_input,
+            )
+        except Exception as exc:
+            return format_error(exc, translator)
+
+
+def _read_github_repository(
+    screen: FramePainter,
+    translator: Translator,
+    decoder: InputDecoder,
+    *,
+    read_input: Callable[[], object] | None = None,
+) -> str | None:
+    repository = ""
+    while True:
+        screen.paint(
+            compose_frame(
+                repository or "—",
+                translator.text("status.dataset_github_title"),
+                translator.text("status.dataset_github_controls"),
+                height=get_terminal_size().lines,
+            )
+        )
+        event = read_input() if read_input is not None else read_event(decoder, 0.1)
+        if isinstance(event, PasteEvent):
+            repository += event.value
+            continue
+        if not isinstance(event, KeyEvent):
+            continue
+        if event.value == "\x1b":
+            return None
+        if event.value in {"\x7f", "\b"}:
+            repository = repository[:-1]
+        elif event.value in {"\r", "\n"}:
+            return repository.strip() or None
+        elif len(event.value) == 1 and event.value.isprintable():
+            repository += event.value
+
+
+def _register_github(
+    service: DatasetService,
+    screen: FramePainter,
+    translator: Translator,
+    decoder: InputDecoder,
+    *,
+    read_input: Callable[[], object] | None = None,
+) -> str | None:
+    repository = _read_github_repository(screen, translator, decoder, read_input=read_input)
+    if repository is None:
+        return None
+    try:
+        artifact = service.resolve_github_repository(repository)
+    except Exception as exc:
+        return format_error(exc, translator)
+    if not _confirm(
+        screen,
+        translator,
+        decoder,
+        translator.text("status.dataset_github_confirm", repository=artifact.repository),
+        title=translator.text("status.dataset_github_title"),
+        controls=translator.text("status.dataset_github_confirm_controls"),
+        read_input=read_input,
+    ):
+        return None
+    try:
+        status = service.install_resolved_github_artifact(artifact)
+        assert status.installed is not None
+        return _register_result(
+            service,
+            service.register_installed_dataset(status.installed.dataset_id),
+            screen,
+            translator,
+            decoder,
+            read_input=read_input,
+        )
+    except Exception as exc:
+        return format_error(exc, translator)
+
+
 def run_dataset_manager(service: DatasetService, translator: Translator) -> int:
     screen = FramePainter(sys.stdout)
     selected = 0
@@ -289,7 +494,13 @@ def run_dataset_manager(service: DatasetService, translator: Translator) -> int:
                 elif key == "i" and statuses:
                     details = not details
                 elif key == "+":
-                    notice = _register_local(service, screen, translator, decoder)
+                    source = _choose_dataset_source(screen, translator, decoder)
+                    if source == "local":
+                        notice = _register_local(service, screen, translator, decoder)
+                    elif source == "official":
+                        notice = _register_official(service, screen, translator, decoder)
+                    elif source == "github":
+                        notice = _register_github(service, screen, translator, decoder)
                 elif key == "d" and view.selected_id is not None:
                     current = statuses[selected].registration
                     service.set_enabled(current.dataset_id, not current.enabled)
