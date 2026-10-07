@@ -14,6 +14,8 @@ from typing import Literal, cast
 
 from ccusage_viz import __version__
 from ccusage_viz.acquisition import (
+    builtin_summary_query_intent,
+    builtin_summary_query_plan,
     custom_historical_query_intent,
     custom_probe_query_intent,
     custom_summary_query_intent,
@@ -56,6 +58,7 @@ from ccusage_viz.animation_overlay import (
     render_history_table,
 )
 from ccusage_viz.bootstrap import build_chart_registry, build_query_runtime
+from ccusage_viz.builtin_summary import BuiltinPaneSummary, build_builtin_pane_summary
 from ccusage_viz.command_copy import (
     copy_command,
     format_command,
@@ -117,7 +120,7 @@ from ccusage_viz.data_view import (
     cycle_body_view,
     cycle_dashboard_body_view,
     render_custom_data,
-    render_monitor_data,
+    render_current_monitor_data,
     render_snapshot_data,
 )
 from ccusage_viz.deltas import RefreshDeltas, RefreshRanks
@@ -186,6 +189,7 @@ from ccusage_viz.options import (
 from ccusage_viz.processing import build_period_summary, required_summary_coverage
 from ccusage_viz.processing.custom_historical import CustomChartProjection
 from ccusage_viz.processing.summaries import (
+    SummaryQueryPlan,
     SummaryScope,
     range_summary_query_plan,
     summary_query_plan,
@@ -216,6 +220,7 @@ from ccusage_viz.render.surfaces import (
     dashboard_pane_surface,
     standalone_surface,
 )
+from ccusage_viz.standalone_help import run_standalone_help
 from ccusage_viz.terminal import (
     Frame,
     FramePainter,
@@ -312,6 +317,15 @@ class MonitorWarmupOutcome:
 PaneFuture = Future[HistoricalOutcome] | Future[MonitorOutcome] | Future[MonitorWarmupOutcome]
 
 
+@dataclass(frozen=True, slots=True)
+class BuiltinSummaryOutcome:
+    generation: int
+    plan: SummaryQueryPlan
+    chart: HistoricalChartConfig
+    result: ProviderResult | None = None
+    error: BaseException | None = None
+
+
 @dataclass(slots=True)
 class TuiEmptyPane:
     pane_id: int = -1
@@ -360,6 +374,10 @@ class TuiChartPane:
     component: HistoricalChartComponent | MonitorComponent
     scheduler: FixedIntervalScheduler
     lifecycle: LifecycleOperation[PaneFuture]
+    summary_lifecycle: LifecycleOperation[Future[BuiltinSummaryOutcome]] | None = None
+    summary: BuiltinPaneSummary | None = None
+    summary_error: BaseException | None = None
+    summary_generation: int = 0
     pane_id: int = -1
     demo_ordinal: int = 0
     demo_warmed_generation: int | None = None
@@ -510,6 +528,7 @@ class DashboardDatasetModalState:
     entries: tuple[object, ...] = ()
     selected_dataset_id: str | None = None
     artifact: object | None = None
+    official_preview: tuple[object, bytes, object] | None = None
     chart_kinds: tuple[str, ...] = ()
 
 
@@ -899,6 +918,8 @@ def _shutdown_pane(pane: TuiPane) -> None:
         return
     pane.scheduler.shutdown()
     pane.lifecycle.shutdown()
+    if isinstance(pane, TuiChartPane) and pane.summary_lifecycle is not None:
+        pane.summary_lifecycle.shutdown()
     if isinstance(pane, TuiCustomPane) and pane.summary is not None:
         pane.summary.scheduler.shutdown()
         pane.summary.lifecycle.shutdown()
@@ -1287,6 +1308,7 @@ def _new_pane(
             owner_id=chart_owner_id,
             runtime=runtime,
             registry=registry,
+            include_summary=False,
         )
     now = time.monotonic()
     attachment = None
@@ -1301,6 +1323,11 @@ def _new_pane(
         component,
         FixedIntervalScheduler(options.host.interval, now=now),
         LifecycleOperation(chart_owner_id),
+        (
+            LifecycleOperation(f"{chart_owner_id}:summary")
+            if isinstance(component, HistoricalChartComponent)
+            else None
+        ),
         attachment=attachment,
         attachment_renderer=attachment_renderer,
     )
@@ -1319,6 +1346,18 @@ def _await_custom_submission(
 
 def _await_historical(handle: QueryHandle[ProviderResult], started: float) -> UsageSnapshot:
     return snapshot_from_result(handle.result(), time.monotonic() - started)
+
+
+def _await_builtin_summary_submission(
+    handle: QueryHandle[ProviderResult],
+    generation: int,
+    plan: SummaryQueryPlan,
+    chart: HistoricalChartConfig,
+) -> BuiltinSummaryOutcome:
+    try:
+        return BuiltinSummaryOutcome(generation, plan, chart, result=handle.result())
+    except BaseException as exc:
+        return BuiltinSummaryOutcome(generation, plan, chart, error=exc)
 
 
 def _await_historical_submission(submission: HistoricalSubmission) -> HistoricalOutcome:
@@ -1447,16 +1486,13 @@ def _pane_copy_payload(
     if isinstance(component, MonitorComponent):
         if not isinstance(active.chart, MonitorConfig):
             raise TypeError("monitor pane component has historical configuration")
-        buckets = component.buckets(
-            max(8, min(32, terminal.width // 4)),
-            now=time.monotonic(),
-            wall=datetime.now().astimezone(),
-        )
-        return render_monitor_data(
-            buckets,
-            by=active.chart.by,
+        return render_current_monitor_data(
+            component,
+            active.chart,
             translator=translator,
             terminal=terminal,
+            now=time.monotonic(),
+            wall=datetime.now().astimezone(),
             view=view,
         )
     return render_snapshot_data(
@@ -1742,17 +1778,14 @@ def _pane_render(
         if isinstance(component, MonitorComponent):
             if not isinstance(accepted.chart, MonitorConfig):
                 raise TypeError("monitor pane component has historical configuration")
-            buckets = component.buckets(
-                max(8, min(32, terminal.width // 4)),
-                now=time.monotonic(),
-                wall=datetime.now().astimezone(),
-            )
             return PaneRender(
-                render_monitor_data(
-                    buckets,
-                    by=accepted.chart.by,
+                render_current_monitor_data(
+                    component,
+                    accepted.chart,
                     translator=translator,
                     terminal=terminal,
+                    now=time.monotonic(),
+                    wall=datetime.now().astimezone(),
                     view=pane.body_view,
                 )
             )
@@ -1990,13 +2023,13 @@ def _cycle(values: tuple[str, ...], current: str, step: int) -> str:
 
 
 def _cycle_custom_grouping(
-    config: CustomChartConfig, groupings: tuple[str, ...]
+    config: CustomChartConfig, groupings: tuple[str, ...], *, step: int = 1
 ) -> CustomChartConfig:
     """Advance custom grouping and preserve a style valid for the result."""
 
     values = (None, *groupings)
     current = config.group_by if config.group_by in values else values[0]
-    group_by = values[(values.index(current) + 1) % len(values)]
+    group_by = values[(values.index(current) + step) % len(values)]
     presentation = config.presentation
     styles = compatible_styles(config.kind, group_by)
     if presentation.style not in styles:
@@ -2019,18 +2052,18 @@ def _new_pane_options(command: str, base: DashboardLaunch) -> StandaloneLaunch:
 
 
 _PANE_QUICK_ACTIONS = {
-    "timeline": (("p/P", "period"), ("g/G", "granularity"), ("b", "group"), ("+/-", "top")),
+    "timeline": (("p/P", "period"), ("g/G", "granularity"), ("b/B", "group"), ("+/-", "top")),
     "calendar": (("p/P", "period"),),
-    "stack": (("p/P", "period"), ("g/G", "granularity")),
-    "ranking": (("p/P", "period"), ("b", "group"), ("+/-", "top")),
-    "monitor": (("w", "window"), ("b", "group"), ("+/-", "top")),
+    "stack": (("p/P", "period"), ("g/G", "granularity"), ("b/B", "group"), ("+/-", "top")),
+    "ranking": (("p/P", "period"), ("b/B", "group"), ("+/-", "top")),
+    "monitor": (("w", "window"), ("b/B", "group"), ("+/-", "top")),
 }
 _PANE_ADVANCED_ACTIONS = {
     "timeline": (("o", "other"), ("l", "legend"), ("k", "weekdays")),
     "calendar": (),
-    "stack": (("c", "cache"), ("l", "legend"), ("k", "weekdays")),
+    "stack": (("o", "other"), ("c", "cache"), ("l", "legend"), ("k", "weekdays")),
     "ranking": (("o", "other"),),
-    "monitor": (("A", "project_aggregation"), ("P", "project_label_context"), ("l", "legend")),
+    "monitor": (("l", "legend"),),
 }
 _COMMON_PANE_QUICK_ACTIONS = (
     ("d", "density"),
@@ -2086,7 +2119,7 @@ def _custom_pane_adjustment_bindings(pane: TuiCustomPane, page: str) -> tuple[tu
             if len(capability.granularities) > 1:
                 actions.append(("g/G", "granularity"))
             if chart.kind != "calendar" and capability.group_by:
-                actions.append(("b", "group"))
+                actions.append(("b/B", "group"))
             if capability.filters:
                 actions.append(("f", "filters"))
         if chart.group_by is not None:
@@ -2226,7 +2259,8 @@ def _localized_actions(
 
 def _project_grouping_available(chart: object | None) -> bool:
     return (
-        isinstance(chart, (TimelineConfig, RankingConfig, MonitorConfig)) and chart.by == "project"
+        isinstance(chart, (TimelineConfig, StackConfig, RankingConfig, MonitorConfig))
+        and chart.by == "project"
     )
 
 
@@ -2252,6 +2286,7 @@ def _pane_adjustment_bindings(
             and chart.presentation.style in {"ranking", "list"}
             and key == "w"
         )
+        and not (isinstance(chart, StackConfig) and chart.by != "composition" and key == "c")
     )
     if (
         isinstance(chart, MonitorConfig)
@@ -2365,7 +2400,7 @@ def _query_affecting_adjustment(command: str, key: str) -> bool:
     """
     return (
         key in {"p", "P"}
-        or (key == "b" and command in {"timeline", "ranking", "monitor"})
+        or (key in {"b", "B"} and command in {"timeline", "stack", "ranking", "monitor"})
         or (command == "monitor" and key == "w")
     )
 
@@ -2671,23 +2706,13 @@ def _pane_adjustment_state(pane: TuiChartPane, page: str, translator: Translator
         )
     else:
         advanced: list[str] = []
-        if isinstance(chart, (TimelineConfig, RankingConfig)):
+        if isinstance(chart, (TimelineConfig, StackConfig, RankingConfig)):
             advanced.append(f"Other {chart.other}")
         if isinstance(chart, (TimelineConfig, StackConfig)):
             advanced.extend((f"Legend {chart.presentation.legend}", f"Weekdays {chart.weekdays}"))
-        if isinstance(chart, StackConfig):
+        if isinstance(chart, StackConfig) and chart.by == "composition":
             advanced.insert(0, f"Cache {chart.cache}")
         if isinstance(chart, MonitorConfig):
-            if chart.by == "project":
-                advanced.extend(
-                    (
-                        f"Project aggregation {chart.project_aggregation}",
-                        translator.text(
-                            "status.project_label_context",
-                            context=pane.component.project_label_context,
-                        ),
-                    )
-                )
             advanced.append(f"Legend {chart.presentation.legend}")
             if chart.presentation.style in {"ranking", "list"} and pane.attachment is not None:
                 advanced.append(
@@ -3047,6 +3072,92 @@ def _chooser_viewport(
     return "\n".join(rows[offset : offset + visible_rows]), offset
 
 
+def _official_catalog_rows(
+    entries: tuple[object, ...], translator: Translator, *, index: int, width: int
+) -> list[str]:
+    """Render official catalog entries in a compact two-line table layout."""
+
+    name_width = max(12, width * 25 // 100)
+    id_width = max(10, width * 18 // 100)
+    summary_width = max(12, width - name_width - id_width - 5)
+    rows = [
+        clip_width(
+            f"  {pad_width(translator.text('status.dataset_column_name'), name_width)} "
+            f"{pad_width(translator.text('label.custom_dataset'), id_width)} "
+            f"{pad_width(translator.text('status.dataset_column_summary'), summary_width)}",
+            width,
+        ),
+        "─" * width,
+    ]
+    for item_index, entry in enumerate(entries):
+        name = entry.title.zh_cn if translator.language == "zh" else entry.title.en
+        summary = entry.summary.zh_cn if translator.language == "zh" else entry.summary.en
+        summary_lines = list(wrap_width(summary, summary_width))
+        if len(summary_lines) > 2:
+            summary_lines = [summary_lines[0], truncate_width(summary_lines[1], summary_width - 3) + "..."]
+        elif len(summary_lines) < 2:
+            summary_lines.append("")
+        rows.extend(
+            (
+                clip_width(
+                    f"{'›' if item_index == index else ' '} "
+                    f"{pad_width(truncate_width(name, name_width), name_width)} "
+                    f"{pad_width(truncate_width(entry.id, id_width), id_width)} {summary_lines[0]}",
+                    width,
+                ),
+                clip_width(
+                    f"  {'':{name_width}} {'':{id_width}} {summary_lines[1]}", width
+                ),
+            )
+        )
+    return rows
+
+
+def _official_catalog_viewport(
+    entries: tuple[object, ...],
+    translator: Translator,
+    *,
+    index: int,
+    offset: int,
+    width: int,
+    height: int,
+) -> tuple[str, int]:
+    rows = _official_catalog_rows(entries, translator, index=index, width=width)
+    header = rows[:2]
+    items = rows[2:]
+    body, offset = _chooser_viewport(
+        items, index=index * 2, offset=offset, height=max(1, height - len(header))
+    )
+    return "\n".join([*header, *body.splitlines()]), offset
+
+
+def _official_preview_rows(preview: tuple[object, bytes, object], translator: Translator) -> tuple[str, ...]:
+    _artifact, _archive, manifest = preview
+    descriptor = manifest.descriptor
+    if descriptor is None:
+        return (manifest.metric.title.zh_cn if translator.language == "zh" else manifest.metric.title.en,)
+    title = descriptor.dataset.title.zh_cn if translator.language == "zh" else descriptor.dataset.title.en
+    description = (
+        descriptor.dataset.description.zh_cn
+        if translator.language == "zh"
+        else descriptor.dataset.description.en
+    )
+    charts = " · ".join(
+        translator.text(f"label.pane_{kind}") for kind in descriptor.capabilities.charts
+    )
+    required = tuple(item.name for item in descriptor.environment if item.required)
+    optional = tuple(item.name for item in descriptor.environment if not item.required)
+    return (
+        title,
+        description,
+        f"{translator.text('status.dataset_column_version')}: {descriptor.version}",
+        f"{translator.text('status.dataset_details_supports')}: {charts}",
+        translator.text("status.dataset_details_environment"),
+        *(f"{translator.text('status.dataset_environment_required')}: {' · '.join(required)}" if required else (),),
+        *(f"{translator.text('status.dataset_environment_optional')}: {' · '.join(optional)}" if optional else (),),
+    )
+
+
 def _choose_dataset_view(
     screen: FramePainter,
     translator: Translator,
@@ -3151,13 +3262,16 @@ def _browse_dataset_catalog(
     host_os, host_arch = service.platform
     platform_name = f"{host_os}/{host_arch}"
     while True:
-        rows = [
-            f"{'›' if item_index == index else ' '} {entry.title.zh_cn if translator.language == 'zh' else entry.title.en} · {entry.id}"
-            for item_index, entry in enumerate(entries)
-        ]
         choices, offset = (
-            _chooser_viewport(rows, index=index, offset=offset, height=height)
-            if rows
+            _official_catalog_viewport(
+                entries,
+                translator,
+                index=index,
+                offset=offset,
+                width=get_terminal_size().columns,
+                height=height,
+            )
+            if entries
             else (translator.text("status.datasets_official_empty"), 0)
         )
         selected = entries[index] if entries else None
@@ -3208,6 +3322,9 @@ def _browse_dataset_catalog(
                 notice = None
                 continue
             return None
+        if key == "h":
+            notice = translator.text("status.dataset_catalog_help_hint")
+            continue
         if not entries:
             continue
         if not confirming and key in {"j", "\x1b[B"}:
@@ -3516,9 +3633,9 @@ def _custom_standalone_actions(
     chart = component.candidate
     if capability is not None:
         if len(capability.granularities) > 1:
-            actions.append(("g", "granularity"))
+            actions.append(("g/G", "granularity"))
         if chart.kind != "calendar" and capability.group_by:
-            actions.append(("b", "group"))
+            actions.append(("b/B", "group"))
         if capability.filters:
             actions.append(("f", "filters"))
     if chart.group_by is not None:
@@ -3543,6 +3660,7 @@ def _custom_standalone_render(
     *,
     interval: float | None = None,
     pending: bool,
+    summary: CustomDashboardSummary | None = None,
 ) -> PaneRender:
     if component.error is not None and component.model is None:
         return _render_custom_failure(
@@ -3577,6 +3695,7 @@ def _custom_standalone_render(
         interval=interval,
         pending=pending,
         surface=standalone_surface((component.accepted_config or component.candidate).kind),
+        summary=summary,
     )
     return (
         PaneRender(
@@ -3685,17 +3804,21 @@ def _run_custom_standalone_adjustment(
                 updated = current
                 if key in {"p", "P", "d", "t", "T", "s", "S", "k", "l", "o", "+", "=", "-", "_"}:
                     updated = adjust_custom_chart(current, key)
-                elif key == "g" and capability is not None and len(capability.granularities) > 1:
+                elif key in {"g", "G"} and capability is not None and len(capability.granularities) > 1:
                     values = capability.granularities
                     value = current.granularity if current.granularity in values else values[0]
-                    updated = replace(current, granularity=_cycle(values, value, 1))
+                    updated = replace(current, granularity=_cycle(values, value, 1 if key == "g" else -1))
                 elif (
-                    key == "b"
+                    key in {"b", "B"}
                     and current.kind != "calendar"
                     and capability is not None
                     and capability.group_by
                 ):
-                    updated = _cycle_custom_grouping(current, capability.group_by)
+                    updated = _cycle_custom_grouping(
+                        current,
+                        capability.group_by,
+                        step=1 if key == "b" else -1,
+                    )
                 if updated != current:
                     current = updated
                     paint()
@@ -3714,12 +3837,21 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
     component = CustomHistoricalComponent(options.chart)
     scheduler = FixedIntervalScheduler(options.host.interval, now=started_at)
     lifecycle: LifecycleOperation[Future[CustomOutcome]] = LifecycleOperation("standalone:custom")
+    summary = CustomDashboardSummary(
+        options.chart.source,
+        FixedIntervalScheduler(options.host.interval, now=started_at),
+        LifecycleOperation("standalone:custom:summary"),
+        filters=options.chart.filters,
+    )
     runtime = build_query_runtime()
     executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ccusage-viz-custom")
     screen = FramePainter(sys.stdout)
     current = options.chart
     controls_hidden = False
-    body_view = "chart"
+    body_view: BodyView = "chart"
+    text_offsets: dict[BodyView, int] = {}
+    text_line_counts: dict[BodyView, int] = {}
+    text_visible_rows: dict[BodyView, int] = {}
     error_offset = 0
     error_line_count = 0
     error_visible_rows = 0
@@ -3777,6 +3909,78 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
             handle.cancel,
         )
 
+    def start_summary(operation: OperationToken) -> tuple[Future[CustomOutcome], Callable[[], None]]:
+        config = component.candidate
+        if options.host.timezone is None:
+            raise RuntimeError("custom Dataset requests require a timezone")
+        plan = (
+            range_summary_query_plan(config.date_range)
+            if config.date_range.fixed_bounds
+            else summary_query_plan(
+                local_today(timezone=options.host.timezone), cast(SummaryScope, config.granularity)
+            )
+        )
+        summary.select(config.source, config.filters)
+        intent = custom_summary_query_intent(
+            config.source,
+            plan,
+            filters=config.filters,
+            timezone=options.host.timezone,
+            owner_id=operation.owner_id,
+            generation=operation.generation,
+            trigger=query_trigger(operation.trigger),
+            process=options.process,
+        )
+        request = intent.payload
+        if not isinstance(request, CustomSummaryRequest):
+            raise TypeError("custom standalone summary intent has an unexpected payload")
+        summary.requested_period = request.scope
+        summary.requested_as_of_date = request.current.until
+        handle = runtime.submit(intent)
+        return executor.submit(_await_custom_submission, handle, operation.generation), handle.cancel
+
+    def request_summary(
+        trigger: LifecycleTrigger, *, replace_active: bool = False
+    ) -> bool:
+        if not probe_complete:
+            return False
+        source_changed = (
+            summary.source != component.candidate.source
+            or summary.filters != component.candidate.filters
+        )
+        if source_changed:
+            summary.invalidate()
+        try:
+            return summary.lifecycle.request(
+                trigger,
+                generation=summary.generation,
+                now=time.monotonic(),
+                replace_active=replace_active,
+                start=start_summary,
+            )
+        except BaseException as exc:
+            summary.error = exc
+            return False
+
+    def complete_summary(operation: OperationToken, outcome: CustomOutcome) -> None:
+        if not summary.lifecycle.accepts(operation, generation=outcome.generation):
+            summary.lifecycle.abandon(operation)
+            return
+        if outcome.error is not None or outcome.result is None:
+            summary.error = outcome.error or RuntimeError("custom command returned no summary")
+            summary.lifecycle.complete(operation, generation=outcome.generation)
+            return
+        response = outcome.result.custom_response
+        if not isinstance(response, CustomSummaryResponse):
+            raise TypeError("custom provider result does not contain a summary response")
+        summary.response = response
+        summary.error = None
+        summary.accepted_at = datetime.now().astimezone()
+        summary.accepted_period = summary.requested_period
+        summary.accepted_as_of_date = summary.requested_as_of_date
+        summary.lifecycle.complete(operation, generation=outcome.generation)
+        record_warnings(response)
+
     def request(
         trigger: LifecycleTrigger, *, replace_active: bool = False, roll_range: bool = True
     ) -> bool:
@@ -3791,13 +3995,16 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
             component.configure(refreshed, data_affecting=refreshed != component.candidate)
             current = component.candidate
         try:
-            return lifecycle.request(
+            requested = lifecycle.request(
                 trigger,
                 generation=component.generation,
                 now=time.monotonic(),
                 replace_active=replace_active,
                 start=start,
             )
+            if requested:
+                request_summary(trigger, replace_active=replace_active)
+            return requested
         except BaseException as exc:
             if component.fail(exc, generation=component.generation):
                 record("error", str(exc))
@@ -3806,10 +4013,21 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
     def controls() -> str:
         if body_view == "chart" and controls_hidden:
             return ""
-        if body_view == "chart":
-            return translator.text("status.keys")
         return translator.text(
-            "status.command_keys" if body_view == "command" else "status.custom_full_command_keys"
+            {
+                "chart": "status.keys",
+                "command": "status.command_keys",
+                "full-command": "status.custom_full_command_keys",
+                "data-table": "status.data_table_keys",
+                "data-json": "status.data_json_keys",
+            }[body_view],
+            scroll=translator.text("status.text_scroll_keys")
+            if body_view != "chart"
+            and text_viewport_overflows(
+                line_count=text_line_counts.get(body_view, 0),
+                visible_rows=text_visible_rows.get(body_view, 0),
+            )
+            else "",
         )
 
     def paint(*, force: bool = False) -> None:
@@ -3835,6 +4053,7 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
                 terminal,
                 interval=options.host.interval,
                 pending=lifecycle.submission is not None,
+                summary=summary,
             )
             notices = provisional.notices
         except UsageError as exc:
@@ -3865,6 +4084,7 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
                     Terminal(terminal.width, body_height, terminal.color, terminal.ascii),
                     interval=options.host.interval,
                     pending=lifecycle.submission is not None,
+                    summary=summary,
                 )
                 body, notices = rendered.chart, rendered.notices
             except UsageError:
@@ -3876,6 +4096,15 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
                 else format_full_command_display(
                     format_full_command(replace(options, chart=current)), size.columns
                 )
+                if body_view == "full-command"
+                else render_custom_data(
+                    component.model,
+                    language=translator.language,
+                    translator=translator,
+                    view=body_view,
+                )
+                if component.model is not None
+                else translator.text("status.loading")
             )
         error_body = body_view == "chart" and provisional.error_body
         if error_body:
@@ -3886,6 +4115,16 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
             body = render_text_viewport(
                 body_rows, offset=error_offset, visible_rows=error_visible_rows
             ).body
+        elif body_view != "chart":
+            viewport = render_text_viewport(
+                body,
+                offset=text_offsets.get(body_view, 0),
+                visible_rows=body_height,
+            )
+            text_offsets[body_view] = viewport.offset
+            text_line_counts[body_view] = viewport.line_count
+            text_visible_rows[body_view] = viewport.visible_rows
+            body = viewport.body
         screen.paint(
             compose_frame(
                 body,
@@ -3983,6 +4222,13 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
                             )
                     except BaseException as exc:
                         component.fail(exc, generation=operation.generation, purpose="comparison")
+                summary_operation = summary.lifecycle.operation
+                summary_future = summary.lifecycle.submission
+                if summary_operation is not None and summary_future is not None:
+                    try:
+                        complete_summary(summary_operation, summary_future.result())
+                    except BaseException as exc:
+                        summary.error = exc
                 record("ok", getattr(outcome.result, "diagnostics", "") or "ok")
                 paint()
                 return 0
@@ -4001,6 +4247,21 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
                 if scheduler.due(now=now):
                     request(LifecycleTrigger.PERIODIC)
                     paint()
+                completed_summary = summary.lifecycle.take_completed(lambda future: future.done())
+                if completed_summary is not None:
+                    summary_operation, summary_future = completed_summary
+                    try:
+                        complete_summary(summary_operation, summary_future.result())
+                    except BaseException as exc:
+                        summary.error = exc
+                        if summary.lifecycle.accepts(
+                            summary_operation, generation=summary_operation.generation
+                        ):
+                            summary.lifecycle.complete(
+                                summary_operation, generation=summary_operation.generation
+                            )
+                    paint()
+                    summary.lifecycle.start_ready(now=time.monotonic(), start=start_summary)
                 completed = lifecycle.take_completed(lambda future: future.done())
                 if completed is not None:
                     operation, future = completed
@@ -4082,29 +4343,55 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
                     assert updated_offset is not None
                     error_offset = updated_offset
                     paint(force=True)
+                elif body_view != "chart" and key in {"\x1b[A", "\x1b[B", "\x1b[H", "e"}:
+                    offset = next_text_offset(
+                        key,
+                        offset=text_offsets.get(body_view, 0),
+                        line_count=text_line_counts.get(body_view, 0),
+                        visible_rows=text_visible_rows.get(body_view, 0),
+                    )
+                    assert offset is not None
+                    text_offsets[body_view] = offset
+                    paint(force=True)
                 elif body_view == "chart" and key == "r":
                     request(LifecycleTrigger.MANUAL, replace_active=True)
                     paint(force=True)
-                elif body_view == "chart" and key in {"h", "H"}:
+                elif body_view == "chart" and key == "c":
                     controls_hidden = not controls_hidden
                     paint(force=True)
+                elif body_view == "chart" and key == "h":
+                    run_standalone_help(
+                        screen,
+                        translator,
+                        color=current.presentation.theme != "no-color",
+                        read_key=read_key,
+                    )
+                    paint(force=True)
                 elif key in {"v", "V"}:
-                    body_view = {
-                        "chart": "command",
-                        "command": "full-command",
-                        "full-command": "chart",
-                    }[body_view]
+                    body_view = cycle_body_view(body_view, step=1 if key == "v" else -1)
                     paint(force=True)
                 elif key in {"y", "Y"} and body_view != "chart":
                     value = (
                         format_command(replace(options, chart=current))
                         if body_view == "command"
                         else format_full_command(replace(options, chart=current))
+                        if body_view == "full-command"
+                        else render_custom_data(
+                            component.model,
+                            language=translator.language,
+                            translator=translator,
+                            view=body_view,
+                        )
+                        if component.model is not None
+                        else translator.text("status.loading")
                     )
+                    copied = copy_command(value)
                     copy_feedback.show(
                         translator.text(
                             "status.command_copied"
-                            if copy_command(value)
+                            if copied and body_view in {"command", "full-command"}
+                            else "status.data_copied"
+                            if copied
                             else "status.command_copy_failed"
                         )
                     )
@@ -4142,6 +4429,8 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
     finally:
         scheduler.shutdown()
         lifecycle.shutdown()
+        summary.scheduler.shutdown()
+        summary.lifecycle.shutdown()
         runtime.cancel()
         executor.shutdown(wait=False, cancel_futures=True)
         screen.finish()
@@ -4403,6 +4692,73 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             handle.cancel,
         )
 
+    def start_builtin_pane_summary_submission(
+        pane: TuiChartPane, operation: OperationToken
+    ) -> tuple[Future[BuiltinSummaryOutcome], Callable[[], None]]:
+        component = pane.component
+        if not isinstance(component, HistoricalChartComponent):
+            raise TypeError("monitor panes do not have built-in summary lifecycles")
+        plan = builtin_summary_query_plan(
+            component.candidate, today=local_today(timezone=options.host.timezone)
+        )
+        intent = builtin_summary_query_intent(
+            component.candidate,
+            runtime.definition(historical_provider_id(component.candidate)),
+            plan,
+            owner_id=operation.owner_id,
+            generation=operation.generation,
+            trigger=query_trigger(operation.trigger),
+        )
+        handle = runtime.submit(intent)
+        return (
+            executor.submit(
+                _await_builtin_summary_submission,
+                handle,
+                operation.generation,
+                plan,
+                component.candidate.chart,
+            ),
+            handle.cancel,
+        )
+
+    def refresh_builtin_pane_summary(
+        pane: TuiChartPane,
+        *,
+        trigger: LifecycleTrigger,
+        replace_active: bool = False,
+        invalidate: bool = False,
+    ) -> bool:
+        lifecycle = pane.summary_lifecycle
+        if lifecycle is None or not isinstance(pane.component, HistoricalChartComponent):
+            return False
+        if invalidate:
+            pane.summary_generation += 1
+            lifecycle.detach_active()
+        try:
+            return lifecycle.request(
+                trigger,
+                generation=pane.summary_generation,
+                now=time.monotonic(),
+                replace_active=replace_active,
+                start=lambda operation: start_builtin_pane_summary_submission(pane, operation),
+            )
+        except BaseException as exc:
+            pane.summary_error = exc
+            return False
+
+    def start_builtin_pane_summary(pane: TuiChartPane, *, now: float) -> bool:
+        lifecycle = pane.summary_lifecycle
+        if lifecycle is None:
+            return False
+        try:
+            return lifecycle.start_ready(
+                now=now,
+                start=lambda operation: start_builtin_pane_summary_submission(pane, operation),
+            )
+        except BaseException as exc:
+            pane.summary_error = exc
+            return False
+
     def start_custom_pane_summary_submission(
         pane: TuiCustomPane, operation: OperationToken
     ) -> tuple[Future[CustomOutcome], Callable[[], None]]:
@@ -4485,10 +4841,11 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 )
                 return chart_started or summary_started
             if isinstance(pane, TuiChartPane):
-                return pane.lifecycle.start_ready(
+                chart_started = pane.lifecycle.start_ready(
                     now=now,
                     start=lambda operation: start_pane_submission(pane, operation),
                 )
+                return start_builtin_pane_summary(pane, now=now) or chart_started
         except BaseException as exc:
             if isinstance(pane, TuiCustomPane) and pane.component.fail(
                 exc, generation=pane.component.generation
@@ -4582,13 +4939,20 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             component.configure(submitted, data_affecting=True)
         now = time.monotonic()
         try:
-            return pane.lifecycle.request(
+            chart_requested = pane.lifecycle.request(
                 trigger,
                 generation=component.generation,
                 now=now,
                 replace_active=replace_active,
                 start=lambda operation: start_pane_submission(pane, operation),
             )
+            summary_requested = refresh_builtin_pane_summary(
+                pane,
+                trigger=trigger,
+                replace_active=replace_active,
+                invalidate=data_affecting,
+            )
+            return chart_requested or summary_requested
         except BaseException:
             return False
 
@@ -4757,6 +5121,8 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         (pane.lifecycle, pane.summary.lifecycle)
                         if isinstance(pane, TuiCustomPane) and pane.summary is not None
                         else (pane.lifecycle,)
+                        if isinstance(pane, TuiChartPane) and pane.summary_lifecycle is not None
+                        else (pane.lifecycle,)
                         if isinstance(pane, TuiChartPane)
                         else ()
                     )
@@ -4875,6 +5241,45 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         pane, operation
                     ),
                 )
+        for pane in (item for item in panes if isinstance(item, TuiChartPane)):
+            lifecycle = pane.summary_lifecycle
+            if lifecycle is None or not isinstance(pane.component, HistoricalChartComponent):
+                continue
+            completed_summary = lifecycle.take_completed(lambda future: future.done())
+            if completed_summary is None:
+                continue
+            operation, future = completed_summary
+            observed_at = time.monotonic()
+            try:
+                outcome = future.result()
+                if not lifecycle.accepts(operation, generation=outcome.generation):
+                    lifecycle.abandon(operation)
+                elif outcome.error is not None:
+                    pane.summary_error = outcome.error
+                    lifecycle.complete(operation, generation=outcome.generation)
+                    changed = True
+                elif outcome.result is None:
+                    lifecycle.abandon(operation)
+                else:
+                    pane.summary = build_builtin_pane_summary(
+                        outcome.chart,
+                        outcome.plan,
+                        outcome.result.records,
+                        outcome.result.coverage,
+                        accepted_at=datetime.now().astimezone(),
+                    )
+                    pane.component.set_summary(pane.summary.summary)
+                    pane.summary_error = None
+                    lifecycle.complete(operation, generation=outcome.generation)
+                    last_successful_update = pane.summary.accepted_at
+                    changed = True
+            except Exception as exc:
+                if lifecycle.accepts(operation, generation=operation.generation):
+                    pane.summary_error = exc
+                    lifecycle.complete(operation, generation=operation.generation)
+                    changed = True
+            retire_manual_refresh(operation)
+            start_builtin_pane_summary(pane, now=observed_at)
         for index, pane in enumerate(panes):
             if isinstance(pane, TuiCustomPane):
                 completed_custom = pane.lifecycle.take_completed(lambda future: future.done())
@@ -5542,6 +5947,34 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 )
                 for index, value in enumerate(policy):
                     rows.extend(tree_node("", value, (), is_last=index == len(policy) - 1))
+                return tuple(clip_width(line, width) for line in rows)
+            elif help_overlay.context == "catalog-browser":
+                sections = (
+                    (
+                        "status.tui_help_section_selecting",
+                        (translator.text("status.tui_help_catalog_browser"),),
+                    ),
+                    (
+                        "status.tui_help_section_options",
+                        (translator.text("status.tui_help_catalog_columns"),),
+                    ),
+                    (
+                        "status.tui_help_section_selected",
+                        (translator.text("status.tui_help_catalog_selected"),),
+                    ),
+                )
+                rows = []
+                for heading, values in sections:
+                    if rows:
+                        rows.append("")
+                    rows.append(help_heading(translator.text(heading)))
+                    for index, value in enumerate(values):
+                        rows.extend(tree_node("", value, (), is_last=index == len(values) - 1))
+                rows.append("")
+                rows.append(help_heading(translator.text("status.tui_help_section_policy")))
+                rows.extend(
+                    tree_node("", translator.text("status.tui_help_idle_close"), (), is_last=True)
+                )
                 return tuple(clip_width(line, width) for line in rows)
             elif help_overlay.context == "editor":
                 rows = [help_heading(translator.text("status.tui_help_section_controls"))]
@@ -6672,16 +7105,21 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 controls = translator.text("status.dataset_browse_controls")
                 notices = (translator.text("status.datasets_official_empty"),)
             else:
-                rows = [
-                    f"{'›' if item_index == modal.index else ' '} "
-                    f"{entry.title.zh_cn if translator.language == 'zh' else entry.title.en} · {entry.id}"
-                    for item_index, entry in enumerate(modal.entries)
-                ]
-                body, modal.offset = _chooser_viewport(
-                    rows, index=modal.index, offset=modal.offset, height=height
+                body, modal.offset = _official_catalog_viewport(
+                    modal.entries,
+                    translator,
+                    index=modal.index,
+                    offset=modal.offset,
+                    width=get_terminal_size().columns,
+                    height=height,
                 )
                 title = translator.text("status.dataset_browse_title")
                 controls = translator.text("status.dataset_browse_controls")
+        elif modal.stage == "browse_loading":
+            body = ""
+            title = translator.text("status.dataset_browse_title")
+            controls = translator.text("status.dataset_browse_loading_controls")
+            notices = (translator.text("status.dataset_browse_loading"),)
         elif modal.stage == "github":
             body = modal.draft.command or "—"
             title = translator.text("status.dataset_github_title")
@@ -6710,26 +7148,8 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             controls = translator.text("status.dataset_github_loading_controls")
             notices = (translator.text("status.dataset_github_installing"),)
         elif modal.stage == "browse_confirm":
-            selected = modal.entries[modal.index]
-            host_os, host_arch = cast(tuple[str, str], modal.service.platform)
-            artifact = next(
-                artifact
-                for artifact in selected.artifacts
-                if artifact.os == host_os and artifact.arch == host_arch
-            )
-            body = "\n".join(
-                (
-                    selected.summary.zh_cn
-                    if translator.language == "zh"
-                    else selected.summary.en,
-                    f"{artifact.repository} · {artifact.release_tag} · {host_os}/{host_arch}",
-                    translator.text(
-                        "status.dataset_browse_confirm",
-                        dataset_id=selected.id,
-                        repository=artifact.repository,
-                    ),
-                )
-            )
+            assert modal.official_preview is not None
+            body = "\n".join(_official_preview_rows(modal.official_preview, translator))
             title = translator.text("status.dataset_browse_title")
             controls = translator.text("status.dataset_browse_confirm_controls")
         elif modal.stage == "installing":
@@ -6837,6 +7257,19 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 modal.error = format_error(exc, translator)
             except Exception:
                 modal.stage = "browse_confirm"
+                modal.error = translator.text("error.dataset_download_failed")
+            modal.future = None
+            return True
+        if modal.stage == "browse_loading":
+            try:
+                modal.official_preview = cast(tuple[object, bytes, object], modal.future.result())
+                modal.stage = "browse_confirm"
+                modal.error = None
+            except UsageError as exc:
+                modal.stage = "browse"
+                modal.error = format_error(exc, translator)
+            except Exception:
+                modal.stage = "browse"
                 modal.error = translator.text("error.dataset_download_failed")
             modal.future = None
             return True
@@ -6968,7 +7401,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         if modal.stage == "github_installing":
             return
         if modal.stage == "browse":
-            if key == "\x1b":
+            if key == "h" and modal.future is None and modal.entries:
+                open_help(context="catalog-browser")
+            elif key == "\x1b":
                 if modal.future is not None:
                     modal.future.cancel()
                 modal.future = None
@@ -6991,7 +7426,13 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         )
                     else:
                         modal.selected_dataset_id = selected.id
-                        modal.stage = "browse_confirm"
+                        modal.stage = "browse_loading"
+                        modal.future = executor.submit(
+                            cast(Callable[[str], object], modal.service.prepare_official_install),
+                            selected.id,
+                        )
+            return
+        if modal.stage == "browse_loading":
             return
         if modal.stage == "browse_confirm":
             if key == "\x1b":
@@ -6999,10 +7440,12 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 modal.error = None
             elif key in {"\r", "\n"}:
                 assert modal.selected_dataset_id is not None
+                assert modal.official_preview is not None
                 modal.stage = "installing"
                 modal.future = executor.submit(
-                    cast(Callable[[str], object], modal.service.install_official),
-                    modal.selected_dataset_id,
+                    cast(Callable[[object, bytes], object], modal.service.install_artifact),
+                    modal.official_preview[0],
+                    modal.official_preview[1],
                 )
             return
         if modal.stage == "installing":
@@ -7531,12 +7974,14 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                     ),
                                 )
                         elif (
-                            key == "b"
+                            key in {"b", "B"}
                             and base.kind != "calendar"
                             and capability is not None
                             and capability.group_by
                         ):
-                            updated = _cycle_custom_grouping(base, capability.group_by)
+                            updated = _cycle_custom_grouping(
+                                base, capability.group_by, step=1 if key == "b" else -1
+                            )
                             if updated != base:
                                 record_mutation(
                                     ("pane", focused_index, "custom-group"),

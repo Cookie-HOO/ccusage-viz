@@ -3,6 +3,7 @@ from __future__ import annotations
 import shlex
 import sys
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from shutil import get_terminal_size
 
@@ -44,28 +45,20 @@ def _list_rows(
     width: int,
 ) -> list[str]:
     rows: list[str] = []
-    name_width = max(12, width * 36 // 100)
-    version_width = max(7, width * 16 // 100)
-    source_width = max(10, width * 22 // 100)
-    status_width = max(8, width - name_width - version_width - source_width - 5)
+    name_width = max(12, width * 46 // 100)
+    version_width = max(7, width * 20 // 100)
+    source_width = max(10, width - name_width - version_width - 4)
     rows.extend(
         (
             clip_width(
                 f"  {pad_width(translator.text('status.dataset_column_name'), name_width)} "
                 f"{pad_width(translator.text('status.dataset_column_version'), version_width)} "
-                f"{pad_width(translator.text('status.dataset_column_source'), source_width)} "
-                f"{pad_width(translator.text('status.dataset_column_status'), status_width)}",
+                f"{pad_width(translator.text('status.dataset_column_source'), source_width)}",
                 width,
             ),
             "─" * width,
         )
     )
-    labels = {
-        "ready": translator.text("status.dataset_ready"),
-        "setup_required": translator.text("status.dataset_setup_required"),
-        "unavailable": translator.text("status.dataset_unavailable"),
-        "disabled": translator.text("status.dataset_disabled"),
-    }
     for availability in ("ready", "setup_required", "unavailable", "disabled"):
         grouped = [item for item in statuses if item.availability == availability]
         if not grouped:
@@ -85,8 +78,7 @@ def _list_rows(
                 clip_width(
                     f"{marker} {pad_width(title, name_width)} "
                     f"{pad_width(descriptor.version, version_width)} "
-                    f"{pad_width(source, source_width)} "
-                    f"{pad_width(labels[item.availability], status_width)}",
+                    f"{pad_width(source, source_width)}",
                     width,
                 )
             )
@@ -115,22 +107,27 @@ def _detail_rows(status: DatasetRegistrationStatus, translator: Translator, widt
                 )
             )
         return rows
+    def section(key: str) -> str:
+        return emphasize(
+            translator.text(key), color=get_color_scheme("classic").highlight, enabled=True
+        )
     rows = [
+        section("status.dataset_details_dataset"),
         _text(descriptor.dataset.title, translator),
         *wrap_width(_text(descriptor.dataset.description, translator), width),
         f"{_text(descriptor.dataset.unit.label, translator)} · "
         f"{descriptor.source_timezone or translator.text('status.dataset_timezone_unspecified')}",
         "",
-        translator.text("status.dataset_details_supports"),
+        section("status.dataset_details_supports"),
         " · ".join(
             translator.text(f"label.pane_{kind}") for kind in descriptor.capabilities.charts
         ),
         "",
-        translator.text("status.dataset_details_environment"),
+        section("status.dataset_details_environment"),
         *environment_rows(required, translator.text("status.dataset_environment_required")),
         *environment_rows(optional, translator.text("status.dataset_environment_optional")),
         "",
-        translator.text("status.dataset_details_source"),
+        section("status.dataset_details_source"),
         *(
             wrap_width(shlex.join(status.registration.source.command_argv), width)
             if isinstance(status.registration.source, LocalDatasetSource)
@@ -165,14 +162,20 @@ def _manifest_rows(manifest: DatasetManifest, translator: Translator, width: int
     description = (
         _text(descriptor.dataset.description, translator) if descriptor is not None else ""
     )
+    def section(key: str) -> str:
+        return emphasize(
+            translator.text(key), color=get_color_scheme("classic").highlight, enabled=True
+        )
     rows = [
+        section("status.dataset_details_dataset"),
         title,
         *wrap_width(description, width),
         f"{translator.text('status.dataset_column_version')}: {manifest.version}",
-        f"{translator.text('status.dataset_details_supports')}: "
-        + " · ".join(translator.text(f"label.pane_{kind}") for kind in manifest.charts),
         "",
-        translator.text("status.dataset_details_environment"),
+        section("status.dataset_details_supports"),
+        " · ".join(translator.text(f"label.pane_{kind}") for kind in manifest.charts),
+        "",
+        section("status.dataset_details_environment"),
         *environment_rows(required, translator.text("status.dataset_environment_required")),
         *environment_rows(optional, translator.text("status.dataset_environment_optional")),
     ]
@@ -410,11 +413,34 @@ def _manager_help_lines(
     width: int,
     statuses: tuple[DatasetRegistrationStatus, ...] = (),
 ) -> tuple[str, ...]:
+    def tree(items: tuple[tuple[str, tuple[str, ...]], ...]) -> list[str]:
+        rows: list[str] = []
+        for item_index, (label, children) in enumerate(items):
+            last_item = item_index == len(items) - 1
+            branch = "└─" if last_item else "├─"
+            continuation = "   " if last_item else "│  "
+            rows.append(f"{branch} {label}")
+            for child_index, child in enumerate(children):
+                rows.append(
+                    f"{continuation}{'└─' if child_index == len(children) - 1 else '├─'} {child}"
+                )
+        return rows
+
     if details and status is not None:
         descriptor = status.registration.probe.descriptor
         rows = [
             translator.text("status.dataset_help_section_selecting"),
-            translator.text("status.dataset_help_setup_title", name=_text(descriptor.dataset.title, translator)),
+            *tree(
+                (
+                    (
+                        translator.text(
+                            "status.dataset_help_setup_title",
+                            name=_text(descriptor.dataset.title, translator),
+                        ),
+                        (),
+                    ),
+                )
+            ),
             "",
         ]
         for required, heading in (
@@ -427,6 +453,7 @@ def _manager_help_lines(
             if rows[-1] != "":
                 rows.append("")
             rows.append(heading)
+            variables_rows: list[tuple[str, tuple[str, ...]]] = []
             for item in variables:
                 present = item not in status.missing_environment
                 state = translator.text(
@@ -434,38 +461,53 @@ def _manager_help_lines(
                     if present
                     else "status.dataset_environment_missing"
                 )
-                rows.extend(
+                variables_rows.append(
                     (
                         f"{item.name} · {state} · {_text(item.label, translator)}",
-                        *wrap_width(_text(item.how_to_get, translator), width),
-                        *(wrap_width(item.help_url, width) if item.help_url is not None else ()),
-                        "",
+                        (
+                            *wrap_width(_text(item.how_to_get, translator), max(1, width - 6)),
+                            *(
+                                wrap_width(item.help_url, max(1, width - 6))
+                                if item.help_url is not None
+                                else ()
+                            ),
+                        ),
                     )
                 )
+            rows.extend(tree(tuple(variables_rows)))
         return tuple(rows[:-1] if rows[-1:] == [""] else rows)
-    return (
+    rows = [
         translator.text("status.dataset_help_section_selecting"),
-        translator.text("status.dataset_help_dynamic_list"),
+        *tree(((translator.text("status.dataset_help_dynamic_list"), ()),)),
         "",
         translator.text("status.dataset_help_section_actions"),
-        translator.text("status.dataset_help_refresh"),
-        translator.text("status.dataset_help_add"),
-        translator.text("status.dataset_help_details"),
-        *(
-            (translator.text("status.dataset_help_upgrade"),)
-            if status is not None and status.registration.available_update is not None
-            else ()
+        *tree(
+            (
+                (translator.text("status.dataset_help_refresh"), ()),
+                (translator.text("status.dataset_help_add"), ()),
+                (translator.text("status.dataset_help_details"), ()),
+                *(
+                    ((translator.text("status.dataset_help_upgrade"), ()),)
+                    if status is not None and status.registration.available_update is not None
+                    else ()
+                ),
+                (translator.text("status.dataset_help_enable"), ()),
+                (translator.text("status.dataset_help_remove"), ()),
+                (translator.text("status.dataset_help_navigation"), ()),
+            )
         ),
-        translator.text("status.dataset_help_enable"),
-        translator.text("status.dataset_help_remove"),
-        translator.text("status.dataset_help_navigation"),
         "",
         translator.text("status.dataset_help_states"),
-        translator.text("status.dataset_help_ready"),
-        translator.text("status.dataset_help_setup_required"),
-        translator.text("status.dataset_help_unavailable"),
-        translator.text("status.dataset_help_disabled"),
-    )
+        *tree(
+            (
+                (translator.text("status.dataset_help_ready"), ()),
+                (translator.text("status.dataset_help_setup_required"), ()),
+                (translator.text("status.dataset_help_unavailable"), ()),
+                (translator.text("status.dataset_help_disabled"), ()),
+            )
+        ),
+    ]
+    return tuple(rows)
 
 
 def _manager_help_frame(
@@ -557,6 +599,40 @@ def _register_result(
     return translator.text(f"status.dataset_registration_{result.kind}", dataset_id=result.registration.dataset_id)
 
 
+def _official_preview(service: DatasetService, dataset_id: str):
+    return service.prepare_official_install(dataset_id)
+
+
+def _load_official_preview(
+    service: DatasetService,
+    dataset_id: str,
+    screen: FramePainter,
+    translator: Translator,
+    decoder: InputDecoder,
+    *,
+    read_input: Callable[[], object] | None = None,
+):
+    executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ccuv-dataset-preview")
+    future = executor.submit(_official_preview, service, dataset_id)
+    try:
+        while not future.done():
+            screen.paint(
+                compose_frame(
+                    "",
+                    translator.text("status.dataset_browse_title"),
+                    translator.text("status.dataset_browse_loading_controls"),
+                    (translator.text("status.dataset_browse_loading"),),
+                    height=get_terminal_size().lines,
+                )
+            )
+            event = read_input() if read_input is not None else read_event(decoder, 0.1)
+            if isinstance(event, KeyEvent) and event.value == "\x1b":
+                return None
+        return future.result()
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
+
+
 def _register_official(
     service: DatasetService,
     screen: FramePainter,
@@ -605,9 +681,12 @@ def _register_official(
             continue
         selected = entries[index]
         try:
-            artifact = service.resolve_official(selected.id)
-            archive = service.download_artifact(artifact)
-            manifest = service.inspect_artifact(artifact, archive)
+            preview = _load_official_preview(
+                service, selected.id, screen, translator, decoder, read_input=read_input
+            )
+            if preview is None:
+                continue
+            artifact, archive, manifest = preview
         except Exception as exc:
             return format_error(exc, translator)
         if not _confirm(

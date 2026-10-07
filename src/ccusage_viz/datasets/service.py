@@ -351,6 +351,15 @@ class DatasetService:
     def download_artifact(self, artifact: ReleaseArtifact) -> bytes:
         return download_release_artifact(artifact)
 
+    def prepare_official_install(
+        self, dataset_id: str
+    ) -> tuple[ReleaseArtifact, bytes, DatasetManifest]:
+        """Resolve, download, and verify an official dataset before confirmation."""
+
+        artifact = self.resolve_official(dataset_id)
+        archive = self.download_artifact(artifact)
+        return artifact, archive, self.inspect_artifact(artifact, archive)
+
     def install_official(self, dataset_id: str, *, replace: bool = False) -> DatasetStatus:
         artifact = self.resolve_official(dataset_id)
         archive = self.download_artifact(artifact)

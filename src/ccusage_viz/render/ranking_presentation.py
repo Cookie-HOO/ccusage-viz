@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Hashable, Sequence
+from collections.abc import Callable, Hashable, Mapping, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import cast
@@ -32,6 +32,50 @@ class RankingPresentationEntry:
     comparison_ready: bool = False
     is_other: bool = False
     previous_rank: int | None = None
+
+
+def _refresh_markers(
+    entry: RankingPresentationEntry,
+    *,
+    context: RenderContext,
+    deltas: Mapping[Hashable, float],
+    rank_deltas: Mapping[Hashable, int],
+) -> tuple[str, str, str]:
+    """Return rank, activity, and value-change markers from the latest refresh."""
+    if entry.is_other or context.pending:
+        return " ", " ", " "
+
+    scheme = get_color_scheme(context.color_scheme)
+    rank_marker = " "
+    rank_change = rank_deltas.get(entry.key, 0)
+    if rank_change:
+        rank_color = scheme.trend_increase if rank_change > 0 else scheme.trend_decrease
+        rank_marker = styled_text(
+            trend_glyph(rank_change, ascii=context.ascii), rank_color, context, bold=True
+        )
+
+    activity = " "
+    value_marker = " "
+    if entry.key in deltas:
+        value_change = deltas[entry.key]
+        value_color = (
+            scheme.trend_increase
+            if value_change > 0
+            else scheme.trend_decrease
+            if value_change < 0
+            else scheme.trend_neutral
+        )
+        value_marker = styled_text(
+            trend_glyph(value_change, ascii=context.ascii),
+            value_color,
+            context,
+            bold=value_change != 0,
+        )
+        if value_change:
+            activity = styled_text(
+                "*" if context.ascii else "●", scheme.highlight, context, bold=True
+            )
+    return rank_marker, activity, value_marker
 
 
 def _compact_labels(labels: Sequence[str], width: int) -> list[str]:
@@ -98,7 +142,7 @@ def render_historical_ranking(
     )
     values = ["??" if pending else value_formatter(entry.current) for entry in entries]
     value_width = max(map(display_width, values), default=1)
-    bar_width = max(8, context.width - label_width - value_width - 18)
+    bar_width = max(8, context.width - label_width - value_width - 22)
     maximum = max((entry.current for entry in entries), default=1) or 1
     total = total if total is not None else sum((entry.current for entry in entries), start=0)
     full, empty = ("#", ".") if context.ascii else ("█", "░")
@@ -117,6 +161,8 @@ def render_historical_ranking(
             start=1,
         )
     }
+    deltas = context.deltas or {}
+    rank_deltas = context.rank_deltas or {}
     lines = [line for line in (summary, center_text(heading, context.width)) if line]
     for rank, (entry, label, value) in enumerate(
         zip(entries, labels, values, strict=True), start=1
@@ -135,6 +181,12 @@ def render_historical_ranking(
             mark = ""
         else:
             mark = colored_mark(full * length, color, context) + empty * (bar_width - length)
+        rank_marker, activity, value_marker = _refresh_markers(
+            entry,
+            context=context,
+            deltas=deltas,
+            rank_deltas=rank_deltas,
+        )
         comparison = " "
         if (
             not pending
@@ -169,10 +221,15 @@ def render_historical_ranking(
         label = pad_width(truncate_width(label, label_width), label_width)
         if context.style == "list":
             lines.append(
-                center_text(f"{rank:>2} {label} {value} {comparison}{share}", context.width)
+                center_text(
+                    f"{rank:>2} {rank_marker} {activity} {label} {value} "
+                    f"{value_marker}{comparison}{share}",
+                    context.width,
+                )
             )
         else:
             lines.append(
-                f"{rank:>2}   {label} {mark} {pad_width(value, value_width, align='right')} {comparison}{share}"
+                f"{rank:>2} {rank_marker} {activity} {label} {mark} "
+                f"{pad_width(value, value_width, align='right')} {value_marker}{comparison}{share}"
             )
     return "\n".join(lines)

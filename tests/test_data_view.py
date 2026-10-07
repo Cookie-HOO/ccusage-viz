@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from json import loads
 
@@ -18,6 +18,7 @@ from ccusage_viz.data_view import (
     next_body_view,
     next_dashboard_body_view,
     render_custom_data,
+    render_current_monitor_data,
     render_monitor_data,
     render_monitor_distribution_data,
     render_snapshot_data,
@@ -26,16 +27,20 @@ from ccusage_viz.domain import Agent, SourceKind, TokenUsage, UsageRecord
 from ccusage_viz.historical_component import UsageSnapshot
 from ccusage_viz.i18n import load_translator
 from ccusage_viz.options import (
+    ChartPresentation,
+    MonitorConfig,
     ProcessConfig,
     RankingConfig,
     StandaloneHostConfig,
     StandaloneLaunch,
     TimelineConfig,
 )
+from ccusage_viz.bootstrap import build_chart_registry
 from ccusage_viz.processing.custom_historical import CustomChartProjection, CustomProjectedSeries
 from ccusage_viz.processing.monitor import ObservedBucket
 from ccusage_viz.project_identity import ExactProjectDisplayKey, make_project_ref
 from ccusage_viz.terminal import Terminal
+from ccusage_viz.monitor_component import MonitorComponent, MonitorCompletion
 
 
 def _options() -> StandaloneLaunch:
@@ -497,6 +502,38 @@ def test_monitor_distribution_data_distinguishes_unobserved_and_observed_zero() 
             "coverage": "full",
         },
     ]
+
+
+def test_current_cumulative_monitor_data_uses_distribution_projection() -> None:
+    chart = MonitorConfig("monitor", 3600, presentation=ChartPresentation(style="cumulative-bars"))
+    options = StandaloneLaunch(ProcessConfig(), StandaloneHostConfig(interval=5), chart)
+    component = MonitorComponent(options, registry=build_chart_registry())
+    first = datetime(2026, 1, 1, 9, 0, tzinfo=UTC)
+    second = datetime(2026, 1, 1, 9, 30, tzinfo=UTC)
+
+    def completion(total: int) -> MonitorCompletion:
+        return MonitorCompletion(
+            0,
+            options,
+            (UsageRecord(first.date(), "claude", TokenUsage(total, 0, 0, 0, 0), SourceKind.UNIFIED_DAILY),),
+            0.1,
+        )
+
+    assert component.accept(completion(100), now=0, wall=first)
+    assert component.accept(completion(160), now=30, wall=second)
+    payload = loads(
+        render_current_monitor_data(
+            component,
+            chart,
+            translator=load_translator("en"),
+            terminal=Terminal(120, 40, False, False),
+            now=30,
+            wall=second,
+            view="data-json",
+        )
+    )
+
+    assert "coverage" in payload["rows"][0]
 
 
 def test_monitor_project_data_uses_safe_separated_series_label() -> None:

@@ -40,6 +40,7 @@ from ccusage_viz.options import (
     MonitorConfig,
     ProcessConfig,
     RankingConfig,
+    StackConfig,
     StandaloneHostConfig,
     StandaloneLaunch,
     TimelineConfig,
@@ -149,6 +150,27 @@ def test_custom_display_adjustments_stay_local() -> None:
     assert adjust_custom_chart(chart, "o").other == "hide"
     assert adjust_custom_chart(chart, "l").presentation.legend == "inside"
     assert adjust_custom_chart(chart, "d").presentation.density == DENSITIES[0]
+
+
+def test_stack_defaults_to_composition_and_cycles_native_groupings() -> None:
+    date_range = resolve_date_range("stack", period="14d", since=None, until=None)
+    source = StandaloneLaunch(ProcessConfig(), StandaloneHostConfig(), StackConfig("stack", date_range))
+
+    assert source.chart.by == "composition"
+    assert adjust_standalone(source, "b").chart.by == "agent"
+
+
+def test_ranking_period_cycle_includes_today_only() -> None:
+    source = StandaloneLaunch(
+        ProcessConfig(),
+        StandaloneHostConfig(),
+        RankingConfig("ranking", resolve_date_range("ranking", period="7d", since=None, until=None)),
+    )
+
+    adjusted = adjust_standalone(source, "P")
+
+    assert adjusted.chart.date_range.period == "1d"
+    assert adjusted.chart.date_range.days == 1
 
 
 def test_installed_custom_command_round_trips_without_executable_path() -> None:
@@ -335,15 +357,11 @@ def test_concise_command_keeps_effect_bearing_private_project_filter() -> None:
     assert reparsed.chart.filters == launch.chart.filters
 
 
-def test_project_aggregation_round_trips_in_commands() -> None:
+def test_project_aggregation_is_rejected_by_chart_commands() -> None:
     parser = build_parser(load_translator("en"))
-    launch = _to_options(parser.parse_args(["chart", "ranking", "--project-aggregation", "exact"]))
 
-    assert format_command(launch) == (
-        "ccuv chart ranking --project-aggregation exact --timezone Asia/Shanghai"
-    )
-    reparsed = _to_options(parser.parse_args(shlex.split(format_command(launch))[1:]))
-    assert reparsed.chart.project_aggregation == "exact"
+    with pytest.raises(UsageError):
+        parser.parse_args(["chart", "ranking", "--project-aggregation", "exact"])
 
 
 def test_default_timeline_range_is_fourteen_inclusive_days() -> None:
@@ -424,8 +442,9 @@ def test_runtime_adjustments_replace_owned_nested_configs() -> None:
     )
     assert adjust_standalone(source, "S").chart.presentation.style == "stem"
     assert adjust_standalone(source, "G").chart.granularity == "year"
-    for uppercase_alias in ("D", "K", "L", "C", "B", "O", "W", "I"):
+    for uppercase_alias in ("D", "K", "L", "C", "O", "W", "I"):
         assert adjust_standalone(source, uppercase_alias) == source
+    assert adjust_standalone(source, "B").chart.by == "agent"
     assert adjust_standalone(source, "+").chart.top == 11
     assert adjust_standalone(source, "k").chart.weekdays == "hide"
     assert adjust_standalone(timeline(rolling=False), "p") == timeline(rolling=False)

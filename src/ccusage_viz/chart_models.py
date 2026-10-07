@@ -240,6 +240,7 @@ class StackModel:
     notices: tuple[Notice, ...] = field(default_factory=tuple)
     summary: PeriodSummary | None = None
     aggregation: str = "day"
+    grouping: str = "composition"
 
     @property
     def total(self) -> TokenUsage:

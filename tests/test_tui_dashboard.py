@@ -5,6 +5,7 @@ from contextlib import nullcontext
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
+from types import SimpleNamespace
 
 import pytest
 
@@ -70,6 +71,8 @@ from ccusage_viz.tui import (
     _local_pane_content,
     _new_pane,
     _new_pane_options,
+    _official_catalog_rows,
+    _official_catalog_viewport,
     _pane_adjustment_state,
     _pane_content_actions,
     _pane_copy_payload,
@@ -90,6 +93,47 @@ def test_empty_dashboard_pane_renders_localized_placeholder() -> None:
     assert _pane_render(pane, load_translator("zh"), Terminal(40, 8, False, True)).chart == (
         "空白子图\n双击选中，然后按 r 选择类型"
     )
+
+
+def _catalog_entries(count: int = 1) -> tuple[object, ...]:
+    return tuple(
+        SimpleNamespace(
+            id=f"dataset-{index}",
+            title=LocalizedText(f"Dataset {index}", f"数据集 {index}"),
+            summary=LocalizedText(
+                "This deliberately long summary explains what the Dataset measures over a useful period.",
+                "这是一个用于验证官方数据集简介在表格中最多显示两行并在超出时省略的较长说明。",
+            ),
+        )
+        for index in range(count)
+    )
+
+
+def test_official_catalog_table_limits_each_summary_to_two_lines() -> None:
+    rows = _official_catalog_rows(
+        _catalog_entries(), load_translator("en"), index=0, width=48
+    )
+
+    assert rows[0].startswith("  Name")
+    assert rows[2].startswith("› Dataset 0")
+    assert rows[3].endswith("...")
+    assert len(rows) == 4
+
+
+def test_official_catalog_table_keeps_headers_visible_while_scrolling() -> None:
+    choices, offset = _official_catalog_viewport(
+        _catalog_entries(5),
+        load_translator("en"),
+        index=4,
+        offset=0,
+        width=72,
+        height=5,
+    )
+
+    assert choices.splitlines()[0].startswith("  Name")
+    assert choices.splitlines()[1] == "─" * 72
+    assert "Dataset 4" in choices
+    assert offset > 0
 
 
 def test_pane_chooser_groups_token_usage_and_other_datasets() -> None:
@@ -1576,6 +1620,148 @@ def test_dashboard_primary_completion_queues_pane_supplement(
     assert not any(event[0] == "fail" for event in events)
 
 
+def test_dashboard_builtin_summary_retains_last_accepted_value_across_replacement_and_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cancelled, stale, or failed replacements cannot displace an accepted summary."""
+    options = _to_options(
+        build_parser(load_translator("en")).parse_args(
+            [
+                "dashboard",
+                "--demo",
+                "--header-style",
+                "hidden",
+                "--header-summary",
+                "none",
+                "--pane",
+                "timeline",
+            ]
+        )
+    )
+    provider_runtime = build_query_runtime()
+    summary_submissions = 0
+    summary_set_calls: list[object] = []
+    events: list[str] = []
+    stale_release = threading.Event()
+    stale_finished = threading.Event()
+    pane_ref: list[tui_module.TuiChartPane] = []
+    baseline_summary: list[object] = []
+    baseline_component_summary: list[object] = []
+    first_replacement_requested = False
+    second_replacement_requested = False
+
+    def result_for(value: int) -> ProviderResult:
+        today = date.today()
+        return ProviderResult(
+            (
+                UsageRecord(
+                    today,
+                    "claude",
+                    TokenUsage(value, 0, 0, 0, 0),
+                    SourceKind.UNIFIED_DAILY,
+                ),
+            ),
+            (),
+            DataResolution.DATE,
+            DateCoverage.from_interval(today, today),
+        )
+
+    class Handle:
+        def __init__(self, kind: str, ordinal: int = 0) -> None:
+            self.kind = kind
+            self.ordinal = ordinal
+
+        def result(self) -> ProviderResult:
+            if self.kind == "chart":
+                return result_for(1)
+            if self.ordinal == 1:
+                return result_for(10)
+            if self.ordinal == 2:
+                assert stale_release.wait(1)
+                stale_finished.set()
+                return result_for(20)
+            raise QueryError("error.ccusage_failed", query="summary")
+
+        def cancel(self) -> None:
+            events.append(f"cancel:{self.kind}:{self.ordinal}")
+
+    class Runtime:
+        def definition(self, provider_id: object) -> object:
+            return provider_runtime.definition(provider_id)  # type: ignore[arg-type]
+
+        def submit(self, intent: object) -> Handle:
+            nonlocal summary_submissions
+            owner_id = intent.owner_id  # type: ignore[union-attr]
+            if owner_id.endswith(":summary"):
+                summary_submissions += 1
+                return Handle("summary", summary_submissions)
+            return Handle("chart")
+
+        def cancel(self) -> None:
+            events.append("runtime-cancel")
+
+    class Screen:
+        def __init__(self, _stream: object) -> None:
+            pass
+
+        def paint(self, _frame: object, **_kwargs: object) -> None:
+            pass
+
+        def finish(self) -> None:
+            events.append("finish")
+
+    original_set_summary = HistoricalChartComponent.set_summary
+    original_pane_render = tui_module._pane_render
+
+    def record_summary(self: HistoricalChartComponent, summary: object) -> None:
+        summary_set_calls.append(summary)
+        original_set_summary(self, summary)  # type: ignore[arg-type]
+
+    def capture_pane_render(pane: object, *args: object, **kwargs: object) -> tui_module.PaneRender:
+        if isinstance(pane, tui_module.TuiChartPane):
+            pane_ref[:] = [pane]
+        return original_pane_render(pane, *args, **kwargs)  # type: ignore[arg-type]
+
+    def read_event(_decoder: object, _timeout: float) -> KeyEvent | None:
+        nonlocal first_replacement_requested, second_replacement_requested
+        if len(summary_set_calls) == 1 and not baseline_summary:
+            baseline_summary[:] = [pane_ref[0].summary]
+            baseline_component_summary[:] = [summary_set_calls[0]]
+        if baseline_summary and not first_replacement_requested:
+            first_replacement_requested = True
+            return KeyEvent("r")
+        if summary_submissions >= 2 and not second_replacement_requested:
+            assert pane_ref[0].summary is baseline_summary[0]
+            assert pane_ref[0].component.summary is baseline_component_summary[0]
+            second_replacement_requested = True
+            return KeyEvent("r")
+        if second_replacement_requested and summary_submissions >= 3:
+            stale_release.set()
+            if stale_finished.is_set() and pane_ref[0].summary_error is not None:
+                return KeyEvent("\x03")
+        time.sleep(0.005)
+        return None
+
+    monkeypatch.setattr(tui_module, "build_query_runtime", Runtime)
+    monkeypatch.setattr(HistoricalChartComponent, "set_summary", record_summary)
+    monkeypatch.setattr(tui_module, "_pane_render", capture_pane_render)
+    monkeypatch.setattr(tui_module, "FramePainter", Screen)
+    monkeypatch.setattr(tui_module, "tui_input_mode", nullcontext)
+    monkeypatch.setattr(tui_module, "read_event", read_event)
+    monkeypatch.setattr(
+        tui_module, "get_terminal_size", lambda: __import__("os").terminal_size((100, 30))
+    )
+
+    assert tui_module.run_tui(options, load_translator("en")) == 0
+    assert summary_submissions == 3
+    assert any(event == "cancel:summary:2" for event in events)
+    assert stale_finished.is_set()
+    assert len(summary_set_calls) == 1
+    assert pane_ref[0].summary is baseline_summary[0]
+    assert pane_ref[0].component.summary is baseline_component_summary[0]
+    assert isinstance(pane_ref[0].summary_error, QueryError)
+
+
 @pytest.mark.parametrize(
     ("edited", "expected_configures", "expected_submits"),
     (
@@ -2172,7 +2358,7 @@ def test_query_affecting_adjustments_are_explicit() -> None:
     assert not _query_affecting_adjustment("monitor", "d")
     assert not _query_affecting_adjustment("timeline", "g")
     assert _query_affecting_adjustment("ranking", "b")
-    assert not _query_affecting_adjustment("monitor", "B")
+    assert _query_affecting_adjustment("monitor", "B")
     assert not _query_affecting_adjustment("stack", "c")
     assert not _query_affecting_adjustment("monitor", "+")
     assert not _query_affecting_adjustment("timeline", "t")
@@ -2498,7 +2684,7 @@ def test_tui_adjustment_footer_separates_dashboard_management() -> None:
     assert _adjustment_key_supported("monitor", "quick", "d")
     assert not _adjustment_key_supported("timeline", "advanced", "b")
     assert not _adjustment_key_supported("monitor", "quick", "i")
-    assert not _adjustment_key_supported("monitor", "quick", "B")
+    assert _adjustment_key_supported("monitor", "quick", "B")
     assert "project aggregation" not in _adjustment_controls("timeline", "advanced", translator)
 
     quick_rows = _adjustment_footer(

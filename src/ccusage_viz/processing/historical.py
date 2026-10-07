@@ -86,6 +86,11 @@ def process_historical(
             aggregation=chart.granularity,
             coverage=coverage,
             filter_count=scope.filter_count,
+            by=chart.by,
+            top=chart.top,
+            show_other=chart.other == "show",
+            project_aggregation=chart.project_aggregation,
+            project_label_context=project_label_context,
         )
     return build_ranking(
         scope.records,

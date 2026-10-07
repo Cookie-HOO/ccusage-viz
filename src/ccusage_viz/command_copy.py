@@ -36,7 +36,7 @@ def _default_interval(config: StandaloneLaunch) -> float:
 
 
 def _is_default_top(chart: object, by: str | None, top: int | None) -> bool:
-    if isinstance(chart, RankingConfig):
+    if isinstance(chart, (RankingConfig, StackConfig)):
         return top == 10
     return by is not None and top == 3
 
@@ -64,15 +64,16 @@ def _chart_args(config: StandaloneLaunch, *, full: bool, pane: bool = False) -> 
             if full or chart.weekdays != "show":
                 args.extend(("--weekdays", chart.weekdays))
     by, top = getattr(chart, "by", None), getattr(chart, "top", None)
-    if by is not None and (full or not isinstance(chart, RankingConfig) or by != "project"):
+    if by is not None and (
+        full
+        or not isinstance(chart, (RankingConfig, StackConfig))
+        or (isinstance(chart, RankingConfig) and by != "project")
+        or (isinstance(chart, StackConfig) and by != "composition")
+    ):
         args.extend(("--by", by))
     if top is not None and (full or not _is_default_top(chart, by, top)):
         args.extend(("--top", str(top)))
-    if isinstance(chart, (TimelineConfig, RankingConfig, MonitorConfig)) and (
-        full or chart.project_aggregation != "name"
-    ):
-        args.extend(("--project-aggregation", chart.project_aggregation))
-    if isinstance(chart, (TimelineConfig, RankingConfig)) and (full or chart.other != "show"):
+    if isinstance(chart, (TimelineConfig, StackConfig, RankingConfig)) and (full or chart.other != "show"):
         args.extend(("--other", chart.other))
     if isinstance(chart, StackConfig) and (full or chart.cache != "combined"):
         args.extend(("--cache", chart.cache))

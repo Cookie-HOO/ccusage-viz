@@ -39,6 +39,7 @@ _OPERATION_SOURCES = {
     "unified_daily_agent_observation": QueryKind.UNIFIED_DAILY,
     "claude_daily_projects": QueryKind.CLAUDE_DAILY_PROJECTS,
     "codex_sessions": QueryKind.CODEX_SESSIONS,
+    "codex_ranking_sessions": QueryKind.CODEX_SESSIONS,
 }
 _PROJECT_ATTRIBUTION_SUPPORTED_AGENTS = frozenset({"claude", "codex"})
 _PROJECT_ATTRIBUTION_UNSUPPORTED_AGENTS = frozenset({"antigravity", "opencode"})
@@ -63,6 +64,8 @@ class CcusageProvider:
         project_required = "project" in intent.dimensions
         mode = (
             "project_ranking"
+            if project_required and chart_kind == "ranking"
+            else "project_daily"
             if project_required and chart_kind != "monitor"
             else "claude_daily_projects"
             if chart_kind == "monitor" and project_required
@@ -105,6 +108,47 @@ class CcusageProvider:
                     coverage,
                 ),
             )
+        if mode == "project_daily":
+            return (
+                *CcusageProvider._compile_interval(intent, interval, "claude_daily_projects"),
+                PhysicalQuery(
+                    intent.provider,
+                    "unified_daily_agent_observation",
+                    (
+                        "daily",
+                        "--by-agent",
+                        "--json",
+                        "--since",
+                        since,
+                        "--until",
+                        until,
+                        "--offline",
+                        "--no-cost",
+                    ),
+                    intent.execution_context,
+                    coverage,
+                ),
+                *tuple(
+                    PhysicalQuery(
+                        intent.provider,
+                        "codex_sessions",
+                        (
+                            "codex",
+                            "session",
+                            "--json",
+                            "--since",
+                            day.isoformat(),
+                            "--until",
+                            day.isoformat(),
+                            "--offline",
+                            "--no-cost",
+                        ),
+                        intent.execution_context,
+                        DateCoverage.from_interval(day, day),
+                    )
+                    for day in _days(interval)
+                ),
+            )
         if mode == "project_ranking":
             observation = PhysicalQuery(
                 intent.provider,
@@ -123,35 +167,27 @@ class CcusageProvider:
                 intent.execution_context,
                 coverage,
             )
-            codex_queries: list[PhysicalQuery] = []
-            day = interval.since
-            while day <= interval.until:
-                daily_coverage = DateCoverage.from_interval(day, day)
-                encoded_day = day.isoformat()
-                codex_queries.append(
-                    PhysicalQuery(
-                        intent.provider,
-                        "codex_sessions",
-                        (
-                            "codex",
-                            "session",
-                            "--json",
-                            "--since",
-                            encoded_day,
-                            "--until",
-                            encoded_day,
-                            "--offline",
-                            "--no-cost",
-                        ),
-                        intent.execution_context,
-                        daily_coverage,
-                    )
-                )
-                day += timedelta(days=1)
+            codex = PhysicalQuery(
+                intent.provider,
+                "codex_ranking_sessions",
+                (
+                    "codex",
+                    "session",
+                    "--json",
+                    "--since",
+                    since,
+                    "--until",
+                    until,
+                    "--offline",
+                    "--no-cost",
+                ),
+                intent.execution_context,
+                coverage,
+            )
             return (
                 *CcusageProvider._compile_interval(intent, interval, "claude_daily_projects"),
                 observation,
-                *codex_queries,
+                codex,
             )
         if mode != "unified_daily":
             raise ValueError(f"unsupported ccusage query mode: {mode}")
@@ -240,7 +276,7 @@ class CcusageProvider:
                 stderr=_decode_stderr(result.diagnostics),
             ) from exc
         codex_attribution_incomplete = False
-        if result.query.operation == "codex_sessions":
+        if result.query.operation in {"codex_sessions", "codex_ranking_sessions"}:
             data, codex_attribution_incomplete = _enrich_codex_project_rows(data)
         records = parse_usage_records(_OPERATION_SOURCES[result.query.operation], data)
         if result.query.operation == "codex_sessions":
@@ -248,6 +284,14 @@ class CcusageProvider:
             if len(intervals) != 1 or intervals[0].since != intervals[0].until:
                 raise QueryError("error.ccusage_codex_date_attribution")
             records = tuple(replace(record, day=intervals[0].since) for record in records)
+        elif result.query.operation == "codex_ranking_sessions":
+            intervals = result.query.coverage.intervals
+            if len(intervals) != 1:
+                raise QueryError("error.ccusage_codex_date_attribution")
+            # Session reports aggregate each session across the requested range.
+            # Project ranking consumes period totals only, so anchor these private
+            # range aggregates at the interval end without claiming daily detail.
+            records = tuple(replace(record, day=intervals[0].until) for record in records)
         unsupported_agents: tuple[str, ...] = ()
         unverified_agents: tuple[str, ...] = ()
         if result.query.operation == "unified_daily_agent_observation":
@@ -348,10 +392,18 @@ class CcusageProvider:
             notices,
             plan.summary_notices,
             includes_project_attribution=any(
-                query.operation in {"claude_daily_projects", "codex_sessions"}
+                query.operation
+                in {"claude_daily_projects", "codex_sessions", "codex_ranking_sessions"}
                 for query in plan.queries
             ),
         )
+
+
+def _days(interval: DateInterval):
+    day = interval.since
+    while day <= interval.until:
+        yield day
+        day += timedelta(days=1)
 
 
 def _agents_without_absolute_project_path(data: object) -> set[str]:
@@ -418,13 +470,18 @@ def _communicate_bounded(
     exceeded = Event()
 
     def drain(pipe, target: bytearray, *, bounded: bool) -> None:
-        while chunk := pipe.read1(64 * 1024):
-            target.extend(chunk)
-            if bounded and len(target) > output_limit:
-                exceeded.set()
-                return
-            if not bounded and len(target) > _STDERR_LIMIT:
-                del target[:-_STDERR_LIMIT]
+        try:
+            while chunk := pipe.read1(64 * 1024):
+                target.extend(chunk)
+                if bounded and len(target) > output_limit:
+                    exceeded.set()
+                    return
+                if not bounded and len(target) > _STDERR_LIMIT:
+                    del target[:-_STDERR_LIMIT]
+        except (OSError, ValueError):
+            # Abnormal cleanup closes the parent pipe to release readers even
+            # when an escaped descendant still owns the write end.
+            return
 
     assert process.stdout is not None
     assert process.stderr is not None
@@ -456,14 +513,18 @@ def _communicate_bounded(
             _stop(process)
             break
         time.sleep(0.01)
+    if cancelled.is_set() or exceeded.is_set() or timed_out:
+        # Do not close or join a stream here. Buffered pipe close can itself
+        # wait for a concurrent read1(), and an escaped descendant can retain
+        # the write end forever. The daemon readers may finish later, but must
+        # never retain this query worker or a coordinator execution slot.
+        if cancelled.is_set():
+            raise QueryError("error.ccusage_cancelled", query=operation)
+        if exceeded.is_set():
+            raise QueryError("error.ccusage_output_limit", query=operation, limit=output_limit)
+        raise QueryError("error.ccusage_timeout", query=operation, seconds=timeout)
     stdout_thread.join()
     stderr_thread.join()
-    if cancelled.is_set():
-        raise QueryError("error.ccusage_cancelled", query=operation)
-    if exceeded.is_set():
-        raise QueryError("error.ccusage_output_limit", query=operation, limit=output_limit)
-    if timed_out:
-        raise QueryError("error.ccusage_timeout", query=operation, seconds=timeout)
     return bytes(stdout), bytes(stderr)
 
 

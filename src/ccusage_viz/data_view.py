@@ -14,7 +14,7 @@ from ccusage_viz.chart_models import (
 )
 from ccusage_viz.domain import TokenUsage, UsageRecord
 from ccusage_viz.formatting import format_tokens
-from ccusage_viz.options import RankingConfig
+from ccusage_viz.options import MonitorConfig, RankingConfig, is_monitor_distribution
 from ccusage_viz.processing import process_historical
 from ccusage_viz.processing.custom_historical import CustomChartProjection, CustomProjectedSeries
 from ccusage_viz.processing.filtering import prepare_filtered_scope
@@ -33,6 +33,7 @@ if TYPE_CHECKING:
     from ccusage_viz.i18n import Translator
     from ccusage_viz.options import StandaloneLaunch
     from ccusage_viz.processing.monitor import ObservedBucket
+    from ccusage_viz.monitor_component import MonitorComponent
     from ccusage_viz.terminal import Terminal
 
 
@@ -489,3 +490,30 @@ def render_monitor_data(
         else _markdown(rows)
     )
     return payload
+
+
+def render_current_monitor_data(
+    component: MonitorComponent,
+    chart: MonitorConfig,
+    *,
+    translator: Translator,
+    terminal: Terminal,
+    now: float,
+    wall: datetime,
+    view: Literal["data-table", "data-json"] = "data-table",
+) -> str:
+    """Serialize the same observation projection used by the active Monitor chart."""
+    if is_monitor_distribution(chart):
+        return render_monitor_distribution_data(
+            component.distribution_model(now=now, wall=wall),
+            translator=translator,
+            terminal=terminal,
+            view=view,
+        )
+    return render_monitor_data(
+        component.buckets(max(8, min(32, terminal.width // 4)), now=now, wall=wall),
+        by=chart.by,
+        translator=translator,
+        terminal=terminal,
+        view=view,
+    )

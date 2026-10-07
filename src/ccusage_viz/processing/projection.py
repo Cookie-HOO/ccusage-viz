@@ -86,6 +86,18 @@ def _group_items(
             residual = record.usage.total - known_total
             if residual > 0:
                 output.append((_OTHER_KEY, "Other", day, _component_usage(residual)))
+        elif by == "composition":
+            components = (
+                ("input", record.usage.input),
+                ("output", record.usage.output),
+                ("cache", record.usage.cache_read + record.usage.cache_creation),
+                ("other", record.usage.other),
+            )
+            output.extend(
+                (("composition", name), name, day, _component_usage(amount))
+                for name, amount in components
+                if amount > 0
+            )
     return tuple(output)
 
 
@@ -281,38 +293,71 @@ def build_stack(
     aggregation: str = "day",
     coverage: DateCoverage = _EMPTY_COVERAGE,
     filter_count: int = 0,
+    by: str = "composition",
+    top: int | None = 10,
+    show_other: bool = True,
+    project_aggregation: ProjectAggregation = "name",
+    project_label_context: ProjectLabelContext = 0,
 ) -> StackModel:
     records = tuple(records)
-    totals: dict[date, TokenUsage] = defaultdict(TokenUsage.zero)
-    for record in records:
-        if record.day is not None:
-            totals[record.day] = totals[record.day] + record.usage
     days = period_axis(date_range, aggregation)
-    period_totals = _aggregate_daily(totals, aggregation)
-    definitions = [("input", lambda value: value.input), ("output", lambda value: value.output)]
-    if split_cache:
-        definitions.extend(
-            [
-                ("cache_read", lambda value: value.cache_read),
-                ("cache_creation", lambda value: value.cache_creation),
-            ]
+    if by == "composition":
+        totals: dict[date, TokenUsage] = defaultdict(TokenUsage.zero)
+        for record in records:
+            if record.day is not None:
+                totals[record.day] = totals[record.day] + record.usage
+        period_totals = _aggregate_daily(totals, aggregation)
+        definitions = [("input", lambda value: value.input), ("output", lambda value: value.output)]
+        if split_cache:
+            definitions.extend(
+                [
+                    ("cache_read", lambda value: value.cache_read),
+                    ("cache_creation", lambda value: value.cache_creation),
+                ]
+            )
+        else:
+            definitions.append(("cache", lambda value: value.cache_read + value.cache_creation))
+        if any(value.other for value in totals.values()):
+            definitions.append(("other", lambda value: value.other))
+        components = tuple(
+            Series(
+                ("component", name),
+                name,
+                tuple(_component_usage(getter(period_totals[day])) for day in days),
+                name == "other",
+            )
+            for name, getter in definitions
         )
     else:
-        definitions.append(("cache", lambda value: value.cache_read + value.cache_creation))
-    if any(value.other for value in totals.values()):
-        definitions.append(("other", lambda value: value.other))
-    components = tuple(
-        Series(
-            ("component", name),
-            name,
-            tuple(_component_usage(getter(period_totals[day])) for day in days),
+        groups, _excluded = _top_other(
+            _ranked_groups(
+                _grouped_daily(
+                    records,
+                    by,
+                    project_aggregation,
+                    cache_shortened=by == "project" and project_label_context == 0,
+                    project_label_context=project_label_context,
+                )
+            ),
+            top=top,
+            show_other=show_other,
         )
-        for name, getter in definitions
-    )
+        components = tuple(
+            Series(
+                key,
+                label,
+                tuple(_aggregate_daily(values, aggregation).get(day, TokenUsage.zero()) for day in days),
+                is_other,
+            )
+            for key, label, values, is_other in groups
+        )
+    model_notices = tuple(notices)
+    if _has_invalid_model_attribution(records, by):
+        model_notices += (Notice("notice.model_overattributed"),)
     return StackModel(
         days,
         components,
-        tuple(notices),
+        model_notices,
         _build_summary(
             records,
             date_range,
@@ -322,6 +367,7 @@ def build_stack(
             filter_count=filter_count,
         ),
         aggregation,
+        by,
     )
 
 
@@ -438,6 +484,6 @@ def build_ranking(
         summary,
         top if top_share is not None else None,
         top_share,
-        summary_notices=tuple(summary_notices) if summary is not None else (),
+        summary_notices=tuple(summary_notices),
         project_aggregation=project_aggregation if by == "project" else "name",
     )

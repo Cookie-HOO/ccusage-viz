@@ -49,6 +49,8 @@ def _title_content(
     chart = historical_chart_config(options)
     if isinstance(chart, TimelineConfig):
         return translator.text(f"label.{chart.by or 'total'}")
+    if isinstance(chart, StackConfig):
+        return translator.text(f"label.{chart.by}")
     if isinstance(chart, RankingConfig):
         return translator.text(f"label.{chart.by or 'project'}")
     return None
@@ -57,7 +59,7 @@ def _title_content(
 def _pending_heading(options: StandaloneLaunch, context: RenderContext) -> str:
     chart = historical_chart_config(options)
     title = context.translator.text(f"label.{chart.kind}")
-    if isinstance(chart, TimelineConfig) and context.title_content:
+    if isinstance(chart, (TimelineConfig, StackConfig)) and context.title_content:
         return content_heading(title, chart.date_range.since, chart.date_range.until, context)
     if isinstance(chart, RankingConfig) and context.title_content:
         return content_heading(title, chart.date_range.since, chart.date_range.until, context)
@@ -173,7 +175,9 @@ def render_historical_component(
         return RenderedChart(rendered.rstrip("\n") + "\n" + audit if audit else rendered, ())
     chart = historical_chart_config(accepted_options)
     visible_notices = model.notices
-    if chart.presentation.density != "minimal" and model.summary is not None:
+    if chart.presentation.density != "minimal" and (
+        model.summary is not None or getattr(model, "summary_notices", ())
+    ):
         visible_notices += getattr(model, "summary_notices", ())
     context = _context(
         accepted_options,
@@ -189,7 +193,7 @@ def render_historical_component(
         refreshing=refreshing,
         component=component,
     )
-    rendered = component.render(context)
+    rendered = component.definition.renderer(model, context)
     audit = render_audit(context)
     if audit:
         rendered = rendered.rstrip("\n") + "\n" + audit

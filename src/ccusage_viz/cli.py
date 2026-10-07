@@ -39,7 +39,6 @@ from ccusage_viz.options import (
     GRANULARITIES,
     HEADER_SUMMARIES,
     OTHER_MODES,
-    PROJECT_AGGREGATIONS,
     WEEKDAY_MODES,
     AnimationLaunch,
     AnimationPaneConfig,
@@ -355,12 +354,6 @@ def _add_monitor(parser: argparse.ArgumentParser, tr: Translator) -> None:
         "--by", choices=("agent", "model", "project"), help=tr.text("help.monitor_by")
     )
     parser.add_argument("--top", type=int, help=tr.text("help.monitor_top"))
-    parser.add_argument(
-        "--project-aggregation",
-        choices=PROJECT_AGGREGATIONS,
-        default="name",
-        help=tr.text("help.project_aggregation"),
-    )
     parser.add_argument("--agent", action="append", default=[], help=tr.text("help.agent"))
     parser.add_argument("--model", action="append", default=[], help=tr.text("help.model"))
     parser.add_argument("--project", action="append", default=[], help=tr.text("help.project"))
@@ -398,27 +391,22 @@ def build_parser(tr: Translator) -> argparse.ArgumentParser:
             _add_monitor(chart_parser, tr)
         else:
             _add_history_shared(chart_parser, tr, command)
-            if command == "timeline":
+            if command in {"timeline", "stack"}:
                 chart_parser.add_argument(
-                    "--by", choices=("agent", "model", "project"), default=None, help=tr.text("help.by")
+                    "--by",
+                    choices=("composition", "agent", "model", "project"),
+                    default=None if command == "timeline" else "composition",
+                    help=tr.text("help.by"),
                 )
                 chart_parser.add_argument("--top", type=int, default=None, help=tr.text("help.top"))
-                chart_parser.add_argument(
-                    "--project-aggregation", choices=PROJECT_AGGREGATIONS, default="name",
-                    help=tr.text("help.project_aggregation"),
-                )
                 chart_parser.add_argument("--other", choices=OTHER_MODES, default="show", help=tr.text("help.other"))
-            elif command == "stack":
+            if command == "stack":
                 chart_parser.add_argument("--cache", choices=CACHE_MODES, default="combined", help=tr.text("help.cache"))
             elif command == "ranking":
                 chart_parser.add_argument(
-                    "--by", choices=("agent", "model", "project"), default="project", help=tr.text("help.by")
+                    "--by", choices=("composition", "agent", "model", "project"), default="project", help=tr.text("help.by")
                 )
                 chart_parser.add_argument("--top", type=int, default=10, help=tr.text("help.top"))
-                chart_parser.add_argument(
-                    "--project-aggregation", choices=PROJECT_AGGREGATIONS, default="name",
-                    help=tr.text("help.project_aggregation"),
-                )
                 chart_parser.add_argument("--other", choices=OTHER_MODES, default="show", help=tr.text("help.other"))
         add_custom_source_arguments(chart_parser)
 
@@ -553,7 +541,6 @@ def _chart_from_namespace(namespace: argparse.Namespace, *, timezone: str | None
             presentation=presentation,
             by=namespace.by,
             top=top,
-            project_aggregation=getattr(namespace, "project_aggregation", "name"),
         )
     date_range = resolve_date_range(
         command,
@@ -573,7 +560,6 @@ def _chart_from_namespace(namespace: argparse.Namespace, *, timezone: str | None
             namespace.other,
             namespace.granularity,
             namespace.weekdays,
-            getattr(namespace, "project_aggregation", "name"),
         )
     if command == "calendar":
         return CalendarConfig("calendar", date_range, filters, presentation)
@@ -586,6 +572,9 @@ def _chart_from_namespace(namespace: argparse.Namespace, *, timezone: str | None
             namespace.cache,
             namespace.granularity,
             namespace.weekdays,
+            namespace.by,
+            top if top is not None else 10,
+            namespace.other,
         )
     return RankingConfig(
         "ranking",
@@ -595,7 +584,6 @@ def _chart_from_namespace(namespace: argparse.Namespace, *, timezone: str | None
         namespace.by,
         top if top is not None else 10,
         namespace.other,
-        getattr(namespace, "project_aggregation", "name"),
     )
 
 
@@ -613,7 +601,7 @@ def _custom_chart_from_namespace(
     timezone: str | None = None,
     explicit: frozenset[str] = frozenset(),
 ) -> CustomChartConfig:
-    unsupported = explicit & {"agent", "model", "project", "by", "project_aggregation", "cache"}
+    unsupported = explicit & {"agent", "model", "project", "by", "cache"}
     if unsupported:
         names = ", ".join(f"--{name.replace('_', '-')}" for name in sorted(unsupported))
         raise UsageError(

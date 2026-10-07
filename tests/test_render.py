@@ -668,7 +668,7 @@ def test_historical_ranking_derives_comparison_markers_from_entry_facts() -> Non
     assert "v -100 · v" in app_line
 
 
-def test_historical_ranking_ignores_refresh_delta_maps() -> None:
+def test_historical_ranking_shows_refresh_activity_and_rank_changes() -> None:
     model = RankingModel(
         (
             RankingEntry(("project", "app"), "app", usage(1_200)),
@@ -692,7 +692,13 @@ def test_historical_ranking_ignores_refresh_delta_maps() -> None:
     )
 
     assert "^" not in static
-    assert live == static
+    assert "v" not in static
+    app_line = next(line for line in live.splitlines() if "app" in line)
+    api_line = next(line for line in live.splitlines() if "api" in line)
+    assert "1 ^ * app" in app_line
+    assert "1.2K ^" in app_line
+    assert "2 v * api" in api_line
+    assert "800 v" in api_line
 
 
 def test_historical_ranking_other_ignores_refresh_activity() -> None:
@@ -1576,7 +1582,7 @@ def test_stack_hidden_legend_keeps_heading_and_omits_component_keys() -> None:
         ),
     )
 
-    assert "Stack · 2026-01-01–2026-01-01" in output
+    assert "Grouped composition · 2026-01-01–2026-01-01" in output
     assert "# Input" not in output
     assert "= Output" not in output
 

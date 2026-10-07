@@ -24,9 +24,9 @@ from ccusage_viz.command_copy import (
 )
 from ccusage_viz.data_view import (
     BodyView,
+    cycle_body_view,
     next_body_view,
-    render_monitor_data,
-    render_monitor_distribution_data,
+    render_current_monitor_data,
 )
 from ccusage_viz.diagnostics import format_error, transient_query_recovery_lines
 from ccusage_viz.errors import UsageError, VizError
@@ -52,6 +52,7 @@ from ccusage_viz.options import (
 from ccusage_viz.render.base import RenderAudit, RenderContext, audit_row_visible
 from ccusage_viz.render.filters import active_filter_summary
 from ccusage_viz.render.palette import COLOR_SCHEMES
+from ccusage_viz.standalone_help import run_standalone_help
 from ccusage_viz.terminal import FramePainter, Terminal, compose_frame, inspect_terminal
 from ccusage_viz.terminal_ui import (
     AdjustmentAction,
@@ -335,22 +336,14 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
             elif body_view == "full-command":
                 body = format_full_command_display(format_full_command(config), terminal.width)
             else:
-                data = monitor_data(now, terminal)
-                body = (
-                    render_monitor_distribution_data(
-                        data,
-                        translator=translator,
-                        terminal=terminal,
-                        view=body_view,
-                    )
-                    if is_monitor_distribution(monitor_chart(accepted))
-                    else render_monitor_data(
-                        data,
-                        by=monitor_chart(accepted).by,
-                        translator=translator,
-                        terminal=terminal,
-                        view=body_view,
-                    )
+                body = render_current_monitor_data(
+                    component,
+                    monitor_chart(accepted),
+                    translator=translator,
+                    terminal=terminal,
+                    now=now,
+                    wall=datetime.now().astimezone(),
+                    view=body_view,
                 )
             formatted_notices = notices()
             feedback_rows = feedback(terminal, now=now)
@@ -426,25 +419,18 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                 + ((("g", "granularity"),) if is_monitor_distribution(chart) else ())
                 + (
                     ("i", "interval"),
-                    ("b", "grouping"),
+                    ("b/B", "grouping"),
                     ("+/-", "top"),
                     ("d", "density"),
                     ("t/T", "theme"),
-                    ("s", "style"),
+                    ("s/S", "style"),
                 )
             )
             definitions = (
                 quick_definitions
                 if adjustment_page == "quick"
                 else (
-                    (
-                        ("f", "filter"),
-                        ("A", "project_aggregation"),
-                        ("P", "project_label_context"),
-                        ("l", "legend"),
-                    )
-                    if chart.by == "project"
-                    else (("f", "filter"), ("l", "legend"))
+                    (("f", "filter"), ("l", "legend"))
                 )
                 + (
                     (("t/T", "animation_theme"), ("s/S", "animation_style"))
@@ -514,19 +500,11 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                         if chart.presentation.style in {"ranking", "list"}
                         else ""
                     ),
-                    **(
-                        {
-                            "project_aggregation": chart.project_aggregation,
-                            "project_label_context": component.project_label_context,
-                        }
-                        if chart.by == "project"
-                        else {}
-                    ),
                 }
             )
             state_key = (
-                "status.monitor_adjust_advanced_nonproject"
-                if adjustment_page == "advanced" and chart.by != "project"
+                "status.monitor_adjust_advanced"
+                if adjustment_page == "advanced"
                 else "status.monitor_distribution_adjust_quick"
                 if adjustment_page == "quick" and is_monitor_distribution(chart)
                 else f"status.monitor_adjust_{adjustment_page}"
@@ -607,12 +585,6 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                     data_affecting = True
             elif (
                 adjustment_page == "advanced"
-                and key == "P"
-                and monitor_chart(component.candidate).by == "project"
-            ):
-                component.cycle_project_label_context()
-            elif (
-                adjustment_page == "advanced"
                 and monitor_chart(component.candidate).presentation.style in {"ranking", "list"}
                 and key in {"t", "T", "s", "S"}
             ):
@@ -632,9 +604,9 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                     )
             elif (
                 adjustment_page == "quick"
-                and key in {"d", "s", "t", "T", "b", "w", "g", "i", "+", "=", "-", "_"}
+                and key in {"d", "s", "S", "t", "T", "b", "B", "w", "g", "i", "+", "=", "-", "_"}
                 or adjustment_page == "advanced"
-                and key in {"l", "A"}
+                and key == "l"
             ):
                 config = component.candidate
                 updated = adjust_standalone(config, key)
@@ -796,7 +768,7 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                         if operation is not None:
                             manual_refresh_operations.add(operation)
                     paint(force=True)
-                elif body_view != "chart" and key in {"\x1b[A", "\x1b[B", "h", "e"}:
+                elif body_view != "chart" and key in {"\x1b[A", "\x1b[B", "\x1b[H", "e"}:
                     offset = next_text_offset(
                         key,
                         offset=text_offsets.get(body_view, 0),
@@ -806,11 +778,23 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                     assert offset is not None
                     text_offsets[body_view] = offset
                     paint(force=True)
-                elif body_view == "chart" and key in {"h", "H"}:
+                elif body_view == "chart" and key == "c":
                     controls_hidden = not controls_hidden
                     paint(force=True)
+                elif body_view == "chart" and key == "h":
+                    run_standalone_help(
+                        screen,
+                        translator,
+                        color=terminal_for(component.candidate).color,
+                        read_key=read_key,
+                    )
+                    paint(force=True)
                 elif key in {"v", "V"}:
-                    body_view = next_body_view(body_view)
+                    body_view = (
+                        next_body_view(body_view)
+                        if key == "v"
+                        else cycle_body_view(body_view, step=-1)
+                    )
                     paint(force=True)
                 elif key in {"y", "Y"} and body_view != "chart":
                     config = component.accepted_options or component.candidate
@@ -820,11 +804,13 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                         if body_view == "command"
                         else format_full_command(config)
                         if body_view == "full-command"
-                        else render_monitor_data(
-                            buckets(time.monotonic(), terminal),
-                            by=monitor_chart(config).by,
+                        else render_current_monitor_data(
+                            component,
+                            monitor_chart(config),
                             translator=translator,
                             terminal=terminal,
+                            now=time.monotonic(),
+                            wall=datetime.now().astimezone(),
                             view=body_view,
                         )
                     )

@@ -44,25 +44,18 @@ def test_ccusage_provider_owns_logical_to_physical_planning() -> None:
     assert CCUSAGE_DEFINITION.provider.fingerprint(query) == query.fingerprint
 
 
-def test_project_ranking_compiles_codex_as_single_day_queries() -> None:
+def test_project_ranking_compiles_codex_as_one_range_query() -> None:
     plan = CCUSAGE_DEFINITION.provider.compile(intent("ranking"))
 
     assert [query.operation for query in plan.queries] == [
         "claude_daily_projects",
         "unified_daily_agent_observation",
-        "codex_sessions",
-        "codex_sessions",
+        "codex_ranking_sessions",
     ]
     assert plan.queries[0].arguments[5] == "20260102"
     assert plan.queries[1].arguments[4:7] == ("2026-01-02", "--until", "2026-01-03")
-    assert [query.arguments[4:7] for query in plan.queries[2:]] == [
-        ("2026-01-02", "--until", "2026-01-02"),
-        ("2026-01-03", "--until", "2026-01-03"),
-    ]
-    assert [query.coverage for query in plan.queries[2:]] == [
-        DateCoverage.from_interval(date(2026, 1, 2), date(2026, 1, 2)),
-        DateCoverage.from_interval(date(2026, 1, 3), date(2026, 1, 3)),
-    ]
+    assert plan.queries[2].arguments[4:7] == ("2026-01-02", "--until", "2026-01-03")
+    assert plan.queries[2].coverage == DateCoverage.from_interval(date(2026, 1, 2), date(2026, 1, 3))
     assert plan.summary_notices == ()
 
 
@@ -71,6 +64,35 @@ def test_codex_normalization_attributes_a_singleton_query_to_its_day() -> None:
         ProviderRef("ccusage"),
         "codex_sessions",
         coverage=DateCoverage.from_interval(date(2026, 1, 3), date(2026, 1, 3)),
+    )
+    payload = {
+        "sessions": [
+            {
+                "inputTokens": 2,
+                "outputTokens": 3,
+                "cacheReadTokens": 5,
+                "cacheCreationTokens": 7,
+                "totalTokens": 20,
+                "cwd": "/workspace/project",
+            }
+        ]
+    }
+
+    (record,) = CCUSAGE_DEFINITION.provider.normalize(
+        PhysicalResult(query, json.dumps(payload).encode())
+    ).records
+
+    assert record.day == date(2026, 1, 3)
+    assert record.project is not None
+    assert record.project.raw_id == "/workspace/project"
+    assert record.usage.total == 20
+
+
+def test_range_codex_ranking_normalization_anchors_totals_at_interval_end() -> None:
+    query = PhysicalQuery(
+        ProviderRef("ccusage"),
+        "codex_ranking_sessions",
+        coverage=DateCoverage.from_interval(date(2026, 1, 2), date(2026, 1, 3)),
     )
     payload = {
         "sessions": [

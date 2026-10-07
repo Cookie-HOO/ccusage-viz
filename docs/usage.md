@@ -159,7 +159,6 @@ the conflict is caused by explicitly specifying a theme. `--ascii` without a
 | `--agent VALUE` | Repeatable text | none | Historical routes and Monitor | Filter by a complete Agent value. |
 | `--model VALUE` | Repeatable text | none | Historical routes and Monitor | Filter by a complete model value. |
 | `--project VALUE` | Repeatable text | none | Historical routes and Monitor | Filter by a complete safe project label. |
-| `--project-aggregation MODE` | `name`, `exact`; default `name` | `name` | Timeline, Ranking, Monitor with `--by project` | Project presentation mode; it never broadens exact project filters. |
 | `--interval SECONDS` | Finite number; at least `2` for historical charts | `10` | Historical routes | Refresh cadence while watching. |
 | `--no-watch` | Flag | off | Historical routes | Query once and exit instead of watching. |
 
@@ -243,8 +242,7 @@ whether Timeline and Ranking display the remaining grouped values as **Other**.
 
 ### Project aggregation and attribution coverage
 
-`--project-aggregation name` is the default for Timeline, Ranking, and Monitor
-views grouped by project. It combines only an unambiguous Claude–Codex pair and
+Project views combine only an unambiguous Claude–Codex pair and
 never merges projects within one Agent. It first compares safe final names; when
 Codex has colliding basenames, it may use private parent suffixes solely to
 select a conservative one-to-one pair. Those suffixes are grouping keys, not
@@ -253,11 +251,9 @@ label, not evidence that the records came from one filesystem checkout. Filterin
 always remains against the exact source project identity before this presentation
 aggregation is applied.
 
-Use `--project-aggregation exact` to retain every upstream `(agent, project)`
-source identity separately. Exact-mode charts always prefix the visible project
-name with its Agent, for example `claude · app`; data tables and JSON provide the
-same value as `display_project` alongside a separate `agent` field. Name-mode
-groups that span agents intentionally have no manufactured single-agent value.
+Project filters continue to apply to exact upstream identities before this
+presentation aggregation. Cross-Agent groups intentionally have no manufactured
+single-Agent value.
 
 Every project data view includes `display_project` and `merge_group`.
 `display_project` is the exact label currently rendered by the chart. Equal
@@ -317,7 +313,6 @@ ccuv chart timeline --period 30d --by model --top 5 --style line-points
 | `--granularity` | `day` (default), `month`, `quarter`, `year` | Bucket the historical range. |
 | `--weekdays` | `show` (default), `hide` | Show/hide weekday labels where relevant. |
 | `--legend` | `below-title` (default), `inside`, `hidden` | Legend placement. |
-| `--project-aggregation` | `name` (default), `exact`; only with `--by project` | Use safe cross-agent same-name presentation or preserve each exact source. |
 | `--style` | Timeline styles | `area` is unavailable when grouped. |
 
 ### Calendar
@@ -365,7 +360,6 @@ ccuv chart ranking --period 30d --by project --top 15 --other hide --style dots
 | `--by` | `project` (default), `agent`, `model` | Ranking dimension. |
 | `--top` | Positive integer; default `10` | Number of ranked values. |
 | `--other` | `show` (default), `hide` | Show/hide values outside Top. |
-| `--project-aggregation` | `name` (default), `exact`; only with `--by project` | Use safe cross-agent same-name presentation or preserve each exact source. |
 | `--style` | `dot` (default), `bar`, `dots` | Ranking representation. |
 
 ### Monitor
@@ -591,10 +585,11 @@ restriction is stated:
 | --- | --- |
 | `Ctrl-C` | Exit. |
 | `r` | In chart view, refresh a historical query or request a Monitor sample immediately; it has no action in a non-chart text view. |
-| `h` / `H` | In chart view, show/hide the session-only control footer. In a text view, lowercase `h` goes to the first line; `H` has no action. |
+| `c` | In chart view, show/hide the session-only control footer. |
+| `h` | Open contextual Help from the chart view. |
 | `e` | In a non-chart text view, go to the final line. |
 | `Up` / `Down` | In a non-chart text view, scroll one rendered line. |
-| `v` | Cycle chart, compact command, full command, Markdown table, JSON, then chart. |
+| `v` / `V` | Cycle forward / backward through chart, compact command, full command, Markdown table, and JSON. |
 | `y` | Copy the current command/data text from a non-chart view. |
 | `m` | Open adjustment only from the chart view. |
 | `s` / `d` / `l` | In supported adjustment pickers: style / density / legend controls. |
@@ -614,11 +609,10 @@ Adjustment shortcuts are scoped to the visible page or Dashboard management mode
 the control footer always shows the active meaning. For an ordered finite control
 that displays a lowercase/uppercase pair, lowercase advances, uppercase reverses,
 and both directions wrap. This applies to `p/P` periods, `g/G` historical
-granularity, `t/T` theme, `s/S` style, and `v/V` views.
+granularity, `b/B` grouping, `t/T` theme, `s/S` style, and `v/V` views.
 
-Capitalization is not a universal reverse rule. `A` and page-scoped `P` remain
-low-frequency Advanced project-presentation controls while grouped by project;
-`N`/`n` mean insert before/after; `u/U` mean undo/redo; `H` changes Dashboard
+Capitalization is not a universal reverse rule. `N`/`n` mean insert before/after;
+`u/U` mean undo/redo; `H` changes Dashboard
 Header presentation; and `L` opens custom diagnostics or animation history.
 `f`, `l`, `o`, `k`, and `c` remain lowercase direct actions despite appearing on
 the Advanced page.
@@ -628,8 +622,6 @@ Historical `p/P` traverses the shared sequence `7d → 14d → 30d → 90d → 1
 `1mo`, and `1y` mean This week, This month, and This year respectively, ending
 at today. The sequence applies to every historical token or Dataset chart, not
 just its current granularity. On a fixed explicit-date range it has no effect.
-The same `P` may retain its separately documented project-label meaning only on
-the Advanced page where that footer declares it.
 
 ### Historical adjustment flow
 
@@ -649,11 +641,11 @@ to browse mode.
 
 | Chart | Quick page | Advanced page |
 | --- | --- | --- |
-| Timeline | `p/P` period; `g/G` granularity; `b` grouping; `+/-` Top; `d` density; `t/T` theme; `s/S` style | `f` filters; `o` Other; `A` project aggregation and `P` project-label context when grouped by project; `l` legend; `k` weekday labels |
+| Timeline | `p/P` period; `g/G` granularity; `b/B` grouping; `+/-` Top; `d` density; `t/T` theme; `s/S` style | `f` filters; `o` Other; `l` legend; `k` weekday labels |
 | Calendar | `p/P` period; `d` density; `t/T` theme; `s/S` style | `f` filters |
-| Stack | `p/P` period; `g/G` granularity; `d` density; `t/T` theme; `s/S` style | `f` filters; `c` cache mode; `l` legend; `k` weekday labels |
-| Ranking | `p/P` period; `b` grouping; `+/-` Top; `d` density; `t/T` theme; `s/S` style | `f` filters; `o` Other; `A` project aggregation and `P` project-label context when grouped by project |
-| Monitor | Timeline styles: `w` window; `i` sampling interval; `b` grouping; `+/-` Top; `d` density; `t/T` theme; `s` style. `cumulative-bars`: `w` Today/Yesterday; `g` hour/30 min; `b` grouping; `+/-` Top; `d` density; `t/T` theme; `s` style. Ranking/list omit `w`. | `f` filters; `A` project aggregation and `P` project-label context when grouped by project; `l` legend |
+| Stack | `p/P` period; `g/G` granularity; `b/B` grouping; `+/-` Top; `d` density; `t/T` theme; `s/S` style | `f` filters; `o` Other; `c` cache mode; `l` legend; `k` weekday labels |
+| Ranking | `p/P` period; `b/B` grouping; `+/-` Top; `d` density; `t/T` theme; `s/S` style | `f` filters; `o` Other |
+| Monitor | Timeline styles: `w` window; `i` sampling interval; `b/B` grouping; `+/-` Top; `d` density; `t/T` theme; `s/S` style. `cumulative-bars`: `w` Today/Yesterday; `g` hour/30 min; `b/B` grouping; `+/-` Top; `d` density; `t/T` theme; `s/S` style. Ranking/list omit `w`. | `f` filters; `l` legend |
 
 `p` advances and `P` reverses through the shared historical sequence
 `7d → 14d → 30d → 90d → 180d → 365d → 1w → 1mo → 1y`. `1w`, `1mo`, and `1y`
@@ -706,8 +698,8 @@ Press `m` or `M` from Monitor's chart view. `a` switches pages;
 
 | Page | Controls |
 | --- | --- |
-| Quick | Timeline styles: `w` window and `i` sampling interval; `cumulative-bars`: `w` Today/Yesterday, `g` hour/30 min, and `i` sampling interval; ranking/list omit `w`; all applicable styles retain `b` grouping, `+/-` Top, `d` density, `t/T` theme, and `s` style |
-| Advanced | `f` filters; `A` project aggregation and `P` project-label context when grouped by project; `l` legend |
+| Quick | Timeline styles: `w` window and `i` sampling interval; `cumulative-bars`: `w` Today/Yesterday, `g` hour/30 min, and `i` sampling interval; ranking/list omit `w`; all applicable styles retain `b/B` grouping, `+/-` Top, `d` density, `t/T` theme, and `s/S` style |
+| Advanced | `f` filters; `l` legend |
 
 Grouping and filters require a fresh matching observation baseline; window
 changes reproject retained observations immediately. When the interval changes,
@@ -745,9 +737,8 @@ restores every Pane to chart view. In chart view, `r` replaces it; `N` inserts
 before; `n` inserts after; `x` deletes it when more than one Pane remains;
 `[`/`]` reorder it; and `Tab` moves focus to the next Pane. `{`/`}` adjust
 logical column shares; `_`/`=` adjust logical row shares. Focused Pane Quick
-keys are the historical/Monitor chart controls listed above, including the
-project-only Advanced `A` and `P` controls, except Monitor has no `i` because
-sampling belongs to the Dashboard host. Global Dashboard
+keys are the historical/Monitor chart controls listed above, except Monitor has
+no `i` because sampling belongs to the Dashboard host. Global Dashboard
 adjustment uses `t/T` for shell theme, `s/S` for shell style, `H` for header
 style, `p/P` for header-summary scope, and `z` for layout. Pressing `z` opens the layout
 chooser: use `j`/`k` or arrow keys to select a compatible layout, then `Enter`

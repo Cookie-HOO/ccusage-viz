@@ -61,7 +61,7 @@ def custom_heading(
     if descriptor is not None:
         dataset = descriptor.dataset.title
         labels.append(dataset.zh_cn if context.translator.language == "zh" else dataset.en)
-    if config.kind == "ranking":
+    if config.kind in {"stack", "ranking"}:
         if config.group_by is None:
             labels.append(context.translator.text("label.total"))
         elif descriptor is not None and config.group_by in descriptor.group_labels:

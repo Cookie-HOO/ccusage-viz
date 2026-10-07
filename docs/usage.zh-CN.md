@@ -136,7 +136,6 @@ Monitor-eligible 效果；随后 `s`/`S` 会循环 term-animate 声明的所有�
 | `--agent VALUE` | 可重复文本 | 无 | 历史路由与 Monitor | 按完整 Agent 值筛选。 |
 | `--model VALUE` | 可重复文本 | 无 | 历史路由与 Monitor | 按完整模型值筛选。 |
 | `--project VALUE` | 可重复文本 | 无 | 历史路由与 Monitor | 按完整安全项目标签筛选。 |
-| `--project-aggregation MODE` | `name`、`exact`；默认 `name` | `name` | `--by project` 的 Timeline、Ranking、Monitor | 项目呈现模式；不会放宽精确项目筛选。 |
 | `--interval SECONDS` | 有限数字；历史图表至少 `2` | `10` | 历史路由 | 监听时的刷新节奏。 |
 | `--no-watch` | 标志 | 关闭 | 历史路由 | 仅查询一次后退出，不持续监听。 |
 
@@ -203,15 +202,13 @@ token，并在完整筛选后项目池的每个 token 前缀树分支中，消�
 
 ### 项目聚合与项目归因覆盖范围
 
-Timeline、Ranking 和 Monitor 按项目分组时，`--project-aggregation name` 是默认值。它只会合并
+按项目分组时，只会合并
 无歧义的 Claude–Codex 配对，绝不会合并同一 Agent 内的项目。先比较安全的末级名称；当 Codex
 存在重名末级目录时，可以仅用私有父级后缀选择保守的一对一配对。这些后缀只是分组键，不会显示为
 标签，也不代表重建出的路径。简洁的合并标签仅用于呈现，不代表这些记录来自同一个工作目录。筛选
 始终先针对精确来源项目身份执行，再应用这一呈现聚合。
 
-使用 `--project-aggregation exact` 可分别保留每个上游 `(agent, project)` 来源身份。Exact 模式图表
-始终在可见项目名称前加上 Agent，例如 `claude · app`；数据表和 JSON 将相同值作为
-`display_project`，并另外提供 `agent` 字段。跨 Agent 的 Name 分组不会人为生成一个单独的 Agent 值。
+项目筛选会先针对精确上游身份执行，再应用这一呈现聚合。跨 Agent 分组不会人为生成单独的 Agent 值。
 
 所有项目数据视图都包含 `display_project` 和 `merge_group`。`display_project` 是图表当前实际显示的
 标签。相同且非空的 `merge_group` 表示来源项目会相加为同一个跨 Agent Name 分组；空值表示该行是
@@ -259,7 +256,6 @@ ccuv chart timeline --period 30d --by model --top 5 --style line-points
 | `--granularity` | `day`（默认）、`month`、`quarter`、`year` | 历史范围的分桶粒度。 |
 | `--weekdays` | `show`（默认）、`hide` | 在适用位置显示/隐藏星期标签。 |
 | `--legend` | `below-title`（默认）、`inside`、`hidden` | 图例位置。 |
-| `--project-aggregation` | `name`（默认）、`exact`；仅用于 `--by project` | 使用安全的跨 Agent 同名呈现，或保留每个精确来源。 |
 | `--style` | Timeline 样式 | 分组时 `area` 不可用。 |
 
 ### Calendar
@@ -306,7 +302,6 @@ ccuv chart ranking --period 30d --by project --top 15 --other hide --style dots
 | `--by` | `project`（默认）、`agent`、`model` | 排名维度。 |
 | `--top` | 正整数；默认 `10` | 排名值数量。 |
 | `--other` | `show`（默认）、`hide` | 显示/隐藏 Top 以外的值。 |
-| `--project-aggregation` | `name`（默认）、`exact`；仅用于 `--by project` | 使用安全的跨 Agent 同名呈现，或保留每个精确来源。 |
 | `--style` | `dot`（默认）、`bar`、`dots` | 排名呈现方式。 |
 
 ### Monitor
@@ -472,10 +467,11 @@ Dashboard Header 刻意运行未筛选、全 Agent 的聚合查询；它不会�
 | --- | --- |
 | `Ctrl-C` | 退出。 |
 | `r` | 仅在图表视图刷新历史查询或立即请求一个 Monitor 样本；非图表文字视图中无操作。 |
-| `h` / `H` | 图表视图中显示/隐藏仅当前会话的控制栏；文字视图中小写 `h` 跳到首行，`H` 无操作。 |
+| `c` | 图表视图中显示/隐藏仅当前会话的控制栏。 |
+| `h` | 在图表视图打开上下文帮助。 |
 | `e` | 非图表文字视图中跳到末行。 |
 | `Up` / `Down` | 非图表文字视图中逐渲染行滚动。 |
-| `v` | 依次切换图表、紧凑命令、完整命令、Markdown 表格、JSON，再回到图表。 |
+| `v` / `V` | 正向/反向切换图表、紧凑命令、完整命令、Markdown 表格和 JSON。 |
 | `y` | 从非图表文本视图复制当前命令/数据。 |
 | `m` | 仅在图表视图打开调整。 |
 | `s` / `d` / `l` | 在支持的调整器中分别控制样式/密度/图例。 |
@@ -489,17 +485,15 @@ Dashboard Header 刻意运行未筛选、全 Agent 的聚合查询；它不会�
 
 调整快捷键以当前可见页面或 Dashboard 管理模式为作用域；控制栏始终展示当前按键含义。
 对于控制栏展示的小写/大写有限有序档位，小写向前、大写向后，两个方向都会循环：`p/P`
-周期、`g/G` 历史粒度、`t/T` 主题、`s/S` 样式和 `v/V` 视图均遵循这一规则。
+周期、`g/G` 历史粒度、`b/B` 分组、`t/T` 主题、`s/S` 样式和 `v/V` 视图均遵循这一规则。
 
-大小写不是通用的反向规则。`A` 和页面作用域内的 `P` 在按项目分组时仍是低频 Advanced
-项目呈现控制；`N`/`n` 分别表示前插/后插；`u/U` 表示撤销/重做；`H` 调整 Dashboard
+大小写不是通用的反向规则。`N`/`n` 分别表示前插/后插；`u/U` 表示撤销/重做；`H` 调整 Dashboard
 Header 呈现；`L` 打开自定义诊断或动画历史。即使位于 Advanced 页，`f`、`l`、`o`、`k`
 和 `c` 仍是小写直接操作。
 
 历史图表的 `p/P` 在共享序列 `7d → 14d → 30d → 90d → 180d → 365d → 1w → 1mo → 1y`
 中前进/后退，到达端点时循环。`1w`、`1mo`、`1y` 分别表示截至今天的本周、本月和本年。
 这套序列适用于所有历史 token 图表和 Dataset 图表，而不取决于当前粒度。固定的显式日期范围不受影响。
-仅当 Advanced 页的控制栏明确声明时，`P` 才保留其单独的项目名称含义。
 
 ### 历史图表调整流程
 
@@ -511,11 +505,11 @@ Timeline、Calendar、Stack 和 Ranking 在图表视图按 `m` 打开调整器�
 
 | 图表 | Quick 页 | Advanced 页 |
 | --- | --- | --- |
-| Timeline | `p/P` 范围；`g/G` 粒度；`b` 分组；`+/-` Top；`d` 密度；`t/T` 主题；`s/S` 样式 | `f` 筛选；`o` Other；按项目分组时 `A` 项目聚合和 `P` 项目名称上下文；`l` 图例；`k` 星期标签 |
+| Timeline | `p/P` 范围；`g/G` 粒度；`b/B` 分组；`+/-` Top；`d` 密度；`t/T` 主题；`s/S` 样式 | `f` 筛选；`o` Other；`l` 图例；`k` 星期标签 |
 | Calendar | `p/P` 范围；`d` 密度；`t/T` 主题；`s/S` 样式 | `f` 筛选 |
-| Stack | `p/P` 范围；`g/G` 粒度；`d` 密度；`t/T` 主题；`s/S` 样式 | `f` 筛选；`c` 缓存模式；`l` 图例；`k` 星期标签 |
-| Ranking | `p/P` 范围；`b` 分组；`+/-` Top；`d` 密度；`t/T` 主题；`s/S` 样式 | `f` 筛选；`o` Other；按项目分组时 `A` 项目聚合和 `P` 项目名称上下文 |
-| Monitor | 时间线样式：`w` 窗口；`i` 采样间隔；`b` 分组；`+/-` Top；`d` 密度；`t/T` 主题；`s` 样式。`cumulative-bars`：`w` 今天/昨天；`g` 每小时/30 分钟；`b` 分组；`+/-` Top；`d` 密度；`t/T` 主题；`s` 样式。ranking/list 不显示 `w`。 | `f` 筛选；按项目分组时 `A` 项目聚合和 `P` 项目名称上下文；`l` 图例 |
+| Stack | `p/P` 范围；`g/G` 粒度；`b/B` 分组；`+/-` Top；`d` 密度；`t/T` 主题；`s/S` 样式 | `f` 筛选；`o` Other；`c` 缓存模式；`l` 图例；`k` 星期标签 |
+| Ranking | `p/P` 范围；`b/B` 分组；`+/-` Top；`d` 密度；`t/T` 主题；`s/S` 样式 | `f` 筛选；`o` Other |
+| Monitor | 时间线样式：`w` 窗口；`i` 采样间隔；`b/B` 分组；`+/-` Top；`d` 密度；`t/T` 主题；`s/S` 样式。`cumulative-bars`：`w` 今天/昨天；`g` 每小时/30 分钟；`b/B` 分组；`+/-` Top；`d` 密度；`t/T` 主题；`s/S` 样式。ranking/list 不显示 `w`。 | `f` 筛选；`l` 图例 |
 
 `p` 向前、`P` 向后遍历共享历史序列
 `7d → 14d → 30d → 90d → 180d → 365d → 1w → 1mo → 1y`。`1w`、`1mo`、`1y`
@@ -559,8 +553,8 @@ Advanced 页的 `f` 编辑器会先起草筛选，再提交：
 
 | 页面 | 控制 |
 | --- | --- |
-| Quick | 时间线样式：`w` 窗口与 `i` 采样间隔；`cumulative-bars`：`w` 今天/昨天、`g` 每小时/30 分钟与 `i` 采样间隔；ranking/list 不显示 `w`；所有适用样式保留 `b` 分组、`+/-` Top、`d` 密度、`t/T` 主题和 `s` 样式 |
-| Advanced | `f` 筛选；按项目分组时 `A` 项目聚合和 `P` 项目名称上下文；`l` 图例 |
+| Quick | 时间线样式：`w` 窗口与 `i` 采样间隔；`cumulative-bars`：`w` 今天/昨天、`g` 每小时/30 分钟与 `i` 采样间隔；ranking/list 不显示 `w`；所有适用样式保留 `b/B` 分组、`+/-` Top、`d` 密度、`t/T` 主题和 `s/S` 样式 |
+| Advanced | `f` 筛选；`l` 图例 |
 
 分组和筛选需要新的匹配观测基线；窗口变化会立即重投影保留的观测值。间隔变化时，Monitor 会重建
 调度器。仅外观修改不会假装重建此前的观测历史。
@@ -585,8 +579,7 @@ Dashboard 有独立的导航和归属规则。浏览模式中：
 调整 Pane 时，`v` 向前、`V` 向后切换视图。内置和自定义 Dataset Pane 都在图表、紧凑命令、完整命令、数据表和 JSON 间循环；自定义数据导出表示 ccuv 当前本地投影的数据，而不是 Dataset 进程的原始响应。非图表 Pane 文字视图中，`Up`/`Down` 逐行滚动，`h` 跳到首行，`e`
 跳到末行；Pane 通知保持固定。始终显示的控制栏只保留阅读、复制和视图切换操作，且仅在文字溢出时提示滚动；`r` 在此无操作，显示文字时不提供图表 Quick/Advanced 控制和 Dashboard Pane 管理。按 Enter、`Esc` 或发生无操作超时会结束调整，并将所有 Pane 恢复为图表视图。图表视图中，`r` 替换；`N` 在前插入；`n` 在后插入；当 Pane 多于一个时 `x`
 删除；`[`/`]` 重排；`Tab` 切到下一个 Pane。`{`/`}` 调整逻辑列份额；`_`/`=` 调整逻辑行份额。
-聚焦 Pane 的快捷键使用上面的历史/Monitor 图表控制，包含仅在项目分组时可用的 Advanced `A` 和 `P`；
-但 Monitor 没有 `i`，因为采样属于 Dashboard Host。全局 Dashboard 调整中，`t/T` 调整外壳主题，`s/S` 调整外壳样式，`H` 调整 Header
+聚焦 Pane 的快捷键使用上面的历史/Monitor 图表控制；但 Monitor 没有 `i`，因为采样属于 Dashboard Host。全局 Dashboard 调整中，`t/T` 调整外壳主题，`s/S` 调整外壳样式，`H` 调整 Header
 样式，`p/P` 调整 Header 汇总范围，`z` 调整布局。按 `z` 会打开布局选择器：使用 `j`/`k` 或方向键选择
 兼容布局，按 `Enter` 应用，按 `Esc` 取消。无法容纳当前 Pane 数量的固定容量布局仍会列出并标为不可用，
 导航会跳过这些选项。

@@ -5,6 +5,7 @@ from typing import cast
 import pytest
 
 from ccusage_viz.bootstrap import build_chart_registry, build_query_runtime
+from ccusage_viz.chart_models import PeriodSummary
 from ccusage_viz.core.time import DateRange
 from ccusage_viz.coverage import DateCoverage, DateInterval
 from ccusage_viz.domain import ProjectRef, SourceKind, TokenUsage, UsageRecord
@@ -234,6 +235,31 @@ def test_component_separates_data_generation_from_render_revision() -> None:
     assert chart.model is not None
 
 
+def test_component_persists_injected_summary_through_model_recreation() -> None:
+    chart = HistoricalChartComponent(
+        options(),
+        owner_id="standalone:test",
+        runtime=None,
+        registry=build_chart_registry(),
+        include_summary=False,
+    )
+    summary = PeriodSummary("day", date(2026, 1, 7), 42, None)
+
+    chart.set_summary(summary)
+    chart.seed(chart.candidate, UsageSnapshot((), (), 0.1, coverage=chart.display_coverage()))
+    assert chart.model is not None
+    assert chart.model.summary == summary
+    updated = replace(
+        chart.candidate,
+        chart=replace(chart.candidate.chart, presentation=ChartPresentation(style="points")),
+    )
+    chart.configure(updated, data_affecting=False)
+
+    assert chart.summary == summary
+    assert chart.model is not None
+    assert chart.model.summary == summary
+
+
 def test_component_reprojects_project_aggregation_without_new_generation() -> None:
     selected = replace(
         options(),
@@ -286,13 +312,8 @@ def test_component_reprojects_project_aggregation_without_new_generation() -> No
     ]
 
 
-@pytest.mark.parametrize(
-    ("density", "expects_comparison"),
-    (("minimal", False), ("compact", False), ("full", True), ("detailed", True)),
-)
-def test_component_requests_comparison_coverage_for_complete_content_densities(
-    density: str, expects_comparison: bool
-) -> None:
+@pytest.mark.parametrize("density", ("minimal", "compact", "full", "detailed"))
+def test_timeline_component_requires_only_display_coverage_at_all_densities(density: str) -> None:
     selected = replace(
         options(),
         chart=replace(
@@ -308,68 +329,19 @@ def test_component_requests_comparison_coverage_for_complete_content_densities(
     display = chart.display_coverage()
     chart.seed(selected, UsageSnapshot((), (), 0.1, coverage=display))
 
-    assert (chart.required_coverage() != display) is expects_comparison
-    assert bool(chart.missing_comparison_coverage().intervals) is expects_comparison
-    assert chart.has_pending_unknowns is expects_comparison
+    assert chart.required_coverage() == display
+    assert not chart.missing_comparison_coverage().intervals
+    assert not chart.has_pending_unknowns
 
 
-def test_component_exposes_missing_full_comparison_coverage() -> None:
+def test_timeline_component_has_no_chart_owned_comparison_coverage() -> None:
     chart = component()
     display = chart.display_coverage()
     chart.seed(chart.candidate, UsageSnapshot((), (), 0.1, coverage=display))
 
-    assert chart.required_coverage() == DateCoverage.from_interval(
-        date(2025, 12, 31), date(2026, 1, 7)
-    )
-    assert chart.missing_comparison_coverage().intervals == (
-        DateInterval(date(2025, 12, 31), date(2025, 12, 31)),
-    )
-    assert chart.has_pending_unknowns
-
-
-@pytest.mark.parametrize(
-    ("granularity", "expected"),
-    (
-        (
-            "month",
-            (
-                DateInterval(date(2025, 1, 1), date(2025, 1, 7)),
-                DateInterval(date(2025, 12, 1), date(2025, 12, 7)),
-            ),
-        ),
-        (
-            "quarter",
-            (
-                DateInterval(date(2025, 1, 1), date(2025, 1, 7)),
-                DateInterval(date(2025, 10, 1), date(2025, 10, 7)),
-            ),
-        ),
-        (
-            "year",
-            (DateInterval(date(2025, 1, 1), date(2025, 1, 7)),),
-        ),
-    ),
-)
-def test_component_exposes_period_comparison_coverage(
-    granularity: str,
-    expected: tuple[DateInterval, ...],
-) -> None:
-    selected = replace(
-        options(),
-        chart=replace(options().chart, granularity=granularity),
-    )
-    chart = HistoricalChartComponent(
-        selected,
-        owner_id="test:period",
-        runtime=None,
-        registry=build_chart_registry(),
-    )
-    chart.seed(
-        selected,
-        UsageSnapshot((), (), 0.1, coverage=chart.display_coverage()),
-    )
-
-    assert chart.missing_comparison_coverage().intervals == expected
+    assert chart.required_coverage() == display
+    assert not chart.missing_comparison_coverage().intervals
+    assert not chart.has_pending_unknowns
 
 
 def test_component_fixed_range_requires_no_comparison_coverage() -> None:
@@ -448,9 +420,7 @@ def test_component_supplement_failure_preserves_facts_and_adds_local_notice() ->
     assert not chart.has_pending_unknowns
     assert chart.model is not None
     assert chart.model.notices[-1].key == "notice.comparison_refresh_failed"
-    assert chart.missing_comparison_coverage().intervals == (
-        DateInterval(date(2025, 12, 31), date(2025, 12, 31)),
-    )
+    assert not chart.missing_comparison_coverage().intervals
 
 
 def test_component_successful_supplement_clears_failure_notice() -> None:

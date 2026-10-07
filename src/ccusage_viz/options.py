@@ -9,7 +9,7 @@ from ccusage_viz.animation_overlay import OverlayConfig
 from ccusage_viz.core.time import DateRange, local_today, natural_period_start
 from ccusage_viz.core.time import parse_period as parse_core_period
 from ccusage_viz.errors import UsageError
-from ccusage_viz.project_identity import PROJECT_AGGREGATIONS, ProjectAggregation
+from ccusage_viz.project_identity import ProjectAggregation
 
 GRANULARITIES = ("day", "week", "month", "quarter", "year")
 HEADER_SUMMARIES = (*GRANULARITIES, "none")
@@ -33,6 +33,7 @@ INTERACTIVE_PERIOD_PRESETS = (
     "1mo",
     "1y",
 )
+RANKING_INTERACTIVE_PERIOD_PRESETS = ("1d", *INTERACTIVE_PERIOD_PRESETS)
 DEFAULT_PERIODS = {
     "day": "14d",
     "week": "8w",
@@ -72,7 +73,7 @@ MINIMUM_SIZES = {
     "monitor": (40, 10),
 }
 
-Dimension: TypeAlias = Literal["agent", "model", "project"]
+Dimension: TypeAlias = Literal["composition", "agent", "model", "project"]
 Density: TypeAlias = Literal["minimal", "compact", "full", "detailed"]
 MonitorDayWindow: TypeAlias = Literal["today", "yesterday"]
 
@@ -139,6 +140,10 @@ class StackConfig:
     cache: str = "combined"
     granularity: str = "day"
     weekdays: str = "show"
+    by: Dimension = "composition"
+    top: int = 10
+    other: str = "show"
+    project_aggregation: ProjectAggregation = "name"
 
 
 @dataclass(frozen=True, slots=True)
@@ -367,15 +372,18 @@ def _cycle(values: tuple[str, ...], current: str, step: int) -> str:
     return values[(values.index(current) + step) % len(values)]
 
 
-def _adjust_period(date_range: DateRange, key: str) -> DateRange:
+def _adjust_period(date_range: DateRange, key: str, *, kind: str) -> DateRange:
     """Adjust a rolling time view without crossing its granularity boundary."""
     if not date_range.relative_until or date_range.period is None:
         return date_range
     _, unit = parse_period(date_range.period)
     granularity = UNIT_GRANULARITIES[unit]
-    if date_range.period in INTERACTIVE_PERIOD_PRESETS:
+    presets = (
+        RANKING_INTERACTIVE_PERIOD_PRESETS if kind == "ranking" else INTERACTIVE_PERIOD_PRESETS
+    )
+    if date_range.period in presets:
         period = _cycle(
-            INTERACTIVE_PERIOD_PRESETS, date_range.period, 1 if key == "p" else -1
+            presets, date_range.period, 1 if key == "p" else -1
         )
     else:
         period = DEFAULT_PERIODS[granularity]
@@ -424,7 +432,7 @@ def adjust_chart(chart: ChartConfig, key: str, *, demo: bool = False) -> ChartCo
         theme = _cycle(COLOR_SCHEMES, chart.presentation.theme, 1 if key == "t" else -1)
         return replace(chart, presentation=replace(chart.presentation, theme=theme))
     if key in {"p", "P"} and not isinstance(chart, MonitorConfig):
-        return replace(chart, date_range=_adjust_period(chart.date_range, key))
+        return replace(chart, date_range=_adjust_period(chart.date_range, key, kind=chart.kind))
     if key in {"g", "G"} and isinstance(chart, (TimelineConfig, StackConfig)):
         if not chart.date_range.relative_until:
             return chart
@@ -445,18 +453,22 @@ def adjust_chart(chart: ChartConfig, key: str, *, demo: bool = False) -> ChartCo
                 chart.presentation, legend=_cycle(values, chart.presentation.legend, 1)
             ),
         )
-    if key == "c" and isinstance(chart, StackConfig):
+    if key == "c" and isinstance(chart, StackConfig) and chart.by == "composition":
         return replace(chart, cache=_cycle(CACHE_MODES, chart.cache, 1))
-    if key == "b" and isinstance(chart, (TimelineConfig, RankingConfig, MonitorConfig)):
+    if key in {"b", "B"} and isinstance(
+        chart, (TimelineConfig, StackConfig, RankingConfig, MonitorConfig)
+    ):
         values: tuple[Dimension | None, ...] = (
-            (None, "agent", "model", "project")
-            if not isinstance(chart, RankingConfig)
-            else ("agent", "model", "project")
+            ("composition", "agent", "model", "project")
+            if isinstance(chart, StackConfig)
+            else (None, "agent", "model", "project", "composition")
+            if isinstance(chart, TimelineConfig)
+            else ("agent", "model", "composition", "project")
         )
         current = chart.by if chart.by in values else values[0]
-        by = values[(values.index(current) + 1) % len(values)]
+        by = values[(values.index(current) + (1 if key == "b" else -1)) % len(values)]
         styles = compatible_styles(chart.kind, by)
-        top = None if by is None else chart.top or 3
+        top = None if by is None else chart.top or (10 if isinstance(chart, StackConfig) else 3)
         presentation = (
             chart.presentation
             if chart.presentation.style in styles
@@ -465,22 +477,17 @@ def adjust_chart(chart: ChartConfig, key: str, *, demo: bool = False) -> ChartCo
         return replace(chart, by=by, top=top, presentation=presentation)
     if (
         key in {"+", "="}
-        and isinstance(chart, (TimelineConfig, RankingConfig, MonitorConfig))
+        and isinstance(chart, (TimelineConfig, StackConfig, RankingConfig, MonitorConfig))
         and chart.by is not None
     ):
         return replace(chart, top=(chart.top or 0) + 1)
     if (
         key in {"-", "_"}
-        and isinstance(chart, (TimelineConfig, RankingConfig, MonitorConfig))
+        and isinstance(chart, (TimelineConfig, StackConfig, RankingConfig, MonitorConfig))
         and chart.by is not None
     ):
         return replace(chart, top=max(1, (chart.top or 1) - 1))
-    if key == "A" and isinstance(chart, MonitorConfig) and chart.by == "project":
-        return replace(
-            chart,
-            project_aggregation=_cycle(PROJECT_AGGREGATIONS, chart.project_aggregation, 1),
-        )
-    if key == "o" and isinstance(chart, (TimelineConfig, RankingConfig)):
+    if key == "o" and isinstance(chart, (TimelineConfig, StackConfig, RankingConfig)):
         return replace(chart, other=_cycle(OTHER_MODES, chart.other, 1))
     if key == "w" and isinstance(chart, MonitorConfig):
         if chart.presentation.style in {"ranking", "list"}:
@@ -504,7 +511,7 @@ def adjust_custom_chart(chart: CustomChartConfig, key: str) -> CustomChartConfig
     """Apply a local custom chart adjustment."""
 
     if key in {"p", "P"}:
-        return replace(chart, date_range=_adjust_period(chart.date_range, key))
+        return replace(chart, date_range=_adjust_period(chart.date_range, key, kind=chart.kind))
     if key == "d":
         return replace(
             chart,

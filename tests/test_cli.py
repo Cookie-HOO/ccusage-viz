@@ -351,16 +351,11 @@ def test_all_commands_accept_exactly_four_density_values() -> None:
     assert caught.value.key == "error.arguments"
 
 
-@pytest.mark.parametrize("command", ("timeline", "ranking", "monitor"))
-def test_project_aggregation_defaults_to_name_and_accepts_exact(command: str) -> None:
+@pytest.mark.parametrize("command", ("timeline", "stack", "ranking", "monitor"))
+def test_project_aggregation_is_not_a_public_chart_option(command: str) -> None:
     parser = build_parser(load_translator("en"))
-    assert parser.parse_args(["chart", command]).project_aggregation == "name"
-    assert (
-        parser.parse_args(["chart", command, "--project-aggregation", "exact"]).project_aggregation
-        == "exact"
-    )
     with pytest.raises(UsageError):
-        parser.parse_args(["chart", command, "--project-aggregation", "agent"])
+        parser.parse_args(["chart", command, "--project-aggregation", "exact"])
 
 
 def test_animate_help_is_localized(capsys: pytest.CaptureFixture[str]) -> None:

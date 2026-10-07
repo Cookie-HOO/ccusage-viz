@@ -11,7 +11,7 @@ from ccusage_viz.render.base import (
     date_ticks,
     isolated_plot,
 )
-from ccusage_viz.render.palette import get_color_scheme
+from ccusage_viz.render.palette import categorical_colors, get_color_scheme
 from ccusage_viz.render.stack_presentation import (
     render_grouped_stack_plot,
     render_stack_grid,
@@ -31,7 +31,10 @@ def render_stack(model: StackModel, context: RenderContext) -> str:
         configure_plot(context)
         heading = center_text(
             date_range_heading(
-                context.translator.text("label.stack"), model.days[0], model.days[-1], context
+                context.title_content or context.translator.text("label.stack"),
+                model.days[0],
+                model.days[-1],
+                context,
             ),
             context.width,
         )
@@ -53,10 +56,24 @@ def render_stack(model: StackModel, context: RenderContext) -> str:
         else:
             values = raw_values
         labels = [
-            context.translator.text(f"label.{component.label}") for component in model.components
+            context.translator.text(f"label.{component.label}")
+            if model.grouping == "composition"
+            else context.translator.text("label.other")
+            if component.is_other
+            else component.label
+            for component in model.components
         ]
         scheme = get_color_scheme(context.color_scheme)
-        colors = [scheme.component(component.label) for component in model.components]
+        colors = (
+            [scheme.component(component.label) for component in model.components]
+            if model.grouping == "composition"
+            else [
+                scheme.other
+                if component.is_other
+                else categorical_colors((component.key,), context.color_scheme)[component.key]
+                for component in model.components
+            ]
+        )
         if context.style == "stacked-pattern":
             marker_names = (
                 ("#", "=", "+", ":", "%", "@") if context.ascii else ("/", "\\", "x", "=", "+", ":")

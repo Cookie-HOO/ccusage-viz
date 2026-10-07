@@ -85,6 +85,17 @@ def test_demo_stack_has_no_other_component() -> None:
     ]
 
 
+def test_stack_uses_the_requested_native_grouping() -> None:
+    period = DateRange(date(2026, 1, 1), date(2026, 1, 14))
+    records = generate_demo("small", period)
+
+    stack = build_stack(records, period, by="agent", top=2, show_other=True)
+
+    assert stack.grouping == "agent"
+    assert stack.components
+    assert all(component.label not in {"input", "output", "cache"} for component in stack.components)
+
+
 def test_filters_or_within_dimension_and_and_across_dimensions() -> None:
     records = (
         record(1, "claude", "/a/app", "sonnet", 10),
@@ -532,7 +543,7 @@ def test_ranking_summary_uses_only_daily_records_and_marks_session_omission() ->
     assert scope_notice not in ranking.notices
 
 
-def test_ranking_summary_warning_is_hidden_with_the_summary() -> None:
+def test_ranking_summary_warning_is_retained_for_an_external_summary() -> None:
     period = DateRange(date(2026, 1, 1), date(2026, 1, 1))
     scope_notice = Notice("notice.summary_excludes_session_agent", {"agent": "Codex"})
 
@@ -546,7 +557,7 @@ def test_ranking_summary_warning_is_hidden_with_the_summary() -> None:
     )
 
     assert ranking.summary is None
-    assert ranking.summary_notices == ()
+    assert ranking.summary_notices == (scope_notice,)
     assert scope_notice not in ranking.notices
 
 

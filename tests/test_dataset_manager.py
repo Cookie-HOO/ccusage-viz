@@ -144,6 +144,8 @@ def test_manager_general_help_explains_the_dynamic_dataset_list() -> None:
     )
 
     assert "This list contains your registered Datasets." in "\n".join(lines)
+    assert "Available: enabled, last probe succeeded" in "\n".join(lines)
+    assert "Ready: enabled" not in "\n".join(lines)
 
 
 def test_manager_footer_follows_dashboard_browse_order_without_quit() -> None:

@@ -119,6 +119,36 @@ def test_custom_standalone_timeline_keeps_x_axis_labels_inside_frame() -> None:
     assert frame.rows[-1] == "controls"
 
 
+def test_custom_standalone_renders_accepted_dataset_summary() -> None:
+    chart = CustomChartConfig(
+        "timeline",
+        CustomCommandSource("reading", ("reader", "ccuv")),
+        DateRange(date(2026, 9, 1), date(2026, 9, 2)),
+    )
+    component = CustomHistoricalComponent(chart)
+    from test_custom_component import response
+
+    assert component.accept_response(response())
+    summary = tui_module.CustomDashboardSummary(
+        chart.source,
+        FixedIntervalScheduler(60, now=0),
+        LifecycleOperation("standalone:custom:summary"),
+        response=custom_summary_response(display="68 pages"),
+        accepted_period="day",
+        accepted_as_of_date=date(2026, 9, 2),
+    )
+
+    rendered = tui_module._custom_standalone_render(
+        component,
+        load_translator("en"),
+        Terminal(100, 24, color=False, ascii=True),
+        pending=False,
+        summary=summary,
+    )
+
+    assert "68 pages" in rendered.chart
+
+
 def test_custom_standalone_replacement_renders_candidate_loading_placeholder() -> None:
     from test_custom_component import response
 

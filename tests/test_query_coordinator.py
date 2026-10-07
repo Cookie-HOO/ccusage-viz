@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import signal
 import sys
 import threading
 import time
@@ -71,6 +73,49 @@ def test_ccusage_execution_honors_environment_and_output_limit() -> None:
     with pytest.raises(QueryError) as caught:
         provider.execute(oversized, Event())
     assert caught.value.key == "error.ccusage_output_limit"
+
+
+@pytest.mark.skipif(os.name != "posix", reason="requires POSIX process groups")
+def test_ccusage_timeout_does_not_wait_for_escaped_pipe_descendant(tmp_path) -> None:
+    pid_path = tmp_path / "escaped-child.pid"
+    script = (
+        "import os, time; "
+        "pid = os.fork(); "
+        f"pid_path = {str(pid_path)!r}; "
+        "pid and (open(pid_path, 'w').write(str(pid)), os._exit(0)); "
+        "os.setsid(); time.sleep(30)"
+    )
+    query = PhysicalQuery(
+        ProviderRef("ccusage"),
+        "unified_daily",
+        ("-c", script),
+        ExecutionContext(sys.executable, 0.1, 1024),
+    )
+    completed = Event()
+    errors: list[BaseException] = []
+
+    def execute() -> None:
+        try:
+            CCUSAGE_DEFINITION.provider.execute(query, Event())
+        except BaseException as exc:
+            errors.append(exc)
+        finally:
+            completed.set()
+
+    thread = threading.Thread(target=execute, daemon=True)
+    thread.start()
+    try:
+        assert completed.wait(1)
+        assert len(errors) == 1
+        assert isinstance(errors[0], QueryError)
+        assert errors[0].key == "error.ccusage_timeout"
+    finally:
+        deadline = time.monotonic() + 1
+        while not pid_path.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        if pid_path.exists():
+            os.kill(int(pid_path.read_text()), signal.SIGKILL)
+        thread.join(1)
 
 
 @dataclass(frozen=True, slots=True)

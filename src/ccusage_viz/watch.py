@@ -4,11 +4,19 @@ import os
 import sys
 import time
 from collections.abc import Callable, Hashable, Mapping
+from contextlib import suppress
 from dataclasses import dataclass, replace
+from datetime import datetime
 from shutil import get_terminal_size
 
+from ccusage_viz.acquisition import (
+    builtin_summary_query_intent,
+    builtin_summary_query_plan,
+    historical_provider_id,
+)
 from ccusage_viz.adjustment_timeout import AdjustmentIdleTimer, AdjustmentTimeout
 from ccusage_viz.bootstrap import build_chart_registry, build_query_runtime
+from ccusage_viz.builtin_summary import build_builtin_pane_summary
 from ccusage_viz.command_copy import (
     copy_command,
     format_command,
@@ -16,8 +24,8 @@ from ccusage_viz.command_copy import (
     format_full_command_display,
     wrap_command,
 )
-from ccusage_viz.core.time import refresh_date_range
-from ccusage_viz.data_view import BodyView, next_body_view, render_snapshot_data
+from ccusage_viz.core.time import local_today, refresh_date_range
+from ccusage_viz.data_view import BodyView, cycle_body_view, next_body_view, render_snapshot_data
 from ccusage_viz.deltas import RefreshDeltas, RefreshRanks
 from ccusage_viz.diagnostics import (
     color_enabled,
@@ -54,12 +62,16 @@ from ccusage_viz.options import (
     compatible_styles,
     replace_chart_filters,
 )
+from ccusage_viz.processing.summaries import SummaryQueryPlan
+from ccusage_viz.query.coordinator import QueryHandle
+from ccusage_viz.query.models import ProviderResult
 from ccusage_viz.render.palette import COLOR_SCHEMES
 from ccusage_viz.render.surfaces import (
     EMPTY_SURFACE_CONTROLS,
     SurfaceControls,
     standalone_surface,
 )
+from ccusage_viz.standalone_help import run_standalone_help
 from ccusage_viz.terminal import FramePainter, Terminal, compose_frame, inspect_terminal
 from ccusage_viz.terminal_ui import (
     AdjustmentAction,
@@ -93,16 +105,30 @@ class RuntimeAdjustmentResult:
     seed: RefreshResult
 
 
+@dataclass(frozen=True, slots=True)
+class BuiltinSummarySubmission:
+    generation: int
+    options: StandaloneLaunch
+    plan: SummaryQueryPlan
+    handle: QueryHandle[ProviderResult]
+
+    def result(self) -> ProviderResult:
+        return self.handle.result()
+
+    def cancel(self) -> None:
+        self.handle.cancel()
+
+
 _ADJUSTMENT_QUICK_KEYS = {
-    "timeline": frozenset("dpPgb+-=tTs"),
-    "calendar": frozenset("dpPtTs"),
-    "stack": frozenset("dpPgtTs"),
-    "ranking": frozenset("dpPb+-=tTs"),
+    "timeline": frozenset("dpPgbB+-=tTsS"),
+    "calendar": frozenset("dpPtTsS"),
+    "stack": frozenset("dpPgbB+-=tTsS"),
+    "ranking": frozenset("dpPbB+-=tTsS"),
 }
 _ADJUSTMENT_ADVANCED_KEYS = {
     "timeline": frozenset("folk"),
     "calendar": frozenset("f"),
-    "stack": frozenset("fclk"),
+    "stack": frozenset("foclk"),
     "ranking": frozenset("fo"),
 }
 
@@ -110,12 +136,12 @@ _ADJUSTMENT_ACTIONS = {
     "timeline": {
         "quick": (
             ("p/P", "period"),
-            ("g", "granularity"),
-            ("b", "grouping"),
+            ("g/G", "granularity"),
+            ("b/B", "grouping"),
             ("+/-", "top"),
             ("d", "density"),
             ("t/T", "theme"),
-            ("s", "style"),
+            ("s/S", "style"),
         ),
         "advanced": (
             ("f", "filter"),
@@ -131,21 +157,29 @@ _ADJUSTMENT_ACTIONS = {
     "stack": {
         "quick": (
             ("p/P", "period"),
-            ("g", "granularity"),
+            ("g/G", "granularity"),
+            ("b/B", "grouping"),
+            ("+/-", "top"),
             ("d", "density"),
             ("t/T", "theme"),
-            ("s", "style"),
+            ("s/S", "style"),
         ),
-        "advanced": (("f", "filter"), ("c", "cache"), ("l", "legend"), ("k", "weekdays")),
+        "advanced": (
+            ("f", "filter"),
+            ("o", "other"),
+            ("c", "cache"),
+            ("l", "legend"),
+            ("k", "weekdays"),
+        ),
     },
     "ranking": {
         "quick": (
             ("p/P", "period"),
-            ("b", "grouping"),
+            ("b/B", "grouping"),
             ("+/-", "top"),
             ("d", "density"),
             ("t/T", "theme"),
-            ("s", "style"),
+            ("s/S", "style"),
         ),
         "advanced": (("f", "filter"), ("o", "other")),
     },
@@ -153,7 +187,7 @@ _ADJUSTMENT_ACTIONS = {
 
 
 def _project_grouping_available(chart: object) -> bool:
-    return isinstance(chart, (TimelineConfig, RankingConfig)) and chart.by == "project"
+    return isinstance(chart, (TimelineConfig, StackConfig, RankingConfig)) and chart.by == "project"
 
 
 def _adjustment_key_supported(command: str, page: str, key: str) -> bool:
@@ -258,9 +292,11 @@ def run_runtime_adjustment(
 
     def grouping_choices() -> tuple[str, ...]:
         if current.chart.kind == "timeline":
-            return ("total", "agent", "model", "project")
+            return ("total", "agent", "model", "project", "composition")
+        if current.chart.kind == "stack":
+            return ("composition", "agent", "model", "project")
         if current.chart.kind == "ranking":
-            return ("agent", "model", "project")
+            return ("agent", "model", "project", "composition")
         return ()
 
     def paint() -> None:
@@ -331,7 +367,7 @@ def run_runtime_adjustment(
         }
         status_key = f"status.runtime_adjustment_{current.chart.kind}_{adjustment_page}"
         state_values = dict(common)
-        if isinstance(current.chart, (TimelineConfig, RankingConfig)):
+        if isinstance(current.chart, (TimelineConfig, StackConfig, RankingConfig)):
             state_values.update(
                 grouping=current.chart.by or translator.text("label.all"),
                 top=current.chart.top
@@ -350,7 +386,7 @@ def run_runtime_adjustment(
             )
         state = translator.messages[status_key].format(**state_values)
         project_preview_missing = (
-            isinstance(current.chart, (TimelineConfig, RankingConfig))
+            isinstance(current.chart, (TimelineConfig, StackConfig, RankingConfig))
             and current.chart.by == "project"
             and not snapshot.includes_project_attribution
         )
@@ -482,10 +518,15 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
         owner_id="standalone",
         runtime=runtime,
         registry=build_chart_registry(),
+        include_summary=False,
     )
     started_at = time.monotonic()
     scheduler = FixedIntervalScheduler(interval, now=started_at)
     lifecycle: LifecycleOperation[HistoricalSubmission] = LifecycleOperation("standalone")
+    summary_lifecycle: LifecycleOperation[BuiltinSummarySubmission] = LifecycleOperation(
+        "standalone:summary"
+    )
+    summary_generation = 0
     controls_hidden = False
     body_view: BodyView = "chart"
     text_offsets: dict[BodyView, int] = {}
@@ -730,6 +771,73 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
             raise
         return submission, submission.cancel
 
+    def start_summary(operation: OperationToken) -> tuple[BuiltinSummarySubmission, Callable[[], None]]:
+        submitted = component.candidate
+        plan = builtin_summary_query_plan(
+            submitted, today=local_today(timezone=submitted.host.timezone)
+        )
+        handle = runtime.submit(
+            builtin_summary_query_intent(
+                submitted,
+                runtime.definition(historical_provider_id(submitted)),
+                plan,
+                owner_id=operation.owner_id,
+                generation=operation.generation,
+                trigger=query_trigger(operation.trigger),
+            )
+        )
+        submission = BuiltinSummarySubmission(
+            operation.generation, submitted, plan, handle
+        )
+        return submission, submission.cancel
+
+    def request_summary(
+        trigger: LifecycleTrigger,
+        *,
+        now: float,
+        replace_active: bool = False,
+    ) -> bool:
+        nonlocal summary_generation
+        summary_generation += 1
+        return summary_lifecycle.request(
+            trigger,
+            generation=summary_generation,
+            now=now,
+            replace_active=replace_active,
+            start=start_summary,
+        )
+
+    def complete_summary(
+        operation: OperationToken,
+        submission: BuiltinSummarySubmission,
+    ) -> None:
+        try:
+            result = submission.result()
+            if not summary_lifecycle.accepts(operation, generation=submission.generation):
+                summary_lifecycle.abandon(operation)
+                return
+            summary = build_builtin_pane_summary(
+                submission.options.chart,
+                submission.plan,
+                result.records,
+                result.coverage,
+                accepted_at=datetime.now().astimezone(),
+            )
+            component.set_summary(summary.summary)
+            summary_lifecycle.complete(operation, generation=submission.generation)
+        except BaseException:
+            if summary_lifecycle.accepts(operation, generation=submission.generation):
+                # Retain the last accepted summary when its independent refresh fails.
+                summary_lifecycle.complete(operation, generation=submission.generation)
+
+    def take_completed_summary() -> bool:
+        completed = summary_lifecycle.take_completed(lambda submission: submission.handle.done())
+        if completed is None:
+            return False
+        complete_summary(*completed)
+        summary_lifecycle.start_ready(now=time.monotonic(), start=start_summary)
+        return True
+
     def start_ready(now: float) -> bool:
         nonlocal base_status, terminal_error
         try:
@@ -766,13 +874,19 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
             )
             component.configure(refreshed, data_affecting=True)
         try:
-            return lifecycle.request(
+            requested = lifecycle.request(
                 trigger,
                 generation=component.generation,
                 now=now,
                 replace_active=replace_active,
                 start=start,
             )
+            if requested:
+                # Summary acquisition is independent: retain any accepted summary
+                # and let the historical chart lifecycle continue uninterrupted.
+                with suppress(BaseException):
+                    request_summary(trigger, now=now, replace_active=replace_active)
+            return requested
         except BaseException as exc:
             base_status = (
                 translator.text("status.data_temporarily_unavailable")
@@ -804,6 +918,17 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
                 if not component.accept(completion):
                     return 1
                 lifecycle.complete(operation, generation=submission.generation)
+                completed_summary = summary_lifecycle.take_completed(
+                    lambda summary: summary.handle.done()
+                )
+                if completed_summary is not None:
+                    complete_summary(*completed_summary)
+                else:
+                    summary_operation = summary_lifecycle.operation
+                    summary_submission = summary_lifecycle.submission
+                    if summary_operation is not None and summary_submission is not None:
+                        with suppress(BaseException):
+                            complete_summary(summary_operation, summary_submission)
                 current = component.candidate
                 terminal = inspect_terminal(
                     current.chart.kind,
@@ -856,6 +981,9 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
                     and scheduler.due(now=now)
                     and request(LifecycleTrigger.PERIODIC, now=now)
                 ):
+                    paint()
+
+                if take_completed_summary():
                     paint()
 
                 completed = lifecycle.take_completed(lambda submission: submission.handle.done())
@@ -958,7 +1086,7 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
                         if operation is not None:
                             manual_refresh_operations.add(operation)
                     paint(force=True)
-                elif body_view != "chart" and key in {"\x1b[A", "\x1b[B", "h", "e"}:
+                elif body_view != "chart" and key in {"\x1b[A", "\x1b[B", "\x1b[H", "e"}:
                     offset = next_text_offset(
                         key,
                         offset=text_offsets.get(body_view, 0),
@@ -968,11 +1096,23 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
                     assert offset is not None
                     text_offsets[body_view] = offset
                     paint(force=True)
-                elif body_view == "chart" and key in {"h", "H"}:
+                elif body_view == "chart" and key == "c":
                     controls_hidden = not controls_hidden
                     paint(force=True)
+                elif body_view == "chart" and key == "h":
+                    run_standalone_help(
+                        active_screen,
+                        translator,
+                        color=style_enabled(),
+                        read_key=read_key,
+                    )
+                    paint(force=True)
                 elif key in {"v", "V"}:
-                    body_view = next_body_view(body_view)
+                    body_view = (
+                        next_body_view(body_view)
+                        if key == "v"
+                        else cycle_body_view(body_view, step=-1)
+                    )
                     paint(force=True)
                 elif key in {"y", "Y"} and body_view != "chart":
                     terminal = inspect_terminal(
@@ -1021,12 +1161,19 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
                         component.configure(current, data_affecting=data_affecting)
                         if data_affecting:
                             request(LifecycleTrigger.CONFIGURATION, now=time.monotonic())
-                        elif component.missing_comparison_coverage().intervals:
-                            request(
-                                LifecycleTrigger.CONFIGURATION,
-                                now=time.monotonic(),
-                                data_affecting=False,
-                            )
+                        else:
+                            with suppress(BaseException):
+                                request_summary(
+                                    LifecycleTrigger.CONFIGURATION,
+                                    now=time.monotonic(),
+                                    replace_active=True,
+                                )
+                            if component.missing_comparison_coverage().intervals:
+                                request(
+                                    LifecycleTrigger.CONFIGURATION,
+                                    now=time.monotonic(),
+                                    data_affecting=False,
+                                )
                     paint()
                 elif current.host.demo_size and key in {"s", "d", "l"}:
                     size = {"s": "small", "d": "medium", "l": "large"}[key]
@@ -1039,5 +1186,6 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
     finally:
         scheduler.shutdown()
         lifecycle.shutdown()
+        summary_lifecycle.shutdown()
         runtime.cancel()
         active_screen.finish()

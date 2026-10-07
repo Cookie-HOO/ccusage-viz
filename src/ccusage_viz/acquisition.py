@@ -19,7 +19,12 @@ from ccusage_viz.options import (
     ProcessConfig,
     StandaloneLaunch,
 )
-from ccusage_viz.processing.summaries import SummaryQueryPlan, SummaryScope, summary_query_plan
+from ccusage_viz.processing.summaries import (
+    SummaryQueryPlan,
+    SummaryScope,
+    range_summary_query_plan,
+    summary_query_plan,
+)
 from ccusage_viz.query.models import (
     DataResolution,
     DataScope,
@@ -144,6 +149,71 @@ def historical_query_intent(
         execution_options=execution_options,
         execution_context=execution_context,
     )
+
+
+def builtin_summary_query_intent(
+    options: StandaloneLaunch,
+    definition: ProviderDefinition,
+    plan: SummaryQueryPlan,
+    *,
+    owner_id: str,
+    generation: int,
+    trigger: QueryTrigger,
+) -> QueryIntent:
+    """Plan canonical daily records for one built-in pane summary.
+
+    Display grouping, Top, and Other never shape this query. Timeline and Stack
+    granularity is resolved into ``plan`` beforehand because it defines the
+    requested summary period; pane filters alone determine source dimensions.
+    """
+    chart = options.chart
+    if isinstance(chart, (MonitorConfig, CustomChartConfig)):
+        raise TypeError("built-in summary planning only supports historical configurations")
+    provider = definition.provider
+    project_required = bool(chart.filters.projects)
+    available_options = {
+        "chart_kind": "timeline",
+        "demo_size": options.host.demo_size,
+        "demo_seed": options.host.demo_seed,
+    }
+    execution_options = tuple(
+        (key, available_options[key])
+        for key in sorted(provider.capabilities.execution_options)
+        if available_options.get(key) is not None
+    )
+    execution_context = (
+        None
+        if provider.capabilities.in_process
+        else ExecutionContext(
+            options.process.ccusage_bin,
+            options.process.query_timeout,
+            options.process.output_limit,
+            options.process.environment,
+        )
+    )
+    return QueryIntent(
+        owner_id=owner_id,
+        generation=generation,
+        trigger=trigger,
+        provider=provider.provider,
+        scope=DataScope(plan.intervals),
+        missing_intervals=plan.intervals,
+        resolution=DataResolution.DATE,
+        dimensions=("project",) if project_required else ("agent",),
+        execution_options=execution_options,
+        execution_context=execution_context,
+    )
+
+
+def builtin_summary_query_plan(options: StandaloneLaunch, *, today: date) -> SummaryQueryPlan:
+    """Resolve the user-visible built-in pane summary scope independent of its chart."""
+    chart = options.chart
+    if isinstance(chart, (MonitorConfig, CustomChartConfig)):
+        raise TypeError("built-in summary planning only supports historical configurations")
+    if chart.date_range.fixed_bounds:
+        return range_summary_query_plan(chart.date_range)
+    period = chart.granularity if chart.kind in {"timeline", "stack"} else "day"
+    return summary_query_plan(today, cast(SummaryScope, period))
 
 
 def custom_probe_query_intent(

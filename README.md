@@ -103,8 +103,8 @@ overview composed from multiple panes.
 > Project Ranking uses conservative **Name** aggregation by default: an unambiguous
 > Claude–Codex pair becomes one chart project. Press `v` for its data views: they
 > show the safe source rows before aggregation, and equal non-empty `merge_group`
-> values identify the rows summed into one chart project. Use
-> `--project-aggregation exact` to disable cross-Agent aggregation.
+> values identify the rows summed into one chart project. Project views use
+> conservative cross-Agent Name aggregation.
 
 > [!TIP]
 > Need several focused charts together? Compose standalone chart commands into a
