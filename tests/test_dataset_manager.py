@@ -5,12 +5,15 @@ from ccusage_viz.custom_models import (
     CustomChartCapability,
     CustomChartDefaults,
     CustomDataset,
+    CustomEnvironmentDeclaration,
     CustomProbeDescriptor,
     CustomUnit,
     LocalizedText,
 )
 from ccusage_viz.datasets.manager import (
     _choose_dataset_source,
+    _manager_help_frame,
+    _manager_help_lines,
     _read_github_repository,
     format_dataset_list,
     render_dataset_manager,
@@ -34,7 +37,16 @@ def status(*, availability: str = "ready") -> DatasetRegistrationStatus:
         CustomDataset(text, LocalizedText("Daily reading time", "每日阅读时长"), CustomUnit("minute", text, "suffix", 2)),
         CustomCapabilities((), (), {"timeline": CustomChartCapability(("day",), (), ())}),
         {"timeline": CustomChartDefaults("14d", None, None)},
-        (),
+        (
+            CustomEnvironmentDeclaration(
+                "WEREAD_API_KEY",
+                True,
+                True,
+                LocalizedText("WeRead API key", "微信读书 API 密钥"),
+                LocalizedText("Follow the authorization guide.", "请按授权指南操作。"),
+                "https://weread.qq.com/r/weread-skills",
+            ),
+        ),
         "Asia/Shanghai",
     )
     registration = DatasetRegistration(
@@ -81,6 +93,33 @@ def test_manager_uses_a_separate_detail_page_on_narrow_terminals() -> None:
     assert "Daily reading time" in body
     assert "local command · Ready" not in body
     assert rendered.frame.rows[-1] == "i details · Esc back"
+
+
+def test_dataset_setup_help_expands_environment_instructions() -> None:
+    record = status().registration
+    setup = DatasetRegistrationStatus(
+        record,
+        "setup_required",
+        record.probe.descriptor.environment,
+    )
+    translator = load_translator("en")
+    detail = render_dataset_manager((setup,), translator, details=True, width=80, height=24)
+    help_lines = _manager_help_lines(setup, translator, details=True, width=80)
+    frame = _manager_help_frame(help_lines, translator, width=100, height=24)
+
+    assert "WEREAD_API_KEY · missing" in "\n".join(detail.frame.rows)
+    assert "Follow the authorization guide." not in "\n".join(detail.frame.rows)
+    assert "Follow the authorization guide." in "\n".join(frame.rows)
+    assert "https://weread.qq.com/r/weread-skills" in "\n".join(frame.rows)
+
+
+def test_manager_footer_follows_dashboard_browse_order_without_quit() -> None:
+    rendered = render_dataset_manager((status(),), load_translator("en"), width=100, height=24)
+
+    assert rendered.frame.rows[-1] == (
+        "r refresh all · + add · i details · d disable · x remove · j/k select · h help"
+    )
+    assert "q quit" not in rendered.frame.rows[-1]
 
 
 def test_dataset_list_formats_local_records_without_running_commands() -> None:

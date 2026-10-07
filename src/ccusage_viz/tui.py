@@ -413,6 +413,8 @@ class HelpOverlayState:
     context: str = "dashboard"
     action: str | None = None
     selected: str | None = None
+    dataset_id: str | None = None
+    chart_kind: str | None = None
     scroll_offset: int = 0
 
 
@@ -4189,7 +4191,12 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         grid_error = None
 
     def open_help(
-        *, context: str = "dashboard", action: str | None = None, selected: str | None = None
+        *,
+        context: str = "dashboard",
+        action: str | None = None,
+        selected: str | None = None,
+        dataset_id: str | None = None,
+        chart_kind: str | None = None,
     ) -> None:
         nonlocal help_overlay
         help_overlay = HelpOverlayState(
@@ -4198,6 +4205,8 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             context=context,
             action=action,
             selected=selected,
+            dataset_id=dataset_id,
+            chart_kind=chart_kind,
         )
         paint()
 
@@ -5404,6 +5413,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             if help_overlay.context == "chooser":
                 assert help_overlay.action is not None
                 assert help_overlay.selected is not None
+                selected_key = f"status.tui_help_chooser_option_{help_overlay.selected}"
                 context_nodes = (
                     (
                         translator.text("status.tui_help_chooser"),
@@ -5416,10 +5426,51 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                 ),
                                 (),
                             ),
+                            (translator.text(selected_key), ()),
                             (translator.text("status.tui_help_chooser_detail"), ()),
                         ),
                     ),
                 )
+            elif help_overlay.context == "dataset-chooser":
+                assert dataset_modal is not None
+                modal = dataset_modal
+                if modal.stage == "source" and modal.statuses:
+                    status = modal.statuses[modal.index]
+                    descriptor = status.registration.probe.descriptor
+                    context_nodes = (
+                        (
+                            translator.text("status.tui_help_dataset_chooser"),
+                            (
+                                (
+                                    translator.text(
+                                        "status.tui_help_dataset_chooser_selected",
+                                        name=_dataset_title(descriptor.dataset.title, translator),
+                                        version=descriptor.version,
+                                    ),
+                                    (),
+                                ),
+                                (translator.text("status.tui_help_dataset_chooser_manage"), ()),
+                            ),
+                        ),
+                    )
+                else:
+                    assert modal.chart_kinds
+                    chart_kind = modal.chart_kinds[modal.index]
+                    context_nodes = (
+                        (
+                            translator.text("status.tui_help_dataset_chart_chooser"),
+                            (
+                                (
+                                    translator.text(
+                                        "status.tui_help_dataset_chart_selected",
+                                        chart=translator.text(f"label.pane_{chart_kind}"),
+                                    ),
+                                    (),
+                                ),
+                                (translator.text("status.tui_help_dataset_chart_detail"), ()),
+                            ),
+                        ),
+                    )
             elif help_overlay.context == "editor":
                 rows = [
                     styled_text(
@@ -6806,6 +6857,12 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             return
         if modal.stage == "source":
             entries = modal.statuses
+            if key == "h" and entries:
+                open_help(
+                    context="dataset-chooser",
+                    dataset_id=entries[modal.index].registration.dataset_id,
+                )
+                return
             if key == "\x1b":
                 modal.stage, modal.index, modal.offset = "pane", 0, 0
             elif key in {"j", "\x1b[B"}:
@@ -6897,6 +6954,13 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         if modal.stage == "installing":
             return
         if modal.stage == "installed":
+            if key == "h":
+                open_help(
+                    context="dataset-chooser",
+                    dataset_id=modal.draft.dataset_id,
+                    chart_kind=modal.chart_kinds[modal.index],
+                )
+                return
             if key == "\x1b":
                 modal.stage, modal.index, modal.offset = "source", 0, 0
             elif key in {"j", "\x1b[B"}:

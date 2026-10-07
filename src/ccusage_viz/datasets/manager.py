@@ -6,10 +6,13 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from shutil import get_terminal_size
 
-from ccusage_viz.datasets.models import DatasetRegistrationStatus, LocalDatasetSource
+from ccusage_viz.datasets.models import (
+    DatasetRegistrationStatus,
+    LocalDatasetSource,
+)
 from ccusage_viz.datasets.service import DatasetService
 from ccusage_viz.diagnostics import format_error
-from ccusage_viz.formatting import clip_width, pad_width, wrap_width
+from ccusage_viz.formatting import clip_width, display_width, pad_width, wrap_width
 from ccusage_viz.i18n import Translator
 from ccusage_viz.terminal import Frame, FramePainter, compose_frame, set_cursor_visible
 from ccusage_viz.tui_input import InputDecoder, KeyEvent, PasteEvent, read_event, tui_input_mode
@@ -84,6 +87,26 @@ def _list_rows(
 
 def _detail_rows(status: DatasetRegistrationStatus, translator: Translator, width: int) -> list[str]:
     descriptor = status.registration.probe.descriptor
+    required = tuple(item for item in descriptor.environment if item.required)
+    optional = tuple(item for item in descriptor.environment if not item.required)
+
+    def environment_rows(items, heading: str) -> list[str]:
+        if not items:
+            return []
+        rows = [heading]
+        for item in items:
+            present = item not in status.missing_environment
+            state = translator.text(
+                "status.dataset_environment_present"
+                if present
+                else "status.dataset_environment_missing"
+            )
+            rows.extend(
+                (
+                    f"{item.name} · {state} · {_text(item.label, translator)}",
+                )
+            )
+        return rows
     rows = [
         _text(descriptor.dataset.title, translator),
         *wrap_width(_text(descriptor.dataset.description, translator), width),
@@ -96,14 +119,20 @@ def _detail_rows(status: DatasetRegistrationStatus, translator: Translator, widt
         ),
         "",
         translator.text("status.dataset_details_environment"),
-        *(
-            f"{item.name} · "
-            f"{translator.text('status.dataset_environment_present') if item not in status.missing_environment else translator.text('status.dataset_environment_missing')}"
-            for item in descriptor.environment
-        ),
+        *environment_rows(required, translator.text("status.dataset_environment_required")),
+        *environment_rows(optional, translator.text("status.dataset_environment_optional")),
         "",
         translator.text("status.dataset_details_source"),
-        *wrap_width(shlex.join(status.registration.source.command_argv), width),
+        *(
+            wrap_width(shlex.join(status.registration.source.command_argv), width)
+            if isinstance(status.registration.source, LocalDatasetSource)
+            else wrap_width(
+                f"{status.registration.source.repository} · "
+                f"{status.registration.source.release_tag} · "
+                f"{status.registration.source.asset_name}",
+                width,
+            )
+        ),
     ]
     return [clip_width(row, width) for row in rows]
 
@@ -201,6 +230,9 @@ def _read_local_command(
             continue
         if not isinstance(event, KeyEvent):
             continue
+        if event.value == "h":
+            _show_manager_help(screen, translator, decoder, read_input=read_input)
+            continue
         if event.value == "\x1b":
             return None
         if event.value in {"\x7f", "\b"}:
@@ -249,6 +281,9 @@ def _choose_dataset_source(
         event = read_input() if read_input is not None else read_event(decoder, 0.1)
         if not isinstance(event, KeyEvent):
             continue
+        if event.value == "h":
+            _show_manager_help(screen, translator, decoder, read_input=read_input)
+            continue
         if event.value == "\x1b":
             return None
         if event.value in {"j", "\x1b[B"}:
@@ -273,6 +308,9 @@ def _confirm(
         screen.paint(compose_frame(body, title, controls, height=get_terminal_size().lines))
         event = read_input() if read_input is not None else read_event(decoder, 0.1)
         if not isinstance(event, KeyEvent):
+            continue
+        if event.value == "h":
+            _show_manager_help(screen, translator, decoder, read_input=read_input)
             continue
         if event.value in {"\r", "\n"}:
             return True
@@ -312,6 +350,107 @@ def _register_local(
         except Exception as exc:
             return format_error(exc, translator)
     return translator.text(f"status.dataset_registration_{result.kind}", dataset_id=result.registration.dataset_id)
+
+
+def _manager_help_lines(
+    status: DatasetRegistrationStatus | None,
+    translator: Translator,
+    *,
+    details: bool,
+    width: int,
+) -> tuple[str, ...]:
+    if details and status is not None:
+        descriptor = status.registration.probe.descriptor
+        rows = [
+            translator.text("status.dataset_help_setup_title", name=_text(descriptor.dataset.title, translator)),
+            "",
+        ]
+        for required, heading in (
+            (True, translator.text("status.dataset_environment_required")),
+            (False, translator.text("status.dataset_environment_optional")),
+        ):
+            variables = tuple(item for item in descriptor.environment if item.required is required)
+            if not variables:
+                continue
+            rows.append(heading)
+            for item in variables:
+                present = item not in status.missing_environment
+                state = translator.text(
+                    "status.dataset_environment_present"
+                    if present
+                    else "status.dataset_environment_missing"
+                )
+                rows.extend(
+                    (
+                        f"{item.name} · {state} · {_text(item.label, translator)}",
+                        *wrap_width(_text(item.how_to_get, translator), width),
+                        *(wrap_width(item.help_url, width) if item.help_url is not None else ()),
+                        "",
+                    )
+                )
+        return tuple(rows[:-1] if rows[-1:] == [""] else rows)
+    return (
+        translator.text("status.dataset_help_title"),
+        "",
+        translator.text("status.dataset_help_refresh"),
+        translator.text("status.dataset_help_add"),
+        translator.text("status.dataset_help_details"),
+        translator.text("status.dataset_help_enable"),
+        translator.text("status.dataset_help_remove"),
+        translator.text("status.dataset_help_navigation"),
+        "",
+        translator.text("status.dataset_help_states"),
+        translator.text("status.dataset_help_ready"),
+        translator.text("status.dataset_help_setup_required"),
+        translator.text("status.dataset_help_unavailable"),
+        translator.text("status.dataset_help_disabled"),
+    )
+
+
+def _manager_help_frame(lines: tuple[str, ...], translator: Translator, *, width: int, height: int) -> Frame:
+    content_width = max(1, min(width - 4, 88))
+    content = tuple(clip_width(line, content_width) for line in lines)
+    footer = clip_width(translator.text("status.dataset_help_close"), content_width)
+    panel_width = min(width, max(*(display_width(line) for line in (*content, footer)), 1) + 4)
+    inner_width = max(1, panel_width - 4)
+    visible = content[: max(1, height - 5)]
+    border = "-" * max(0, panel_width - 2)
+    panel = ["+" + border + "+"]
+    panel.extend("| " + pad_width(line, inner_width) + " |" for line in visible)
+    panel.append("|" + "-" * max(0, panel_width - 2) + "|")
+    panel.append("| " + pad_width(footer, inner_width) + " |")
+    panel.append("+" + border + "+")
+    start_x = max(0, (width - panel_width) // 2)
+    start_y = max(0, (height - len(panel)) // 2)
+    canvas = ["" for _ in range(height)]
+    for index, row in enumerate(panel):
+        if start_y + index < height:
+            canvas[start_y + index] = " " * start_x + row
+    return Frame(tuple(canvas))
+
+
+def _show_manager_help(
+    screen: FramePainter,
+    translator: Translator,
+    decoder: InputDecoder,
+    *,
+    status: DatasetRegistrationStatus | None = None,
+    details: bool = False,
+    read_input: Callable[[], object] | None = None,
+) -> None:
+    size = get_terminal_size()
+    screen.paint(
+        _manager_help_frame(
+            _manager_help_lines(status, translator, details=details, width=max(1, size.columns - 4)),
+            translator,
+            width=size.columns,
+            height=size.lines,
+        )
+    )
+    while True:
+        event = read_input() if read_input is not None else read_event(decoder, 0.1)
+        if isinstance(event, KeyEvent) and event.value in {"h", "\x1b", "\r", "\n"}:
+            return
 
 
 def _register_result(
@@ -370,6 +509,9 @@ def _register_official(
         )
         event = read_input() if read_input is not None else read_event(decoder, 0.1)
         if not isinstance(event, KeyEvent):
+            continue
+        if event.value == "h":
+            _show_manager_help(screen, translator, decoder, read_input=read_input)
             continue
         if event.value == "\x1b":
             return None
@@ -435,6 +577,9 @@ def _read_github_repository(
             continue
         if not isinstance(event, KeyEvent):
             continue
+        if event.value == "h":
+            _show_manager_help(screen, translator, decoder, read_input=read_input)
+            continue
         if event.value == "\x1b":
             return None
         if event.value in {"\x7f", "\b"}:
@@ -490,6 +635,7 @@ def run_dataset_manager(service: DatasetService, translator: Translator) -> int:
     selected = 0
     details = False
     notice: str | None = None
+    help_open = False
     try:
         set_cursor_visible(sys.stdout, False)
         with tui_input_mode() as decoder:
@@ -504,24 +650,44 @@ def run_dataset_manager(service: DatasetService, translator: Translator) -> int:
                     height=get_terminal_size().lines,
                     notice=notice,
                 )
-                screen.paint(view.frame)
+                active = statuses[selected] if statuses else None
+                screen.paint(
+                    _manager_help_frame(
+                        _manager_help_lines(
+                            active,
+                            translator,
+                            details=details,
+                            width=max(1, get_terminal_size().columns - 4),
+                        ),
+                        translator,
+                        width=get_terminal_size().columns,
+                        height=get_terminal_size().lines,
+                    )
+                    if help_open
+                    else view.frame
+                )
                 event = read_event(decoder, 0.1)
                 if not isinstance(event, KeyEvent):
                     continue
                 key = event.value
-                if key == "q":
+                if help_open:
+                    if key in {"h", "\x1b", "\r", "\n"}:
+                        help_open = False
+                    continue
+                if key == "\x03":
                     return 0
                 if key == "\x1b":
                     if details:
                         details = False
-                    else:
-                        return 0
+                    continue
                 if key in {"j", "\x1b[B"} and statuses:
                     selected = (selected + 1) % len(statuses)
                 elif key in {"k", "\x1b[A"} and statuses:
                     selected = (selected - 1) % len(statuses)
                 elif key == "i" and statuses:
                     details = not details
+                elif key == "h":
+                    help_open = True
                 elif key == "+":
                     source = _choose_dataset_source(screen, translator, decoder)
                     if source == "local":
