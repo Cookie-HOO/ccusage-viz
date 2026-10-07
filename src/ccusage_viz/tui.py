@@ -8443,7 +8443,10 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         isinstance(pane, TuiCustomPane)
                         and pane.body_view == "chart"
                         and pane.component.error is not None
-                        and pane.component.model is None
+                        and (
+                            isinstance(pane.component, CustomMonitorComponent)
+                            or pane.component.model is None
+                        )
                     )
                     if isinstance(pane, (TuiChartPane, TuiCustomPane)) and (
                         pane.body_view != "chart" or error_body
