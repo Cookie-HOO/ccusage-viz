@@ -54,6 +54,8 @@ def test_manager_renders_grouped_list_and_toggleable_details() -> None:
     detail = render_dataset_manager((status(),), translator, details=True, width=80, height=24)
 
     assert "WeRead" in "\n".join(compact.frame.rows)
+    assert "Name" in "\n".join(compact.frame.rows)
+    assert "Version" in "\n".join(compact.frame.rows)
     assert "Daily reading time" not in "\n".join(compact.frame.rows)
     assert "Daily reading time" in "\n".join(detail.frame.rows)
     assert compact.selected_id == "weread"

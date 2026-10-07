@@ -6,7 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from shutil import get_terminal_size
 
-from ccusage_viz.datasets.models import DatasetRegistrationStatus
+from ccusage_viz.datasets.models import DatasetRegistrationStatus, LocalDatasetSource
 from ccusage_viz.datasets.service import DatasetService
 from ccusage_viz.diagnostics import format_error
 from ccusage_viz.formatting import clip_width, pad_width, wrap_width
@@ -33,6 +33,22 @@ def _list_rows(
     width: int,
 ) -> list[str]:
     rows: list[str] = []
+    name_width = max(12, width * 36 // 100)
+    version_width = max(7, width * 16 // 100)
+    source_width = max(10, width * 22 // 100)
+    status_width = max(8, width - name_width - version_width - source_width - 5)
+    rows.extend(
+        (
+            clip_width(
+                f"  {pad_width(translator.text('status.dataset_column_name'), name_width)} "
+                f"{pad_width(translator.text('status.dataset_column_version'), version_width)} "
+                f"{pad_width(translator.text('status.dataset_column_source'), source_width)} "
+                f"{pad_width(translator.text('status.dataset_column_status'), status_width)}",
+                width,
+            ),
+            "─" * width,
+        )
+    )
     labels = {
         "ready": translator.text("status.dataset_ready"),
         "setup_required": translator.text("status.dataset_setup_required"),
@@ -48,11 +64,18 @@ def _list_rows(
             index = statuses.index(item)
             descriptor = item.registration.probe.descriptor
             marker = "›" if index == selected else " "
+            title = clip_width(_text(descriptor.dataset.title, translator), name_width)
+            source = translator.text(
+                "label.dataset_source_local"
+                if isinstance(item.registration.source, LocalDatasetSource)
+                else f"label.dataset_source_{item.registration.source.kind}"
+            )
             rows.append(
                 clip_width(
-                    f"{marker} {_text(descriptor.dataset.title, translator)}  "
-                    f"{descriptor.version}  {translator.text('label.dataset_source_local')} · "
-                    f"{labels[item.availability]}",
+                    f"{marker} {pad_width(title, name_width)} "
+                    f"{pad_width(descriptor.version, version_width)} "
+                    f"{pad_width(source, source_width)} "
+                    f"{pad_width(labels[item.availability], status_width)}",
                     width,
                 )
             )
