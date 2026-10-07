@@ -5519,14 +5519,17 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             if help_overlay.context in {"editor", "history"}:
                 policy_children.append((translator.text("status.tui_help_animation_hint"), ()))
             policy_children.append((translator.text("status.tui_help_idle_close"), ()))
-            rows.extend(
-                tree_node(
-                    "",
+            rows.append("")
+            rows.append(
+                styled_text(
                     translator.text("status.tui_help_section_policy"),
-                    tuple(policy_children),
-                    is_last=True,
+                    scheme.highlight,
+                    context,
+                    bold=True,
                 )
             )
+            for index, (value, children) in enumerate(policy_children):
+                rows.extend(tree_node("", value, children, is_last=index == len(policy_children) - 1))
             return tuple(clip_width(line, width) for line in rows)
 
         text_navigation: tuple[tuple[str, tuple[object, ...]], ...] = ()
@@ -6842,6 +6845,13 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         if key == "\x03":
             raise KeyboardInterrupt
         if modal.stage == "pane":
+            if key == "h":
+                open_help(
+                    context="chooser",
+                    action=modal.action,
+                    selected=_PANE_COMMANDS[modal.index],
+                )
+                return
             if key == "\x1b":
                 finish_dataset_modal(None)
             elif key in {"j", "\x1b[B"}:

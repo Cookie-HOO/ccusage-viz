@@ -113,6 +113,13 @@ def test_dataset_setup_help_expands_environment_instructions() -> None:
     assert "https://weread.qq.com/r/weread-skills" in "\n".join(frame.rows)
 
 
+def test_manager_help_uses_dashboard_style_highlight_for_section_titles() -> None:
+    lines = _manager_help_lines(status(), load_translator("en"), details=False, width=80)
+    frame = _manager_help_frame(lines, load_translator("en"), width=100, height=24, color=True)
+
+    assert "\x1b[" in "\n".join(frame.rows)
+
+
 def test_manager_footer_follows_dashboard_browse_order_without_quit() -> None:
     rendered = render_dataset_manager((status(),), load_translator("en"), width=100, height=24)
 

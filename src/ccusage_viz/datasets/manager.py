@@ -14,6 +14,8 @@ from ccusage_viz.datasets.service import DatasetService
 from ccusage_viz.diagnostics import format_error
 from ccusage_viz.formatting import clip_width, display_width, pad_width, wrap_width
 from ccusage_viz.i18n import Translator
+from ccusage_viz.render.base import RenderContext, styled_text
+from ccusage_viz.render.palette import get_color_scheme
 from ccusage_viz.terminal import Frame, FramePainter, compose_frame, set_cursor_visible
 from ccusage_viz.tui_input import InputDecoder, KeyEvent, PasteEvent, read_event, tui_input_mode
 
@@ -407,9 +409,26 @@ def _manager_help_lines(
     )
 
 
-def _manager_help_frame(lines: tuple[str, ...], translator: Translator, *, width: int, height: int) -> Frame:
+def _manager_help_frame(
+    lines: tuple[str, ...], translator: Translator, *, width: int, height: int, color: bool = False
+) -> Frame:
     content_width = max(1, min(width - 4, 88))
-    content = tuple(clip_width(line, content_width) for line in lines)
+    headings = {
+        translator.text("status.dataset_help_title"),
+        translator.text("status.dataset_help_states"),
+        translator.text("status.dataset_environment_required"),
+        translator.text("status.dataset_environment_optional"),
+    }
+    context = RenderContext(content_width, 1, translator, color=color)
+    content = tuple(
+        clip_width(
+            styled_text(line, get_color_scheme("classic").highlight, context, bold=True)
+            if line in headings
+            else line,
+            content_width,
+        )
+        for line in lines
+    )
     footer = clip_width(translator.text("status.dataset_help_close"), content_width)
     panel_width = min(width, max(*(display_width(line) for line in (*content, footer)), 1) + 4)
     inner_width = max(1, panel_width - 4)
@@ -445,6 +464,7 @@ def _show_manager_help(
             translator,
             width=size.columns,
             height=size.lines,
+            color=screen.stream.isatty(),
         )
     )
     while True:
