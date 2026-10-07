@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from types import MappingProxyType
 from typing import Literal
@@ -167,6 +167,20 @@ class V2ProbeDescriptor:
     metrics: tuple[V2MetricDescriptor, ...]
     environment: tuple[CustomEnvironmentDeclaration, ...]
     source_timezone: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class V2MetricValue:
+    id: str
+    label: LocalizedText
+    value: Decimal
+
+
+@dataclass(frozen=True, slots=True)
+class V2MonitorObservation:
+    end_at: datetime
+    total: Decimal
+    groups: tuple[V2MetricValue, ...]
 
 
 @dataclass(frozen=True, slots=True)

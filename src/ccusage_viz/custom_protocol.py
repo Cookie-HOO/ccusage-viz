@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Literal, TypeAlias
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -35,7 +35,9 @@ from ccusage_viz.custom_models import (
     V2HistoricalChartCapability,
     V2MetricCapabilities,
     V2MetricDescriptor,
+    V2MetricValue,
     V2MonitorCapability,
+    V2MonitorObservation,
     V2ProbeDescriptor,
 )
 
@@ -177,7 +179,121 @@ class CustomProbeRequest:
         return _json_bytes(self.to_wire())
 
 
-CustomRequest: TypeAlias = CustomChartRequest | CustomSummaryRequest | CustomProbeRequest
+@dataclass(frozen=True, slots=True)
+class V2ProbeRequest:
+    request_id: str
+    command_argv: tuple[str, ...] = ()
+    execution_context: tuple[tuple[str, str], ...] = ()
+    request_kind: Literal["probe"] = "probe"
+
+    def __post_init__(self) -> None:
+        _require_id(self.request_id, "request ID")
+
+    def to_wire(self) -> dict[str, object]:
+        return {"protocol": V2_PROTOCOL_VERSION, "request_id": self.request_id, "request_kind": self.request_kind}
+
+    def to_json_bytes(self) -> bytes:
+        return _json_bytes(self.to_wire())
+
+
+@dataclass(frozen=True, slots=True)
+class V2ChartRequest:
+    request_id: str
+    dataset_id: str
+    metric_id: str
+    timezone: str
+    start_date: date
+    end_date: date
+    period: str | None = None
+    filters: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    group_by: str | None = None
+    granularity: str = "day"
+    command_argv: tuple[str, ...] = ()
+    execution_context: tuple[tuple[str, str], ...] = ()
+    request_kind: Literal["chart"] = "chart"
+
+    def __post_init__(self) -> None:
+        _require_id(self.request_id, "request ID")
+        _require_id(self.dataset_id, "dataset ID")
+        _require_id(self.metric_id, "metric ID")
+        _validate_timezone(self.timezone)
+        if self.end_date < self.start_date:
+            raise ValueError("v2 custom request range end date must not precede start date")
+        object.__setattr__(self, "filters", _canonical_filters(self.filters))
+
+    def to_wire(self) -> dict[str, object]:
+        return {
+            "protocol": V2_PROTOCOL_VERSION,
+            "request_id": self.request_id,
+            "request_kind": self.request_kind,
+            "dataset_id": self.dataset_id,
+            "metric_id": self.metric_id,
+            "timezone": self.timezone,
+            "range": {
+                "start_date": self.start_date.isoformat(),
+                "end_date": self.end_date.isoformat(),
+                "period": self.period,
+            },
+            "query": {
+                "filters": {key: list(values) for key, values in self.filters},
+                "group_by": self.group_by,
+                "granularity": self.granularity,
+            },
+        }
+
+    def to_json_bytes(self) -> bytes:
+        return _json_bytes(self.to_wire())
+
+
+@dataclass(frozen=True, slots=True)
+class V2MonitorRequest:
+    request_id: str
+    dataset_id: str
+    metric_id: str
+    timezone: str
+    end_at: datetime
+    filters: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    group_by: str | None = None
+    command_argv: tuple[str, ...] = ()
+    execution_context: tuple[tuple[str, str], ...] = ()
+    request_kind: Literal["monitor"] = "monitor"
+
+    def __post_init__(self) -> None:
+        _require_id(self.request_id, "request ID")
+        _require_id(self.dataset_id, "dataset ID")
+        _require_id(self.metric_id, "metric ID")
+        _validate_timezone(self.timezone)
+        if self.end_at.tzinfo is None:
+            raise ValueError("v2 monitor end_at must be timezone aware")
+        object.__setattr__(self, "filters", _canonical_filters(self.filters))
+
+    def to_wire(self) -> dict[str, object]:
+        return {
+            "protocol": V2_PROTOCOL_VERSION,
+            "request_id": self.request_id,
+            "request_kind": self.request_kind,
+            "dataset_id": self.dataset_id,
+            "metric_id": self.metric_id,
+            "timezone": self.timezone,
+            "range": {"end_at": self.end_at.isoformat()},
+            "query": {
+                "filters": {key: list(values) for key, values in self.filters},
+                "group_by": self.group_by,
+            },
+        }
+
+    def to_json_bytes(self) -> bytes:
+        return _json_bytes(self.to_wire())
+
+
+CustomRequest: TypeAlias = (
+    CustomChartRequest
+    | CustomSummaryRequest
+    | CustomProbeRequest
+    | V2ProbeRequest
+    | V2ChartRequest
+    | V2MonitorRequest
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -201,7 +317,35 @@ class CustomProbeResponse:
     warnings: tuple[CustomProtocolWarning, ...] = field(default=(), kw_only=True)
 
 
-CustomResponse: TypeAlias = CustomChartResponse | CustomSummaryResponse | CustomProbeResponse
+@dataclass(frozen=True, slots=True)
+class V2ProbeResponse:
+    dataset_id: str
+    descriptor: V2ProbeDescriptor
+    warnings: tuple[CustomProtocolWarning, ...] = field(default=(), kw_only=True)
+
+
+@dataclass(frozen=True, slots=True)
+class V2ChartResponse:
+    metric_id: str
+    data: CustomData
+    warnings: tuple[CustomProtocolWarning, ...] = field(default=(), kw_only=True)
+
+
+@dataclass(frozen=True, slots=True)
+class V2MonitorResponse:
+    metric_id: str
+    observation: V2MonitorObservation
+    warnings: tuple[CustomProtocolWarning, ...] = field(default=(), kw_only=True)
+
+
+CustomResponse: TypeAlias = (
+    CustomChartResponse
+    | CustomSummaryResponse
+    | CustomProbeResponse
+    | V2ChartResponse
+    | V2MonitorResponse
+    | V2ProbeResponse
+)
 
 # Internal compatibility names. The wire protocol accepts only chart/summary.
 CustomPaneRequest = CustomChartRequest
@@ -219,7 +363,7 @@ CustomDashboardSummaryResponse = CustomSummaryResponse
 
 
 def canonical_custom_request_key(request: CustomRequest) -> tuple[object, ...]:
-    if isinstance(request, CustomProbeRequest):
+    if isinstance(request, (CustomProbeRequest, V2ProbeRequest)):
         return (request.command_argv, request.execution_context, request.request_kind)
     common: tuple[object, ...] = (
         request.command_argv,
@@ -228,14 +372,22 @@ def canonical_custom_request_key(request: CustomRequest) -> tuple[object, ...]:
         request.request_kind,
     )
     common += (request.timezone,)
-    if isinstance(request, CustomChartRequest):
+    if isinstance(request, (CustomChartRequest, V2ChartRequest)):
         return common + (
+            *((request.metric_id,) if isinstance(request, V2ChartRequest) else ()),
             request.start_date.isoformat(),
             request.end_date.isoformat(),
             request.period,
             request.filters,
             request.group_by,
             request.granularity,
+        )
+    if isinstance(request, V2MonitorRequest):
+        return common + (
+            request.metric_id,
+            request.end_at.astimezone(UTC).isoformat(),
+            request.filters,
+            request.group_by,
         )
     if isinstance(request, CustomSummaryRequest):
         return common + (
@@ -260,6 +412,16 @@ def parse_custom_response(raw: bytes, request: CustomRequest) -> CustomResponse:
     if status != "ok":
         raise CustomProtocolError("response status must be 'ok' or 'error'")
     warnings = _parse_warnings(root.get("warnings"))
+    if isinstance(request, V2ChartRequest):
+        return V2ChartResponse(
+            _response_metric_id(root, request.metric_id), _parse_data(root.get("data")), warnings=warnings
+        )
+    if isinstance(request, V2MonitorRequest):
+        return V2MonitorResponse(
+            _response_metric_id(root, request.metric_id),
+            _parse_v2_monitor_observation(root.get("observation")),
+            warnings=warnings,
+        )
     if isinstance(request, CustomChartRequest):
         return CustomChartResponse(
             _parse_dataset(root.get("dataset")),
@@ -269,6 +431,12 @@ def parse_custom_response(raw: bytes, request: CustomRequest) -> CustomResponse:
         )
     if isinstance(request, CustomSummaryRequest):
         return CustomSummaryResponse(_parse_summary(root.get("summary")), warnings=warnings)
+    if isinstance(request, V2ProbeRequest):
+        return V2ProbeResponse(
+            _string(root.get("dataset_id"), "v2 probe response dataset ID"),
+            parse_v2_probe_descriptor(root.get("descriptor")),
+            warnings=warnings,
+        )
     return CustomProbeResponse(
         _string(root.get("dataset_id"), "probe response dataset ID"),
         _parse_probe_descriptor(root.get("descriptor")),
@@ -277,7 +445,10 @@ def parse_custom_response(raw: bytes, request: CustomRequest) -> CustomResponse:
 
 
 def _validate_envelope(root: dict[str, object], request: CustomRequest) -> None:
-    if root.get("protocol") != PROTOCOL_VERSION:
+    expected_protocol = (
+        V2_PROTOCOL_VERSION if isinstance(request, (V2ProbeRequest, V2ChartRequest, V2MonitorRequest)) else None
+    )
+    if root.get("protocol") not in ({expected_protocol} if expected_protocol else {PROTOCOL_VERSION, V2_PROTOCOL_VERSION}):
         raise CustomProtocolError(f"unsupported protocol version: {root.get('protocol')!r}")
     for field_name, expected in (
         ("request_id", request.request_id),
@@ -295,6 +466,13 @@ def _validate_envelope(root: dict[str, object], request: CustomRequest) -> None:
                     "a protocol-incompatible command version"
                 )
             raise CustomProtocolError(detail)
+
+
+def _response_metric_id(root: dict[str, object], expected: str) -> str:
+    metric_id = _string(root.get("metric_id"), "v2 response metric ID")
+    if metric_id != expected:
+        raise CustomProtocolError("v2 response metric ID does not match request")
+    return metric_id
 
 
 def _parse_failure(root: dict[str, object]) -> CustomProtocolError:
@@ -665,6 +843,27 @@ def _parse_data(value: object) -> CustomData:
     return CustomData(series)
 
 
+def _parse_v2_monitor_observation(value: object) -> V2MonitorObservation:
+    source = _mapping(value, "v2 monitor observation")
+    end_at = _parse_timestamp(source.get("end_at"), "v2 monitor observation end_at")
+    groups = tuple(
+        V2MetricValue(
+            _string(item.get("id"), "v2 monitor group ID"),
+            _parse_localized(item.get("label"), "v2 monitor group label"),
+            _parse_decimal(item.get("value"), "v2 monitor group value"),
+        )
+        for raw in _sequence(source.get("groups"), "v2 monitor observation groups")
+        for item in (_mapping(raw, "v2 monitor group"),)
+    )
+    if len({group.id for group in groups}) != len(groups):
+        raise CustomProtocolError("v2 monitor group IDs must be unique")
+    return V2MonitorObservation(
+        end_at,
+        _parse_decimal(source.get("total"), "v2 monitor observation total"),
+        groups,
+    )
+
+
 def _parse_series(value: object) -> CustomSeries:
     source = _mapping(value, "series")
     points = tuple(
@@ -763,6 +962,18 @@ def _parse_date(value: object, name: str) -> date:
         return date.fromisoformat(value)
     except ValueError as error:
         raise CustomProtocolError(f"{name} must be an ISO-8601 date") from error
+
+
+def _parse_timestamp(value: object, name: str) -> datetime:
+    if not isinstance(value, str):
+        raise CustomProtocolError(f"{name} must be an ISO-8601 timestamp")
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError as error:
+        raise CustomProtocolError(f"{name} must be an ISO-8601 timestamp") from error
+    if parsed.tzinfo is None:
+        raise CustomProtocolError(f"{name} must include a timezone")
+    return parsed
 
 
 def _canonical_filters(
