@@ -11,6 +11,7 @@ from ccusage_viz.custom_models import (
 )
 from ccusage_viz.datasets.manager import (
     _choose_dataset_source,
+    _read_github_repository,
     format_dataset_list,
     render_dataset_manager,
 )
@@ -109,3 +110,22 @@ def test_add_source_chooser_lists_three_sources_and_selects_local() -> None:
     assert "Browse official datasets" in output
     assert "Install from GitHub" in output
     assert "Local command" in output
+
+
+def test_github_prompt_is_rendered_separately_from_controls() -> None:
+    frames: list[Frame] = []
+
+    class Screen:
+        def paint(self, frame: Frame, **_kwargs: object) -> None:
+            frames.append(frame)
+
+    events = iter((KeyEvent("\x1b"),))
+    _read_github_repository(
+        Screen(),  # type: ignore[arg-type]
+        load_translator("en"),
+        InputDecoder(),
+        read_input=lambda: next(events),
+    )
+
+    assert "Enter OWNER/REPOSITORY" in "\n".join(frames[0].rows[:-1])
+    assert frames[0].rows[-1] == "Enter discover · Esc back"

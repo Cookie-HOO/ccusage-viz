@@ -417,7 +417,13 @@ def _read_github_repository(
     while True:
         screen.paint(
             compose_frame(
-                repository or "—",
+                "\n".join(
+                    (
+                        translator.text("status.dataset_github_prompt"),
+                        "",
+                        repository or "—",
+                    )
+                ),
                 translator.text("status.dataset_github_title"),
                 translator.text("status.dataset_github_controls"),
                 height=get_terminal_size().lines,
