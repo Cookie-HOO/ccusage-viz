@@ -725,10 +725,11 @@ def _parse_v2_defaults(value: object) -> dict[str, CustomChartDefaults]:
         top = item["top"]
         if period is not None:
             period = _string(period, f"v2 chart default {kind} period")
-            try:
-                parse_period(period)
-            except ValueError as exc:
-                raise CustomProtocolError(f"v2 chart default {kind} period must be valid") from exc
+            if not (kind == "ranking" and period == "all"):
+                try:
+                    parse_period(period)
+                except ValueError as exc:
+                    raise CustomProtocolError(f"v2 chart default {kind} period must be valid") from exc
         if group_by is not None:
             group_by = _string(group_by, f"v2 chart default {kind} group_by")
         if top is not None and (not isinstance(top, int) or isinstance(top, bool) or top < 1):

@@ -203,6 +203,20 @@ def test_v2_probe_descriptor_rejects_invalid_metric_contract(
         parse_v2_probe_descriptor(descriptor)
 
 
+def test_v2_ranking_default_all_is_allowed_but_other_chart_defaults_reject_it() -> None:
+    descriptor = v2_probe_descriptor()
+    descriptor["metrics"][0]["capabilities"]["charts"] = {
+        "ranking": {"granularities": ["day"], "group_by": [], "filters": [], "periods": ["all"]}
+    }
+    descriptor["metrics"][0]["defaults"] = {"ranking": {"period": "all", "group_by": None, "top": None}}
+
+    assert parse_v2_probe_descriptor(descriptor).metrics[0].defaults["ranking"].period == "all"
+
+    descriptor["metrics"][0]["defaults"] = {"timeline": {"period": "all", "group_by": None, "top": None}}
+    with pytest.raises(CustomProtocolError, match="period must be valid"):
+        parse_v2_probe_descriptor(descriptor)
+
+
 def capabilities() -> dict[str, object]:
     return {
         "group_by": [{"id": "book", "label": text("Book", "书籍")}],

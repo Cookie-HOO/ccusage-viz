@@ -12,6 +12,8 @@
 
 每个指标声明 `aggregation: "sum"` 或 `aggregation: "value"`。`sum` 允许 ccuv 对返回事实做历史投影聚合；`value` 是数据源拥有的最终事实，切换范围、分组、粒度、筛选或图表时 ccuv 必须重新请求，不能本地相加、平均或生成 Other。
 
+V2 指标可声明 `summary: "comparisons" | "total" | "none"`。`comparisons` 是默认值，允许普通的当前值、环比和同比摘要；`total` 只允许显示一个总数；`none` 不发起 Dataset 摘要请求。Ranking capability 可声明支持的 `periods`。`all` 仅用于 Ranking：ccuv 发送 `period: "all"`，并使用 `1971-01-01` 到今天的锚定范围。权威语义是 marker，不是锚定日期；Dataset 必须按照自身全量数据口径处理。若不支持某个周期，继续使用现有 `unsupported_query`，字段为 `range.period`。
+
 V2 指标可以声明 `monitor`。它声明固定业务口径 `window_seconds`，也可声明 `refresh_interval_seconds`。ccuv 的 Monitor 显示历史仅决定本地可见观测，不会修改指标业务窗口。Dashboard 现有全局采样周期仍是实际周期；若与声明周期不同，会显示警告。Custom Monitor 支持 bars、ranking 和 list，不提供 `cumulative-bars`，因为固定滚动观测不是互不重叠的累计增量。
 
 Custom Monitor 请求包含带时区的 `range.end_at`。Dataset 按声明的固定窗口计算该截止点的总值和分组；无法回答时返回 `range_not_available`，ccuv 显示错误，绝不替换成零。

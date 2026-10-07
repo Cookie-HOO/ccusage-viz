@@ -25,6 +25,15 @@ Each metric declares `aggregation: "sum"` or `aggregation: "value"`.
 `value` is source-owned: ccuv displays only the exact query result and asks the
 Dataset again whenever range, grouping, granularity, filters, or chart changes.
 
+V2 metrics may declare `summary: "comparisons" | "total" | "none"`.
+`comparisons` is the default and permits the ordinary current/sequential/year-over-year
+summary. `total` permits only one total value. `none` suppresses Dataset summary
+acquisition. A Ranking capability may declare its supported `periods`. `all` is
+Ranking-only: ccuv sends `period: "all"` with an anchored range from
+`1971-01-01` through today. The marker, not the anchor date, means all source
+data. Datasets must reject unsupported periods with their existing
+`unsupported_query` response for `range.period`.
+
 V2 metrics may declare `monitor`. A Monitor metric declares its fixed business
 `window_seconds` and may declare `refresh_interval_seconds`. ccuv's Monitor
 display history remains local and does not alter the metric's business window.

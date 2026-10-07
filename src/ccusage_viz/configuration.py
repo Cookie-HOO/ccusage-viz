@@ -2,7 +2,14 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from ccusage_viz.custom_models import CustomProbeDescriptor
+from ccusage_viz.custom_models import (
+    CustomCapabilities,
+    CustomChartCapability,
+    CustomDataset,
+    CustomProbeDescriptor,
+    V2HistoricalChartCapability,
+    V2ProbeDescriptor,
+)
 from ccusage_viz.custom_protocol import CustomProtocolError
 from ccusage_viz.options import (
     CalendarConfig,
@@ -96,6 +103,40 @@ def apply_custom_probe_defaults(
             timezone=timezone,
         )
     return replace(config, date_range=date_range, group_by=group_by, top=top)
+
+
+def v2_metric_probe_descriptor(
+    descriptor: V2ProbeDescriptor, metric_id: str | None
+) -> CustomProbeDescriptor:
+    """Project one V2 historical Metric into the mature V1 historical surface."""
+
+    from ccusage_viz.custom_monitor_component import resolve_metric
+
+    resolved = resolve_metric(
+        CustomChartConfig(
+            "timeline",
+            CustomCommandSource("probe", ("probe",)),
+            resolve_date_range("timeline", period="14d", since=None, until=None),
+            metric_id=metric_id,
+        ),
+        descriptor,
+    )
+    metric = next(item for item in descriptor.metrics if item.id == resolved.metric_id)
+    charts: dict[str, CustomChartCapability] = {}
+    for kind, capability in metric.capabilities.charts.items():
+        if isinstance(capability, V2HistoricalChartCapability):
+            charts[kind] = CustomChartCapability(
+                capability.granularities, capability.group_by, capability.filters
+            )
+    return CustomProbeDescriptor(
+        descriptor.revision,
+        descriptor.version,
+        CustomDataset(metric.title, metric.description, metric.unit),
+        CustomCapabilities(metric.capabilities.group_by, metric.capabilities.filters, charts),
+        metric.defaults,
+        descriptor.environment,
+        descriptor.source_timezone,
+    )
 
 
 def default_custom_pane(
