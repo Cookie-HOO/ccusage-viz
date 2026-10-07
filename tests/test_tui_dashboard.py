@@ -63,6 +63,7 @@ from ccusage_viz.tui import (
     _adjustment_target_page,
     _animation_adjustment_target_page,
     _append_monitor_attachment,
+    _choose_pane_type,
     _custom_dashboard_sources,
     _frame,
     _header_options,
@@ -89,6 +90,28 @@ def test_empty_dashboard_pane_renders_localized_placeholder() -> None:
     assert _pane_render(pane, load_translator("zh"), Terminal(40, 8, False, True)).chart == (
         "空白子图\n双击选中，然后按 r 选择类型"
     )
+
+
+def test_pane_chooser_groups_token_usage_and_other_datasets() -> None:
+    frames: list[object] = []
+
+    class Screen:
+        def paint(self, frame: object, **_kwargs: object) -> None:
+            frames.append(frame)
+
+    events = iter((KeyEvent("\x1b"),))
+    assert _choose_pane_type(
+        Screen(),  # type: ignore[arg-type]
+        load_translator("en"),
+        object(),  # type: ignore[arg-type]
+        height=24,
+        read_input=lambda: next(events),
+    ) is None
+
+    output = "\n".join(frames[0].rows)  # type: ignore[union-attr]
+    assert "Built-in token usage" in output
+    assert "Other datasets" in output
+    assert "Datasets" in output
 
 
 def test_dashboard_custom_sources_choose_first_pane_for_each_dataset_id() -> None:

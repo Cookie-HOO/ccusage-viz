@@ -261,6 +261,30 @@ _PANE_COMMANDS = (
     "datasets",
 )
 
+_TOKEN_PANE_COMMANDS = ("timeline", "stack", "calendar", "ranking", "monitor")
+_OTHER_PANE_COMMANDS = ("empty", "animate")
+
+
+def _pane_chooser_rows(translator: Translator, selected: int) -> tuple[list[str], dict[str, int]]:
+    current = _PANE_COMMANDS[selected]
+    rows: list[str] = []
+    positions: dict[str, int] = {}
+    for heading, commands in (
+        ("status.tui_pane_group_token", _TOKEN_PANE_COMMANDS),
+        ("status.tui_pane_group_datasets", ("datasets",)),
+        ("status.tui_pane_group_other", _OTHER_PANE_COMMANDS),
+    ):
+        if rows:
+            rows.append("")
+        rows.append(translator.text(heading))
+        for command in commands:
+            positions[command] = len(rows)
+            rows.append(
+                f"{'›' if command == current else ' '} "
+                f"{translator.text(f'label.pane_{command}')}"
+            )
+    return rows, positions
+
 
 @dataclass(frozen=True, slots=True)
 class HistoricalOutcome:
@@ -3451,14 +3475,15 @@ def _choose_pane_type(
     index = 0
     offset = 0
     while True:
-        rows = [
-            f"{'›' if item == _PANE_COMMANDS[index] else ' '} "
-            f"{translator.text(f'label.pane_{item}')}"
-            for item in _PANE_COMMANDS
-        ]
+        rows, positions = _pane_chooser_rows(translator, index)
         title = translator.text(f"status.tui_{action}_title")
         controls = translator.text(f"status.tui_{action}_controls")
-        choices, offset = _chooser_viewport(rows, index=index, offset=offset, height=height)
+        choices, offset = _chooser_viewport(
+            rows,
+            index=positions[_PANE_COMMANDS[index]],
+            offset=offset,
+            height=height,
+        )
         if paint_choices is None:
             screen.paint(compose_frame(choices, title, controls, height=height))
         else:
@@ -5414,63 +5439,120 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 assert help_overlay.action is not None
                 assert help_overlay.selected is not None
                 selected_key = f"status.tui_help_chooser_option_{help_overlay.selected}"
-                context_nodes = (
+                sections = (
                     (
-                        translator.text("status.tui_help_chooser"),
+                        "status.tui_help_section_selecting",
                         (
-                            (translator.text(f"status.tui_{help_overlay.action}_title"), ()),
-                            (
-                                translator.text(
-                                    "status.tui_help_chooser_selected",
-                                    pane=translator.text(f"label.pane_{help_overlay.selected}"),
-                                ),
-                                (),
+                            translator.text(f"status.tui_{help_overlay.action}_title"),
+                            translator.text("status.tui_help_chooser_detail"),
+                        ),
+                    ),
+                    (
+                        "status.tui_help_section_options",
+                        tuple(
+                            translator.text(f"status.tui_help_chooser_option_{item}")
+                            for item in _PANE_COMMANDS
+                        ),
+                    ),
+                    (
+                        "status.tui_help_section_selected",
+                        (
+                            translator.text(
+                                "status.tui_help_chooser_selected",
+                                pane=translator.text(f"label.pane_{help_overlay.selected}"),
                             ),
-                            (translator.text(selected_key), ()),
-                            (translator.text("status.tui_help_chooser_detail"), ()),
+                            translator.text(selected_key),
                         ),
                     ),
                 )
+                rows: list[str] = []
+                for heading, values in sections:
+                    if rows:
+                        rows.append("")
+                    rows.append(styled_text(translator.text(heading), scheme.highlight, context, bold=True))
+                    for index, value in enumerate(values):
+                        rows.extend(tree_node("", value, (), is_last=index == len(values) - 1))
+                return tuple(clip_width(line, width) for line in rows)
             elif help_overlay.context == "dataset-chooser":
                 assert dataset_modal is not None
                 modal = dataset_modal
                 if modal.stage == "source" and modal.statuses:
                     status = modal.statuses[modal.index]
                     descriptor = status.registration.probe.descriptor
-                    context_nodes = (
+                    sections = (
                         (
-                            translator.text("status.tui_help_dataset_chooser"),
+                            "status.tui_help_section_selecting",
+                            (translator.text("status.tui_help_dataset_chooser"),),
+                        ),
+                        (
+                            "status.tui_help_section_options",
+                            (translator.text("status.tui_help_dataset_chooser_manage"),),
+                        ),
+                        (
+                            "status.tui_help_section_selected",
                             (
-                                (
-                                    translator.text(
-                                        "status.tui_help_dataset_chooser_selected",
-                                        name=_dataset_title(descriptor.dataset.title, translator),
-                                        version=descriptor.version,
-                                    ),
-                                    (),
+                                translator.text(
+                                    "status.tui_help_dataset_chooser_selected",
+                                    name=_dataset_title(descriptor.dataset.title, translator),
+                                    version=descriptor.version,
                                 ),
-                                (translator.text("status.tui_help_dataset_chooser_manage"), ()),
+                                (
+                                    descriptor.dataset.description.zh_cn
+                                    if translator.language == "zh"
+                                    else descriptor.dataset.description.en
+                                ),
                             ),
                         ),
                     )
                 else:
                     assert modal.chart_kinds
                     chart_kind = modal.chart_kinds[modal.index]
-                    context_nodes = (
+                    sections = (
                         (
-                            translator.text("status.tui_help_dataset_chart_chooser"),
+                            "status.tui_help_section_selecting",
+                            (translator.text("status.tui_help_dataset_chart_chooser"),),
+                        ),
+                        (
+                            "status.tui_help_section_options",
+                            tuple(
+                                translator.text(f"status.tui_help_chooser_option_{item}")
+                                for item in modal.chart_kinds
+                            ),
+                        ),
+                        (
+                            "status.tui_help_section_selected",
                             (
-                                (
-                                    translator.text(
-                                        "status.tui_help_dataset_chart_selected",
-                                        chart=translator.text(f"label.pane_{chart_kind}"),
-                                    ),
-                                    (),
+                                translator.text(
+                                    "status.tui_help_dataset_chart_selected",
+                                    chart=translator.text(f"label.pane_{chart_kind}"),
                                 ),
-                                (translator.text("status.tui_help_dataset_chart_detail"), ()),
+                                translator.text("status.tui_help_dataset_chart_detail"),
                             ),
                         ),
                     )
+                rows = []
+                for heading, values in sections:
+                    if rows:
+                        rows.append("")
+                    rows.append(styled_text(translator.text(heading), scheme.highlight, context, bold=True))
+                    for index, value in enumerate(values):
+                        rows.extend(tree_node("", value, (), is_last=index == len(values) - 1))
+                rows.append("")
+                rows.append(
+                    styled_text(
+                        translator.text("status.tui_help_section_policy"),
+                        scheme.highlight,
+                        context,
+                        bold=True,
+                    )
+                )
+                policy = (
+                    translator.text("status.tui_help_dataset_policy"),
+                    translator.text("status.tui_help_idle_close"),
+                )
+                for index, value in enumerate(policy):
+                    rows.extend(tree_node("", value, (), is_last=index == len(policy) - 1))
+                return tuple(clip_width(line, width) for line in rows)
             elif help_overlay.context == "editor":
                 rows = [
                     styled_text(
