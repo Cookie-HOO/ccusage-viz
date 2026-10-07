@@ -31,6 +31,7 @@ _REPOSITORY = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 DATASET_MANIFEST_SCHEMA = "ccuv.dataset/v1"
 OFFICIAL_CATALOG_SCHEMA = "ccuv.dataset-catalog/v1"
 CUSTOM_PROTOCOL = "ccuv.custom/v1"
+CUSTOM_V2_PROTOCOL = "ccuv.custom/v2"
 CHART_KINDS = ("timeline", "calendar", "stack", "ranking")
 
 
@@ -168,7 +169,7 @@ class DatasetManifest:
     metric: DatasetMetric
     charts: tuple[str, ...]
     environment: tuple[EnvironmentRequirement, ...]
-    descriptor: CustomProbeDescriptor | None = None
+    descriptor: CustomProbeDescriptor | V2ProbeDescriptor | None = None
 
     @classmethod
     def parse(cls, value: object) -> DatasetManifest:
@@ -202,7 +203,7 @@ class DatasetManifest:
             raise ValueError("manifest id is invalid")
         if not isinstance(version, str) or not _SEMVER.fullmatch(version):
             raise ValueError("manifest version is invalid")
-        if protocol != CUSTOM_PROTOCOL:
+        if protocol not in {CUSTOM_PROTOCOL, CUSTOM_V2_PROTOCOL}:
             raise ValueError("manifest protocol is unsupported")
         if (
             not isinstance(entrypoint, str)
@@ -243,7 +244,7 @@ class DatasetManifest:
 
     @classmethod
     def _parse_static_probe(cls, value: Mapping[str, object]) -> DatasetManifest:
-        if value.get("schema") != DATASET_MANIFEST_SCHEMA or value.get("protocol") != CUSTOM_PROTOCOL:
+        if value.get("schema") != DATASET_MANIFEST_SCHEMA or value.get("protocol") not in {CUSTOM_PROTOCOL, CUSTOM_V2_PROTOCOL}:
             raise ValueError("manifest schema or protocol is unsupported")
         entrypoint = value.get("entrypoint")
         platform = value.get("platform")
@@ -271,17 +272,39 @@ class DatasetManifest:
             or not platform_arch
         ):
             raise ValueError("manifest is invalid")
-        descriptor = parse_probe_descriptor(probe.get("descriptor"))
-        metric = DatasetMetric(
-            descriptor.dataset.unit.id,
-            descriptor.dataset.title,
-            DatasetUnit(
-                descriptor.dataset.unit.id,
-                descriptor.dataset.unit.label,
-                descriptor.dataset.unit.placement,
-                descriptor.dataset.unit.decimal_places,
-            ),
+        descriptor = (
+            parse_v2_probe_descriptor(probe.get("descriptor"))
+            if value.get("protocol") == CUSTOM_V2_PROTOCOL
+            else parse_probe_descriptor(probe.get("descriptor"))
         )
+        if isinstance(descriptor, V2ProbeDescriptor):
+            metric_descriptor = next(
+                (item for item in descriptor.metrics if item.id == descriptor.default_metric_id),
+                descriptor.metrics[0],
+            )
+            metric = DatasetMetric(
+                metric_descriptor.id,
+                metric_descriptor.title,
+                DatasetUnit(
+                    metric_descriptor.unit.id,
+                    metric_descriptor.unit.label,
+                    metric_descriptor.unit.placement,
+                    metric_descriptor.unit.decimal_places,
+                ),
+            )
+            charts = tuple(metric_descriptor.capabilities.charts)
+        else:
+            metric = DatasetMetric(
+                descriptor.dataset.unit.id,
+                descriptor.dataset.title,
+                DatasetUnit(
+                    descriptor.dataset.unit.id,
+                    descriptor.dataset.unit.label,
+                    descriptor.dataset.unit.placement,
+                    descriptor.dataset.unit.decimal_places,
+                ),
+            )
+            charts = tuple(descriptor.capabilities.charts)
         environment = tuple(
             EnvironmentRequirement(
                 item.name,
@@ -296,12 +319,12 @@ class DatasetManifest:
         return cls(
             identifier,
             descriptor.version,
-            CUSTOM_PROTOCOL,
+            value["protocol"],
             entrypoint,
             platform_os,
             platform_arch,
             metric,
-            tuple(descriptor.capabilities.charts),
+            charts,
             environment,
             descriptor,
         )

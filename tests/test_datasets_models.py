@@ -86,6 +86,40 @@ def test_manifest_accepts_static_probe_descriptor_without_duplicate_metadata() -
     assert manifest.descriptor.dataset.description.en == "Daily reading"
 
 
+def test_manifest_accepts_v2_static_probe_and_uses_default_metric() -> None:
+    manifest = DatasetManifest.parse(
+        {
+            "schema": "ccuv.dataset/v1",
+            "protocol": "ccuv.custom/v2",
+            "entrypoint": "bin/router",
+            "platform": {"os": "darwin", "arch": "arm64"},
+            "probe": {
+                "dataset_id": "router",
+                "descriptor": {
+                    "revision": "router-1", "version": "0.1.0", "default_metric_id": "requests",
+                    "dataset": {"title": {"en": "Router", "zh-CN": "Router"}, "description": {"en": "Live", "zh-CN": "实时"}},
+                    "metrics": [
+                        {
+                            "id": "tokens", "title": {"en": "Tokens", "zh-CN": "Token"}, "description": {"en": "Live", "zh-CN": "实时"},
+                            "unit": {"id": "token", "label": {"en": "tokens", "zh-CN": "Token"}, "placement": "suffix", "decimal_places": 0},
+                            "aggregation": "sum", "capabilities": {"group_by": [], "filters": [], "charts": {"monitor": {"window_seconds": 60, "group_by": [], "filters": []}}}, "defaults": {}
+                        },
+                        {
+                            "id": "requests", "title": {"en": "Requests", "zh-CN": "请求"}, "description": {"en": "Live", "zh-CN": "实时"},
+                            "unit": {"id": "request", "label": {"en": "requests", "zh-CN": "请求"}, "placement": "suffix", "decimal_places": 0},
+                            "aggregation": "sum", "capabilities": {"group_by": [], "filters": [], "charts": {"monitor": {"window_seconds": 60, "group_by": [], "filters": []}}}, "defaults": {}
+                        },
+                    ], "environment": []
+                }
+            }
+        }
+    )
+
+    assert manifest.protocol == "ccuv.custom/v2"
+    assert manifest.metric.id == "requests"
+    assert manifest.charts == ("monitor",)
+
+
 def test_environment_status_never_retains_values() -> None:
     manifest = DatasetManifest.parse(
         manifest_wire(
