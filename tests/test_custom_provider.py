@@ -7,9 +7,9 @@ from textwrap import dedent
 
 import pytest
 
-from ccusage_viz.acquisition import custom_historical_query_intent
+from ccusage_viz.acquisition import custom_historical_query_intent, custom_v2_probe_query_intent
 from ccusage_viz.bootstrap import build_query_runtime
-from ccusage_viz.custom_protocol import CustomChartResponse
+from ccusage_viz.custom_protocol import CustomChartResponse, V2ProbeResponse
 from ccusage_viz.errors import QueryError
 from ccusage_viz.lifecycle import QueryTrigger
 from ccusage_viz.options import (
@@ -97,6 +97,45 @@ def test_custom_provider_accepts_current_day_ranges(tmp_path: Path) -> None:
     )
 
     assert intent.payload.end_date == date.today()
+
+
+def test_custom_provider_executes_a_v2_probe(tmp_path: Path) -> None:
+    script = tmp_path / "probe.py"
+    script.write_text(
+        dedent(
+            """
+            import json
+            import sys
+            request = json.loads(sys.stdin.read())
+            metric = {
+                "id": "tokens", "title": {"en": "Tokens", "zh-CN": "Token"},
+                "description": {"en": "Live", "zh-CN": "实时"},
+                "unit": {"id": "token", "label": {"en": "tokens", "zh-CN": "Token"}, "placement": "suffix", "decimal_places": 0},
+                "aggregation": "sum",
+                "capabilities": {"group_by": [], "filters": [], "charts": {"monitor": {"window_seconds": 60, "group_by": [], "filters": []}}},
+                "defaults": {},
+            }
+            print(json.dumps({
+                "protocol": "ccuv.custom/v2", "request_id": request["request_id"],
+                "request_kind": "probe", "dataset_id": "router", "status": "ok",
+                "descriptor": {
+                    "revision": "router-1", "version": "0.1.0",
+                    "dataset": {"title": {"en": "Router", "zh-CN": "Router"}, "description": {"en": "Live", "zh-CN": "实时"}},
+                    "metrics": [metric], "environment": []
+                }
+            }))
+            """
+        )
+    )
+    intent = custom_v2_probe_query_intent(
+        CustomCommandSource("router", (sys.executable, str(script))),
+        owner_id="probe", generation=1, trigger=QueryTrigger.STARTUP,
+    )
+
+    response = build_query_runtime().acquire(intent).custom_response
+
+    assert isinstance(response, V2ProbeResponse)
+    assert response.descriptor.metrics[0].id == "tokens"
 
 
 def test_custom_provider_uses_process_timeout_output_limit_and_environment(tmp_path: Path) -> None:

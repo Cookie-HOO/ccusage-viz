@@ -10,6 +10,7 @@ from ccusage_viz.custom_protocol import (
     CustomChartRequest,
     CustomProbeRequest,
     CustomSummaryRequest,
+    V2ProbeRequest,
 )
 from ccusage_viz.options import (
     CustomChartConfig,
@@ -229,6 +230,38 @@ def custom_probe_query_intent(
     request = CustomProbeRequest(
         request_id=f"{owner_id}:{generation}:probe",
         command_argv=source.command_argv,
+    )
+
+
+def custom_v2_probe_query_intent(
+    source: CustomCommandSource,
+    *,
+    owner_id: str,
+    generation: int,
+    trigger: QueryTrigger,
+    process: ProcessConfig | None = None,
+) -> QueryIntent:
+    """Plan a V2 metadata probe without coupling it to a persisted V1 descriptor."""
+    process = process or ProcessConfig()
+    request = V2ProbeRequest(
+        request_id=f"{owner_id}:{generation}:probe",
+        command_argv=source.command_argv,
+    )
+    return QueryIntent(
+        owner_id=owner_id,
+        generation=generation,
+        trigger=trigger,
+        provider=ProviderRef("custom-command"),
+        scope=DataScope(()),
+        missing_intervals=(),
+        resolution=DataResolution.DATE,
+        execution_context=ExecutionContext(
+            source.command_argv[0],
+            process.query_timeout,
+            process.output_limit,
+            process.environment,
+        ),
+        payload=request,
     )
     return QueryIntent(
         owner_id=owner_id,

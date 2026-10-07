@@ -1,6 +1,6 @@
 import json
 from dataclasses import FrozenInstanceError
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 import pytest
@@ -9,6 +9,10 @@ from ccusage_viz.coverage import DateInterval
 from ccusage_viz.custom_protocol import (
     PROTOCOL_VERSION,
     V2_PROTOCOL_VERSION,
+    V2MonitorRequest,
+    V2ProbeRequest,
+    V2MonitorResponse,
+    V2ProbeResponse,
     CustomChartRequest,
     CustomProbeRequest,
     CustomProtocolError,
@@ -137,6 +141,44 @@ def test_v2_probe_descriptor_parses_multiple_metrics_and_monitor_capabilities() 
     assert monitor.refresh_interval_seconds == 10
     assert descriptor.metrics[1].aggregation == "value"
     assert descriptor.metrics[1].capabilities.charts["monitor"].refresh_interval_seconds is None
+
+
+def test_v2_probe_and_monitor_wire_round_trip() -> None:
+    probe = V2ProbeRequest("probe-v2", command_argv=("router", "ccuv"))
+    probe_response = {
+        "protocol": V2_PROTOCOL_VERSION,
+        "request_id": "probe-v2",
+        "request_kind": "probe",
+        "dataset_id": "router",
+        "status": "ok",
+        "descriptor": v2_probe_descriptor(),
+    }
+    parsed_probe = parse_custom_response(json.dumps(probe_response).encode(), probe)
+    assert isinstance(parsed_probe, V2ProbeResponse)
+    assert parsed_probe.descriptor.metrics[0].id == "tokens"
+
+    request = V2MonitorRequest(
+        "monitor-v2", "router", "tokens", "Asia/Shanghai", datetime(2026, 10, 7, 14, 0, tzinfo=UTC), group_by="real_model"
+    )
+    wire = request.to_wire()
+    assert wire["range"] == {"end_at": "2026-10-07T14:00:00+00:00"}
+    response = {
+        "protocol": V2_PROTOCOL_VERSION,
+        "request_id": "monitor-v2",
+        "request_kind": "monitor",
+        "dataset_id": "router",
+        "metric_id": "tokens",
+        "status": "ok",
+        "observation": {
+            "end_at": "2026-10-07T14:00:00+00:00",
+            "total": "175",
+            "groups": [{"id": "terra", "label": text("Terra", "Terra"), "value": "175"}],
+        },
+    }
+    parsed = parse_custom_response(json.dumps(response).encode(), request)
+    assert isinstance(parsed, V2MonitorResponse)
+    assert parsed.observation.total == Decimal("175")
+    assert parsed.observation.groups[0].id == "terra"
 
 
 @pytest.mark.parametrize(
