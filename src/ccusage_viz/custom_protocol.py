@@ -286,6 +286,49 @@ class V2MonitorRequest:
         return _json_bytes(self.to_wire())
 
 
+@dataclass(frozen=True, slots=True)
+class V2SummaryRequest:
+    request_id: str
+    dataset_id: str
+    metric_id: str
+    timezone: str
+    scope: str
+    current: DateInterval
+    sequential: DateInterval | None = None
+    year_over_year: DateInterval | None = None
+    filters: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    command_argv: tuple[str, ...] = ()
+    execution_context: tuple[tuple[str, str], ...] = ()
+    request_kind: Literal["summary"] = "summary"
+
+    def __post_init__(self) -> None:
+        _require_id(self.request_id, "request ID")
+        _require_id(self.dataset_id, "dataset ID")
+        _require_id(self.metric_id, "metric ID")
+        _validate_timezone(self.timezone)
+        object.__setattr__(self, "filters", _canonical_filters(self.filters))
+
+    def to_wire(self) -> dict[str, object]:
+        intervals: dict[str, object] = {"current": _interval_wire(self.current)}
+        if self.sequential is not None:
+            intervals["sequential"] = _interval_wire(self.sequential)
+        if self.year_over_year is not None:
+            intervals["year_over_year"] = _interval_wire(self.year_over_year)
+        return {
+            "protocol": V2_PROTOCOL_VERSION,
+            "request_id": self.request_id,
+            "request_kind": self.request_kind,
+            "dataset_id": self.dataset_id,
+            "metric_id": self.metric_id,
+            "timezone": self.timezone,
+            "query": {"filters": {key: list(values) for key, values in self.filters}},
+            "summary": {"scope": self.scope, "intervals": intervals},
+        }
+
+    def to_json_bytes(self) -> bytes:
+        return _json_bytes(self.to_wire())
+
+
 CustomRequest: TypeAlias = (
     CustomChartRequest
     | CustomSummaryRequest
@@ -293,6 +336,7 @@ CustomRequest: TypeAlias = (
     | V2ProbeRequest
     | V2ChartRequest
     | V2MonitorRequest
+    | V2SummaryRequest
 )
 
 
@@ -340,12 +384,20 @@ class V2MonitorResponse:
     warnings: tuple[CustomProtocolWarning, ...] = field(default=(), kw_only=True)
 
 
+@dataclass(frozen=True, slots=True)
+class V2SummaryResponse:
+    metric_id: str
+    summary: CustomSummary
+    warnings: tuple[CustomProtocolWarning, ...] = field(default=(), kw_only=True)
+
+
 CustomResponse: TypeAlias = (
     CustomChartResponse
     | CustomSummaryResponse
     | CustomProbeResponse
     | V2ChartResponse
     | V2MonitorResponse
+    | V2SummaryResponse
     | V2ProbeResponse
 )
 
@@ -391,6 +443,15 @@ def canonical_custom_request_key(request: CustomRequest) -> tuple[object, ...]:
             request.filters,
             request.group_by,
         )
+    if isinstance(request, V2SummaryRequest):
+        return common + (
+            request.metric_id,
+            request.filters,
+            request.scope,
+            _interval_key(request.current),
+            _interval_key(request.sequential),
+            _interval_key(request.year_over_year),
+        )
     if isinstance(request, CustomSummaryRequest):
         return common + (
             request.filters,
@@ -428,6 +489,10 @@ def parse_custom_response(raw: bytes, request: CustomRequest) -> CustomResponse:
             _parse_v2_monitor_observation(root.get("observation")),
             warnings=warnings,
         )
+    if isinstance(request, V2SummaryRequest):
+        return V2SummaryResponse(
+            _response_metric_id(root, request.metric_id), _parse_summary(root.get("summary")), warnings=warnings
+        )
     if isinstance(request, CustomChartRequest):
         return CustomChartResponse(
             _parse_dataset(root.get("dataset")),
@@ -452,7 +517,7 @@ def parse_custom_response(raw: bytes, request: CustomRequest) -> CustomResponse:
 
 def _validate_envelope(root: dict[str, object], request: CustomRequest) -> None:
     expected_protocol = (
-        V2_PROTOCOL_VERSION if isinstance(request, (V2ProbeRequest, V2ChartRequest, V2MonitorRequest)) else None
+        V2_PROTOCOL_VERSION if isinstance(request, (V2ProbeRequest, V2ChartRequest, V2MonitorRequest, V2SummaryRequest)) else None
     )
     if root.get("protocol") not in ({expected_protocol} if expected_protocol else {PROTOCOL_VERSION, V2_PROTOCOL_VERSION}):
         raise CustomProtocolError(f"unsupported protocol version: {root.get('protocol')!r}")

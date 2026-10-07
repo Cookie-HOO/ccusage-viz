@@ -13,6 +13,8 @@ from ccusage_viz.custom_protocol import (
     V2ProbeRequest,
     V2MonitorResponse,
     V2ProbeResponse,
+    V2SummaryRequest,
+    V2SummaryResponse,
     CustomChartRequest,
     CustomProbeRequest,
     CustomProtocolError,
@@ -181,6 +183,27 @@ def test_v2_probe_and_monitor_wire_round_trip() -> None:
     assert isinstance(parsed, V2MonitorResponse)
     assert parsed.observation.total == Decimal("175")
     assert parsed.observation.groups[0].id == "terra"
+
+
+def test_v2_total_summary_wire_round_trip() -> None:
+    request = V2SummaryRequest(
+        "summary-v2", "weread", "total_notes", "Asia/Shanghai", "total",
+        DateInterval(date(1971, 1, 1), date(2026, 10, 8)),
+    )
+    response = {
+        "protocol": V2_PROTOCOL_VERSION, "request_id": "summary-v2", "request_kind": "summary",
+        "dataset_id": "weread", "metric_id": "total_notes", "status": "ok",
+        "summary": {"metric": {
+            "id": "total_notes", "label": text("Total notes", "总笔记数"),
+            "current": {"value": "9", "display": text("9 notes", "9 条笔记")},
+            "sequential": {"status": "unavailable"}, "year_over_year": {"status": "unavailable"},
+        }},
+    }
+
+    parsed = parse_custom_response(json.dumps(response).encode(), request)
+
+    assert isinstance(parsed, V2SummaryResponse)
+    assert parsed.summary.metric.current.value == Decimal("9")
 
 
 @pytest.mark.parametrize(

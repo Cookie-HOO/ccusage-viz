@@ -140,7 +140,13 @@ def v2_metric_probe_descriptor(
 
 
 def default_custom_pane(
-    kind: str, *, source: CustomCommandSource, dashboard: DashboardLaunch, metric_id: str | None = None
+    kind: str,
+    *,
+    source: CustomCommandSource,
+    dashboard: DashboardLaunch,
+    metric_id: str | None = None,
+    metric_summary: str = "comparisons",
+    metric_periods: tuple[str, ...] = (),
 ) -> CustomChartPaneConfig:
     """Create a default custom historical pane from a declared command source."""
     if kind not in {"timeline", "calendar", "stack", "ranking", "monitor"}:
@@ -148,7 +154,15 @@ def default_custom_pane(
     presentation = _default_dashboard_chart_presentation(kind)
     date_range = resolve_date_range("timeline" if kind == "monitor" else kind, period=None, since=None, until=None)
     return CustomChartPaneConfig(
-        CustomChartConfig(kind, source, date_range, presentation=presentation, metric_id=metric_id)
+        CustomChartConfig(
+            kind,
+            source,
+            date_range,
+            presentation=presentation,
+            metric_id=metric_id,
+            metric_summary=metric_summary,  # type: ignore[arg-type]
+            metric_periods=metric_periods,
+        )
     )
 
 

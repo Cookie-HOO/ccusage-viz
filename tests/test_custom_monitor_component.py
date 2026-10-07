@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 
 from ccusage_viz.custom_models import LocalizedText, V2MetricValue, V2MonitorObservation
-from ccusage_viz.custom_models import V2Dataset, V2MetricCapabilities, V2MetricDescriptor, V2MonitorCapability, V2ProbeDescriptor, CustomUnit
+from ccusage_viz.custom_models import V2Dataset, V2HistoricalChartCapability, V2MetricCapabilities, V2MetricDescriptor, V2MonitorCapability, V2ProbeDescriptor, CustomUnit
 from ccusage_viz.custom_monitor_component import CustomMonitorCompletion, CustomMonitorComponent, resolve_metric
 from ccusage_viz.custom_protocol import V2MonitorResponse
 from ccusage_viz.options import CustomChartConfig, CustomCommandSource, resolve_date_range
@@ -71,3 +71,18 @@ def test_resolves_default_or_unique_metric_and_rejects_ambiguous_probe() -> None
         assert "--metric" in str(error)
     else:
         raise AssertionError("ambiguous metric resolution was accepted")
+
+
+def test_resolved_metric_carries_declared_ranking_periods() -> None:
+    text = LocalizedText("Notes", "笔记")
+    metric = V2MetricDescriptor(
+        "total_notes", text, text, CustomUnit("note", text, "suffix", 0), "sum",
+        V2MetricCapabilities((), (), {"ranking": V2HistoricalChartCapability(("day",), ("book",), (), ("all",))}),
+        {}, "total",
+    )
+    descriptor = V2ProbeDescriptor("r", "1", V2Dataset(text, text), (metric,), ())
+    omitted = CustomChartConfig("ranking", CustomCommandSource("weread", ("weread",)), resolve_date_range("ranking", period="all", since=None, until=None))
+
+    resolved = resolve_metric(omitted, descriptor)
+
+    assert resolved.metric_periods == ("all",)

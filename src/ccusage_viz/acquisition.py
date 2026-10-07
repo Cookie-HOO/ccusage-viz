@@ -13,6 +13,7 @@ from ccusage_viz.custom_protocol import (
     V2ProbeRequest,
     V2MonitorRequest,
     V2ChartRequest,
+    V2SummaryRequest,
 )
 from ccusage_viz.options import (
     CustomChartConfig,
@@ -363,6 +364,47 @@ def custom_v2_monitor_query_intent(
             process.query_timeout,
             process.output_limit,
             process.environment,
+        ),
+        payload=request,
+    )
+
+
+def custom_v2_summary_query_intent(
+    config: CustomChartConfig,
+    plan: SummaryQueryPlan,
+    *,
+    timezone: str,
+    owner_id: str,
+    generation: int,
+    trigger: QueryTrigger,
+    process: ProcessConfig | None = None,
+) -> QueryIntent:
+    """Request one source-owned V2 summary with its explicitly resolved intervals."""
+    if config.metric_id is None:
+        raise ValueError("v2 summary requires a selected metric")
+    process = process or ProcessConfig()
+    request = V2SummaryRequest(
+        request_id=f"{owner_id}:{generation}",
+        dataset_id=config.source.dataset_id,
+        metric_id=config.metric_id,
+        timezone=timezone,
+        scope=plan.scope,
+        current=plan.current,
+        sequential=plan.sequential,
+        year_over_year=plan.year_over_year,
+        filters=config.filters,
+        command_argv=config.source.command_argv,
+    )
+    return QueryIntent(
+        owner_id=owner_id,
+        generation=generation,
+        trigger=trigger,
+        provider=ProviderRef("custom-command", config.source.dataset_id),
+        scope=DataScope(plan.intervals),
+        missing_intervals=plan.intervals,
+        resolution=DataResolution.DATE,
+        execution_context=ExecutionContext(
+            config.source.command_argv[0], process.query_timeout, process.output_limit, process.environment
         ),
         payload=request,
     )

@@ -6,7 +6,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 
 from ccusage_viz.custom_protocol import V2MonitorResponse
-from ccusage_viz.custom_models import V2ProbeDescriptor
+from ccusage_viz.custom_models import V2HistoricalChartCapability, V2ProbeDescriptor
 from ccusage_viz.options import CustomChartConfig
 
 
@@ -80,12 +80,18 @@ def resolve_metric(config: CustomChartConfig, descriptor: V2ProbeDescriptor) -> 
     """Resolve an omitted Metric from a V2 Probe without guessing ambiguous sources."""
 
     if config.metric_id is not None:
-        if config.metric_id not in {metric.id for metric in descriptor.metrics}:
+        metric = next((metric for metric in descriptor.metrics if metric.id == config.metric_id), None)
+        if metric is None:
             raise ValueError("selected metric is not declared by runtime probe")
-        return config
+        ranking = metric.capabilities.charts.get("ranking")
+        periods = ranking.periods if isinstance(ranking, V2HistoricalChartCapability) else ()
+        return replace(config, metric_summary=metric.summary, metric_periods=periods)
     selected = descriptor.default_metric_id
     if selected is None and len(descriptor.metrics) == 1:
         selected = descriptor.metrics[0].id
     if selected is None:
         raise ValueError("dataset declares multiple metrics; specify --metric")
-    return replace(config, metric_id=selected)
+    metric = next(metric for metric in descriptor.metrics if metric.id == selected)
+    ranking = metric.capabilities.charts.get("ranking")
+    periods = ranking.periods if isinstance(ranking, V2HistoricalChartCapability) else ()
+    return replace(config, metric_id=selected, metric_summary=metric.summary, metric_periods=periods)

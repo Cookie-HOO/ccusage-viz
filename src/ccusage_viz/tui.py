@@ -19,6 +19,7 @@ from ccusage_viz.acquisition import (
     custom_historical_query_intent,
     custom_probe_query_intent,
     custom_summary_query_intent,
+    custom_v2_summary_query_intent,
     custom_v2_monitor_query_intent,
     custom_v2_probe_query_intent,
     historical_provider_id,
@@ -69,7 +70,11 @@ from ccusage_viz.command_copy import (
     format_full_dashboard_command,
     wrap_command,
 )
-from ccusage_viz.configuration import apply_custom_probe_defaults, default_custom_pane
+from ccusage_viz.configuration import (
+    apply_custom_probe_defaults,
+    default_custom_pane,
+    v2_metric_probe_descriptor,
+)
 from ccusage_viz.core.time import (
     DateRange,
     local_today,
@@ -88,6 +93,7 @@ from ccusage_viz.custom_models import (
     CustomFilter,
     CustomProtocolFailure,
     V2MonitorCapability,
+    V2HistoricalChartCapability,
     V2ProbeDescriptor,
 )
 from ccusage_viz.custom_monitor_component import (
@@ -101,6 +107,8 @@ from ccusage_viz.custom_protocol import (
     CustomSummaryResponse,
     V2MonitorResponse,
     V2ProbeResponse,
+    V2SummaryResponse,
+    V2SummaryRequest,
 )
 from ccusage_viz.dashboard_history import DashboardHistory
 from ccusage_viz.dashboard_layout import (
@@ -588,7 +596,7 @@ class CustomDashboardSummary:
     scheduler: FixedIntervalScheduler
     lifecycle: LifecycleOperation[Future[CustomOutcome]]
     filters: tuple[tuple[str, tuple[str, ...]], ...] = ()
-    response: CustomSummaryResponse | None = None
+    response: CustomSummaryResponse | V2SummaryResponse | None = None
     error: BaseException | None = None
     generation: int = 0
     accepted_at: datetime | None = None
@@ -596,6 +604,8 @@ class CustomDashboardSummary:
     accepted_as_of_date: date | None = None
     requested_period: str | None = None
     requested_as_of_date: date | None = None
+    metric_id: str | None = None
+    summary_mode: str = "comparisons"
 
     def select(
         self, source: CustomCommandSource, filters: tuple[tuple[str, tuple[str, ...]], ...]
@@ -622,6 +632,8 @@ class CustomDashboardSource:
     """A Dataset source selected once per Header summary."""
 
     source: CustomCommandSource
+    config: CustomChartConfig | None = field(default=None, compare=False)
+    summary_mode: str = "comparisons"
 
 
 @dataclass(slots=True)
@@ -683,7 +695,13 @@ def _custom_dashboard_sources(panes: list[TuiPane]) -> tuple[CustomDashboardSour
         if not isinstance(pane, TuiCustomPane):
             continue
         config = pane.component.candidate
-        sources.setdefault(config.source.dataset_id, CustomDashboardSource(config.source))
+        summary_mode = config.metric_summary
+        if summary_mode == "none":
+            continue
+        sources.setdefault(
+            config.source.dataset_id,
+            CustomDashboardSource(config.source, config, summary_mode),
+        )
     return tuple(sources.values())
 
 
@@ -708,12 +726,16 @@ def _reconcile_custom_dashboard_summaries(
                 summary.invalidate()
                 summary.select(selection.source, ())
                 added.append(summary)
+            summary.metric_id = selection.config.metric_id if selection.config is not None else None
+            summary.summary_mode = selection.summary_mode
             continue
         summary = CustomDashboardSummary(
             selection.source,
             FixedIntervalScheduler(header.scheduler.interval, now=now),
             LifecycleOperation(f"dashboard:header:custom:{dataset_id}"),
         )
+        summary.metric_id = selection.config.metric_id
+        summary.summary_mode = selection.summary_mode
         header.custom_summaries[dataset_id] = summary
         added.append(summary)
     return tuple(added)
@@ -838,7 +860,7 @@ def _header_lines(
                 rendered = render_custom_metrics(
                     (custom.response.summary.metric,),
                     context,
-                    period=custom.accepted_period,
+                    period="range" if custom.summary_mode == "total" else custom.accepted_period,
                     as_of_date=custom.accepted_as_of_date,
                 )
                 if rendered:
@@ -1296,7 +1318,7 @@ def _new_pane(
                 LifecycleOperation(owner_id),
                 options.process,
                 None
-                if pane_config.chart.kind == "monitor"
+                if pane_config.chart.kind == "monitor" or pane_config.chart.metric_id is not None
                 else CustomDashboardSummary(
                     pane_config.chart.source,
                     FixedIntervalScheduler(options.host.refresh_interval, now=started_at),
@@ -3636,6 +3658,8 @@ def _choose_dataset_pane_config(
         status = entries[index]
         descriptor = status.registration.probe.descriptor
         metric_id: str | None = None
+        metric_summary = "comparisons"
+        metric_periods: tuple[str, ...] = ()
         if isinstance(descriptor, V2ProbeDescriptor):
             metric_index = next(
                 (
@@ -3689,6 +3713,13 @@ def _choose_dataset_pane_config(
                     continue
                 if event.value in {"\r", "\n"}:
                     metric_id = metric.id
+                    metric_summary = metric.summary
+                    ranking = metric.capabilities.charts.get("ranking")
+                    metric_periods = (
+                        ranking.periods
+                        if isinstance(ranking, V2HistoricalChartCapability)
+                        else ()
+                    )
                     break
             if metric_id is None:
                 continue
@@ -3713,7 +3744,14 @@ def _choose_dataset_pane_config(
         except UsageError as exc:
             error = format_error(exc, translator)
             continue
-        return default_custom_pane(view, source=source, dashboard=dashboard, metric_id=metric_id)
+        return default_custom_pane(
+            view,
+            source=source,
+            dashboard=dashboard,
+            metric_id=metric_id,
+            metric_summary=metric_summary,
+            metric_periods=metric_periods,
+        )
 
 
 def _choose_pane_type(
@@ -4017,7 +4055,11 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
 
     def start(operation: OperationToken) -> tuple[Future[CustomOutcome], Callable[[], None]]:
         if not probe_complete:
-            intent = custom_probe_query_intent(
+            intent = (
+                custom_v2_probe_query_intent
+                if component.candidate.metric_id is not None
+                else custom_probe_query_intent
+            )(
                 component.candidate.source,
                 owner_id=operation.owner_id,
                 generation=operation.generation,
@@ -4116,7 +4158,7 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
             summary.lifecycle.complete(operation, generation=outcome.generation)
             return
         response = outcome.result.custom_response
-        if not isinstance(response, CustomSummaryResponse):
+        if not isinstance(response, (CustomSummaryResponse, V2SummaryResponse)):
             raise TypeError("custom provider result does not contain a summary response")
         summary.response = response
         summary.error = None
@@ -4303,20 +4345,31 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
                         return 1
                     if outcome.purpose == "probe":
                         response = outcome.result.custom_response
-                        if not isinstance(response, CustomProbeResponse):
-                            raise TypeError(
-                                "custom provider result does not contain a probe response"
-                            )
                         if options.host.timezone is None:
                             raise RuntimeError("custom Dataset requests require a timezone")
-                        component.configure(
-                            apply_custom_probe_defaults(
-                                component.candidate,
-                                response.descriptor,
-                                timezone=options.host.timezone,
-                            ),
-                            data_affecting=False,
-                        )
+                        if isinstance(response, V2ProbeResponse):
+                            resolved = resolve_metric(component.candidate, response.descriptor)
+                            component.configure(
+                                apply_custom_probe_defaults(
+                                    resolved,
+                                    v2_metric_probe_descriptor(
+                                        response.descriptor, resolved.metric_id
+                                    ),
+                                    timezone=options.host.timezone,
+                                ),
+                                data_affecting=False,
+                            )
+                        elif isinstance(response, CustomProbeResponse):
+                            component.configure(
+                                apply_custom_probe_defaults(
+                                    component.candidate,
+                                    response.descriptor,
+                                    timezone=options.host.timezone,
+                                ),
+                                data_affecting=False,
+                            )
+                        else:
+                            raise TypeError("custom provider result does not contain a probe response")
                         current = component.candidate
                         probe_complete = True
                         lifecycle.complete(operation, generation=outcome.generation)
@@ -4417,20 +4470,31 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
                         if active and outcome.error is None and outcome.result is not None:
                             if purpose == "probe":
                                 response = outcome.result.custom_response
-                                if not isinstance(response, CustomProbeResponse):
-                                    raise TypeError(
-                                        "custom provider result does not contain a probe response"
-                                    )
                                 if options.host.timezone is None:
                                     raise RuntimeError("custom Dataset requests require a timezone")
-                                component.configure(
-                                    apply_custom_probe_defaults(
-                                        component.candidate,
-                                        response.descriptor,
-                                        timezone=options.host.timezone,
-                                    ),
-                                    data_affecting=False,
-                                )
+                                if isinstance(response, V2ProbeResponse):
+                                    resolved = resolve_metric(component.candidate, response.descriptor)
+                                    component.configure(
+                                        apply_custom_probe_defaults(
+                                            resolved,
+                                            v2_metric_probe_descriptor(
+                                                response.descriptor, resolved.metric_id
+                                            ),
+                                            timezone=options.host.timezone,
+                                        ),
+                                        data_affecting=False,
+                                    )
+                                elif isinstance(response, CustomProbeResponse):
+                                    component.configure(
+                                        apply_custom_probe_defaults(
+                                            component.candidate,
+                                            response.descriptor,
+                                            timezone=options.host.timezone,
+                                        ),
+                                        data_affecting=False,
+                                    )
+                                else:
+                                    raise TypeError("custom provider result does not contain a probe response")
                                 current = component.candidate
                                 probe_complete = True
                                 lifecycle.complete(operation, generation=operation.generation)
@@ -4802,7 +4866,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         custom_monitor = isinstance(pane.component, CustomMonitorComponent)
         if not pane.probe_complete:
             intent = (
-                custom_v2_probe_query_intent if custom_monitor else custom_probe_query_intent
+                custom_v2_probe_query_intent
+                if custom_monitor or pane.component.candidate.metric_id is not None
+                else custom_probe_query_intent
             )(
                 pane.component.candidate.source,
                 owner_id=operation.owner_id,
@@ -5131,25 +5197,48 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         summary.select(selection.source, ())
         if options.host.timezone is None:
             raise RuntimeError("custom Dataset requests require a timezone")
-        plan = summary_query_plan(
-            local_today(timezone=options.host.timezone),
-            cast(SummaryScope, header.summary_period),
+        if selection.summary_mode == "none":
+            raise RuntimeError("summary disabled for selected metric")
+        plan = (
+            range_summary_query_plan(selection.config.date_range)
+            if selection.config is not None and selection.config.date_range.fixed_bounds
+            else summary_query_plan(
+                local_today(timezone=options.host.timezone),
+                cast(SummaryScope, header.summary_period),
+            )
         )
-        intent = custom_summary_query_intent(
-            summary.source,
-            plan,
-            filters=summary.filters,
-            timezone=options.host.timezone,
-            owner_id=operation.owner_id,
-            generation=operation.generation,
-            trigger=query_trigger(operation.trigger),
-            process=options.process,
-        )
+        if selection.summary_mode in {"total", "comparisons"} and selection.config is not None:
+            if selection.summary_mode == "total":
+                plan = SummaryQueryPlan("total", plan.current)
+            intent = custom_v2_summary_query_intent(
+                selection.config,
+                plan,
+                timezone=options.host.timezone,
+                owner_id=operation.owner_id,
+                generation=operation.generation,
+                trigger=query_trigger(operation.trigger),
+                process=options.process,
+            )
+        else:
+            intent = custom_summary_query_intent(
+                summary.source,
+                plan,
+                filters=summary.filters,
+                timezone=options.host.timezone,
+                owner_id=operation.owner_id,
+                generation=operation.generation,
+                trigger=query_trigger(operation.trigger),
+                process=options.process,
+            )
         request = intent.payload
-        if not isinstance(request, CustomSummaryRequest):
+        if isinstance(request, V2SummaryRequest):
+            summary.requested_period = request.scope
+            summary.requested_as_of_date = request.current.until
+        elif not isinstance(request, CustomSummaryRequest):
             raise TypeError("custom Dashboard summary intent has an unexpected payload")
-        summary.requested_period = request.scope
-        summary.requested_as_of_date = request.current.until
+        else:
+            summary.requested_period = request.scope
+            summary.requested_as_of_date = request.current.until
         handle = runtime.submit(intent)
         return (
             executor.submit(_await_custom_submission, handle, operation.generation),
@@ -5341,7 +5430,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     summary.lifecycle.abandon(operation)
                 else:
                     response = outcome.result.custom_response
-                    if not isinstance(response, CustomSummaryResponse):
+                    if not isinstance(response, (CustomSummaryResponse, V2SummaryResponse)):
                         raise TypeError(
                             "custom provider result does not contain a summary response"
                         )
@@ -5382,7 +5471,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     summary.lifecycle.abandon(operation)
                 else:
                     response = outcome.result.custom_response
-                    if not isinstance(response, CustomSummaryResponse):
+                    if not isinstance(response, (CustomSummaryResponse, V2SummaryResponse)):
                         raise TypeError("custom provider result does not contain a Pane summary")
                     summary.response = response
                     record_custom_warnings(summary.source, response)
@@ -5501,13 +5590,29 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                 raise TypeError(
                                     "custom monitor metric is not supported by runtime probe"
                                 )
+                        elif isinstance(response, V2ProbeResponse):
+                            resolved = resolve_metric(
+                                pane.component.candidate, response.descriptor
+                            )
+                            pane.component.configure(
+                                apply_custom_probe_defaults(
+                                    resolved,
+                                    v2_metric_probe_descriptor(
+                                        response.descriptor, resolved.metric_id
+                                    ),
+                                    timezone=options.host.timezone or "UTC",
+                                ),
+                                data_affecting=False,
+                            )
                         elif not isinstance(response, CustomProbeResponse):
                             raise TypeError(
                                 "custom provider result does not contain a probe response"
                             )
                         if options.host.timezone is None:
                             raise RuntimeError("custom Dataset requests require a timezone")
-                        if isinstance(pane.component, CustomHistoricalComponent):
+                        if isinstance(pane.component, CustomHistoricalComponent) and isinstance(
+                            response, CustomProbeResponse
+                        ):
                             pane.component.configure(
                                 apply_custom_probe_defaults(
                                     pane.component.candidate,
