@@ -62,18 +62,6 @@ def _invalidates_accepted_chart(error: BaseException) -> bool:
     )
 
 
-def _is_non_period_selection_rejection(error: BaseException) -> bool:
-    if not isinstance(error, QueryError):
-        return False
-    failure = error.values.get("custom_failure")
-    return (
-        isinstance(failure, CustomProtocolFailure)
-        and failure.code == "unsupported_query"
-        and failure.unsupported is not None
-        and failure.unsupported.get("field") != "range.period"
-    )
-
-
 def _query_identity(config: CustomChartConfig) -> tuple[object, ...]:
     """Return the data-affecting portion of a custom query configuration."""
 
@@ -286,7 +274,6 @@ class CustomHistoricalComponent:
         replacement_failed = (
             self.accepted_config is not None
             and _query_identity(self.accepted_config) != _query_identity(self.candidate)
-            and not _is_non_period_selection_rejection(error)
         )
         if _invalidates_accepted_chart(error) or replacement_failed:
             self.model = None

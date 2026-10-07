@@ -35,7 +35,9 @@ def _metric_capability(probe: V2ProbeResponse, config: CustomChartConfig) -> V2M
 def _render(component: CustomMonitorComponent, capability: V2MonitorCapability, translator: Translator, terminal: Terminal, interval: float) -> str:
     config = component.candidate
     response = component.accepted_response
-    title = config.metric_id or config.source.dataset_id
+    title = (
+        config.metric_titles[1] if translator.language == "zh" else config.metric_titles[0]
+    ) if config.metric_titles is not None else config.metric_id or config.source.dataset_id
     heading = center_text(f"{title} · {capability.window_seconds}s", terminal.width)
     if response is None:
         detail = format_error(component.error, translator, color=False) if component.error else translator.text("status.querying")

@@ -100,5 +100,7 @@ def refresh_date_range(
     if not date_range.relative_until or date_range.period is None:
         return date_range
     end = local_today(today, timezone=timezone)
+    if date_range.period == "all":
+        return replace(date_range, until=end)
     value, unit = parse_period(date_range.period)
     return replace(date_range, since=natural_period_start(end, value, unit), until=end)

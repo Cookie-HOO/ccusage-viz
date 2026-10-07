@@ -312,6 +312,8 @@ def test_period_unsupported_failure_clears_an_accepted_projection() -> None:
         ),
     )
 
+    component.configure(replace(component.candidate, group_by="author"), data_affecting=True)
+
     assert component.fail(failure, generation=component.generation)
     assert component.model is None
     assert component.accepted_config is None
@@ -319,7 +321,7 @@ def test_period_unsupported_failure_clears_an_accepted_projection() -> None:
     assert component.error is failure
 
 
-def test_non_period_unsupported_failure_retains_an_accepted_projection() -> None:
+def test_non_period_unsupported_failure_clears_the_replacement_projection() -> None:
     component = CustomHistoricalComponent(config())
     assert component.accept_response(response())
     accepted = component.model
@@ -332,9 +334,10 @@ def test_non_period_unsupported_failure_retains_an_accepted_projection() -> None
         ),
     )
 
+    component.configure(replace(component.candidate, group_by="author"), data_affecting=True)
     assert component.fail(failure, generation=component.generation)
-    assert component.model is accepted
-    assert component.accepted_response is not None
+    assert component.model is None
+    assert component.accepted_response is None
     assert component.error is failure
 
 

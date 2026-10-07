@@ -85,7 +85,7 @@ def resolve_metric(config: CustomChartConfig, descriptor: V2ProbeDescriptor) -> 
             raise ValueError("selected metric is not declared by runtime probe")
         ranking = metric.capabilities.charts.get("ranking")
         periods = ranking.periods if isinstance(ranking, V2HistoricalChartCapability) else ()
-        return replace(config, metric_summary=metric.summary, metric_periods=periods)
+        return replace(config, metric_summary=metric.summary, metric_periods=periods, metric_titles=(metric.title.en, metric.title.zh_cn))
     selected = descriptor.default_metric_id
     if selected is None and len(descriptor.metrics) == 1:
         selected = descriptor.metrics[0].id
@@ -94,4 +94,4 @@ def resolve_metric(config: CustomChartConfig, descriptor: V2ProbeDescriptor) -> 
     metric = next(metric for metric in descriptor.metrics if metric.id == selected)
     ranking = metric.capabilities.charts.get("ranking")
     periods = ranking.periods if isinstance(ranking, V2HistoricalChartCapability) else ()
-    return replace(config, metric_id=selected, metric_summary=metric.summary, metric_periods=periods)
+    return replace(config, metric_id=selected, metric_summary=metric.summary, metric_periods=periods, metric_titles=(metric.title.en, metric.title.zh_cn))

@@ -549,6 +549,11 @@ class DashboardDatasetModalState:
     artifact: object | None = None
     official_preview: tuple[object, bytes, object] | None = None
     chart_kinds: tuple[str, ...] = ()
+    metrics: tuple[object, ...] = ()
+    metric_id: str | None = None
+    metric_summary: str = "comparisons"
+    metric_periods: tuple[str, ...] = ()
+    metric_titles: tuple[str, str] | None = None
 
 
 def _dataset_title(value, translator: Translator) -> str:
@@ -1642,9 +1647,10 @@ def _render_custom_monitor(
 ) -> PaneRender:
     config = component.accepted_config or component.candidate
     response = component.accepted_response
-    heading = center_text(
-        f"{config.metric_id or config.source.dataset_id} · source window", terminal.width
-    )
+    title = (
+        config.metric_titles[1] if translator.language == "zh" else config.metric_titles[0]
+    ) if config.metric_titles is not None else config.metric_id or config.source.dataset_id
+    heading = center_text(f"{title} · source window", terminal.width)
     if response is None:
         body = (
             format_error(component.error, translator, color=False)
@@ -3660,6 +3666,7 @@ def _choose_dataset_pane_config(
         metric_id: str | None = None
         metric_summary = "comparisons"
         metric_periods: tuple[str, ...] = ()
+        metric_titles: tuple[str, str] | None = None
         if isinstance(descriptor, V2ProbeDescriptor):
             metric_index = next(
                 (
@@ -3714,6 +3721,7 @@ def _choose_dataset_pane_config(
                 if event.value in {"\r", "\n"}:
                     metric_id = metric.id
                     metric_summary = metric.summary
+                    metric_titles = (metric.title.en, metric.title.zh_cn)
                     ranking = metric.capabilities.charts.get("ranking")
                     metric_periods = (
                         ranking.periods
@@ -3751,6 +3759,7 @@ def _choose_dataset_pane_config(
             metric_id=metric_id,
             metric_summary=metric_summary,
             metric_periods=metric_periods,
+            metric_titles=metric_titles,
         )
 
 
@@ -7493,6 +7502,16 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             )
             title = translator.text("status.dataset_chooser_title")
             controls = translator.text("status.dataset_chooser_controls")
+        elif modal.stage == "metric":
+            rows = [
+                f"{'›' if item_index == modal.index else ' '} {_dataset_title(metric.title, translator)}"
+                for item_index, metric in enumerate(modal.metrics)
+            ]
+            body, modal.offset = _chooser_viewport(
+                rows, index=modal.index, offset=modal.offset, height=height
+            )
+            title = translator.text("status.dataset_chooser_title")
+            controls = translator.text("status.dataset_chooser_controls")
         else:
             fields = (
                 translator.text("label.custom_kind"),
@@ -7681,7 +7700,43 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             elif key in {"\r", "\n"}:
                 status = entries[modal.index]
                 modal.draft.dataset_id = status.registration.dataset_id
-                modal.chart_kinds = tuple(status.registration.probe.descriptor.capabilities.charts)
+                descriptor = status.registration.probe.descriptor
+                if isinstance(descriptor, V2ProbeDescriptor):
+                    modal.metrics = descriptor.metrics
+                    modal.index = next(
+                        (
+                            position
+                            for position, metric in enumerate(descriptor.metrics)
+                            if metric.id == descriptor.default_metric_id
+                        ),
+                        0,
+                    )
+                    modal.offset = 0
+                    modal.stage = "metric"
+                else:
+                    modal.chart_kinds = tuple(descriptor.capabilities.charts)
+                if modal.chart_kinds:
+                    modal.stage, modal.index, modal.offset = "installed", 0, 0
+            return
+        if modal.stage == "metric":
+            if key == "\x1b":
+                modal.stage, modal.index, modal.offset = "source", 0, 0
+            elif key in {"j", "\x1b[B"}:
+                modal.index = (modal.index + 1) % len(modal.metrics)
+            elif key in {"k", "\x1b[A"}:
+                modal.index = (modal.index - 1) % len(modal.metrics)
+            elif key in {"\r", "\n"}:
+                metric = modal.metrics[modal.index]
+                modal.metric_id = metric.id
+                modal.metric_summary = metric.summary
+                modal.metric_titles = (metric.title.en, metric.title.zh_cn)
+                ranking = metric.capabilities.charts.get("ranking")
+                modal.metric_periods = (
+                    ranking.periods
+                    if isinstance(ranking, V2HistoricalChartCapability)
+                    else ()
+                )
+                modal.chart_kinds = tuple(metric.capabilities.charts)
                 if modal.chart_kinds:
                     modal.stage, modal.index, modal.offset = "installed", 0, 0
             return
@@ -7794,7 +7849,13 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 else:
                     finish_dataset_modal(
                         default_custom_pane(
-                            modal.chart_kinds[modal.index], source=source, dashboard=options
+                            modal.chart_kinds[modal.index],
+                            source=source,
+                            dashboard=options,
+                            metric_id=modal.metric_id,
+                            metric_summary=modal.metric_summary,
+                            metric_periods=modal.metric_periods,
+                            metric_titles=modal.metric_titles,
                         )
                     )
             return

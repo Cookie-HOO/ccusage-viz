@@ -210,6 +210,7 @@ class CustomChartConfig:
     metric_id: str | None = None
     metric_summary: Literal["comparisons", "total", "none"] = "comparisons"
     metric_periods: tuple[str, ...] = ()
+    metric_titles: tuple[str, str] | None = None
 
 
 HistoricalChartConfig: TypeAlias = TimelineConfig | CalendarConfig | StackConfig | RankingConfig

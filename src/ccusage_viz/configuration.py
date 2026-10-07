@@ -147,6 +147,7 @@ def default_custom_pane(
     metric_id: str | None = None,
     metric_summary: str = "comparisons",
     metric_periods: tuple[str, ...] = (),
+    metric_titles: tuple[str, str] | None = None,
 ) -> CustomChartPaneConfig:
     """Create a default custom historical pane from a declared command source."""
     if kind not in {"timeline", "calendar", "stack", "ranking", "monitor"}:
@@ -162,6 +163,7 @@ def default_custom_pane(
             metric_id=metric_id,
             metric_summary=metric_summary,  # type: ignore[arg-type]
             metric_periods=metric_periods,
+            metric_titles=metric_titles,
         )
     )
 

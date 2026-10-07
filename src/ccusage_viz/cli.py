@@ -431,6 +431,8 @@ def build_parser(tr: Translator) -> argparse.ArgumentParser:
         dest="dataset_command", metavar="COMMAND"
     )
     dataset_subparsers.add_parser("list", help=tr.text("help.dataset_list"))
+    dataset_local = dataset_subparsers.add_parser("add-local", help="Register a local Dataset command")
+    dataset_local.add_argument("command_argv", nargs=argparse.REMAINDER, metavar="COMMAND")
 
     animate = subparsers.add_parser(
         "animate", help=tr.text("help.animate"), description=tr.text("help.animate")
@@ -1136,6 +1138,12 @@ def main(argv: list[str] | None = None) -> int:
             service = DatasetService()
             if namespace.dataset_command == "list":
                 print(format_dataset_list(service.registrations(), tr))
+                return 0
+            if namespace.dataset_command == "add-local":
+                if not namespace.command_argv:
+                    raise UsageError("error.arguments", detail="dataset add-local requires a command")
+                result = service.register_local_command(tuple(namespace.command_argv))
+                print(result.registration.dataset_id)
                 return 0
             return run_dataset_manager(service, tr)
         if namespace.command == "text":
