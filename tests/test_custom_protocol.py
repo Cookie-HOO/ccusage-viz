@@ -78,6 +78,7 @@ def v2_probe_descriptor() -> dict[str, object]:
     return {
         "revision": "router-1",
         "version": "0.1.0",
+        "default_metric_id": "tokens",
         "dataset": {
             "title": text("Local Router", "本地 Router"),
             "description": text("Live Router metrics", "实时 Router 指标"),
@@ -136,6 +137,7 @@ def test_v2_probe_descriptor_parses_multiple_metrics_and_monitor_capabilities() 
         "average_tokens_per_request",
     )
     assert descriptor.metrics[0].aggregation == "sum"
+    assert descriptor.default_metric_id == "tokens"
     monitor = descriptor.metrics[0].capabilities.charts["monitor"]
     assert monitor.window_seconds == 60
     assert monitor.refresh_interval_seconds == 10
@@ -188,6 +190,7 @@ def test_v2_probe_and_monitor_wire_round_trip() -> None:
         (lambda value: value["metrics"][0].pop("aggregation"), "aggregation"),
         (lambda value: value["metrics"][0].__setitem__("aggregation", "ratio"), "aggregation"),
         (lambda value: value["metrics"][0]["capabilities"]["charts"]["monitor"].__setitem__("window_seconds", 0), "window_seconds"),
+        (lambda value: value.__setitem__("default_metric_id", "missing"), "default_metric_id"),
     ],
 )
 def test_v2_probe_descriptor_rejects_invalid_metric_contract(

@@ -31,6 +31,10 @@ def run(options: LaunchConfig, translator: Translator) -> int:
 
         return run_tui(options, translator)
     if isinstance(options.chart, CustomChartConfig):
+        if options.chart.kind == "monitor":
+            from ccusage_viz.custom_monitor import run_custom_monitor
+
+            return run_custom_monitor(options, translator)
         from ccusage_viz.tui import run_custom_standalone
 
         return run_custom_standalone(options, translator)

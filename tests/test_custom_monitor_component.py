@@ -2,7 +2,8 @@ from datetime import UTC, datetime
 from decimal import Decimal
 
 from ccusage_viz.custom_models import LocalizedText, V2MetricValue, V2MonitorObservation
-from ccusage_viz.custom_monitor_component import CustomMonitorCompletion, CustomMonitorComponent
+from ccusage_viz.custom_models import V2Dataset, V2MetricCapabilities, V2MetricDescriptor, V2MonitorCapability, V2ProbeDescriptor, CustomUnit
+from ccusage_viz.custom_monitor_component import CustomMonitorCompletion, CustomMonitorComponent, resolve_metric
 from ccusage_viz.custom_protocol import V2MonitorResponse
 from ccusage_viz.options import CustomChartConfig, CustomCommandSource, resolve_date_range
 
@@ -49,3 +50,24 @@ def test_rejects_stale_or_wrong_metric_observations() -> None:
     assert not component.accept(
         CustomMonitorCompletion(1, config(metric_id="completed_requests"), response("tokens")), accepted_at=datetime.now(UTC)
     )
+
+
+def test_resolves_default_or_unique_metric_and_rejects_ambiguous_probe() -> None:
+    text = LocalizedText("Tokens", "Token")
+    metric = lambda identifier: V2MetricDescriptor(
+        identifier, text, text, CustomUnit("token", text, "suffix", 0), "sum",
+        V2MetricCapabilities((), (), {"monitor": V2MonitorCapability(60, None, (), ())}), {},
+    )
+    defaulted = V2ProbeDescriptor("r", "1", V2Dataset(text, text), (metric("tokens"), metric("requests")), (), default_metric_id="requests")
+    unique = V2ProbeDescriptor("r", "1", V2Dataset(text, text), (metric("tokens"),), ())
+    ambiguous = V2ProbeDescriptor("r", "1", V2Dataset(text, text), (metric("tokens"), metric("requests")), ())
+    omitted = CustomChartConfig("monitor", CustomCommandSource("router", ("router",)), resolve_date_range("timeline", period="14d", since=None, until=None))
+
+    assert resolve_metric(omitted, defaulted).metric_id == "requests"
+    assert resolve_metric(omitted, unique).metric_id == "tokens"
+    try:
+        resolve_metric(omitted, ambiguous)
+    except ValueError as error:
+        assert "--metric" in str(error)
+    else:
+        raise AssertionError("ambiguous metric resolution was accepted")

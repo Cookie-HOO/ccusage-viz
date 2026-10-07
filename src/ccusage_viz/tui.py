@@ -19,6 +19,8 @@ from ccusage_viz.acquisition import (
     custom_historical_query_intent,
     custom_probe_query_intent,
     custom_summary_query_intent,
+    custom_v2_monitor_query_intent,
+    custom_v2_probe_query_intent,
     historical_provider_id,
     historical_query_intent,
 )
@@ -85,11 +87,20 @@ from ccusage_viz.custom_models import (
     CustomChartCapability,
     CustomFilter,
     CustomProtocolFailure,
+    V2MonitorCapability,
+    V2ProbeDescriptor,
+)
+from ccusage_viz.custom_monitor_component import (
+    CustomMonitorCompletion,
+    CustomMonitorComponent,
+    resolve_metric,
 )
 from ccusage_viz.custom_protocol import (
     CustomProbeResponse,
     CustomSummaryRequest,
     CustomSummaryResponse,
+    V2MonitorResponse,
+    V2ProbeResponse,
 )
 from ccusage_viz.dashboard_history import DashboardHistory
 from ccusage_viz.dashboard_layout import (
@@ -119,8 +130,8 @@ from ccusage_viz.data_view import (
     body_view_copy_kind,
     cycle_body_view,
     cycle_dashboard_body_view,
-    render_custom_data,
     render_current_monitor_data,
+    render_custom_data,
     render_snapshot_data,
 )
 from ccusage_viz.deltas import RefreshDeltas, RefreshRanks
@@ -133,6 +144,7 @@ from ccusage_viz.formatting import (
     center_text,
     clip_width,
     display_width,
+    format_tokens,
     pad_width,
     truncate_width,
     wrap_width,
@@ -286,8 +298,7 @@ def _pane_chooser_rows(translator: Translator, selected: int) -> tuple[list[str]
         for command in commands:
             positions[command] = len(rows)
             rows.append(
-                f"{'›' if command == current else ' '} "
-                f"{translator.text(f'label.pane_{command}')}"
+                f"{'›' if command == current else ' '} {translator.text(f'label.pane_{command}')}"
             )
     return rows, positions
 
@@ -348,7 +359,7 @@ class CustomLogRecord:
 
 @dataclass(slots=True)
 class TuiCustomPane:
-    component: CustomHistoricalComponent
+    component: CustomHistoricalComponent | CustomMonitorComponent
     scheduler: FixedIntervalScheduler
     lifecycle: LifecycleOperation[Future[CustomOutcome]]
     process: ProcessConfig
@@ -1269,12 +1280,24 @@ def _new_pane(
             raise TypeError("dashboard chart pane owner id is required")
         if isinstance(pane_config, CustomChartPaneConfig):
             started_at = time.monotonic()
+            component = (
+                CustomMonitorComponent(pane_config.chart)
+                if pane_config.chart.kind == "monitor"
+                else CustomHistoricalComponent(pane_config.chart)
+            )
             return TuiCustomPane(
-                CustomHistoricalComponent(pane_config.chart),
-                FixedIntervalScheduler(options.host.refresh_interval, now=started_at),
+                component,
+                FixedIntervalScheduler(
+                    options.host.sampling_interval
+                    if pane_config.chart.kind == "monitor"
+                    else options.host.refresh_interval,
+                    now=started_at,
+                ),
                 LifecycleOperation(owner_id),
                 options.process,
-                CustomDashboardSummary(
+                None
+                if pane_config.chart.kind == "monitor"
+                else CustomDashboardSummary(
                     pane_config.chart.source,
                     FixedIntervalScheduler(options.host.refresh_interval, now=started_at),
                     LifecycleOperation(f"{owner_id}:summary"),
@@ -1588,6 +1611,33 @@ def _render_custom_failure(
     )
 
 
+def _render_custom_monitor(
+    component: CustomMonitorComponent,
+    translator: Translator,
+    terminal: Terminal,
+    *,
+    interval: float,
+) -> PaneRender:
+    config = component.accepted_config or component.candidate
+    response = component.accepted_response
+    heading = center_text(
+        f"{config.metric_id or config.source.dataset_id} · source window", terminal.width
+    )
+    if response is None:
+        body = (
+            format_error(component.error, translator, color=False)
+            if component.error
+            else translator.text("status.loading")
+        )
+        return PaneRender(f"{heading}\n{body}", error_body=component.error is not None)
+    observation = response.observation
+    rows = [heading, f"Total  {format_tokens(round(float(observation.total)))}"]
+    for group in sorted(observation.groups, key=lambda item: (-item.value, item.id)):
+        label = group.label.zh_cn if translator.language == "zh" else group.label.en
+        rows.append(f"{label}  {format_tokens(round(float(group.value)))}")
+    return PaneRender("\n".join(rows))
+
+
 def _render_custom_projection(
     projection: CustomChartProjection,
     config: CustomChartConfig,
@@ -1680,6 +1730,16 @@ def _pane_render(
         ):
             raise ValueError("custom pane text views require dashboard options")
         options = _custom_pane_options(dashboard, pane) if dashboard is not None else None
+        if isinstance(component, CustomMonitorComponent):
+            if pane.body_view == "command":
+                assert options is not None
+                return PaneRender(wrap_command(format_command(options), terminal.width))
+            if pane.body_view == "full-command":
+                assert options is not None
+                return PaneRender(
+                    format_full_command_display(format_full_command(options), terminal.width)
+                )
+            return _render_custom_monitor(component, translator, terminal, interval=pane.interval)
         if component.error is not None and component.model is None:
             return _render_custom_failure(
                 component,
@@ -3094,7 +3154,10 @@ def _official_catalog_rows(
         summary = entry.summary.zh_cn if translator.language == "zh" else entry.summary.en
         summary_lines = list(wrap_width(summary, summary_width))
         if len(summary_lines) > 2:
-            summary_lines = [summary_lines[0], truncate_width(summary_lines[1], summary_width - 3) + "..."]
+            summary_lines = [
+                summary_lines[0],
+                truncate_width(summary_lines[1], summary_width - 3) + "...",
+            ]
         elif len(summary_lines) < 2:
             summary_lines.append("")
         rows.extend(
@@ -3105,9 +3168,7 @@ def _official_catalog_rows(
                     f"{pad_width(truncate_width(entry.id, id_width), id_width)} {summary_lines[0]}",
                     width,
                 ),
-                clip_width(
-                    f"  {'':{name_width}} {'':{id_width}} {summary_lines[1]}", width
-                ),
+                clip_width(f"  {'':{name_width}} {'':{id_width}} {summary_lines[1]}", width),
             )
         )
     return rows
@@ -3131,12 +3192,22 @@ def _official_catalog_viewport(
     return "\n".join([*header, *body.splitlines()]), offset
 
 
-def _official_preview_rows(preview: tuple[object, bytes, object], translator: Translator) -> tuple[str, ...]:
+def _official_preview_rows(
+    preview: tuple[object, bytes, object], translator: Translator
+) -> tuple[str, ...]:
     _artifact, _archive, manifest = preview
     descriptor = manifest.descriptor
     if descriptor is None:
-        return (manifest.metric.title.zh_cn if translator.language == "zh" else manifest.metric.title.en,)
-    title = descriptor.dataset.title.zh_cn if translator.language == "zh" else descriptor.dataset.title.en
+        return (
+            manifest.metric.title.zh_cn
+            if translator.language == "zh"
+            else manifest.metric.title.en,
+        )
+    title = (
+        descriptor.dataset.title.zh_cn
+        if translator.language == "zh"
+        else descriptor.dataset.title.en
+    )
     description = (
         descriptor.dataset.description.zh_cn
         if translator.language == "zh"
@@ -3153,8 +3224,16 @@ def _official_preview_rows(preview: tuple[object, bytes, object], translator: Tr
         f"{translator.text('status.dataset_column_version')}: {descriptor.version}",
         f"{translator.text('status.dataset_details_supports')}: {charts}",
         translator.text("status.dataset_details_environment"),
-        *(f"{translator.text('status.dataset_environment_required')}: {' · '.join(required)}" if required else (),),
-        *(f"{translator.text('status.dataset_environment_optional')}: {' · '.join(optional)}" if optional else (),),
+        *(
+            f"{translator.text('status.dataset_environment_required')}: {' · '.join(required)}"
+            if required
+            else (),
+        ),
+        *(
+            f"{translator.text('status.dataset_environment_optional')}: {' · '.join(optional)}"
+            if optional
+            else (),
+        ),
     )
 
 
@@ -3295,9 +3374,7 @@ def _browse_dataset_catalog(
                 (
                     choices,
                     "",
-                    selected.summary.zh_cn
-                    if translator.language == "zh"
-                    else selected.summary.en,
+                    selected.summary.zh_cn if translator.language == "zh" else selected.summary.en,
                     f"{artifact.repository} · {artifact.release_tag} · {platform_name}",
                     translator.text(
                         "status.dataset_browse_confirm",
@@ -3501,7 +3578,7 @@ def _choose_dataset_pane_config(
     paint_choices: Callable[[str, str, str, tuple[str, ...]], None] | None = None,
     read_input: Callable[[], object] | None = None,
 ) -> CustomChartPaneConfig | None:
-    """Select a ready managed Dataset, then one declared chart kind."""
+    """Select a ready Dataset, then Metric and chart kind for V2 sources."""
 
     from ccusage_viz.datasets.service import DatasetService
 
@@ -3557,7 +3634,67 @@ def _choose_dataset_pane_config(
         if key not in {"\r", "\n"}:
             continue
         status = entries[index]
-        kinds = tuple(status.registration.probe.descriptor.capabilities.charts)
+        descriptor = status.registration.probe.descriptor
+        metric_id: str | None = None
+        if isinstance(descriptor, V2ProbeDescriptor):
+            metric_index = next(
+                (
+                    index
+                    for index, metric in enumerate(descriptor.metrics)
+                    if metric.id == descriptor.default_metric_id
+                ),
+                0,
+            )
+            metric_offset = 0
+            while True:
+                metric = descriptor.metrics[metric_index]
+                metric_choices = [
+                    f"{'›' if position == metric_index else ' '} {_dataset_title(item.title, translator)}"
+                    for position, item in enumerate(descriptor.metrics)
+                ]
+                body, metric_offset = _chooser_viewport(
+                    metric_choices,
+                    index=metric_index,
+                    offset=metric_offset,
+                    height=height,
+                    reserved_rows=2,
+                )
+                if paint_choices is None:
+                    screen.paint(
+                        compose_frame(
+                            body,
+                            translator.text("status.dataset_chooser_title"),
+                            translator.text("status.dataset_chooser_controls"),
+                            (),
+                            height=height,
+                        )
+                    )
+                else:
+                    paint_choices(
+                        body,
+                        translator.text("status.dataset_chooser_title"),
+                        translator.text("status.dataset_chooser_controls"),
+                        (),
+                    )
+                event = read_input() if read_input is not None else read_event(decoder, 0.1)
+                if not isinstance(event, KeyEvent):
+                    continue
+                if event.value == "\x1b":
+                    break
+                if event.value in {"j", "\x1b[B"}:
+                    metric_index = (metric_index + 1) % len(descriptor.metrics)
+                    continue
+                if event.value in {"k", "\x1b[A"}:
+                    metric_index = (metric_index - 1) % len(descriptor.metrics)
+                    continue
+                if event.value in {"\r", "\n"}:
+                    metric_id = metric.id
+                    break
+            if metric_id is None:
+                continue
+            kinds = tuple(metric.capabilities.charts)
+        else:
+            kinds = tuple(descriptor.capabilities.charts)
         if not kinds:
             continue
         view = _choose_dataset_view(
@@ -3576,7 +3713,7 @@ def _choose_dataset_pane_config(
         except UsageError as exc:
             error = format_error(exc, translator)
             continue
-        return default_custom_pane(view, source=source, dashboard=dashboard)
+        return default_custom_pane(view, source=source, dashboard=dashboard, metric_id=metric_id)
 
 
 def _choose_pane_type(
@@ -3804,10 +3941,16 @@ def _run_custom_standalone_adjustment(
                 updated = current
                 if key in {"p", "P", "d", "t", "T", "s", "S", "k", "l", "o", "+", "=", "-", "_"}:
                     updated = adjust_custom_chart(current, key)
-                elif key in {"g", "G"} and capability is not None and len(capability.granularities) > 1:
+                elif (
+                    key in {"g", "G"}
+                    and capability is not None
+                    and len(capability.granularities) > 1
+                ):
                     values = capability.granularities
                     value = current.granularity if current.granularity in values else values[0]
-                    updated = replace(current, granularity=_cycle(values, value, 1 if key == "g" else -1))
+                    updated = replace(
+                        current, granularity=_cycle(values, value, 1 if key == "g" else -1)
+                    )
                 elif (
                     key in {"b", "B"}
                     and current.kind != "calendar"
@@ -3909,7 +4052,9 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
             handle.cancel,
         )
 
-    def start_summary(operation: OperationToken) -> tuple[Future[CustomOutcome], Callable[[], None]]:
+    def start_summary(
+        operation: OperationToken,
+    ) -> tuple[Future[CustomOutcome], Callable[[], None]]:
         config = component.candidate
         if options.host.timezone is None:
             raise RuntimeError("custom Dataset requests require a timezone")
@@ -3937,11 +4082,11 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
         summary.requested_period = request.scope
         summary.requested_as_of_date = request.current.until
         handle = runtime.submit(intent)
-        return executor.submit(_await_custom_submission, handle, operation.generation), handle.cancel
+        return executor.submit(
+            _await_custom_submission, handle, operation.generation
+        ), handle.cancel
 
-    def request_summary(
-        trigger: LifecycleTrigger, *, replace_active: bool = False
-    ) -> bool:
+    def request_summary(trigger: LifecycleTrigger, *, replace_active: bool = False) -> bool:
         if not probe_complete:
             return False
         source_changed = (
@@ -4654,8 +4799,11 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
     def start_custom_submission(
         pane: TuiCustomPane, operation: OperationToken
     ) -> tuple[Future[CustomOutcome], Callable[[], None]]:
+        custom_monitor = isinstance(pane.component, CustomMonitorComponent)
         if not pane.probe_complete:
-            intent = custom_probe_query_intent(
+            intent = (
+                custom_v2_probe_query_intent if custom_monitor else custom_probe_query_intent
+            )(
                 pane.component.candidate.source,
                 owner_id=operation.owner_id,
                 generation=operation.generation,
@@ -4665,6 +4813,23 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             handle = runtime.submit(intent)
             return (
                 executor.submit(_await_custom_submission, handle, operation.generation, "probe"),
+                handle.cancel,
+            )
+        if custom_monitor:
+            if options.host.timezone is None:
+                raise RuntimeError("custom Dataset requests require a timezone")
+            intent = custom_v2_monitor_query_intent(
+                pane.component.candidate,
+                timezone=options.host.timezone,
+                owner_id=operation.owner_id,
+                generation=operation.generation,
+                trigger=query_trigger(operation.trigger),
+                end_at=datetime.now().astimezone(),
+                process=pane.process,
+            )
+            handle = runtime.submit(intent)
+            return (
+                executor.submit(_await_custom_submission, handle, operation.generation, "primary"),
                 handle.cancel,
             )
         purpose = "comparison" if pane.component.comparison_is_pending else "primary"
@@ -5292,11 +5457,18 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     if not pane.lifecycle.accepts(operation, generation=outcome.generation):
                         pane.lifecycle.abandon(operation)
                     elif outcome.error is not None:
-                        if pane.component.fail(
-                            outcome.error,
-                            generation=outcome.generation,
-                            purpose="primary" if outcome.purpose == "probe" else outcome.purpose,
-                        ):
+                        failed = (
+                            pane.component.fail(outcome.error, generation=outcome.generation)
+                            if isinstance(pane.component, CustomMonitorComponent)
+                            else pane.component.fail(
+                                outcome.error,
+                                generation=outcome.generation,
+                                purpose="primary"
+                                if outcome.purpose == "probe"
+                                else outcome.purpose,
+                            )
+                        )
+                        if failed:
                             record_custom_log(
                                 pane, "error", _custom_failure_log_detail(outcome.error, translator)
                             )
@@ -5308,20 +5480,42 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         pane.lifecycle.abandon(operation)
                     elif outcome.purpose == "probe":
                         response = outcome.result.custom_response
-                        if not isinstance(response, CustomProbeResponse):
+                        if isinstance(pane.component, CustomMonitorComponent):
+                            if not isinstance(response, V2ProbeResponse):
+                                raise TypeError("custom monitor probe did not return a V2 response")
+                            pane.component.configure(
+                                resolve_metric(pane.component.candidate, response.descriptor),
+                                data_affecting=False,
+                            )
+                            metric = next(
+                                (
+                                    item
+                                    for item in response.descriptor.metrics
+                                    if item.id == pane.component.candidate.metric_id
+                                ),
+                                None,
+                            )
+                            if metric is None or not isinstance(
+                                metric.capabilities.charts.get("monitor"), V2MonitorCapability
+                            ):
+                                raise TypeError(
+                                    "custom monitor metric is not supported by runtime probe"
+                                )
+                        elif not isinstance(response, CustomProbeResponse):
                             raise TypeError(
                                 "custom provider result does not contain a probe response"
                             )
                         if options.host.timezone is None:
                             raise RuntimeError("custom Dataset requests require a timezone")
-                        pane.component.configure(
-                            apply_custom_probe_defaults(
-                                pane.component.candidate,
-                                response.descriptor,
-                                timezone=options.host.timezone,
-                            ),
-                            data_affecting=False,
-                        )
+                        if isinstance(pane.component, CustomHistoricalComponent):
+                            pane.component.configure(
+                                apply_custom_probe_defaults(
+                                    pane.component.candidate,
+                                    response.descriptor,
+                                    timezone=options.host.timezone,
+                                ),
+                                data_affecting=False,
+                            )
                         pane.probe_complete = True
                         record_custom_warnings(pane.component.candidate.source, response)
                         pane.lifecycle.complete(operation, generation=outcome.generation)
@@ -5331,6 +5525,25 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                             data_affecting=False,
                         )
                         changed = True
+                    elif isinstance(pane.component, CustomMonitorComponent):
+                        response = outcome.result.custom_response
+                        if not isinstance(response, V2MonitorResponse):
+                            raise TypeError("custom monitor query did not return a V2 observation")
+                        if pane.component.accept(
+                            CustomMonitorCompletion(
+                                outcome.generation, pane.component.candidate, response
+                            ),
+                            accepted_at=datetime.now().astimezone(),
+                        ):
+                            record_custom_warnings(pane.component.candidate.source, response)
+                            record_custom_log(
+                                pane, "ok", translator.text("status.custom_query_succeeded")
+                            )
+                            pane.lifecycle.complete(operation, generation=outcome.generation)
+                            last_successful_update = pane.component.accepted_at
+                            changed = True
+                        else:
+                            pane.lifecycle.abandon(operation)
                     elif pane.component.apply_provider_result(
                         outcome.result, purpose=outcome.purpose
                     ):
@@ -5858,7 +6071,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                 "status.tui_help_labeled_option",
                                 option=(
                                     f"{'*' if options.host.ascii else '●'} "
-                                    f"{translator.text(f'label.pane_{item}') }"
+                                    f"{translator.text(f'label.pane_{item}')}"
                                     if item == help_overlay.selected
                                     else translator.text(f"label.pane_{item}")
                                 ),
@@ -5922,11 +6135,13 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                     "status.tui_help_labeled_option",
                                     option=(
                                         f"{'*' if options.host.ascii else '●'} "
-                                        f"{translator.text(f'label.pane_{item}') }"
+                                        f"{translator.text(f'label.pane_{item}')}"
                                         if item == chart_kind
                                         else translator.text(f"label.pane_{item}")
                                     ),
-                                    detail=translator.text(f"status.tui_help_chooser_option_{item}"),
+                                    detail=translator.text(
+                                        f"status.tui_help_chooser_option_{item}"
+                                    ),
                                 )
                                 for item in modal.chart_kinds
                             ),
@@ -6013,7 +6228,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             rows.append("")
             rows.append(help_heading(translator.text("status.tui_help_section_policy")))
             for index, (value, children) in enumerate(policy_children):
-                rows.extend(tree_node("", value, children, is_last=index == len(policy_children) - 1))
+                rows.extend(
+                    tree_node("", value, children, is_last=index == len(policy_children) - 1)
+                )
             return tuple(clip_width(line, width) for line in rows)
 
         text_navigation: tuple[tuple[str, tuple[object, ...]], ...] = ()

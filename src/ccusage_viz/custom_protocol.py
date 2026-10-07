@@ -612,6 +612,11 @@ def parse_v2_probe_descriptor(value: object) -> V2ProbeDescriptor:
         raise CustomProtocolError("v2 metrics must not be empty")
     if len({metric.id for metric in metrics}) != len(metrics):
         raise CustomProtocolError("v2 metric IDs must be unique")
+    default_metric_id = source.get("default_metric_id")
+    if default_metric_id is not None:
+        default_metric_id = _string(default_metric_id, "v2 default_metric_id")
+        if default_metric_id not in {metric.id for metric in metrics}:
+            raise CustomProtocolError("v2 default_metric_id must reference a declared metric")
     environment = tuple(
         _parse_environment_declaration(item)
         for item in _sequence(source.get("environment"), "v2 environment")
@@ -628,6 +633,7 @@ def parse_v2_probe_descriptor(value: object) -> V2ProbeDescriptor:
         metrics,
         environment,
         source_timezone,
+        default_metric_id,
     )
 
 
@@ -826,6 +832,7 @@ def v2_probe_descriptor_to_wire(descriptor: V2ProbeDescriptor) -> dict[str, obje
             }
             for metric in descriptor.metrics
         ],
+        **({"default_metric_id": descriptor.default_metric_id} if descriptor.default_metric_id else {}),
         "environment": [
             {"name": item.name, "required": item.required, "sensitive": item.sensitive, "label": localized(item.label), "how_to_get": localized(item.how_to_get), **({"help_url": item.help_url} if item.help_url else {})}
             for item in descriptor.environment

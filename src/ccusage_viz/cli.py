@@ -634,8 +634,6 @@ def _custom_chart_from_namespace(
             raise UsageError("error.arguments", detail="--command requires --dataset")
         source = CustomCommandSource(namespace.dataset, command_argv)
     kind = _chart_kind(namespace)
-    if kind == "monitor" and namespace.metric is None:
-        raise UsageError("error.arguments", detail="custom monitor requires --metric")
     group_by = namespace.group_by
     top = getattr(namespace, "top", None)
     if kind == "ranking" and group_by is None and top == 10 and "top" not in explicit:

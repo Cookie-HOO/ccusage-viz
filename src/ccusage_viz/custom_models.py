@@ -167,6 +167,7 @@ class V2ProbeDescriptor:
     metrics: tuple[V2MetricDescriptor, ...]
     environment: tuple[CustomEnvironmentDeclaration, ...]
     source_timezone: str | None = None
+    default_metric_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
