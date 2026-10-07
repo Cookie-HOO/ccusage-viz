@@ -360,10 +360,12 @@ def _manager_help_lines(
     *,
     details: bool,
     width: int,
+    statuses: tuple[DatasetRegistrationStatus, ...] = (),
 ) -> tuple[str, ...]:
     if details and status is not None:
         descriptor = status.registration.probe.descriptor
         rows = [
+            translator.text("status.dataset_help_section_selecting"),
             translator.text("status.dataset_help_setup_title", name=_text(descriptor.dataset.title, translator)),
             "",
         ]
@@ -374,6 +376,8 @@ def _manager_help_lines(
             variables = tuple(item for item in descriptor.environment if item.required is required)
             if not variables:
                 continue
+            if rows[-1] != "":
+                rows.append("")
             rows.append(heading)
             for item in variables:
                 present = item not in status.missing_environment
@@ -392,8 +396,12 @@ def _manager_help_lines(
                 )
         return tuple(rows[:-1] if rows[-1:] == [""] else rows)
     return (
+        translator.text("status.dataset_help_section_selecting"),
         translator.text("status.dataset_help_title"),
         "",
+        translator.text("status.dataset_help_dynamic_list"),
+        "",
+        translator.text("status.dataset_help_section_actions"),
         translator.text("status.dataset_help_refresh"),
         translator.text("status.dataset_help_add"),
         translator.text("status.dataset_help_details"),
@@ -415,7 +423,9 @@ def _manager_help_frame(
     content_width = max(1, min(width - 4, 88))
     headings = {
         translator.text("status.dataset_help_title"),
+        translator.text("status.dataset_help_section_selecting"),
         translator.text("status.dataset_help_states"),
+        translator.text("status.dataset_help_section_actions"),
         translator.text("status.dataset_environment_required"),
         translator.text("status.dataset_environment_optional"),
     }
@@ -678,6 +688,7 @@ def run_dataset_manager(service: DatasetService, translator: Translator) -> int:
                             translator,
                             details=details,
                             width=max(1, get_terminal_size().columns - 4),
+                            statuses=statuses,
                         ),
                         translator,
                         width=get_terminal_size().columns,

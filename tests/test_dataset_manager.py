@@ -120,6 +120,18 @@ def test_manager_help_uses_dashboard_style_highlight_for_section_titles() -> Non
     assert "\x1b[" in "\n".join(frame.rows)
 
 
+def test_manager_general_help_explains_the_dynamic_dataset_list() -> None:
+    selected = status()
+    lines = _manager_help_lines(
+        selected,
+        load_translator("en"),
+        details=False,
+        width=80,
+    )
+
+    assert "This list contains your registered Datasets." in "\n".join(lines)
+
+
 def test_manager_footer_follows_dashboard_browse_order_without_quit() -> None:
     rendered = render_dataset_manager((status(),), load_translator("en"), width=100, height=24)
 

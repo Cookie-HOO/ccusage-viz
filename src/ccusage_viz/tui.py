@@ -5438,7 +5438,6 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             if help_overlay.context == "chooser":
                 assert help_overlay.action is not None
                 assert help_overlay.selected is not None
-                selected_key = f"status.tui_help_chooser_option_{help_overlay.selected}"
                 sections = (
                     (
                         "status.tui_help_section_selecting",
@@ -5450,18 +5449,17 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     (
                         "status.tui_help_section_options",
                         tuple(
-                            translator.text(f"status.tui_help_chooser_option_{item}")
-                            for item in _PANE_COMMANDS
-                        ),
-                    ),
-                    (
-                        "status.tui_help_section_selected",
-                        (
                             translator.text(
-                                "status.tui_help_chooser_selected",
-                                pane=translator.text(f"label.pane_{help_overlay.selected}"),
-                            ),
-                            translator.text(selected_key),
+                                "status.tui_help_labeled_option",
+                                option=(
+                                    f"{'*' if options.host.ascii else '●'} "
+                                    f"{translator.text(f'label.pane_{item}') }"
+                                    if item == help_overlay.selected
+                                    else translator.text(f"label.pane_{item}")
+                                ),
+                                detail=translator.text(f"status.tui_help_chooser_option_{item}"),
+                            )
+                            for item in _PANE_COMMANDS
                         ),
                     ),
                 )
@@ -5515,18 +5513,17 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         (
                             "status.tui_help_section_options",
                             tuple(
-                                translator.text(f"status.tui_help_chooser_option_{item}")
-                                for item in modal.chart_kinds
-                            ),
-                        ),
-                        (
-                            "status.tui_help_section_selected",
-                            (
                                 translator.text(
-                                    "status.tui_help_dataset_chart_selected",
-                                    chart=translator.text(f"label.pane_{chart_kind}"),
-                                ),
-                                translator.text("status.tui_help_dataset_chart_detail"),
+                                    "status.tui_help_labeled_option",
+                                    option=(
+                                        f"{'*' if options.host.ascii else '●'} "
+                                        f"{translator.text(f'label.pane_{item}') }"
+                                        if item == chart_kind
+                                        else translator.text(f"label.pane_{item}")
+                                    ),
+                                    detail=translator.text(f"status.tui_help_chooser_option_{item}"),
+                                )
+                                for item in modal.chart_kinds
                             ),
                         ),
                     )
