@@ -64,7 +64,7 @@ class DatasetStore:
         return tuple(
             candidate.name
             for candidate in sorted(self.root.iterdir())
-            if candidate.is_dir() and candidate.name not in {"locks", "staging"}
+            if candidate.is_dir() and candidate.name not in {"locks", "staging", "registrations"}
         )
 
     def list(self) -> tuple[tuple[InstalledDataset, DatasetManifest, Path], ...]:

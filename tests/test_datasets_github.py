@@ -63,6 +63,10 @@ def test_parse_repository_rejects_non_canonical_repositories(value: str) -> None
             "https://github.com/Cookie-HOO/ccuv-dataset-weread",
             "Cookie-HOO/ccuv-dataset-weread",
         ),
+        (
+            "https://github.com/Cookie-HOO/ccuv-dataset-weread/",
+            "Cookie-HOO/ccuv-dataset-weread",
+        ),
     ),
 )
 def test_parse_github_repository_accepts_one_simple_input(value: str, expected: str) -> None:
@@ -73,7 +77,6 @@ def test_parse_github_repository_accepts_one_simple_input(value: str, expected: 
     "value",
     (
         "http://github.com/owner/repo",
-        "https://github.com/owner/repo/",
         "https://github.com/owner/repo/releases",
         "https://github.com/owner/repo?ref=main",
         "https://example.com/owner/repo",

@@ -200,6 +200,7 @@ def test_store_round_trips_local_registration_without_a_managed_artifact(tmp_pat
 
     store.remove_registration("weread")
     assert store.registration_ids() == ()
+    assert store.dataset_ids() == ()
 
 
 def test_store_round_trips_managed_registration_provenance(tmp_path: Path) -> None:

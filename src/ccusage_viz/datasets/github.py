@@ -23,7 +23,7 @@ def parse_repository(value: str) -> str:
 
 
 def parse_github_repository(value: str) -> str:
-    """Normalize a canonical GitHub repository link or OWNER/REPOSITORY."""
+    """Normalize an owner/repository pair or a GitHub repository URL."""
 
     value = value.strip()
     if _REPOSITORY.fullmatch(value):
@@ -34,10 +34,10 @@ def parse_github_repository(value: str) -> str:
         or parsed.netloc != "github.com"
         or parsed.query
         or parsed.fragment
-        or parsed.path.count("/") != 2
+        or parsed.path.count("/") not in {2, 3}
     ):
         raise UsageError("error.dataset_invalid_repository")
-    repository = parsed.path.removeprefix("/")
+    repository = parsed.path.strip("/")
     return parse_repository(repository)
 
 
