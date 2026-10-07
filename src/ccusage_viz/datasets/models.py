@@ -349,9 +349,10 @@ class ReleaseArtifact:
                 raise ValueError("official release artifact is invalid")
 
     @classmethod
-    def parse_official(cls, value: object, *, dataset_id: str) -> ReleaseArtifact:
+    def parse_official(
+        cls, value: object, *, dataset_id: str, repository: str
+    ) -> ReleaseArtifact:
         if not isinstance(value, Mapping) or set(value) != {
-            "repository",
             "release_tag",
             "asset_name",
             "download_url",
@@ -364,7 +365,6 @@ class ReleaseArtifact:
         platform = value.get("platform")
         if not isinstance(platform, Mapping) or set(platform) != {"os", "arch"}:
             raise ValueError("catalog artifact platform is invalid")
-        repository = value.get("repository")
         release_tag = value.get("release_tag")
         asset_name = value.get("asset_name")
         download_url = value.get("download_url")
@@ -377,7 +377,6 @@ class ReleaseArtifact:
             not all(
                 isinstance(item, str)
                 for item in (
-                    repository,
                     release_tag,
                     asset_name,
                     download_url,
@@ -393,7 +392,7 @@ class ReleaseArtifact:
             raise ValueError("catalog artifact fields are invalid")
         return cls(
             dataset_id,
-            cast(str, repository),
+            repository,
             cast(str, release_tag),
             cast(str, asset_name),
             cast(str, download_url),
@@ -410,7 +409,8 @@ class ReleaseArtifact:
 class CatalogEntry:
     id: str
     title: LocalizedText
-    description: LocalizedText
+    summary: LocalizedText
+    repository: str
     artifacts: tuple[ReleaseArtifact, ...]
 
     @classmethod
@@ -418,22 +418,33 @@ class CatalogEntry:
         if not isinstance(value, Mapping) or set(value) != {
             "id",
             "title",
-            "description",
+            "summary",
+            "repository",
             "artifacts",
         }:
             raise ValueError("catalog entry is invalid")
         identifier = value.get("id")
+        repository = value.get("repository")
         artifacts = value.get("artifacts")
-        if not isinstance(identifier, str) or not _DATASET_ID.fullmatch(identifier):
+        if (
+            not isinstance(identifier, str)
+            or not _DATASET_ID.fullmatch(identifier)
+            or not isinstance(repository, str)
+            or not _REPOSITORY.fullmatch(repository)
+        ):
             raise ValueError("catalog entry ID is invalid")
         if not isinstance(artifacts, list) or not artifacts:
             raise ValueError("catalog entry artifacts are invalid")
         return cls(
             identifier,
             LocalizedText.parse(value.get("title"), field="catalog.title"),
-            LocalizedText.parse(value.get("description"), field="catalog.description"),
+            LocalizedText.parse(value.get("summary"), field="catalog.summary"),
+            repository,
             tuple(
-                ReleaseArtifact.parse_official(item, dataset_id=identifier) for item in artifacts
+                ReleaseArtifact.parse_official(
+                    item, dataset_id=identifier, repository=repository
+                )
+                for item in artifacts
             ),
         )
 

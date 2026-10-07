@@ -46,10 +46,10 @@ def catalog_entry() -> dict[str, object]:
     return {
         "id": "weread",
         "title": {"en": "WeRead", "zh-CN": "微信读书"},
-        "description": {"en": "Reading activity", "zh-CN": "阅读活动"},
+        "summary": {"en": "Visualize reading activity", "zh-CN": "将阅读活动可视化"},
+        "repository": "Cookie-HOO/ccuv-dataset-weread",
         "artifacts": [
             {
-                "repository": "Cookie-HOO/ccuv-dataset-weread",
                 "release_tag": "v1.2.3",
                 "asset_name": "weread-darwin-arm64.tar.gz",
                 "download_url": "https://github.com/Cookie-HOO/ccuv-dataset-weread/releases/download/v1.2.3/weread-darwin-arm64.tar.gz",
@@ -76,6 +76,8 @@ def test_catalog_verifies_signed_entries_and_selects_platform() -> None:
 
     artifact = catalog.artifact_for("weread", "darwin", "arm64")
     assert catalog.entry("weread").title.en == "WeRead"
+    assert catalog.entry("weread").summary.zh_cn == "将阅读活动可视化"
+    assert catalog.entry("weread").repository == "Cookie-HOO/ccuv-dataset-weread"
     assert artifact.release_tag == "v1.2.3"
     assert artifact.source_kind == "official"
 

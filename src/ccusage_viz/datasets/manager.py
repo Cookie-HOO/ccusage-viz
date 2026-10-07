@@ -402,8 +402,6 @@ def _manager_help_lines(
         return tuple(rows[:-1] if rows[-1:] == [""] else rows)
     return (
         translator.text("status.dataset_help_section_selecting"),
-        translator.text("status.dataset_help_title"),
-        "",
         translator.text("status.dataset_help_dynamic_list"),
         "",
         translator.text("status.dataset_help_section_actions"),
@@ -427,7 +425,6 @@ def _manager_help_frame(
 ) -> Frame:
     content_width = max(1, min(width - 4, 88))
     headings = {
-        translator.text("status.dataset_help_title"),
         translator.text("status.dataset_help_section_selecting"),
         translator.text("status.dataset_help_states"),
         translator.text("status.dataset_help_section_actions"),
@@ -530,7 +527,8 @@ def _register_official(
     while True:
         rows = [
             f"{'›' if item_index == index else ' '} "
-            f"{_text(entry.title, translator)} · {entry.id}"
+            f"{_text(entry.title, translator)} · {entry.id}\n"
+            f"  {_text(entry.summary, translator)}"
             for item_index, entry in enumerate(entries)
         ]
         screen.paint(

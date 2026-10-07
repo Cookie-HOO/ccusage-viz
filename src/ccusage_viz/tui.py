@@ -3181,9 +3181,9 @@ def _browse_dataset_catalog(
                 (
                     choices,
                     "",
-                    selected.description.zh_cn
+                    selected.summary.zh_cn
                     if translator.language == "zh"
-                    else selected.description.en,
+                    else selected.summary.en,
                     f"{artifact.repository} · {artifact.release_tag} · {platform_name}",
                     translator.text(
                         "status.dataset_browse_confirm",
@@ -6719,9 +6719,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             )
             body = "\n".join(
                 (
-                    selected.description.zh_cn
+                    selected.summary.zh_cn
                     if translator.language == "zh"
-                    else selected.description.en,
+                    else selected.summary.en,
                     f"{artifact.repository} · {artifact.release_tag} · {host_os}/{host_arch}",
                     translator.text(
                         "status.dataset_browse_confirm",
