@@ -14,9 +14,14 @@ from ccusage_viz.datasets.service import DatasetService
 from ccusage_viz.diagnostics import format_error
 from ccusage_viz.formatting import clip_width, display_width, pad_width, wrap_width
 from ccusage_viz.i18n import Translator
-from ccusage_viz.render.base import RenderContext, styled_text
 from ccusage_viz.render.palette import get_color_scheme
-from ccusage_viz.terminal import Frame, FramePainter, compose_frame, set_cursor_visible
+from ccusage_viz.terminal import (
+    Frame,
+    FramePainter,
+    compose_frame,
+    emphasize,
+    set_cursor_visible,
+)
 from ccusage_viz.tui_input import InputDecoder, KeyEvent, PasteEvent, read_event, tui_input_mode
 
 
@@ -429,10 +434,9 @@ def _manager_help_frame(
         translator.text("status.dataset_environment_required"),
         translator.text("status.dataset_environment_optional"),
     }
-    context = RenderContext(content_width, 1, translator, color=color)
     content = tuple(
         clip_width(
-            styled_text(line, get_color_scheme("classic").highlight, context, bold=True)
+            emphasize(line, color=get_color_scheme("classic").highlight, enabled=color)
             if line in headings
             else line,
             content_width,
@@ -693,6 +697,7 @@ def run_dataset_manager(service: DatasetService, translator: Translator) -> int:
                         translator,
                         width=get_terminal_size().columns,
                         height=get_terminal_size().lines,
+                        color=True,
                     )
                     if help_open
                     else view.frame

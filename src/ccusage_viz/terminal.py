@@ -50,6 +50,15 @@ def compose_frame(
 
 _HIDE_CURSOR = "\x1b[?25l"
 _SHOW_CURSOR = "\x1b[?25h"
+_RESET_STYLE = "\x1b[0m"
+
+
+def emphasize(text: str, *, color: int, enabled: bool) -> str:
+    """Render a bold themed terminal heading without renderer-global state."""
+
+    if not enabled:
+        return text
+    return f"\x1b[38;5;{color}m\x1b[1m{text}{_RESET_STYLE}"
 
 
 def set_cursor_visible(stream: TextIO, visible: bool) -> None:

@@ -221,6 +221,7 @@ from ccusage_viz.terminal import (
     FramePainter,
     Terminal,
     compose_frame,
+    emphasize,
     inspect_terminal,
     set_cursor_visible,
 )
@@ -5365,14 +5366,6 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         )
         page = "quick" if adjustment_page == "quick" else "advanced"
         scheme = get_color_scheme(dashboard_theme)
-        context = RenderContext(
-            width,
-            1,
-            translator,
-            color=dashboard_theme != "no-color",
-            ascii=options.host.ascii,
-            color_scheme=dashboard_theme,
-        )
         branch, last, pipe = ("|- ", "\\- ", "|  ") if options.host.ascii else ("├─ ", "└─ ", "│  ")
         active_icon = "* " if options.host.ascii else "● "
         selected_page_icon = "[x] " if options.host.ascii else "● "
@@ -5434,6 +5427,13 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 (translator.text("status.tui_help_mode_pages_detail"), ()),
             )
 
+        def help_heading(value: str) -> str:
+            return emphasize(
+                value,
+                color=scheme.highlight,
+                enabled=dashboard_theme != "no-color",
+            )
+
         if help_overlay is not None and help_overlay.context != "dashboard":
             if help_overlay.context == "chooser":
                 assert help_overlay.action is not None
@@ -5467,7 +5467,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 for heading, values in sections:
                     if rows:
                         rows.append("")
-                    rows.append(styled_text(translator.text(heading), scheme.highlight, context, bold=True))
+                    rows.append(help_heading(translator.text(heading)))
                     for index, value in enumerate(values):
                         rows.extend(tree_node("", value, (), is_last=index == len(values) - 1))
                 return tuple(clip_width(line, width) for line in rows)
@@ -5531,18 +5531,11 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 for heading, values in sections:
                     if rows:
                         rows.append("")
-                    rows.append(styled_text(translator.text(heading), scheme.highlight, context, bold=True))
+                    rows.append(help_heading(translator.text(heading)))
                     for index, value in enumerate(values):
                         rows.extend(tree_node("", value, (), is_last=index == len(values) - 1))
                 rows.append("")
-                rows.append(
-                    styled_text(
-                        translator.text("status.tui_help_section_policy"),
-                        scheme.highlight,
-                        context,
-                        bold=True,
-                    )
-                )
+                rows.append(help_heading(translator.text("status.tui_help_section_policy")))
                 policy = (
                     translator.text("status.tui_help_dataset_policy"),
                     translator.text("status.tui_help_idle_close"),
@@ -5551,14 +5544,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     rows.extend(tree_node("", value, (), is_last=index == len(policy) - 1))
                 return tuple(clip_width(line, width) for line in rows)
             elif help_overlay.context == "editor":
-                rows = [
-                    styled_text(
-                        translator.text("status.tui_help_section_controls"),
-                        scheme.highlight,
-                        context,
-                        bold=True,
-                    )
-                ]
+                rows = [help_heading(translator.text("status.tui_help_section_controls"))]
                 groups = editor_help_groups(dashboard=True)
                 for index, group in enumerate(groups):
                     rows.extend(
@@ -5577,14 +5563,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         ((translator.text("status.tui_help_history_overlay_detail"), ()),),
                     ),
                 )
-            rows = [
-                styled_text(
-                    translator.text("status.tui_help_section_controls"),
-                    scheme.highlight,
-                    context,
-                    bold=True,
-                )
-            ]
+            rows = [help_heading(translator.text("status.tui_help_section_controls"))]
             for value, children in context_nodes:
                 rows.extend(tree_node("", value, children, is_last=False))
             policy_children = [
@@ -5599,14 +5578,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 policy_children.append((translator.text("status.tui_help_animation_hint"), ()))
             policy_children.append((translator.text("status.tui_help_idle_close"), ()))
             rows.append("")
-            rows.append(
-                styled_text(
-                    translator.text("status.tui_help_section_policy"),
-                    scheme.highlight,
-                    context,
-                    bold=True,
-                )
-            )
+            rows.append(help_heading(translator.text("status.tui_help_section_policy")))
             for index, (value, children) in enumerate(policy_children):
                 rows.extend(tree_node("", value, children, is_last=index == len(policy_children) - 1))
             return tuple(clip_width(line, width) for line in rows)
@@ -5780,7 +5752,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         for heading, nodes in sections:
             if rows:
                 rows.append("")
-            rows.append(styled_text(translator.text(heading), scheme.highlight, context, bold=True))
+            rows.append(help_heading(translator.text(heading)))
             for index, (value, children) in enumerate(nodes):
                 rows.extend(
                     tree_node(
@@ -5842,14 +5814,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             )
         policy_children.append((translator.text("status.tui_help_idle_close"), ()))
         rows.append("")
-        rows.append(
-            styled_text(
-                translator.text("status.tui_help_section_policy"),
-                scheme.highlight,
-                context,
-                bold=True,
-            )
-        )
+        rows.append(help_heading(translator.text("status.tui_help_section_policy")))
         for index, (value, children) in enumerate(policy_children):
             rows.extend(tree_node("", value, children, is_last=index == len(policy_children) - 1))
         return tuple(clip_width(line, width) for line in rows)
