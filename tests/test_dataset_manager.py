@@ -53,6 +53,27 @@ def test_manager_renders_grouped_list_and_toggleable_details() -> None:
     assert compact.selected_id == "weread"
 
 
+def test_manager_uses_side_by_side_details_on_wide_terminals() -> None:
+    translator = load_translator("en")
+    statuses = (status(), status(availability="disabled"))
+
+    rendered = render_dataset_manager(statuses, translator, selected=1, details=True, width=120, height=24)
+    body = "\n".join(rendered.frame.rows)
+
+    assert "│" in body
+    assert "Disabled" in body
+    assert "Daily reading time" in body
+
+
+def test_manager_uses_a_separate_detail_page_on_narrow_terminals() -> None:
+    rendered = render_dataset_manager((status(),), load_translator("en"), details=True, width=80, height=24)
+    body = "\n".join(rendered.frame.rows)
+
+    assert "Daily reading time" in body
+    assert "local command · Ready" not in body
+    assert rendered.frame.rows[-1] == "i details · Esc back"
+
+
 def test_dataset_list_formats_local_records_without_running_commands() -> None:
     output = format_dataset_list((status(), status(availability="disabled")), load_translator("en"))
 

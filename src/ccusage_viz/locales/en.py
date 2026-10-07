@@ -65,6 +65,7 @@ MESSAGES = {
     "status.dataset_group_disabled": "Disabled",
     "status.dataset_manager_title": "ccuv · Datasets  {count} registered",
     "status.dataset_manager_controls": "j/k select · i details · + add · r refresh · d disable · x remove · q quit",
+    "status.dataset_manager_detail_controls": "i details · Esc back",
     "status.dataset_manager_empty": "No registered datasets",
     "status.dataset_timezone_unspecified": "source timezone not declared",
     "status.dataset_details_supports": "Supports",

@@ -65,6 +65,7 @@ MESSAGES = {
     "status.dataset_group_disabled": "已禁用",
     "status.dataset_manager_title": "ccuv · 数据集  已注册 {count} 个",
     "status.dataset_manager_controls": "j/k 选择 · i 详情 · + 添加 · r 刷新 · d 禁用 · x 删除 · q 退出",
+    "status.dataset_manager_detail_controls": "i 详情 · Esc 返回",
     "status.dataset_manager_empty": "尚未注册数据集",
     "status.dataset_timezone_unspecified": "未声明数据源时区",
     "status.dataset_details_supports": "支持",

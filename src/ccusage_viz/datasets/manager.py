@@ -9,7 +9,7 @@ from shutil import get_terminal_size
 from ccusage_viz.datasets.models import DatasetRegistrationStatus
 from ccusage_viz.datasets.service import DatasetService
 from ccusage_viz.diagnostics import format_error
-from ccusage_viz.formatting import clip_width
+from ccusage_viz.formatting import clip_width, pad_width, wrap_width
 from ccusage_viz.i18n import Translator
 from ccusage_viz.terminal import Frame, FramePainter, compose_frame, set_cursor_visible
 from ccusage_viz.tui_input import InputDecoder, KeyEvent, PasteEvent, read_event, tui_input_mode
@@ -25,17 +25,13 @@ def _text(value, translator: Translator) -> str:
     return value.zh_cn if translator.language == "zh" else value.en
 
 
-def render_dataset_manager(
+def _list_rows(
     statuses: tuple[DatasetRegistrationStatus, ...],
     translator: Translator,
     *,
-    selected: int = 0,
-    details: bool = False,
-    width: int = 80,
-    height: int = 24,
-    notice: str | None = None,
-) -> ManagerView:
-    selected = min(max(selected, 0), max(0, len(statuses) - 1))
+    selected: int,
+    width: int,
+) -> list[str]:
     rows: list[str] = []
     labels = {
         "ready": translator.text("status.dataset_ready"),
@@ -51,50 +47,86 @@ def render_dataset_manager(
         for item in grouped:
             index = statuses.index(item)
             descriptor = item.registration.probe.descriptor
-            title = _text(descriptor.dataset.title, translator)
-            source = translator.text("label.dataset_source_local")
             marker = "›" if index == selected else " "
             rows.append(
                 clip_width(
-                    f"{marker} {title}  {descriptor.version}  {source} · {labels[item.availability]}",
+                    f"{marker} {_text(descriptor.dataset.title, translator)}  "
+                    f"{descriptor.version}  {translator.text('label.dataset_source_local')} · "
+                    f"{labels[item.availability]}",
                     width,
                 )
             )
-    if not rows:
-        rows.append(translator.text("status.dataset_manager_empty"))
+    return rows or [translator.text("status.dataset_manager_empty")]
+
+
+def _detail_rows(status: DatasetRegistrationStatus, translator: Translator, width: int) -> list[str]:
+    descriptor = status.registration.probe.descriptor
+    rows = [
+        _text(descriptor.dataset.title, translator),
+        *wrap_width(_text(descriptor.dataset.description, translator), width),
+        f"{_text(descriptor.dataset.unit.label, translator)} · "
+        f"{descriptor.source_timezone or translator.text('status.dataset_timezone_unspecified')}",
+        "",
+        translator.text("status.dataset_details_supports"),
+        " · ".join(
+            translator.text(f"label.pane_{kind}") for kind in descriptor.capabilities.charts
+        ),
+        "",
+        translator.text("status.dataset_details_environment"),
+        *(
+            f"{item.name} · "
+            f"{translator.text('status.dataset_environment_present') if item not in status.missing_environment else translator.text('status.dataset_environment_missing')}"
+            for item in descriptor.environment
+        ),
+        "",
+        translator.text("status.dataset_details_source"),
+        *wrap_width(shlex.join(status.registration.source.command_argv), width),
+    ]
+    return [clip_width(row, width) for row in rows]
+
+
+def _side_by_side(left: list[str], right: list[str], *, left_width: int, right_width: int) -> str:
+    rows: list[str] = []
+    count = max(len(left), len(right))
+    for index in range(count):
+        left_row = left[index] if index < len(left) else ""
+        right_row = right[index] if index < len(right) else ""
+        rows.append(f"{pad_width(clip_width(left_row, left_width), left_width)} │ {clip_width(right_row, right_width)}")
+    return "\n".join(rows)
+
+
+def render_dataset_manager(
+    statuses: tuple[DatasetRegistrationStatus, ...],
+    translator: Translator,
+    *,
+    selected: int = 0,
+    details: bool = False,
+    width: int = 80,
+    height: int = 24,
+    notice: str | None = None,
+) -> ManagerView:
+    selected = min(max(selected, 0), max(0, len(statuses) - 1))
     selected_status = statuses[selected] if statuses else None
-    if details and selected_status is not None:
-        descriptor = selected_status.registration.probe.descriptor
-        rows.extend(
-            (
-                "",
-                _text(descriptor.dataset.title, translator),
-                _text(descriptor.dataset.description, translator),
-                f"{_text(descriptor.dataset.unit.label, translator)} · "
-                f"{descriptor.source_timezone or translator.text('status.dataset_timezone_unspecified')}",
-                "",
-                translator.text("status.dataset_details_supports"),
-                " · ".join(
-                    translator.text(f"label.pane_{kind}")
-                    for kind in descriptor.capabilities.charts
-                ),
-                "",
-                translator.text("status.dataset_details_environment"),
-                *(
-                    f"{item.name} · "
-                    f"{translator.text('status.dataset_environment_present') if item not in selected_status.missing_environment else translator.text('status.dataset_environment_missing')}"
-                    for item in descriptor.environment
-                ),
-                "",
-                translator.text("status.dataset_details_source"),
-                shlex.join(selected_status.registration.source.command_argv),
-            )
+    if details and selected_status is not None and width >= 100:
+        left_width = max(32, (width - 3) * 42 // 100)
+        right_width = width - left_width - 3
+        body = _side_by_side(
+            _list_rows(statuses, translator, selected=selected, width=left_width),
+            _detail_rows(selected_status, translator, right_width),
+            left_width=left_width,
+            right_width=right_width,
         )
-    controls = translator.text("status.dataset_manager_controls")
+        controls = translator.text("status.dataset_manager_controls")
+    elif details and selected_status is not None:
+        body = "\n".join(_detail_rows(selected_status, translator, width))
+        controls = translator.text("status.dataset_manager_detail_controls")
+    else:
+        body = "\n".join(_list_rows(statuses, translator, selected=selected, width=width))
+        controls = translator.text("status.dataset_manager_controls")
     notices = () if notice is None else (notice,)
     return ManagerView(
         compose_frame(
-            "\n".join(rows),
+            body,
             translator.text("status.dataset_manager_title", count=len(statuses)),
             controls,
             notices,
@@ -243,8 +275,13 @@ def run_dataset_manager(service: DatasetService, translator: Translator) -> int:
                 if not isinstance(event, KeyEvent):
                     continue
                 key = event.value
-                if key in {"q", "\x1b"}:
+                if key == "q":
                     return 0
+                if key == "\x1b":
+                    if details:
+                        details = False
+                    else:
+                        return 0
                 if key in {"j", "\x1b[B"} and statuses:
                     selected = (selected + 1) % len(statuses)
                 elif key in {"k", "\x1b[A"} and statuses:
