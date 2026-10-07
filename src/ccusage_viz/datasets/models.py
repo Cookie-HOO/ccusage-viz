@@ -10,8 +10,14 @@ from typing import Literal, cast
 from ccusage_viz.custom_models import (
     CustomEnvironmentDeclaration,
     CustomProbeDescriptor,
+    V2ProbeDescriptor,
 )
-from ccusage_viz.custom_protocol import parse_probe_descriptor, probe_descriptor_to_wire
+from ccusage_viz.custom_protocol import (
+    parse_probe_descriptor,
+    parse_v2_probe_descriptor,
+    probe_descriptor_to_wire,
+    v2_probe_descriptor_to_wire,
+)
 from ccusage_viz.errors import UsageError
 
 _DATASET_ID = re.compile(r"[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
@@ -627,7 +633,7 @@ class DatasetUpdateCandidate:
 @dataclass(frozen=True, slots=True)
 class DatasetProbeSnapshot:
     dataset_id: str
-    descriptor: CustomProbeDescriptor
+    descriptor: CustomProbeDescriptor | V2ProbeDescriptor
     refreshed_at: str
 
     def __post_init__(self) -> None:
@@ -683,7 +689,11 @@ class DatasetRegistration:
             "updated_at": self.updated_at,
             "probe": {
                 "dataset_id": self.probe.dataset_id,
-                "descriptor": probe_descriptor_to_wire(self.probe.descriptor),
+                "descriptor": (
+                    v2_probe_descriptor_to_wire(self.probe.descriptor)
+                    if isinstance(self.probe.descriptor, V2ProbeDescriptor)
+                    else probe_descriptor_to_wire(self.probe.descriptor)
+                ),
                 "refreshed_at": self.probe.refreshed_at,
             },
             **(
@@ -767,7 +777,12 @@ class DatasetRegistration:
             updated_at,
             DatasetProbeSnapshot(
                 probe_id,
-                parse_probe_descriptor(probe.get("descriptor")),
+                (
+                    parse_v2_probe_descriptor(probe.get("descriptor"))
+                    if isinstance(probe.get("descriptor"), Mapping)
+                    and "metrics" in probe["descriptor"]
+                    else parse_probe_descriptor(probe.get("descriptor"))
+                ),
                 refreshed_at,
             ),
             (

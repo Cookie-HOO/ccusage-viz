@@ -8,8 +8,8 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
-from ccusage_viz.acquisition import custom_probe_query_intent
-from ccusage_viz.custom_protocol import CustomProbeResponse
+from ccusage_viz.acquisition import custom_probe_query_intent, custom_v2_probe_query_intent
+from ccusage_viz.custom_protocol import CustomProbeResponse, V2ProbeResponse
 from ccusage_viz.datasets.archive import extract_dataset_archive, sha256_bytes
 from ccusage_viz.datasets.github import (
     download_release_artifact,
@@ -35,6 +35,7 @@ from ccusage_viz.datasets.models import (
 from ccusage_viz.datasets.paths import dataset_state_root
 from ccusage_viz.datasets.store import DatasetStore
 from ccusage_viz.errors import UsageError
+from ccusage_viz.errors import QueryError
 from ccusage_viz.lifecycle import QueryTrigger
 from ccusage_viz.options import CustomCommandSource
 
@@ -56,24 +57,39 @@ class DatasetService:
         root: Path | None = None,
         environ: Mapping[str, str] | None = None,
         platform: tuple[str, str] | None = None,
-        probe_runner: Callable[[tuple[str, ...]], CustomProbeResponse] | None = None,
+        probe_runner: Callable[[tuple[str, ...]], CustomProbeResponse | V2ProbeResponse] | None = None,
     ) -> None:
         self.environ = environ
         self.store = DatasetStore(dataset_state_root(environ=environ) if root is None else root)
         self.platform = host_platform() if platform is None else platform
         self.probe_runner = self._run_probe if probe_runner is None else probe_runner
 
-    def _run_probe(self, command_argv: tuple[str, ...]) -> CustomProbeResponse:
+    def _run_probe(self, command_argv: tuple[str, ...]) -> CustomProbeResponse | V2ProbeResponse:
         from ccusage_viz.bootstrap import build_query_runtime
 
         source = CustomCommandSource("probe", command_argv)
-        intent = custom_probe_query_intent(
+        intent = custom_v2_probe_query_intent(
             source,
             owner_id="dataset:registration",
             generation=0,
             trigger=QueryTrigger.STARTUP,
         )
-        result = build_query_runtime(max_parallel=1).acquire(intent)
+        try:
+            result = build_query_runtime(max_parallel=1).acquire(intent)
+            response = result.custom_response
+            if isinstance(response, V2ProbeResponse):
+                return response
+        except QueryError:
+            pass
+        # Existing command Datasets remain V1 until explicitly migrated.
+        result = build_query_runtime(max_parallel=1).acquire(
+            custom_probe_query_intent(
+                source,
+                owner_id="dataset:registration",
+                generation=0,
+                trigger=QueryTrigger.STARTUP,
+            )
+        )
         response = result.custom_response
         if not isinstance(response, CustomProbeResponse):
             raise RuntimeError("custom probe did not return a probe response")

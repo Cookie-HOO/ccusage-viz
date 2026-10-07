@@ -16,7 +16,16 @@ from ccusage_viz.custom_models import (
     CustomUnit,
     LocalizedText,
 )
-from ccusage_viz.custom_protocol import CustomProbeResponse
+from ccusage_viz.custom_models import (
+    CustomUnit,
+    LocalizedText,
+    V2Dataset,
+    V2MetricCapabilities,
+    V2MetricDescriptor,
+    V2MonitorCapability,
+    V2ProbeDescriptor,
+)
+from ccusage_viz.custom_protocol import CustomProbeResponse, V2ProbeResponse
 from ccusage_viz.datasets.archive import sha256_bytes
 from ccusage_viz.datasets.models import ReleaseArtifact
 from ccusage_viz.datasets.service import DatasetService
@@ -60,6 +69,50 @@ def probe(dataset_id: str = "weread") -> CustomProbeResponse:
         (),
     )
     return CustomProbeResponse(dataset_id, descriptor)
+
+
+def v2_probe(dataset_id: str = "router") -> V2ProbeResponse:
+    text = LocalizedText("Router", "Router")
+    descriptor = V2ProbeDescriptor(
+        "router-1",
+        "0.1.0",
+        V2Dataset(text, LocalizedText("Live", "实时")),
+        (
+            V2MetricDescriptor(
+                "tokens",
+                LocalizedText("Tokens", "Token"),
+                LocalizedText("Live", "实时"),
+                CustomUnit("token", text, "suffix", 0),
+                "sum",
+                V2MetricCapabilities((), (), {"monitor": V2MonitorCapability(60, 10, (), ())}),
+                {},
+            ),
+            V2MetricDescriptor(
+                "completed_requests",
+                LocalizedText("Requests", "请求"),
+                LocalizedText("Live", "实时"),
+                CustomUnit("request", text, "suffix", 0),
+                "sum",
+                V2MetricCapabilities((), (), {"monitor": V2MonitorCapability(60, 10, (), ())}),
+                {},
+            ),
+        ),
+        (),
+    )
+    return V2ProbeResponse(dataset_id, descriptor)
+
+
+def test_registers_and_persists_a_v2_multi_metric_local_dataset(tmp_path: Path) -> None:
+    service = DatasetService(root=tmp_path, environ={}, probe_runner=lambda _argv: v2_probe())
+
+    result = service.register_local_command(("router-dataset",))
+    restored = service.store.load_registration("router")
+
+    assert result.kind == "created"
+    assert tuple(metric.id for metric in restored.probe.descriptor.metrics) == (
+        "tokens",
+        "completed_requests",
+    )
 
 
 def test_register_local_command_uses_probe_identity_and_preserves_argv(tmp_path: Path) -> None:

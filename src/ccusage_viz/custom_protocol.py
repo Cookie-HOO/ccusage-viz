@@ -790,6 +790,49 @@ def probe_descriptor_to_wire(descriptor: CustomProbeDescriptor) -> dict[str, obj
     }
 
 
+def v2_probe_descriptor_to_wire(descriptor: V2ProbeDescriptor) -> dict[str, object]:
+    """Serialize safe V2 descriptor metadata for a local registration snapshot."""
+
+    def localized(value: LocalizedText) -> dict[str, str]:
+        return {"en": value.en, "zh-CN": value.zh_cn}
+
+    def unit(value: CustomUnit) -> dict[str, object]:
+        return {"id": value.id, "label": localized(value.label), "placement": value.placement, "decimal_places": value.decimal_places}
+
+    def capability(value: V2HistoricalChartCapability | V2MonitorCapability) -> dict[str, object]:
+        common = {"group_by": list(value.group_by), "filters": list(value.filters)}
+        if isinstance(value, V2MonitorCapability):
+            return {**common, "window_seconds": value.window_seconds, **({"refresh_interval_seconds": value.refresh_interval_seconds} if value.refresh_interval_seconds is not None else {})}
+        return {**common, "granularities": list(value.granularities)}
+
+    return {
+        "revision": descriptor.revision,
+        "version": descriptor.version,
+        **({"source_timezone": descriptor.source_timezone} if descriptor.source_timezone else {}),
+        "dataset": {"title": localized(descriptor.dataset.title), "description": localized(descriptor.dataset.description)},
+        "metrics": [
+            {
+                "id": metric.id,
+                "title": localized(metric.title),
+                "description": localized(metric.description),
+                "unit": unit(metric.unit),
+                "aggregation": metric.aggregation,
+                "capabilities": {
+                    "group_by": [{"id": item.id, "label": localized(item.label)} for item in metric.capabilities.group_by],
+                    "filters": [],
+                    "charts": {kind: capability(item) for kind, item in metric.capabilities.charts.items()},
+                },
+                "defaults": {kind: {"period": item.period, "group_by": item.group_by, "top": item.top} for kind, item in metric.defaults.items()},
+            }
+            for metric in descriptor.metrics
+        ],
+        "environment": [
+            {"name": item.name, "required": item.required, "sensitive": item.sensitive, "label": localized(item.label), "how_to_get": localized(item.how_to_get), **({"help_url": item.help_url} if item.help_url else {})}
+            for item in descriptor.environment
+        ],
+    }
+
+
 def _parse_environment_declaration(value: object) -> CustomEnvironmentDeclaration:
     source = _mapping(value, "environment declaration")
     expected = {"name", "required", "sensitive", "label", "how_to_get"}
