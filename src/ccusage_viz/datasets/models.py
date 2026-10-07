@@ -162,6 +162,7 @@ class DatasetManifest:
     metric: DatasetMetric
     charts: tuple[str, ...]
     environment: tuple[EnvironmentRequirement, ...]
+    descriptor: CustomProbeDescriptor | None = None
 
     @classmethod
     def parse(cls, value: object) -> DatasetManifest:
@@ -296,6 +297,7 @@ class DatasetManifest:
             metric,
             tuple(descriptor.capabilities.charts),
             environment,
+            descriptor,
         )
 
 
@@ -612,6 +614,17 @@ DatasetSource = LocalDatasetSource | ManagedDatasetSource
 
 
 @dataclass(frozen=True, slots=True)
+class DatasetUpdateCandidate:
+    release_tag: str
+    asset_name: str
+    sha256: str
+
+    def __post_init__(self) -> None:
+        if not self.release_tag or not self.asset_name or not _SHA256.fullmatch(self.sha256):
+            raise ValueError("Dataset update candidate is invalid")
+
+
+@dataclass(frozen=True, slots=True)
 class DatasetProbeSnapshot:
     dataset_id: str
     descriptor: CustomProbeDescriptor
@@ -634,6 +647,7 @@ class DatasetRegistration:
     created_at: str
     updated_at: str
     probe: DatasetProbeSnapshot
+    available_update: DatasetUpdateCandidate | None = None
     last_probe_error: str | None = None
 
     def __post_init__(self) -> None:
@@ -672,6 +686,17 @@ class DatasetRegistration:
                 "descriptor": probe_descriptor_to_wire(self.probe.descriptor),
                 "refreshed_at": self.probe.refreshed_at,
             },
+            **(
+                {
+                    "available_update": {
+                        "release_tag": self.available_update.release_tag,
+                        "asset_name": self.available_update.asset_name,
+                        "sha256": self.available_update.sha256,
+                    }
+                }
+                if self.available_update is not None
+                else {}
+            ),
             **({"last_probe_error": self.last_probe_error} if self.last_probe_error else {}),
         }
 
@@ -687,6 +712,7 @@ class DatasetRegistration:
             "created_at",
             "updated_at",
             "probe",
+            "available_update",
             "last_probe_error",
         }
         if not set(value).issubset(allowed) or {
@@ -700,6 +726,7 @@ class DatasetRegistration:
         updated_at = value.get("updated_at")
         enabled = value.get("enabled")
         last_probe_error = value.get("last_probe_error")
+        available_update = value.get("available_update")
         if (
             not isinstance(dataset_id, str)
             or not isinstance(source, Mapping)
@@ -711,6 +738,12 @@ class DatasetRegistration:
             or (last_probe_error is not None and not isinstance(last_probe_error, str))
         ):
             raise ValueError("Dataset registration is invalid")
+        if available_update is not None and (
+            not isinstance(available_update, Mapping)
+            or set(available_update) != {"release_tag", "asset_name", "sha256"}
+            or not all(isinstance(available_update.get(key), str) for key in available_update)
+        ):
+            raise ValueError("Dataset registration update candidate is invalid")
         source_kind = source.get("kind")
         if source_kind == "local":
             if set(source) != {"kind", "command_argv"} or not isinstance(source.get("command_argv"), list) or not all(isinstance(item, str) for item in source["command_argv"]):
@@ -736,6 +769,15 @@ class DatasetRegistration:
                 probe_id,
                 parse_probe_descriptor(probe.get("descriptor")),
                 refreshed_at,
+            ),
+            (
+                DatasetUpdateCandidate(
+                    cast(str, available_update["release_tag"]),
+                    cast(str, available_update["asset_name"]),
+                    cast(str, available_update["sha256"]),
+                )
+                if available_update is not None
+                else None
             ),
             last_probe_error,
         )

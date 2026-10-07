@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 import pytest
 import rfc8785
@@ -17,15 +17,12 @@ def signed_catalog(
     *,
     entries: list[object] | None = None,
     issued_at: datetime | None = None,
-    expires_at: datetime | None = None,
 ) -> tuple[bytes, str]:
     issued_at = issued_at or datetime(2026, 10, 4, tzinfo=UTC)
-    expires_at = expires_at or issued_at + timedelta(days=30)
     signed = {
         "schema": "ccuv.official-dataset-catalog/v1",
         "catalog_version": 1,
         "issued_at": issued_at.isoformat().replace("+00:00", "Z"),
-        "expires_at": expires_at.isoformat().replace("+00:00", "Z"),
         "entries": entries or [],
     }
     public_key = private_key.public_key().public_bytes_raw()
@@ -80,6 +77,7 @@ def test_catalog_verifies_signed_entries_and_selects_platform() -> None:
     assert catalog.entry("weread").repository == "Cookie-HOO/ccuv-dataset-weread"
     assert artifact.release_tag == "v1.2.3"
     assert artifact.source_kind == "official"
+    assert catalog.entry_for_repository("Cookie-HOO/ccuv-dataset-weread") == catalog.entry("weread")
 
 
 @pytest.mark.parametrize(
@@ -105,20 +103,18 @@ def test_catalog_rejects_unsigned_tampering(mutation: object) -> None:
     assert caught.value.key == "error.dataset_catalog_signature"
 
 
-def test_catalog_rejects_expired_signed_body() -> None:
+def test_catalog_accepts_an_old_signed_body_from_the_trusted_official_source() -> None:
     private_key = Ed25519PrivateKey.generate()
     payload, public_key = signed_catalog(
         private_key,
         issued_at=datetime(2026, 8, 1, tzinfo=UTC),
-        expires_at=datetime(2026, 8, 31, tzinfo=UTC),
     )
 
-    with pytest.raises(UsageError) as caught:
-        parse_and_verify_official_catalog(
-            payload, now=datetime(2026, 10, 5, tzinfo=UTC), public_key_b64=public_key
-        )
+    catalog = parse_and_verify_official_catalog(
+        payload, now=datetime(2026, 10, 5, tzinfo=UTC), public_key_b64=public_key
+    )
 
-    assert caught.value.key == "error.dataset_catalog_expired"
+    assert catalog.issued_at == datetime(2026, 8, 1, tzinfo=UTC)
 
 
 def test_catalog_rejects_duplicate_json_keys() -> None:

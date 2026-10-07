@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import io
+import json
+import tarfile
 from pathlib import Path
 
 import pytest
@@ -14,6 +17,8 @@ from ccusage_viz.custom_models import (
     LocalizedText,
 )
 from ccusage_viz.custom_protocol import CustomProbeResponse
+from ccusage_viz.datasets.archive import sha256_bytes
+from ccusage_viz.datasets.models import ReleaseArtifact
 from ccusage_viz.datasets.service import DatasetService
 from ccusage_viz.errors import UsageError
 
@@ -125,3 +130,106 @@ def test_refresh_preserves_last_successful_snapshot_when_probe_fails(tmp_path: P
     assert refreshed.availability == "unavailable"
     assert refreshed.registration.probe == created.probe
     assert refreshed.registration.last_probe_error == "command failed"
+
+
+def _archive() -> bytes:
+    manifest = {
+        "schema": "ccuv.dataset/v1",
+        "protocol": "ccuv.custom/v1",
+        "entrypoint": "bin/weread",
+        "platform": {"os": "darwin", "arch": "arm64"},
+        "probe": {
+            "dataset_id": "weread",
+            "descriptor": {
+                "revision": "weread-1",
+                "version": "0.1.0",
+                "dataset": {
+                    "title": {"en": "WeRead", "zh-CN": "微信读书"},
+                    "description": {"en": "Reading activity", "zh-CN": "阅读活动"},
+                    "unit": {
+                        "id": "minute",
+                        "label": {"en": "minutes", "zh-CN": "分钟"},
+                        "placement": "suffix",
+                        "decimal_places": 0,
+                    },
+                },
+                "capabilities": {
+                    "group_by": [],
+                    "filters": [],
+                    "charts": {"timeline": {"granularities": ["day"], "group_by": [], "filters": []}},
+                },
+                "defaults": {"timeline": {"period": "14d", "group_by": None, "top": None}},
+                "environment": [],
+            },
+        },
+    }
+    payload = io.BytesIO()
+    with tarfile.open(fileobj=payload, mode="w:gz") as archive:
+        document = json.dumps(manifest).encode()
+        item = tarfile.TarInfo("manifest.json")
+        item.size = len(document)
+        archive.addfile(item, io.BytesIO(document))
+        executable = b"#!/bin/sh\n"
+        item = tarfile.TarInfo("bin/weread")
+        item.size = len(executable)
+        archive.addfile(item, io.BytesIO(executable))
+    return payload.getvalue()
+
+
+def test_inspect_artifact_validates_full_descriptor_without_installing(tmp_path: Path) -> None:
+    archive = _archive()
+    manifest_sha256 = sha256_bytes(
+        json.dumps(
+            {
+                "schema": "ccuv.dataset/v1",
+                "protocol": "ccuv.custom/v1",
+                "entrypoint": "bin/weread",
+                "platform": {"os": "darwin", "arch": "arm64"},
+                "probe": {
+                    "dataset_id": "weread",
+                    "descriptor": {
+                        "revision": "weread-1",
+                        "version": "0.1.0",
+                        "dataset": {
+                            "title": {"en": "WeRead", "zh-CN": "微信读书"},
+                            "description": {"en": "Reading activity", "zh-CN": "阅读活动"},
+                            "unit": {
+                                "id": "minute",
+                                "label": {"en": "minutes", "zh-CN": "分钟"},
+                                "placement": "suffix",
+                                "decimal_places": 0,
+                            },
+                        },
+                        "capabilities": {
+                            "group_by": [],
+                            "filters": [],
+                            "charts": {"timeline": {"granularities": ["day"], "group_by": [], "filters": []}},
+                        },
+                        "defaults": {"timeline": {"period": "14d", "group_by": None, "top": None}},
+                        "environment": [],
+                    },
+                },
+            }
+        ).encode()
+    )
+    artifact = ReleaseArtifact(
+        "weread",
+        "example/weread",
+        "v0.1.0",
+        "weread-darwin-arm64.tar.gz",
+        "https://github.com/example/weread/releases/download/v0.1.0/weread-darwin-arm64.tar.gz",
+        sha256_bytes(archive),
+        manifest_sha256,
+        len(archive),
+        "official",
+        "darwin",
+        "arm64",
+    )
+    service = DatasetService(root=tmp_path, environ={}, platform=("darwin", "arm64"))
+
+    manifest = service.inspect_artifact(artifact, archive)
+
+    assert manifest.descriptor is not None
+    assert manifest.descriptor.dataset.description.en == "Reading activity"
+    assert service.store.dataset_ids() == ()
+    assert not (tmp_path / "staging").exists() or not tuple((tmp_path / "staging").iterdir())

@@ -13,15 +13,18 @@ from ccusage_viz.custom_protocol import CustomProbeResponse
 from ccusage_viz.datasets.archive import extract_dataset_archive, sha256_bytes
 from ccusage_viz.datasets.github import (
     download_release_artifact,
+    parse_github_repository,
     resolve_github_release,
     resolve_github_repository,
     resolve_official_artifact,
 )
 from ccusage_viz.datasets.models import (
+    DatasetManifest,
     DatasetProbeSnapshot,
     DatasetRegistration,
     DatasetRegistrationStatus,
     DatasetStatus,
+    DatasetUpdateCandidate,
     LocalDatasetSource,
     ManagedDatasetSource,
     RegisterResult,
@@ -183,14 +186,83 @@ class DatasetService:
                     last_probe_error=str(exc),
                 )
             else:
+                try:
+                    candidate = self._update_candidate(current)
+                except Exception:
+                    candidate = current.available_update
                 updated = replace(
                     current,
                     updated_at=now,
                     probe=DatasetProbeSnapshot(current.dataset_id, response.descriptor, now),
+                    available_update=candidate,
                     last_probe_error=None,
                 )
             self.store.save_registration(updated)
         return self.registrations()
+
+    def _update_candidate(self, registration: DatasetRegistration) -> DatasetUpdateCandidate | None:
+        if not isinstance(registration.source, ManagedDatasetSource):
+            return None
+        artifact = self._resolved_managed_artifact(registration.source)
+        if (
+            artifact.release_tag == registration.source.release_tag
+            and artifact.asset_name == registration.source.asset_name
+            and artifact.sha256 == registration.source.sha256
+        ):
+            return None
+        return DatasetUpdateCandidate(artifact.release_tag, artifact.asset_name, artifact.sha256)
+
+    def _resolved_managed_artifact(self, source: ManagedDatasetSource) -> ReleaseArtifact:
+        host_os, host_arch = self.platform
+        if source.kind == "official":
+            catalog = self.official_catalog()
+            return resolve_official_artifact(
+                catalog.artifact_for(
+                    source_repository_id(catalog, source.repository), host_os, host_arch
+                ),
+                expected_os=host_os,
+                expected_arch=host_arch,
+            )
+        return resolve_github_repository(repository=source.repository, os=host_os, arch=host_arch)
+
+    def upgrade(self, dataset_id: str) -> DatasetRegistration:
+        identifier = parse_dataset_id(dataset_id)
+        registration = self.store.load_registration(identifier)
+        if registration.available_update is None or not isinstance(registration.source, ManagedDatasetSource):
+            raise UsageError("error.dataset_no_update", dataset_id=identifier)
+        artifact = self._resolved_managed_artifact(registration.source)
+        if (
+            artifact.release_tag != registration.available_update.release_tag
+            or artifact.asset_name != registration.available_update.asset_name
+            or artifact.sha256 != registration.available_update.sha256
+        ):
+            raise UsageError("error.dataset_update_changed", dataset_id=identifier)
+        installed = self.install_artifact(artifact, download_release_artifact(artifact), replace=True)
+        assert installed.dataset_id == identifier
+        self.register_installed_dataset(identifier, replace=True)
+        return self.store.load_registration(identifier)
+
+    def inspect_artifact(self, artifact: ReleaseArtifact, archive: bytes) -> DatasetManifest:
+        """Validate an archive and return its static manifest without installing it."""
+
+        host_os, host_arch = self.platform
+        staging = self.store.stage_directory()
+        try:
+            staging.rmdir()
+            manifest = extract_dataset_archive(
+                archive,
+                expected_sha256=artifact.sha256,
+                destination=staging,
+                expected_dataset_id=artifact.dataset_id,
+                host_os=host_os,
+                host_arch=host_arch,
+            )
+            manifest_sha256 = sha256_bytes((staging / "manifest.json").read_bytes())
+            if artifact.manifest_sha256 is not None and manifest_sha256 != artifact.manifest_sha256:
+                raise UsageError("error.dataset_manifest_invalid")
+            return manifest
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
 
     def remove_registration(self, dataset_id: str) -> None:
         identifier = parse_dataset_id(dataset_id)
@@ -266,16 +338,22 @@ class DatasetService:
     def official_entries(self):
         return self.official_catalog().entries
 
-    def install_official(self, dataset_id: str, *, replace: bool = False) -> DatasetStatus:
+    def resolve_official(self, dataset_id: str) -> ReleaseArtifact:
         identifier = parse_dataset_id(dataset_id)
         catalog = self.official_catalog()
         host_os, host_arch = self.platform
-        artifact = resolve_official_artifact(
+        return resolve_official_artifact(
             catalog.artifact_for(identifier, host_os, host_arch),
             expected_os=host_os,
             expected_arch=host_arch,
         )
-        archive = download_release_artifact(artifact)
+
+    def download_artifact(self, artifact: ReleaseArtifact) -> bytes:
+        return download_release_artifact(artifact)
+
+    def install_official(self, dataset_id: str, *, replace: bool = False) -> DatasetStatus:
+        artifact = self.resolve_official(dataset_id)
+        archive = self.download_artifact(artifact)
         return self.install_artifact(artifact, archive, replace=replace)
 
     def update_official(
@@ -377,7 +455,21 @@ class DatasetService:
 
     def resolve_github_repository(self, repository: str) -> ReleaseArtifact:
         host_os, host_arch = self.platform
-        return resolve_github_repository(repository=repository, os=host_os, arch=host_arch)
+        normalized = parse_github_repository(repository)
+        try:
+            catalog = self.official_catalog()
+            official = catalog.entry_for_repository(normalized)
+        except UsageError as error:
+            if error.key != "error.dataset_catalog_unavailable":
+                raise
+        else:
+            if official is not None:
+                return resolve_official_artifact(
+                    catalog.artifact_for(official.id, host_os, host_arch),
+                    expected_os=host_os,
+                    expected_arch=host_arch,
+                )
+        return resolve_github_repository(repository=normalized, os=host_os, arch=host_arch)
 
     def install_resolved_github_artifact(
         self, artifact: ReleaseArtifact, *, replace: bool = False
@@ -421,3 +513,10 @@ def replace_registration(current: DatasetRegistration, candidate: DatasetRegistr
         created_at=current.created_at,
         updated_at=datetime.now(UTC).isoformat(),
     )
+
+
+def source_repository_id(catalog, repository: str) -> str:
+    entry = catalog.entry_for_repository(repository)
+    if entry is None:
+        raise UsageError("error.dataset_catalog_not_found", dataset_id=repository)
+    return entry.id

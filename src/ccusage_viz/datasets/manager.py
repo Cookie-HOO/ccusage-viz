@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from shutil import get_terminal_size
 
 from ccusage_viz.datasets.models import (
+    DatasetManifest,
     DatasetRegistrationStatus,
     LocalDatasetSource,
 )
@@ -144,6 +145,40 @@ def _detail_rows(status: DatasetRegistrationStatus, translator: Translator, widt
     return [clip_width(row, width) for row in rows]
 
 
+def _manifest_rows(manifest: DatasetManifest, translator: Translator, width: int) -> list[str]:
+    required = tuple(item for item in manifest.environment if item.required)
+    optional = tuple(item for item in manifest.environment if not item.required)
+
+    def environment_rows(items, heading: str) -> list[str]:
+        if not items:
+            return []
+        rows = [heading]
+        rows.extend(f"{item.name} · {_text(item.label, translator)}" for item in items)
+        return rows
+
+    descriptor = manifest.descriptor
+    title = (
+        _text(descriptor.dataset.title, translator)
+        if descriptor is not None
+        else _text(manifest.metric.title, translator)
+    )
+    description = (
+        _text(descriptor.dataset.description, translator) if descriptor is not None else ""
+    )
+    rows = [
+        title,
+        *wrap_width(description, width),
+        f"{translator.text('status.dataset_column_version')}: {manifest.version}",
+        f"{translator.text('status.dataset_details_supports')}: "
+        + " · ".join(translator.text(f"label.pane_{kind}") for kind in manifest.charts),
+        "",
+        translator.text("status.dataset_details_environment"),
+        *environment_rows(required, translator.text("status.dataset_environment_required")),
+        *environment_rows(optional, translator.text("status.dataset_environment_optional")),
+    ]
+    return [clip_width(row, width) for row in rows]
+
+
 def _side_by_side(left: list[str], right: list[str], *, left_width: int, right_width: int) -> str:
     rows: list[str] = []
     count = max(len(left), len(right))
@@ -175,10 +210,18 @@ def render_dataset_manager(
             left_width=left_width,
             right_width=right_width,
         )
-        controls = translator.text("status.dataset_manager_controls")
+        controls = (
+            translator.text("status.dataset_manager_upgrade_controls")
+            if selected_status.registration.available_update is not None
+            else translator.text("status.dataset_manager_controls")
+        )
     elif details and selected_status is not None:
         body = "\n".join(_detail_rows(selected_status, translator, width))
-        controls = translator.text("status.dataset_manager_detail_controls")
+        controls = (
+            translator.text("status.dataset_manager_detail_upgrade_controls")
+            if selected_status.registration.available_update is not None
+            else translator.text("status.dataset_manager_detail_controls")
+        )
     else:
         body = "\n".join(_list_rows(statuses, translator, selected=selected, width=width))
         controls = translator.text("status.dataset_manager_controls")
@@ -408,6 +451,11 @@ def _manager_help_lines(
         translator.text("status.dataset_help_refresh"),
         translator.text("status.dataset_help_add"),
         translator.text("status.dataset_help_details"),
+        *(
+            (translator.text("status.dataset_help_upgrade"),)
+            if status is not None and status.registration.available_update is not None
+            else ()
+        ),
         translator.text("status.dataset_help_enable"),
         translator.text("status.dataset_help_remove"),
         translator.text("status.dataset_help_navigation"),
@@ -556,18 +604,24 @@ def _register_official(
         if event.value not in {"\r", "\n"}:
             continue
         selected = entries[index]
+        try:
+            artifact = service.resolve_official(selected.id)
+            archive = service.download_artifact(artifact)
+            manifest = service.inspect_artifact(artifact, archive)
+        except Exception as exc:
+            return format_error(exc, translator)
         if not _confirm(
             screen,
             translator,
             decoder,
-            translator.text("status.dataset_browse_confirm", dataset_id=selected.id, repository=selected.artifacts[0].repository),
+            "\n".join(_manifest_rows(manifest, translator, get_terminal_size().columns)),
             title=translator.text("status.dataset_browse_title"),
             controls=translator.text("status.dataset_browse_confirm_controls"),
             read_input=read_input,
         ):
             continue
         try:
-            service.install_official(selected.id)
+            service.install_artifact(artifact, archive)
             return _register_result(
                 service,
                 service.register_installed_dataset(selected.id),
@@ -635,20 +689,22 @@ def _register_github(
         return None
     try:
         artifact = service.resolve_github_repository(repository)
+        archive = service.download_artifact(artifact)
+        manifest = service.inspect_artifact(artifact, archive)
     except Exception as exc:
         return format_error(exc, translator)
     if not _confirm(
         screen,
         translator,
         decoder,
-        translator.text("status.dataset_github_confirm", repository=artifact.repository),
+        "\n".join(_manifest_rows(manifest, translator, get_terminal_size().columns)),
         title=translator.text("status.dataset_github_title"),
         controls=translator.text("status.dataset_github_confirm_controls"),
         read_input=read_input,
     ):
         return None
     try:
-        status = service.install_resolved_github_artifact(artifact)
+        status = service.install_artifact(artifact, archive)
         assert status.installed is not None
         return _register_result(
             service,
@@ -753,6 +809,37 @@ def run_dataset_manager(service: DatasetService, translator: Translator) -> int:
                     notice = translator.text(
                         "status.dataset_refresh_complete", unavailable=unavailable
                     )
+                elif (
+                    key == "u"
+                    and details
+                    and view.selected_id is not None
+                    and statuses[selected].registration.available_update is not None
+                ):
+                    current = statuses[selected].registration
+                    candidate = current.available_update
+                    assert candidate is not None
+                    if _confirm(
+                        screen,
+                        translator,
+                        decoder,
+                        translator.text(
+                            "status.dataset_upgrade_confirm",
+                            dataset_id=current.dataset_id,
+                            current=current.source.release_tag,
+                            candidate=candidate.release_tag,
+                        ),
+                        title=translator.text("status.dataset_upgrade_title"),
+                        controls=translator.text("status.dataset_upgrade_controls"),
+                    ):
+                        try:
+                            upgraded = service.upgrade(current.dataset_id)
+                            notice = translator.text(
+                                "status.dataset_upgrade_complete",
+                                dataset_id=upgraded.dataset_id,
+                                version=upgraded.probe.descriptor.version,
+                            )
+                        except Exception as exc:
+                            notice = format_error(exc, translator)
     finally:
         screen.finish()
         set_cursor_visible(sys.stdout, True)

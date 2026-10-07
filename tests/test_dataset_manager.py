@@ -121,6 +121,12 @@ def test_manager_help_uses_dashboard_style_highlight_for_section_titles() -> Non
     assert "\x1b[" in "\n".join(frame.rows)
 
 
+def test_manager_general_help_does_not_repeat_a_second_heading() -> None:
+    lines = _manager_help_lines(status(), load_translator("en"), details=False, width=80)
+
+    assert "Dataset manager help" not in lines
+
+
 def test_manager_help_highlights_sections_for_interactive_manager_default() -> None:
     lines = _manager_help_lines(status(), load_translator("en"), details=False, width=80)
     frame = _manager_help_frame(lines, load_translator("en"), width=100, height=24, color=True)

@@ -25,14 +25,12 @@ CATALOG_KEY_ID = "ccuv-official-2026-01"
 # held outside this repository in the maintainer Keychain and release environment.
 CATALOG_PUBLIC_KEY_B64 = "lfF6lTTEIRoh7Cw+2wHr/k2Jkh5dYcREQuKcjSYpPBo="
 MAX_CATALOG_BYTES = 1024 * 1024
-MAX_CATALOG_LIFETIME = timedelta(days=35)
 MAX_FUTURE_ISSUED_AT = timedelta(minutes=5)
 
 
 @dataclass(frozen=True, slots=True)
 class OfficialCatalog:
     issued_at: datetime
-    expires_at: datetime
     entries: tuple[CatalogEntry, ...]
 
     def entry(self, dataset_id: str) -> CatalogEntry:
@@ -50,6 +48,12 @@ class OfficialCatalog:
         if len(matches) != 1:
             raise UsageError("error.dataset_platform_incompatible")
         return matches[0]
+
+    def entry_for_repository(self, repository: str) -> CatalogEntry | None:
+        matches = tuple(entry for entry in self.entries if entry.repository == repository)
+        if len(matches) > 1:
+            raise UsageError("error.dataset_catalog_invalid")
+        return matches[0] if matches else None
 
 
 def _reject_duplicate_pairs(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -82,7 +86,6 @@ def _parse_signed(value: object, *, now: datetime) -> OfficialCatalog:
         "schema",
         "catalog_version",
         "issued_at",
-        "expires_at",
         "entries",
     }:
         raise ValueError("catalog signed body is invalid")
@@ -92,14 +95,8 @@ def _parse_signed(value: object, *, now: datetime) -> OfficialCatalog:
     ):
         raise ValueError("catalog schema is invalid")
     issued_at = _parse_timestamp(value.get("issued_at"))
-    expires_at = _parse_timestamp(value.get("expires_at"))
-    if (
-        issued_at > now + MAX_FUTURE_ISSUED_AT
-        or expires_at <= issued_at
-        or expires_at - issued_at > MAX_CATALOG_LIFETIME
-        or expires_at <= now
-    ):
-        raise UsageError("error.dataset_catalog_expired")
+    if issued_at > now + MAX_FUTURE_ISSUED_AT:
+        raise ValueError("catalog issued_at is in the future")
     raw_entries = value.get("entries")
     if not isinstance(raw_entries, list):
         raise ValueError("catalog entries are invalid")
@@ -111,7 +108,7 @@ def _parse_signed(value: object, *, now: datetime) -> OfficialCatalog:
     ]
     if len(set(platforms)) != len(platforms):
         raise ValueError("catalog artifacts overlap by platform")
-    return OfficialCatalog(issued_at, expires_at, entries)
+    return OfficialCatalog(issued_at, entries)
 
 
 def parse_and_verify_official_catalog(

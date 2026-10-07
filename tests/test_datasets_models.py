@@ -82,6 +82,8 @@ def test_manifest_accepts_static_probe_descriptor_without_duplicate_metadata() -
     assert manifest.id == "reading-time"
     assert manifest.version == "1.2.3"
     assert manifest.charts == ("timeline",)
+    assert manifest.descriptor is not None
+    assert manifest.descriptor.dataset.description.en == "Daily reading"
 
 
 def test_environment_status_never_retains_values() -> None:
