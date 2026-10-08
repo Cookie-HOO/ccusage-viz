@@ -75,6 +75,46 @@ ccuv dashboard
 | `spotlight-wide` | `ccuv dashboard spotlight-wide` | Best for prioritizing Timeline trends. Timeline-led. | <img src="docs/assets/readme/dashboard-spotlight-wide.png" alt="Preview" width="180"> |
 | `spotlight-wide2` | `ccuv dashboard spotlight-wide2` | Best for prioritizing Timeline and Stack together. Timeline + Stack-led. | <img src="docs/assets/readme/dashboard-spotlight-wide2.png" alt="Preview" width="180"> |
 
+### Your Dashboard presets
+
+In Dashboard browse mode, press `s` to save the current Dashboard under a name,
+or `p` to open the full-screen preset manager. The manager lists built-in and
+your saved presets; use arrows or `j`/`k` to select, `Enter` to load, `s` to
+save, and `x` to delete a selected user preset. Built-ins can be loaded but not
+deleted. Saving a user preset with a built-in name intentionally overrides it;
+deleting that user preset reveals the built-in again. Saving over an existing
+user preset asks whether to overwrite or cancel.
+
+Preset names must match `^[a-z][a-z0-9-]*$`. A saved name can be launched in a
+fresh terminal with `ccuv dashboard <name>`. A named launch is closed to
+configuration overrides: only `--demo`, `--lang`, `--empty`, and `--ccusage-bin`
+may accompany it. For example:
+
+```bash
+ccuv dashboard weekly-review
+ccuv dashboard weekly-review --demo --lang zh-CN
+ccuv dashboard weekly-review --empty
+ccuv dashboard weekly-review --ccusage-bin /opt/bin/ccusage
+```
+
+With a named preset, `--empty` keeps its layout, weights, display settings,
+refresh/sampling cadence, timezone, demo and process settings, but replaces every
+pane with an empty pane in memory; it never changes the saved preset. The ordinary
+unnamed `ccuv dashboard --empty` flow remains available for composing a new
+temporary Dashboard. A demo-enabled preset stays demo-enabled when loaded;
+Dashboard currently has no runtime control for turning demo off.
+
+Presets persist declarative Dashboard configuration, including installed Dataset
+references, local-command argv, and executable Overlay commands, but never query
+results, environments, credentials, or UI/runtime state. Presets are trusted
+user-local automation: load only presets you trust, because loading one can run
+the commands it contains. Presets live in ccuv's private state directory under
+`dashboard-presets/presets.json` (`~/Library/Application Support/ccuv` on macOS,
+`%LOCALAPPDATA%/ccuv` on Windows, or `${XDG_STATE_HOME:-~/.local/state}/ccuv` on
+other systems). A missing installed Dataset leaves a preset loadable and its pane
+reports the unavailable source; only unreadable, malformed, or unsupported preset
+storage is shown as unavailable and protected from overwrites.
+
 > [!TIP]
 > Dashboard coordinates pane queries: identical in-flight provider requests are
 > shared, avoiding duplicate work while multiple panes refresh.
@@ -188,8 +228,14 @@ unavailable.
 > [!TIP]
 > The published `ccusage` package does not include DeepSeek Harness (DSH)
 > statistics. The unofficial [`oksure/ccusage` DSH branch](https://github.com/oksure/ccusage/tree/contrib/dsh-usage-adapter)
-> adds `ccusage dsh` reports; it may drift from upstream. ccuv has no DSH
-> collector of its own.
+> adds `ccusage dsh` reports. Install that branch instead of the published npm
+> package:
+>
+> ```bash
+> npm install -g "git+https://github.com/oksure/ccusage.git#contrib/dsh-usage-adapter"
+> ```
+>
+> It may drift from upstream. ccuv has no DSH collector of its own.
 
 ## Further reading
 
@@ -203,6 +249,8 @@ These documents answer the deeper questions:
 | --- | --- |
 | [Usage guide](docs/usage.md) | How do I install, configure, compose, and adjust charts and Dashboards? |
 | [Custom command protocol](docs/custom-command-protocol.md) | How do I connect an additive historical dataset through a command, use empty Dashboard panes, and implement the JSON contract? |
+| [Dataset developer guide](docs/dataset-developer-guide.md) | How do I build, test locally, Probe, query, package, and publish a Dataset? |
+| [Dataset user guide](docs/dataset-user-guide.md) | How do I install, manage, select, and use local, official, or GitHub Datasets? |
 | [Design philosophy](docs/design-philosophy.md) | Which product boundaries, ownership rules, and presentation principles are intentional? |
 | [Architecture](docs/architecture.md) | How do CLI routes, hosts, panes, providers, processing, and renderers fit together for maintainers? |
 | [Roadmap](ROADMAP.md) | What is planned, deferred, or open for feedback? |

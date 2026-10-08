@@ -7,12 +7,12 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from shutil import get_terminal_size
 
+from ccusage_viz.custom_models import V2ProbeDescriptor
 from ccusage_viz.datasets.models import (
     DatasetManifest,
     DatasetRegistrationStatus,
     LocalDatasetSource,
 )
-from ccusage_viz.custom_models import V2ProbeDescriptor
 from ccusage_viz.datasets.service import DatasetService
 from ccusage_viz.diagnostics import format_error
 from ccusage_viz.formatting import clip_width, display_width, pad_width, wrap_width

@@ -1,6 +1,7 @@
 import math
 from argparse import Namespace
 from datetime import date
+from pathlib import Path
 
 import pytest
 
@@ -17,6 +18,8 @@ from ccusage_viz.cli import (
 )
 from ccusage_viz.configuration import standalone_from_chart_pane
 from ccusage_viz.dashboard import DASHBOARD_PRESETS
+from ccusage_viz.dashboard_preset_store import DashboardPresetStore
+from ccusage_viz.dashboard_presets import preset_from_launch
 from ccusage_viz.errors import UsageError
 from ccusage_viz.i18n import load_translator
 from ccusage_viz.options import (
@@ -81,6 +84,8 @@ def test_text_and_animate_help_describe_public_interfaces(
         "--overlay-color",
         "--overlay-interval",
         "--overlay-max-width",
+        "--overlay-offset-x",
+        "--overlay-offset-y",
     ):
         assert option in animate_help
     assert "--overlay-time-band" not in animate_help
@@ -555,7 +560,9 @@ def test_historical_lifecycle_defaults_and_validation() -> None:
 def test_continuous_routes_reject_ambiguous_lifecycle_options() -> None:
     parser = build_parser(load_translator("en"))
     with pytest.raises(UsageError, match="error.arguments"):
-        _to_options(parser.parse_args(["chart", "monitor", "--no-watch"]), explicit=frozenset({"no_watch"}))
+        _to_options(
+            parser.parse_args(["chart", "monitor", "--no-watch"]), explicit=frozenset({"no_watch"})
+        )
     for arguments in (
         ["chart", "timeline", "--watch"],
         ["dashboard", "--watch"],
@@ -738,9 +745,7 @@ def test_ranking_defaults_to_dot_for_builtin_and_custom_commands() -> None:
 
     builtin = _to_options(parser.parse_args(["chart", "ranking"]))
     custom = _to_options(
-        parser.parse_args(
-            ["chart", "ranking", "--dataset", "reading", "--command", "reader ccuv"]
-        )
+        parser.parse_args(["chart", "ranking", "--dataset", "reading", "--command", "reader ccuv"])
     )
 
     assert builtin.chart.presentation.style == "dot"
@@ -835,18 +840,18 @@ def test_dashboard_spotlight_presets_feature_the_first_pane(
     assert {pane.chart.presentation.density for pane in options.panes} == {"compact"}
 
 
-@pytest.mark.parametrize(
-    "arguments",
-    (
-        ["dashboard", "spotlight-" + "tall"],
-        ["dashboard", "--pane", "timeline", "--layout", "spotlight-" + "tall"],
-    ),
-)
-def test_dashboard_rejects_removed_spotlight_tall(arguments: list[str]) -> None:
+def test_dashboard_allows_user_preset_names_but_rejects_unknown_ones() -> None:
     parser = build_parser(load_translator("en"))
 
+    namespace = parser.parse_args(["dashboard", "spotlight-tall"])
+    assert namespace.preset == "spotlight-tall"
+
     with pytest.raises(UsageError) as caught:
-        parser.parse_args(arguments)
+        _to_options(namespace)
+    assert caught.value.key == "error.arguments"
+
+    with pytest.raises(UsageError) as caught:
+        parser.parse_args(["dashboard", "--pane", "timeline", "--layout", "spotlight-tall"])
     assert caught.value.key == "error.arguments"
 
 
@@ -1073,32 +1078,99 @@ def test_dashboard_narrow_and_all_presets_expand_to_concrete_state() -> None:
     assert len({pane.chart.presentation.theme for pane in all_panes.panes}) > 3
 
 
-def test_dashboard_preset_accepts_overrides_and_appended_panes() -> None:
+@pytest.mark.parametrize(
+    "arguments",
+    (
+        ["dashboard", "wide", "--refresh-interval", "20"],
+        ["dashboard", "wide", "--pane", "calendar"],
+        ["dashboard", "wide", "--query-timeout", "20"],
+        ["dashboard", "wide", "--timezone", "UTC"],
+    ),
+)
+def test_dashboard_named_preset_rejects_configuration_overrides(arguments: list[str]) -> None:
     parser = build_parser(load_translator("en"))
-    arguments = [
-        "dashboard",
-        "wide",
-        "--refresh-interval",
-        "20",
-        "--pane",
-        "calendar",
-    ]
 
-    options = _to_options(
-        parser.parse_args(arguments), explicit=frozenset({"refresh_interval", "panes"})
+    with pytest.raises(UsageError) as caught:
+        _to_options(parser.parse_args(arguments), explicit=_explicit_fields(arguments))
+
+    assert caught.value.key == "error.arguments"
+
+
+def test_dashboard_named_preset_allows_ccusage_bin_override() -> None:
+    parser = build_parser(load_translator("en"))
+    arguments = ["dashboard", "wide", "--ccusage-bin", "/opt/bin/ccusage"]
+
+    options = _to_options(parser.parse_args(arguments), explicit=_explicit_fields(arguments))
+
+    assert options.process.ccusage_bin == "/opt/bin/ccusage"
+    assert options.was_explicit("ccusage_bin")
+
+
+def test_dashboard_named_empty_preserves_preset_configuration() -> None:
+    parser = build_parser(load_translator("en"))
+
+    preset = _to_options(parser.parse_args(["dashboard", "wide"]))
+    emptied = _to_options(
+        parser.parse_args(["dashboard", "wide", "--empty"]),
+        explicit={"empty"},
     )
 
-    assert options.host.refresh_interval == 20
-    assert options.host.grid == "3x2"
-    assert len(options.panes) == 5
-    assert options.panes[-1].chart.kind == "calendar"
+    assert emptied.process == preset.process
+    assert emptied.host == preset.host
+    assert len(emptied.panes) == len(preset.panes)
+    assert all(isinstance(pane, EmptyPaneConfig) for pane in emptied.panes)
+
+
+def test_dashboard_user_preset_empty_preserves_configuration(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    parser = build_parser(load_translator("en"))
+    saved = DashboardLaunch(
+        ProcessConfig(ccusage_bin="preset-ccusage", query_timeout=17),
+        DashboardHostConfig(grid="1x1", timezone="Asia/Shanghai", demo_size="50", demo_seed=3),
+        (EmptyPaneConfig(),),
+    )
+    DashboardPresetStore(tmp_path).save(preset_from_launch("my-dashboard", saved))
+    monkeypatch.setattr("ccusage_viz.cli.dashboard_preset_state_root", lambda: tmp_path)
+
+    emptied = _to_options(
+        parser.parse_args(["dashboard", "my-dashboard", "--empty"]),
+        explicit={"empty"},
+    )
+
+    assert emptied.process == saved.process
+    assert emptied.host == saved.host
+    assert len(emptied.panes) == len(saved.panes)
+    assert all(isinstance(pane, EmptyPaneConfig) for pane in emptied.panes)
+
+
+def test_dashboard_user_preset_allows_ccusage_bin_override(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    parser = build_parser(load_translator("en"))
+    saved = DashboardLaunch(
+        ProcessConfig(ccusage_bin="preset-ccusage", query_timeout=17),
+        DashboardHostConfig(grid="1x1", timezone="Asia/Shanghai", demo_size="50", demo_seed=3),
+        (EmptyPaneConfig(),),
+    )
+    DashboardPresetStore(tmp_path).save(preset_from_launch("my-dashboard", saved))
+    monkeypatch.setattr("ccusage_viz.cli.dashboard_preset_state_root", lambda: tmp_path)
+    arguments = ["dashboard", "my-dashboard", "--ccusage-bin", "/opt/bin/ccusage"]
+
+    loaded = _to_options(parser.parse_args(arguments), explicit=_explicit_fields(arguments))
+
+    assert loaded.process.query_timeout == saved.process.query_timeout
+    assert loaded.process.ccusage_bin == "/opt/bin/ccusage"
+    assert loaded.host == saved.host
+    assert loaded.panes == saved.panes
+    assert loaded.was_explicit("ccusage_bin")
 
 
 def test_dashboard_rejects_unknown_preset() -> None:
     parser = build_parser(load_translator("en"))
 
     with pytest.raises(UsageError, match="error.arguments"):
-        parser.parse_args(["dashboard", "medium"])
+        _to_options(parser.parse_args(["dashboard", "medium"]))
 
 
 def test_dashboard_host_options_use_the_default_preset() -> None:
@@ -1212,7 +1284,11 @@ def test_dashboard_rejects_removed_or_ambiguous_options(arguments: list[str]) ->
 )
 def test_obsolete_appearance_flags_are_rejected(flag: str) -> None:
     parser = build_parser(load_translator("en"))
-    args = ["chart", "timeline", flag, "nord"] if flag == "--color-scheme" else ["chart", "timeline", flag]
+    args = (
+        ["chart", "timeline", flag, "nord"]
+        if flag == "--color-scheme"
+        else ["chart", "timeline", flag]
+    )
     with pytest.raises(UsageError) as caught:
         parser.parse_args(args)
     assert caught.value.key == "error.arguments"

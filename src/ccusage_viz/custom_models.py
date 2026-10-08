@@ -63,8 +63,9 @@ class CustomFilter:
 @dataclass(frozen=True, slots=True)
 class CustomChartCapability:
     granularities: tuple[str, ...]
-    group_by: tuple[str, ...]
+    group_by: tuple[str | None, ...]
     filters: tuple[str, ...]
+    max_items: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,6 +73,13 @@ class CustomChartDefaults:
     period: str | None
     group_by: str | None
     top: int | None
+    granularity: str | None = None
+    filters: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    other: str | None = None
+    style: str | None = None
+    theme: str | None = None
+    window_seconds: int | None = None
+    declared: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,9 +128,10 @@ class V2Dataset:
 @dataclass(frozen=True, slots=True)
 class V2HistoricalChartCapability:
     granularities: tuple[str, ...]
-    group_by: tuple[str, ...]
+    group_by: tuple[str | None, ...]
     filters: tuple[str, ...]
     periods: tuple[str, ...] = ()
+    max_items: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,6 +140,7 @@ class V2MonitorCapability:
     refresh_interval_seconds: int | None
     group_by: tuple[str, ...]
     filters: tuple[str, ...]
+    rate_label: LocalizedText | None = None
 
 
 V2ChartCapability = V2HistoricalChartCapability | V2MonitorCapability

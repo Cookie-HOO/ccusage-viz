@@ -38,7 +38,12 @@ def test_catalogs_have_the_same_keys_and_placeholders() -> None:
         EN_MESSAGES["status.tui_global_operations"]
         == "Global operations: u undo · U redo · h open help"
     )
-    assert ZH_MESSAGES["status.tui_global_operations"] == "全局操作：u 撤销 · U 重做 · h 打开帮助"
+    assert (
+        ZH_MESSAGES["status.tui_global_operations"]
+        == "全局操作：u 撤销 · U 重做 · h 打开帮助"
+    )
+    assert EN_MESSAGES["status.tui_preset_operations"] == "s save as new preset · p manage presets"
+    assert ZH_MESSAGES["status.tui_preset_operations"] == "s 保存为新预设 · p 管理预设"
     assert " d adjust dashboard " in EN_MESSAGES["status.tui_chart_controls"]
     assert "c {action}" in EN_MESSAGES["status.tui_chart_controls"]
     assert " d 调整仪表盘 " in ZH_MESSAGES["status.tui_chart_controls"]

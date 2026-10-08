@@ -11,6 +11,7 @@ from ccusage_viz.project_identity import (
     exact_project_display_key,
     exact_project_display_label,
     exact_project_label,
+    fixed_project_ref,
     make_project_ref,
     merged_project_label,
     normalized_absolute_project_path,
@@ -54,6 +55,22 @@ def test_project_identity_is_agent_scoped() -> None:
     claude = make_project_ref("claude", "/work/app")
     codex = make_project_ref("codex", "/work/app")
     assert claude.key != codex.key
+
+
+def test_fixed_project_groups_merge_across_agents_even_with_exact_aggregation() -> None:
+    unassigned = fixed_project_ref("codex", "unassigned")
+    also_unassigned = fixed_project_ref("opencode", "unassigned")
+    unverified = fixed_project_ref("dsh", "unverified")
+    also_unverified = fixed_project_ref("pi", "unverified")
+
+    groups = project_groups(
+        (unassigned, also_unassigned, unverified, also_unverified), aggregation="exact"
+    )
+
+    assert groups[unassigned.key] is groups[also_unassigned.key]
+    assert groups[unassigned.key].label == "Unassigned"
+    assert groups[unverified.key] is groups[also_unverified.key]
+    assert groups[unverified.key].label == "Unverified"
 
 
 @pytest.mark.parametrize(

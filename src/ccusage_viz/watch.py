@@ -25,7 +25,12 @@ from ccusage_viz.command_copy import (
     wrap_command,
 )
 from ccusage_viz.core.time import local_today, refresh_date_range
-from ccusage_viz.data_view import BodyView, cycle_body_view, next_body_view, render_snapshot_data
+from ccusage_viz.data_view import (
+    BodyView,
+    cycle_body_view,
+    next_body_view,
+    render_snapshot_data,
+)
 from ccusage_viz.deltas import RefreshDeltas, RefreshRanks
 from ccusage_viz.diagnostics import (
     color_enabled,
@@ -771,7 +776,9 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
             raise
         return submission, submission.cancel
 
-    def start_summary(operation: OperationToken) -> tuple[BuiltinSummarySubmission, Callable[[], None]]:
+    def start_summary(
+        operation: OperationToken,
+    ) -> tuple[BuiltinSummarySubmission, Callable[[], None]]:
         submitted = component.candidate
         plan = builtin_summary_query_plan(
             submitted, today=local_today(timezone=submitted.host.timezone)
@@ -786,9 +793,7 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
                 trigger=query_trigger(operation.trigger),
             )
         )
-        submission = BuiltinSummarySubmission(
-            operation.generation, submitted, plan, handle
-        )
+        submission = BuiltinSummarySubmission(operation.generation, submitted, plan, handle)
         return submission, submission.cancel
 
     def request_summary(

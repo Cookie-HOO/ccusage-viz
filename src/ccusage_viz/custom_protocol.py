@@ -208,6 +208,7 @@ class V2ChartRequest:
     filters: tuple[tuple[str, tuple[str, ...]], ...] = ()
     group_by: str | None = None
     granularity: str = "day"
+    top: int | None = None
     command_argv: tuple[str, ...] = ()
     execution_context: tuple[tuple[str, str], ...] = ()
     request_kind: Literal["chart"] = "chart"
@@ -219,6 +220,8 @@ class V2ChartRequest:
         _validate_timezone(self.timezone)
         if self.end_date < self.start_date:
             raise ValueError("v2 custom request range end date must not precede start date")
+        if self.top is not None and self.top < 1:
+            raise ValueError("v2 custom request top must be positive")
         object.__setattr__(self, "filters", _canonical_filters(self.filters))
 
     def to_wire(self) -> dict[str, object]:
@@ -238,6 +241,7 @@ class V2ChartRequest:
                 "filters": {key: list(values) for key, values in self.filters},
                 "group_by": self.group_by,
                 "granularity": self.granularity,
+                "top": self.top,
             },
         }
 
@@ -434,7 +438,8 @@ def canonical_custom_request_key(request: CustomRequest) -> tuple[object, ...]:
             request.period,
             request.filters,
             request.group_by,
-            request.granularity,
+                request.granularity,
+                request.top if isinstance(request, V2ChartRequest) else None,
         )
     if isinstance(request, V2MonitorRequest):
         return common + (
@@ -605,7 +610,7 @@ def _parse_capabilities(value: object) -> CustomCapabilities:
         chart = _mapping(item, f"chart capability {kind}")
         parsed[kind] = CustomChartCapability(
             _string_tuple(chart.get("granularities"), f"chart {kind} granularities"),
-            _string_tuple(chart.get("group_by"), f"chart {kind} group_by"),
+            _group_by_tuple(chart.get("group_by"), f"chart {kind} group_by"),
             _string_tuple(chart.get("filters"), f"chart {kind} filters"),
         )
     _unique_ids(dimensions, "group-by dimensions")
@@ -740,7 +745,7 @@ def _parse_v2_capabilities(value: object) -> V2MetricCapabilities:
     charts: dict[str, V2HistoricalChartCapability | V2MonitorCapability] = {}
     for kind, raw in _mapping(source.get("charts"), "v2 capabilities charts").items():
         chart = _mapping(raw, f"v2 chart capability {kind}")
-        group_by = _string_tuple(chart.get("group_by"), f"v2 chart {kind} group_by")
+        group_by = _group_by_tuple(chart.get("group_by"), f"v2 chart {kind} group_by")
         filters_value = _string_tuple(chart.get("filters"), f"v2 chart {kind} filters")
         if kind == "monitor":
             window_seconds = chart.get("window_seconds")
@@ -758,17 +763,43 @@ def _parse_v2_capabilities(value: object) -> V2MetricCapabilities:
                     "v2 monitor refresh_interval_seconds must be a positive integer"
                 )
             charts[kind] = V2MonitorCapability(window_seconds, refresh, group_by, filters_value)
+            rate_label = chart.get("rate_label")
+            if rate_label is not None:
+                charts[kind] = V2MonitorCapability(
+                    window_seconds,
+                    refresh,
+                    group_by,
+                    filters_value,
+                    _parse_localized(rate_label, "v2 monitor rate_label"),
+                )
         elif kind in {"timeline", "calendar", "stack", "ranking"}:
             periods = _string_tuple(chart.get("periods", []), f"v2 chart {kind} periods")
+            for period in periods:
+                if period != "all":
+                    try:
+                        parse_period(period)
+                    except ValueError as exc:
+                        raise CustomProtocolError(
+                            f"v2 chart {kind} period must be valid"
+                        ) from exc
             if kind != "ranking" and "all" in periods:
                 raise CustomProtocolError("v2 all period is supported only by ranking")
             if "all" in periods and periods[-1] != "all":
                 raise CustomProtocolError("v2 ranking all period must be last")
+            max_items = chart.get("max_items")
+            if max_items is not None and (
+                kind != "ranking"
+                or not isinstance(max_items, int)
+                or isinstance(max_items, bool)
+                or max_items < 1
+            ):
+                raise CustomProtocolError("v2 ranking max_items must be a positive integer")
             charts[kind] = V2HistoricalChartCapability(
                 _string_tuple(chart.get("granularities"), f"v2 chart {kind} granularities"),
                 group_by,
                 filters_value,
                 periods,
+                max_items,
             )
         else:
             raise CustomProtocolError(f"unsupported v2 chart capability: {kind}")
@@ -780,27 +811,74 @@ def _parse_v2_capabilities(value: object) -> V2MetricCapabilities:
 def _parse_v2_defaults(value: object) -> dict[str, CustomChartDefaults]:
     defaults: dict[str, CustomChartDefaults] = {}
     for kind, raw in _mapping(value, "v2 metric defaults").items():
-        if kind not in {"timeline", "calendar", "stack", "ranking"}:
-            raise CustomProtocolError(f"unsupported v2 chart default: {kind}")
-        item = _mapping(raw, f"v2 chart default {kind}")
-        if set(item) != {"period", "group_by", "top"}:
-            raise CustomProtocolError(f"v2 chart default {kind} must contain period, group_by, and top")
-        period = item["period"]
-        group_by = item["group_by"]
-        top = item["top"]
-        if period is not None:
-            period = _string(period, f"v2 chart default {kind} period")
-            if not (kind == "ranking" and period == "all"):
-                try:
-                    parse_period(period)
-                except ValueError as exc:
-                    raise CustomProtocolError(f"v2 chart default {kind} period must be valid") from exc
-        if group_by is not None:
-            group_by = _string(group_by, f"v2 chart default {kind} group_by")
-        if top is not None and (not isinstance(top, int) or isinstance(top, bool) or top < 1):
-            raise CustomProtocolError(f"v2 chart default {kind} top must be a positive integer")
-        defaults[kind] = CustomChartDefaults(period, group_by, top)
+        if kind not in {"timeline", "calendar", "stack", "ranking", "monitor"}:
+            continue
+        if not isinstance(raw, dict):
+            continue
+        declared = frozenset(raw)
+        period = raw.get("period")
+        if not isinstance(period, str) or (
+            period != "all" and _valid_period(period) is False
+        ) or (period == "all" and kind != "ranking"):
+            period = None
+        group_by = raw.get("group_by")
+        if group_by is not None and not isinstance(group_by, str):
+            group_by = None
+        top = raw.get("top")
+        if not isinstance(top, int) or isinstance(top, bool) or top < 1:
+            top = None
+        granularity = raw.get("granularity")
+        if not isinstance(granularity, str):
+            granularity = None
+        filters = _default_filters(raw.get("filters"))
+        other = raw.get("other") if raw.get("other") in {"show", "hide"} else None
+        style = raw.get("style") if isinstance(raw.get("style"), str) else None
+        theme = raw.get("theme") if isinstance(raw.get("theme"), str) else None
+        window_seconds = _default_window_seconds(raw.get("window"))
+        defaults[kind] = CustomChartDefaults(
+            period,
+            group_by,
+            top,
+            granularity,
+            filters,
+            other,
+            style,
+            theme,
+            window_seconds,
+            declared,
+        )
     return defaults
+
+
+def _valid_period(value: str) -> bool:
+    try:
+        parse_period(value)
+    except ValueError:
+        return False
+    return True
+
+
+def _default_filters(value: object) -> tuple[tuple[str, tuple[str, ...]], ...]:
+    if not isinstance(value, dict):
+        return ()
+    parsed: list[tuple[str, tuple[str, ...]]] = []
+    for filter_id, option_ids in value.items():
+        if not isinstance(filter_id, str) or not isinstance(option_ids, list):
+            continue
+        options = tuple(sorted({item for item in option_ids if isinstance(item, str)}))
+        if options:
+            parsed.append((filter_id, options))
+    return tuple(sorted(parsed))
+
+
+def _default_window_seconds(value: object) -> int | None:
+    if not isinstance(value, str):
+        return None
+    match = re.fullmatch(r"([1-9][0-9]*)([mh])", value)
+    if match is None:
+        return None
+    seconds = int(match.group(1)) * (60 if match.group(2) == "m" else 3600)
+    return seconds if 5 * 60 <= seconds <= 24 * 3600 else None
 
 
 def probe_descriptor_to_wire(descriptor: CustomProbeDescriptor) -> dict[str, object]:
@@ -890,8 +968,18 @@ def v2_probe_descriptor_to_wire(descriptor: V2ProbeDescriptor) -> dict[str, obje
     def capability(value: V2HistoricalChartCapability | V2MonitorCapability) -> dict[str, object]:
         common = {"group_by": list(value.group_by), "filters": list(value.filters)}
         if isinstance(value, V2MonitorCapability):
-            return {**common, "window_seconds": value.window_seconds, **({"refresh_interval_seconds": value.refresh_interval_seconds} if value.refresh_interval_seconds is not None else {})}
-        return {**common, "granularities": list(value.granularities), **({"periods": list(value.periods)} if value.periods else {})}
+            return {
+                **common,
+                "window_seconds": value.window_seconds,
+                **({"refresh_interval_seconds": value.refresh_interval_seconds} if value.refresh_interval_seconds is not None else {}),
+                **({"rate_label": localized(value.rate_label)} if value.rate_label is not None else {}),
+            }
+        return {
+            **common,
+            "granularities": list(value.granularities),
+            **({"periods": list(value.periods)} if value.periods else {}),
+            **({"max_items": value.max_items} if value.max_items is not None else {}),
+        }
 
     return {
         "revision": descriptor.revision,
@@ -910,7 +998,10 @@ def v2_probe_descriptor_to_wire(descriptor: V2ProbeDescriptor) -> dict[str, obje
                     "filters": [],
                     "charts": {kind: capability(item) for kind, item in metric.capabilities.charts.items()},
                 },
-                "defaults": {kind: {"period": item.period, "group_by": item.group_by, "top": item.top} for kind, item in metric.defaults.items()},
+                "defaults": {
+                    kind: _defaults_to_wire(item)
+                    for kind, item in metric.defaults.items()
+                },
                 "summary": metric.summary,
             }
             for metric in descriptor.metrics
@@ -921,6 +1012,29 @@ def v2_probe_descriptor_to_wire(descriptor: V2ProbeDescriptor) -> dict[str, obje
             for item in descriptor.environment
         ],
     }
+
+
+def _defaults_to_wire(value: CustomChartDefaults) -> dict[str, object]:
+    declared = value.declared or frozenset({"period", "group_by", "top"})
+    fields: dict[str, object] = {}
+    for name, item in (
+        ("period", value.period),
+        ("group_by", value.group_by),
+        ("top", value.top),
+        ("granularity", value.granularity),
+        ("other", value.other),
+        ("style", value.style),
+        ("theme", value.theme),
+    ):
+        if name in declared:
+            fields[name] = item
+    if "filters" in declared:
+        fields["filters"] = {identifier: list(options) for identifier, options in value.filters}
+    if "window" in declared and value.window_seconds is not None:
+        suffix = "h" if value.window_seconds % 3600 == 0 else "m"
+        divisor = 3600 if suffix == "h" else 60
+        fields["window"] = f"{value.window_seconds // divisor}{suffix}"
+    return fields
 
 
 def _parse_environment_declaration(value: object) -> CustomEnvironmentDeclaration:
@@ -1153,6 +1267,15 @@ def _string(value: object, name: str) -> str:
 
 def _string_tuple(value: object, name: str) -> tuple[str, ...]:
     values = tuple(_string(item, name) for item in _sequence(value, name))
+    if len(set(values)) != len(values):
+        raise CustomProtocolError(f"{name} must not contain duplicates")
+    return values
+
+
+def _group_by_tuple(value: object, name: str) -> tuple[str | None, ...]:
+    values = tuple(
+        item if item is None else _string(item, name) for item in _sequence(value, name)
+    )
     if len(set(values)) != len(values):
         raise CustomProtocolError(f"{name} must not contain duplicates")
     return values

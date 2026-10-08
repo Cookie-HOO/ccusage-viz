@@ -122,6 +122,9 @@ class UsageRecord:
     source: SourceKind
     project: ProjectRef | None = None
     models: tuple[ModelBreakdown, ...] = field(default_factory=tuple)
+    attribution: str | None = None
+    source_project: str | None = None
+    session_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

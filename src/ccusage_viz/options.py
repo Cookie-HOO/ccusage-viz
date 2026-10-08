@@ -523,7 +523,7 @@ def adjust_custom_chart(chart: CustomChartConfig, key: str) -> CustomChartConfig
     """Apply a local custom chart adjustment."""
 
     if key in {"p", "P"}:
-        if chart.kind == "ranking" and chart.metric_periods:
+        if chart.metric_periods:
             current = chart.date_range.period
             period = _cycle(
                 chart.metric_periods,
@@ -532,7 +532,7 @@ def adjust_custom_chart(chart: CustomChartConfig, key: str) -> CustomChartConfig
             )
             return replace(
                 chart,
-                date_range=resolve_date_range("ranking", period=period, since=None, until=None),
+                date_range=resolve_date_range(chart.kind, period=period, since=None, until=None),
             )
         return replace(chart, date_range=_adjust_period(chart.date_range, key, kind=chart.kind))
     if key == "d":

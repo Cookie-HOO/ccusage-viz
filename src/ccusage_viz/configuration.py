@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import suppress
 from dataclasses import replace
 
 from ccusage_viz.custom_models import (
@@ -10,7 +11,6 @@ from ccusage_viz.custom_models import (
     V2HistoricalChartCapability,
     V2ProbeDescriptor,
 )
-from ccusage_viz.custom_protocol import CustomProtocolError
 from ccusage_viz.options import (
     CalendarConfig,
     ChartPaneConfig,
@@ -25,8 +25,10 @@ from ccusage_viz.options import (
     StandaloneHostConfig,
     StandaloneLaunch,
     TimelineConfig,
+    compatible_styles,
     resolve_date_range,
 )
+from ccusage_viz.render.palette import COLOR_SCHEMES
 
 
 def _default_dashboard_chart_presentation(kind: str) -> ChartPresentation:
@@ -37,7 +39,7 @@ def _default_dashboard_chart_presentation(kind: str) -> ChartPresentation:
             "calendar": "relative",
             "stack": "stacked",
             "ranking": "dot",
-            "monitor": "bars",
+            "monitor": "points",
         }[kind],
         density="compact",
     )
@@ -71,38 +73,100 @@ def apply_custom_probe_defaults(
     *,
     timezone: str,
 ) -> CustomChartConfig:
-    """Merge a Dataset's initial chart defaults into an uncustomized chart.
-
-    Probe data is source metadata, rather than a preference store: callers apply
-    it exactly once before their first chart request.  A malformed or
-    contradictory descriptor is rejected here instead of falling back to the
-    host's unrelated generic defaults.
-    """
+    """Apply compatible Dataset suggestions to an initial historical chart."""
     defaults = descriptor.defaults.get(config.kind)
     capability = descriptor.capabilities.charts.get(config.kind)
     if defaults is None or capability is None:
-        raise CustomProtocolError(f"probe descriptor does not support {config.kind} charts")
+        return config
 
     explicit = config.initial_explicit
-    group_by = config.group_by if "group_by" in explicit else defaults.group_by
-    top = config.top if "top" in explicit else defaults.top
-    if group_by is not None and group_by not in capability.group_by:
-        raise CustomProtocolError(
-            f"probe default group_by {group_by!r} is not supported by {config.kind}"
-        )
-    if top is not None and group_by is None:
-        raise CustomProtocolError("probe default top requires a group_by value")
+    group_by = config.group_by
+    if (
+        "group_by" not in explicit
+        and _declared(defaults, "group_by")
+        and defaults.group_by in capability.group_by
+    ):
+        group_by = defaults.group_by
+    top = config.top
+    if (
+        "top" not in explicit
+        and _declared(defaults, "top")
+        and defaults.top is not None
+        and group_by is not None
+    ):
+        top = defaults.top
 
     date_range = config.date_range
-    if not explicit & {"period", "since", "until"} and defaults.period is not None:
-        date_range = resolve_date_range(
-            config.kind,
-            period=defaults.period,
-            since=None,
-            until=None,
-            timezone=timezone,
+    supported_periods = getattr(capability, "periods", ())
+    if (
+        not explicit & {"period", "since", "until"}
+        and defaults.period is not None
+        and (defaults.period != "all" or defaults.period in supported_periods)
+        and (not supported_periods or defaults.period in supported_periods)
+    ):
+        with suppress(ValueError):
+            date_range = resolve_date_range(
+                config.kind,
+                period=defaults.period,
+                since=None,
+                until=None,
+                timezone=timezone,
+            )
+    granularity = config.granularity
+    if (
+        "granularity" not in explicit
+        and _declared(defaults, "granularity")
+        and defaults.granularity in capability.granularities
+    ):
+        granularity = defaults.granularity
+    filters = config.filters
+    if "filter" not in explicit and _declared(defaults, "filters"):
+        valid_options = {
+            item.id: {option.id for option in item.options}
+            for item in descriptor.capabilities.filters
+            if item.id in capability.filters
+        }
+        filters = tuple(
+            (identifier, selected)
+            for identifier, options in defaults.filters
+            if (selected := tuple(option for option in options if option in valid_options.get(identifier, set())))
         )
-    return replace(config, date_range=date_range, group_by=group_by, top=top)
+    other = config.other
+    if (
+        config.kind in {"timeline", "stack", "ranking"}
+        and "other" not in explicit
+        and _declared(defaults, "other")
+        and defaults.other is not None
+    ):
+        other = defaults.other
+    theme = config.presentation.theme
+    if (
+        "color_scheme" not in explicit
+        and _declared(defaults, "theme")
+        and defaults.theme in COLOR_SCHEMES
+    ):
+        theme = defaults.theme
+    style = config.presentation.style
+    if (
+        "style" not in explicit
+        and _declared(defaults, "style")
+        and defaults.style in compatible_styles(config.kind, group_by)
+    ):
+        style = defaults.style
+    return replace(
+        config,
+        date_range=date_range,
+        filters=filters,
+        presentation=replace(config.presentation, theme=theme, style=style),
+        group_by=group_by,
+        top=top,
+        other=other,
+        granularity=granularity,
+    )
+
+
+def _declared(defaults, field: str) -> bool:
+    return not defaults.declared or field in defaults.declared
 
 
 def v2_metric_probe_descriptor(
@@ -126,7 +190,10 @@ def v2_metric_probe_descriptor(
     for kind, capability in metric.capabilities.charts.items():
         if isinstance(capability, V2HistoricalChartCapability):
             charts[kind] = CustomChartCapability(
-                capability.granularities, capability.group_by, capability.filters
+                capability.granularities,
+                capability.group_by,
+                capability.filters,
+                capability.max_items,
             )
     return CustomProbeDescriptor(
         descriptor.revision,

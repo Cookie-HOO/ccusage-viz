@@ -3,6 +3,9 @@ from __future__ import annotations
 import json
 from collections.abc import Iterable
 from pathlib import Path
+from re import fullmatch
+
+_BARE_ROLLOUT_SESSION_ID = r"rollout-(\d{4})-(\d{2})-(\d{2})T[^/]+"
 
 
 def resolve_codex_session_cwds(
@@ -19,19 +22,18 @@ def resolve_codex_session_cwds(
     for session_id in dict.fromkeys(session_ids):
         if not _is_safe_session_id(session_id):
             continue
-        candidate = root.joinpath(*session_id.split("/")).with_name(
-            f"{session_id.rsplit('/', 1)[-1]}.jsonl"
-        )
-        try:
-            path = candidate.resolve(strict=True)
-            path.relative_to(root)
-        except (OSError, ValueError):
-            continue
-        if not path.is_file():
-            continue
-        cwd = _read_session_cwd(path, session_id)
-        if cwd is not None:
-            resolved[session_id] = cwd
+        for candidate in _session_candidates(root, session_id):
+            try:
+                path = candidate.resolve(strict=True)
+                path.relative_to(root)
+            except (OSError, ValueError):
+                continue
+            if not path.is_file():
+                continue
+            cwd = _read_session_cwd(path, session_id)
+            if cwd is not None:
+                resolved[session_id] = cwd
+                break
     return resolved
 
 
@@ -43,6 +45,17 @@ def _is_safe_session_id(value: str) -> bool:
         and "\\" not in value
         and all(part not in {"", ".", ".."} for part in value.split("/"))
     )
+
+
+def _session_candidates(root: Path, session_id: str) -> tuple[Path, ...]:
+    """Return exact local paths permitted for one ccusage session identifier."""
+    filename = f"{session_id.rsplit('/', 1)[-1]}.jsonl"
+    direct = root.joinpath(*session_id.split("/")).with_name(filename)
+    match = fullmatch(_BARE_ROLLOUT_SESSION_ID, session_id)
+    if match is None:
+        return (direct,)
+    year, month, day = match.groups()
+    return (root / year / month / day / filename,)
 
 
 def _read_session_cwd(path: Path, session_id: str) -> str | None:

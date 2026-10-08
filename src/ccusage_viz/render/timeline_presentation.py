@@ -27,7 +27,10 @@ class TimelinePresentationSeries:
 
     color_key: Hashable
     label: str
-    values: tuple[int | float | Decimal, ...]
+    # ``None`` preserves a source-declared missing interval.  The renderer
+    # deliberately splits line runs and omits missing bars instead of drawing a
+    # fabricated zero or connecting across the gap.
+    values: tuple[int | float | Decimal | None, ...]
     is_other: bool = False
 
 
@@ -112,29 +115,54 @@ def render_timeline_plot(
                 marker_name,
                 pixel=plt.pixel(foreground=color_for(item)) if context.color else None,
             )
-            points_x = list(x_values)
-            points_y = list(item.values)
-            if context.style == "step":
-                points_x = [point for position in points_x for point in (position, position + 1)]
-                points_y = [point for value in points_y for point in (value, value)]
+            raw_points = list(zip(x_values, item.values, strict=True))
+            numeric_points = [(point, value) for point, value in raw_points if value is not None]
+            if not numeric_points:
+                continue
+            signals = []
             if use_bars:
-                signal = plt.figure.bar(
-                    [float(point) for point in points_x],
-                    [float(value) for value in points_y],
-                    marker=marker,
-                    width=0.75,
+                signals.append(
+                    plt.figure.bar(
+                        [float(point) for point, _ in numeric_points],
+                        [float(value) for _, value in numeric_points],
+                        marker=marker,
+                        width=0.75,
+                    )
                 )
             else:
-                signal = plt.figure.signal(
-                    [float(point) for point in points_x],
-                    [float(value) for value in points_y],
-                    marker=marker,
-                ).lines(context.style not in {"no-line", "points", "stem"})
-                if context.style in {"stem", "area"}:
-                    signal.fillx()
+                # Source-owned missing observations are factual gaps. Draw
+                # contiguous runs separately rather than joining across them.
+                runs: list[list[tuple[int | float | Decimal, int | float | Decimal]]] = []
+                run: list[tuple[int | float | Decimal, int | float | Decimal]] = []
+                for point, value in raw_points:
+                    if value is None:
+                        if run:
+                            runs.append(run)
+                            run = []
+                        continue
+                    run.append((point, value))
+                if run:
+                    runs.append(run)
+                for run in runs:
+                    points_x = [point for point, _ in run]
+                    points_y = [value for _, value in run]
+                    if context.style == "step":
+                        points_x = [
+                            point for position in points_x for point in (position, position + 1)
+                        ]
+                        points_y = [value for value in points_y for value in (value, value)]
+                    signal = plt.figure.signal(
+                        [float(point) for point in points_x],
+                        [float(value) for value in points_y],
+                        marker=marker,
+                    ).lines(context.style not in {"no-line", "points", "stem"})
+                    if context.style in {"stem", "area"}:
+                        signal.fillx()
+                    signals.append(signal)
             if show_legend and context.legend_position == "inside":
-                signal.label(item.label)
-            plt.figure.draw(signal)
+                signals[0].label(item.label)
+            for signal in signals:
+                plt.figure.draw(signal)
         plt.figure.legend(active=context.legend_position == "inside")
         positions, labels = x_ticks
         plt.figure.ruler("x").ticks([float(position) for position in positions], labels)

@@ -8,9 +8,11 @@ from collections.abc import Callable, Hashable
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta
+from decimal import Decimal
 from shutil import get_terminal_size
 from threading import Event
 from typing import Literal, cast
+from zoneinfo import ZoneInfo
 
 from ccusage_viz import __version__
 from ccusage_viz.acquisition import (
@@ -19,9 +21,9 @@ from ccusage_viz.acquisition import (
     custom_historical_query_intent,
     custom_probe_query_intent,
     custom_summary_query_intent,
-    custom_v2_summary_query_intent,
     custom_v2_monitor_query_intent,
     custom_v2_probe_query_intent,
+    custom_v2_summary_query_intent,
     historical_provider_id,
     historical_query_intent,
 )
@@ -52,6 +54,7 @@ from ccusage_viz.animation import (
 )
 from ccusage_viz.animation_overlay import (
     AnimationOverlayRuntime,
+    OverlayConfig,
     OverlayHistoryTableState,
     OverlayPlacement,
     clip_overlay_placements,
@@ -92,13 +95,14 @@ from ccusage_viz.custom_models import (
     CustomChartCapability,
     CustomFilter,
     CustomProtocolFailure,
-    V2MonitorCapability,
     V2HistoricalChartCapability,
+    V2MonitorCapability,
     V2ProbeDescriptor,
 )
 from ccusage_viz.custom_monitor_component import (
     CustomMonitorCompletion,
     CustomMonitorComponent,
+    custom_monitor_styles,
     resolve_metric,
 )
 from ccusage_viz.custom_protocol import (
@@ -107,9 +111,10 @@ from ccusage_viz.custom_protocol import (
     CustomSummaryResponse,
     V2MonitorResponse,
     V2ProbeResponse,
-    V2SummaryResponse,
     V2SummaryRequest,
+    V2SummaryResponse,
 )
+from ccusage_viz.dashboard import DASHBOARD_PRESETS
 from ccusage_viz.dashboard_history import DashboardHistory
 from ccusage_viz.dashboard_layout import (
     PaneLayout as ResolvedPaneLayout,
@@ -132,6 +137,16 @@ from ccusage_viz.dashboard_layout import (
 from ccusage_viz.dashboard_layout import (
     parse_layout as parse_dashboard_layout,
 )
+from ccusage_viz.dashboard_preset_store import (
+    DashboardPresetStore,
+    DashboardPresetStoreError,
+)
+from ccusage_viz.dashboard_presets import (
+    DashboardPresetValidationError,
+    materialize_preset,
+    preset_from_launch,
+)
+from ccusage_viz.dashboard_state import DashboardPaneState, DashboardState
 from ccusage_viz.data_view import (
     BodyView,
     DashboardBodyView,
@@ -142,6 +157,7 @@ from ccusage_viz.data_view import (
     render_custom_data,
     render_snapshot_data,
 )
+from ccusage_viz.datasets.paths import dashboard_preset_state_root
 from ccusage_viz.deltas import RefreshDeltas, RefreshRanks
 from ccusage_viz.diagnostics import format_error, transient_query_recovery_lines
 from ccusage_viz.domain import UsageRecord
@@ -152,7 +168,6 @@ from ccusage_viz.formatting import (
     center_text,
     clip_width,
     display_width,
-    format_tokens,
     pad_width,
     truncate_width,
     wrap_width,
@@ -229,6 +244,7 @@ from ccusage_viz.render.custom import (
     render_custom_pending,
     render_custom_projection,
 )
+from ccusage_viz.render.custom_monitor import render_custom_monitor
 from ccusage_viz.render.filters import active_filter_summary
 from ccusage_viz.render.palette import COLOR_SCHEMES, get_color_scheme
 from ccusage_viz.render.summary import render_custom_metrics, render_summary
@@ -274,6 +290,18 @@ from ccusage_viz.tui_input import (
     PasteEvent,
     read_event,
     tui_input_mode,
+)
+from ccusage_viz.tui_preset_manager import (
+    ClosePresetManager,
+    DeletePreset,
+    LoadPreset,
+    PresetCatalogEntry,
+    PresetCatalogSnapshot,
+    PresetManagerState,
+    SavePreset,
+    reconcile_preset_manager,
+    reduce_preset_manager,
+    render_preset_manager,
 )
 
 _PANE_COMMANDS = (
@@ -382,6 +410,9 @@ class TuiCustomPane:
     error_offset: int = 0
     error_line_count: int = 0
     error_visible_rows: int = 0
+    attachment: AnimationSessionState | None = None
+    attachment_renderer: AnimationRenderer | None = None
+    attachment_enabled: bool = False
 
     @property
     def interval(self) -> float:
@@ -435,35 +466,6 @@ class TuiAnimationPane:
 
 
 TuiPane = TuiChartPane | TuiAnimationPane | TuiCustomPane | TuiEmptyPane
-
-
-@dataclass(frozen=True, slots=True)
-class DashboardPaneState:
-    """Declarative Pane state suitable for session-only history restoration."""
-
-    pane_id: int
-    config: PaneConfig
-    body_view: BodyView
-    attachment_style: str | None = None
-    attachment_theme: str | None = None
-    attachment_enabled: bool = False
-    animation_theme: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class DashboardState:
-    """The durable dashboard presentation state, without runtime resources."""
-
-    panes: tuple[DashboardPaneState, ...]
-    grid: str
-    layout: str | None
-    column_weights: tuple[int, ...] | None
-    row_weights: tuple[int, ...] | None
-    theme: str
-    style: str
-    header_style: str
-    header_summary: str
-    body_view: DashboardBodyView
 
 
 @dataclass(slots=True)
@@ -558,6 +560,21 @@ class DashboardDatasetModalState:
 
 def _dataset_title(value, translator: Translator) -> str:
     return value.zh_cn if translator.language == "zh" else value.en
+
+
+def _dataset_metric_chooser_chrome(
+    descriptor: V2ProbeDescriptor, translator: Translator
+) -> tuple[str, str]:
+    """Give the metric chooser a selected-Dataset title and next action."""
+
+    return (
+        translator.text(
+            "status.dataset_metric_chooser_title",
+            name=_dataset_title(descriptor.dataset.title, translator),
+            version=descriptor.version,
+        ),
+        translator.text("status.dataset_metric_choose"),
+    )
 
 
 _DOUBLE_CLICK_SECONDS = 0.35
@@ -1312,6 +1329,20 @@ def _new_pane(
                 if pane_config.chart.kind == "monitor"
                 else CustomHistoricalComponent(pane_config.chart)
             )
+            attachment = None
+            attachment_renderer = None
+            if isinstance(component, CustomMonitorComponent):
+                if options.host.timezone is None:
+                    raise RuntimeError("custom Dataset requests require a timezone")
+                component.configure_display_timezone(ZoneInfo(options.host.timezone))
+                component.start_monitoring(datetime.now(ZoneInfo(options.host.timezone)))
+                attachment = new_animation_session(
+                    default_animation_spec("monitor"), theme="classic"
+                )
+                attachment.set_playback_requested(False, started_at)
+                attachment.set_idle_animation_requested(True, started_at)
+                attachment.set_visible(False, started_at)
+                attachment_renderer = AnimationRenderer()
             return TuiCustomPane(
                 component,
                 FixedIntervalScheduler(
@@ -1323,13 +1354,15 @@ def _new_pane(
                 LifecycleOperation(owner_id),
                 options.process,
                 None
-                if pane_config.chart.kind == "monitor" or pane_config.chart.metric_id is not None
+                if pane_config.chart.kind == "monitor"
                 else CustomDashboardSummary(
                     pane_config.chart.source,
                     FixedIntervalScheduler(options.host.refresh_interval, now=started_at),
                     LifecycleOperation(f"{owner_id}:summary"),
                     filters=pane_config.chart.filters,
                 ),
+                attachment=attachment,
+                attachment_renderer=attachment_renderer,
             )
         from ccusage_viz.configuration import standalone_from_chart_pane
 
@@ -1646,24 +1679,76 @@ def _render_custom_monitor(
     interval: float,
 ) -> PaneRender:
     config = component.accepted_config or component.candidate
-    response = component.accepted_response
-    title = (
-        config.metric_titles[1] if translator.language == "zh" else config.metric_titles[0]
-    ) if config.metric_titles is not None else config.metric_id or config.source.dataset_id
-    heading = center_text(f"{title} · source window", terminal.width)
-    if response is None:
+    if component.accepted_response is None or component.pending:
         body = (
             format_error(component.error, translator, color=False)
             if component.error
             else translator.text("status.loading")
         )
-        return PaneRender(f"{heading}\n{body}", error_body=component.error is not None)
-    observation = response.observation
-    rows = [heading, f"Total  {format_tokens(round(float(observation.total)))}"]
-    for group in sorted(observation.groups, key=lambda item: (-item.value, item.id)):
-        label = group.label.zh_cn if translator.language == "zh" else group.label.en
-        rows.append(f"{label}  {format_tokens(round(float(group.value)))}")
-    return PaneRender("\n".join(rows))
+        return PaneRender(
+            f"{component.heading(language=translator.language)}\n{body}",
+            error_body=component.error is not None,
+        )
+    context = dashboard_pane_surface("timeline").context(
+        terminal,
+        translator,
+        SurfacePresentation(
+            "timeline",
+            config.presentation.theme,
+            config.presentation.style,
+            config.presentation.legend,
+            config.presentation.density,
+            config.weekdays,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ),
+    )
+    return PaneRender(render_custom_monitor(component, context))
+
+
+def _append_custom_monitor_attachment(
+    pane: TuiCustomPane,
+    body: str,
+    *,
+    terminal: Terminal,
+    now: float,
+    translator: Translator,
+) -> str:
+    """Append the native Monitor attachment below ranking/list Dataset views."""
+
+    if not isinstance(pane.component, CustomMonitorComponent):
+        return body
+    config = pane.component.accepted_config or pane.component.candidate
+    attachment = pane.attachment
+    renderer = pane.attachment_renderer
+    if (
+        not pane.attachment_enabled
+        or attachment is None
+        or renderer is None
+        or config.presentation.style not in {"ranking", "list"}
+    ):
+        if attachment is not None:
+            attachment.set_visible(False, now)
+        return body
+    residual_height = terminal.height - len(body.rstrip("\r\n").splitlines())
+    if residual_height < 1:
+        attachment.set_visible(False, now)
+        return body
+    attachment.set_visible(True, now)
+    result = renderer.render(
+        attachment,
+        width=terminal.width,
+        height=residual_height,
+        color=terminal.color,
+        ascii=terminal.ascii,
+        now=now,
+        translator=translator,
+    )
+    return "\n".join((body, *result.rows)) if result.viable else body
 
 
 def _render_custom_projection(
@@ -1767,7 +1852,17 @@ def _pane_render(
                 return PaneRender(
                     format_full_command_display(format_full_command(options), terminal.width)
                 )
-            return _render_custom_monitor(component, translator, terminal, interval=pane.interval)
+            return PaneRender(
+                _append_custom_monitor_attachment(
+                    pane,
+                    _render_custom_monitor(
+                        component, translator, terminal, interval=pane.interval
+                    ).chart,
+                    terminal=terminal,
+                    now=time.monotonic(),
+                    translator=translator,
+                )
+            )
         if component.error is not None and component.model is None:
             return _render_custom_failure(
                 component,
@@ -2078,6 +2173,23 @@ def _append_monitor_attachment(
     return "\n".join((*((body,) if body else ()), *result.rows))
 
 
+def _update_custom_monitor_attachment_activity(
+    component: CustomMonitorComponent,
+    attachment: AnimationSessionState,
+    *,
+    now: float,
+    wall: datetime,
+    translator: Translator,
+) -> None:
+    """Apply the latest source-owned Monitor total to a Dashboard attachment."""
+
+    total = component.accepted_activity_total
+    active = (total or Decimal()) > 0
+    attachment.set_playback_requested(active, now)
+    if active:
+        attachment.activity_label = last_activity_label(translator, wall)
+
+
 def _local_pane_content(
     chart: str,
     notices: tuple[str, ...],
@@ -2111,13 +2223,17 @@ def _cycle(values: tuple[str, ...], current: str, step: int) -> str:
 
 
 def _cycle_custom_grouping(
-    config: CustomChartConfig, groupings: tuple[str, ...], *, step: int = 1
+    config: CustomChartConfig, groupings: tuple[str | None, ...], *, step: int = 1
 ) -> CustomChartConfig:
-    """Advance custom grouping and preserve a style valid for the result."""
+    """Advance only through the grouping values declared by a Dataset."""
 
-    values = (None, *groupings)
+    if not groupings:
+        return config
+    values = groupings
     current = config.group_by if config.group_by in values else values[0]
     group_by = values[(values.index(current) + step) % len(values)]
+    if config.kind == "monitor":
+        return replace(config, group_by=group_by, top=(config.top or 3) if group_by else None)
     presentation = config.presentation
     styles = compatible_styles(config.kind, group_by)
     if presentation.style not in styles:
@@ -2128,6 +2244,16 @@ def _cycle_custom_grouping(
         top=(config.top or 3) if group_by else None,
         presentation=presentation,
     )
+
+
+_CUSTOM_MONITOR_WINDOWS = (300, 900, 1800, 3600, 21600, 43200, 86400)
+
+
+def _cycle_custom_monitor_window(window_seconds: int, *, step: int = 1) -> int:
+    nearest = min(_CUSTOM_MONITOR_WINDOWS, key=lambda value: abs(value - window_seconds))
+    return _CUSTOM_MONITOR_WINDOWS[
+        (_CUSTOM_MONITOR_WINDOWS.index(nearest) + step) % len(_CUSTOM_MONITOR_WINDOWS)
+    ]
 
 
 def _new_pane_options(command: str, base: DashboardLaunch) -> StandaloneLaunch:
@@ -2169,24 +2295,40 @@ _PANE_CONTENT_ACTIONS = (
 
 
 def _custom_capability_for_component(
-    component: CustomHistoricalComponent,
-) -> CustomChartCapability | None:
+    component: CustomHistoricalComponent | CustomMonitorComponent,
+) -> CustomChartCapability | V2MonitorCapability | None:
     """Return capabilities only when they describe the active custom source."""
 
-    response = component.accepted_response
-    if (
-        response is None
-        or component.accepted_config is None
-        or component.accepted_config.source != component.candidate.source
-    ):
-        return None
-    return response.capabilities.charts.get(component.candidate.kind)
+    if isinstance(component, CustomMonitorComponent):
+        config = component.accepted_config or component.candidate
+        if component.capability is None or config.metric_id is None:
+            return None
+        return component.capability.charts.get("monitor")
+
+    return component.capability
 
 
-def _custom_capability(pane: TuiCustomPane) -> CustomChartCapability | None:
+def _custom_capability(pane: TuiCustomPane) -> CustomChartCapability | V2MonitorCapability | None:
     """Return the active Dashboard custom pane capability."""
 
     return _custom_capability_for_component(pane.component)
+
+
+def _custom_top_refresh_required(
+    component: CustomHistoricalComponent,
+    updated: CustomChartConfig,
+) -> bool:
+    """Request wider V2 ranking coverage only when the display Top outgrows it."""
+
+    if (
+        updated.metric_id is None
+        or updated.kind != "ranking"
+        or updated.top is None
+        or updated.top <= (component.retrieval_top or 0)
+    ):
+        return False
+    capability = component.capability
+    return capability is None or capability.max_items is None or updated.top <= capability.max_items
 
 
 def _custom_supported_filters(
@@ -2201,12 +2343,30 @@ def _custom_pane_adjustment_bindings(pane: TuiCustomPane, page: str) -> tuple[tu
 
     capability = _custom_capability(pane)
     chart = pane.component.candidate
+    if isinstance(pane.component, CustomMonitorComponent):
+        if page == "quick":
+            actions: list[tuple[str, str]] = []
+            config = pane.component.accepted_config or pane.component.candidate
+            if config.presentation.style not in {"ranking", "list"}:
+                actions.append(("w", "window"))
+            if isinstance(capability, V2MonitorCapability) and capability.group_by:
+                actions.append(("b/B", "group"))
+            if chart.group_by is not None:
+                actions.append(("+/-", "top"))
+            return (*actions, *_COMMON_PANE_QUICK_ACTIONS)
+        actions = [("f", "filters"), ("l", "legend"), ("L", "custom_logs")]
+        if chart.group_by is not None and pane.component.aggregation == "sum":
+            actions.insert(0, ("o", "other"))
+        config = pane.component.accepted_config or pane.component.candidate
+        if pane.attachment is not None and config.presentation.style in {"ranking", "list"}:
+            actions.extend((("t/T", "animation_theme"), ("s/S", "animation_style")))
+        return tuple(actions)
     if page == "quick":
         actions: list[tuple[str, str]] = [("p/P", "period")]
         if capability is not None:
             if len(capability.granularities) > 1:
                 actions.append(("g/G", "granularity"))
-            if chart.kind != "calendar" and capability.group_by:
+            if chart.kind != "calendar":
                 actions.append(("b/B", "group"))
             if capability.filters:
                 actions.append(("f", "filters"))
@@ -2221,6 +2381,30 @@ def _custom_pane_adjustment_bindings(pane: TuiCustomPane, page: str) -> tuple[tu
         actions.extend((("l", "legend"), ("k", "weekdays")))
     actions.append(("L", "custom_logs"))
     return tuple(actions)
+
+
+def _adjust_custom_monitor_chart(
+    chart: CustomChartConfig, key: str, *, aggregation: str = "sum"
+) -> CustomChartConfig:
+    """Cycle the Dataset Monitor's supported source-owned presentations."""
+
+    if key in {"s", "S"}:
+        styles = custom_monitor_styles(aggregation, chart.group_by)
+        current = chart.presentation.style
+        return replace(
+            chart,
+            presentation=replace(
+                chart.presentation,
+                style=_cycle(
+                    styles,
+                    current if current in styles else styles[0],
+                    1 if key == "s" else -1,
+                ),
+            ),
+        )
+    if key in {"d", "t", "T", "l"}:
+        return adjust_custom_chart(chart, key)
+    return chart
 
 
 def _custom_pane_adjustment_actions(
@@ -2241,10 +2425,14 @@ def _custom_pane_adjustment_keys(pane: TuiCustomPane, page: str) -> frozenset[st
 def _custom_pane_adjustment_state(pane: TuiCustomPane, page: str, translator: Translator) -> str:
     chart = pane.component.candidate
     if page == "quick":
-        settings = (
+        values = [
             f"{chart.kind} · {chart.presentation.density} · {chart.presentation.theme} · "
-            f"{chart.presentation.style} · chart"
-        )
+            f"{chart.presentation.style} · chart",
+        ]
+        if chart.group_by is not None:
+            values.append(f"Group {chart.group_by}")
+            values.append(f"Top {chart.top or 0}")
+        settings = " · ".join(values)
     else:
         settings = []
         if chart.group_by is not None:
@@ -2677,9 +2865,9 @@ def _animation_adjustment_footer(
             theme=pane.session.theme,
             theme_index=COLOR_SCHEMES.index(pane.session.theme) + 1,
             theme_count=len(COLOR_SCHEMES),
-            position=pane.overlay.presentation.position,
-            offset_x=pane.overlay.presentation.offset_x,
-            offset_y=pane.overlay.presentation.offset_y,
+            position=pane.overlay.config.position,
+            offset_x=pane.overlay.config.offset_x,
+            offset_y=pane.overlay.config.offset_y,
             interval=_format_overlay_interval(pane.overlay.config.interval),
         ),
         translator.text(f"adjustment.page_{page}"),
@@ -3683,18 +3871,20 @@ def _choose_dataset_pane_config(
                     f"{'›' if position == metric_index else ' '} {_dataset_title(item.title, translator)}"
                     for position, item in enumerate(descriptor.metrics)
                 ]
-                body, metric_offset = _chooser_viewport(
+                metric_body, metric_offset = _chooser_viewport(
                     metric_choices,
                     index=metric_index,
                     offset=metric_offset,
                     height=height,
-                    reserved_rows=2,
+                    reserved_rows=4,
                 )
+                title, prompt = _dataset_metric_chooser_chrome(descriptor, translator)
+                body = "\n".join((prompt, metric_body))
                 if paint_choices is None:
                     screen.paint(
                         compose_frame(
                             body,
-                            translator.text("status.dataset_chooser_title"),
+                            title,
                             translator.text("status.dataset_chooser_controls"),
                             (),
                             height=height,
@@ -3703,7 +3893,7 @@ def _choose_dataset_pane_config(
                 else:
                     paint_choices(
                         body,
-                        translator.text("status.dataset_chooser_title"),
+                        title,
                         translator.text("status.dataset_chooser_controls"),
                         (),
                     )
@@ -3724,9 +3914,7 @@ def _choose_dataset_pane_config(
                     metric_titles = (metric.title.en, metric.title.zh_cn)
                     ranking = metric.capabilities.charts.get("ranking")
                     metric_periods = (
-                        ranking.periods
-                        if isinstance(ranking, V2HistoricalChartCapability)
-                        else ()
+                        ranking.periods if isinstance(ranking, V2HistoricalChartCapability) else ()
                     )
                     break
             if metric_id is None:
@@ -4358,16 +4546,18 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
                             raise RuntimeError("custom Dataset requests require a timezone")
                         if isinstance(response, V2ProbeResponse):
                             resolved = resolve_metric(component.candidate, response.descriptor)
+                            descriptor = v2_metric_probe_descriptor(
+                                response.descriptor, resolved.metric_id
+                            )
                             component.configure(
                                 apply_custom_probe_defaults(
                                     resolved,
-                                    v2_metric_probe_descriptor(
-                                        response.descriptor, resolved.metric_id
-                                    ),
+                                    descriptor,
                                     timezone=options.host.timezone,
                                 ),
                                 data_affecting=False,
                             )
+                            component.set_capability(descriptor.capabilities.charts[current.kind])
                         elif isinstance(response, CustomProbeResponse):
                             component.configure(
                                 apply_custom_probe_defaults(
@@ -4377,8 +4567,13 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
                                 ),
                                 data_affecting=False,
                             )
+                            component.set_capability(
+                                response.descriptor.capabilities.charts[current.kind]
+                            )
                         else:
-                            raise TypeError("custom provider result does not contain a probe response")
+                            raise TypeError(
+                                "custom provider result does not contain a probe response"
+                            )
                         current = component.candidate
                         probe_complete = True
                         lifecycle.complete(operation, generation=outcome.generation)
@@ -4482,16 +4677,22 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
                                 if options.host.timezone is None:
                                     raise RuntimeError("custom Dataset requests require a timezone")
                                 if isinstance(response, V2ProbeResponse):
-                                    resolved = resolve_metric(component.candidate, response.descriptor)
+                                    resolved = resolve_metric(
+                                        component.candidate, response.descriptor
+                                    )
+                                    descriptor = v2_metric_probe_descriptor(
+                                        response.descriptor, resolved.metric_id
+                                    )
                                     component.configure(
                                         apply_custom_probe_defaults(
                                             resolved,
-                                            v2_metric_probe_descriptor(
-                                                response.descriptor, resolved.metric_id
-                                            ),
+                                            descriptor,
                                             timezone=options.host.timezone,
                                         ),
                                         data_affecting=False,
+                                    )
+                                    component.set_capability(
+                                        descriptor.capabilities.charts[current.kind]
                                     )
                                 elif isinstance(response, CustomProbeResponse):
                                     component.configure(
@@ -4502,8 +4703,13 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
                                         ),
                                         data_affecting=False,
                                     )
+                                    component.set_capability(
+                                        response.descriptor.capabilities.charts[current.kind]
+                                    )
                                 else:
-                                    raise TypeError("custom provider result does not contain a probe response")
+                                    raise TypeError(
+                                        "custom provider result does not contain a probe response"
+                                    )
                                 current = component.candidate
                                 probe_complete = True
                                 lifecycle.complete(operation, generation=operation.generation)
@@ -4696,6 +4902,8 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
     dashboard_text_visible_rows = 0
     chooser_overlay: tuple[int, str] | None = None
     dataset_modal: DashboardDatasetModalState | None = None
+    preset_manager: PresetManagerState | None = None
+    current_preset_key: str | None = None
     overlay_editor: OverlayEditorState | None = None
     overlay_history: OverlayHistoryState | None = None
     custom_logs_pane: int | None = None
@@ -4722,6 +4930,151 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         focused = None
         grid_draft = None
         grid_error = None
+
+    def active_dashboard_launch() -> DashboardLaunch:
+        """Capture the displayed Dashboard without leaking live runtime state."""
+
+        state = capture_dashboard_state()
+        return DashboardLaunch(
+            options.process,
+            replace(
+                options.host,
+                grid=state.grid,
+                layout=state.layout,
+                column_weights=state.column_weights,
+                row_weights=state.row_weights,
+                theme=state.theme,
+                style=state.style,
+                header_style=state.header_style,
+                header_summary=state.header_summary,
+            ),
+            tuple(pane.config for pane in state.panes),
+        )
+
+    def preset_catalog() -> PresetCatalogSnapshot:
+        entries = [
+            PresetCatalogEntry(f"builtin:{name}", name, "builtin")
+            for name in DASHBOARD_PRESETS
+        ]
+        try:
+            records = DashboardPresetStore(dashboard_preset_state_root()).list()
+        except DashboardPresetStoreError:
+            return PresetCatalogSnapshot(
+                tuple(entries),
+                current_source_key=current_preset_key,
+                warning=translator.text("status.tui_preset_store_unavailable"),
+            )
+        entries.extend(PresetCatalogEntry(f"user:{record.name}", record.name, "user") for record in records)
+        return PresetCatalogSnapshot(tuple(entries), current_source_key=current_preset_key)
+
+    def preset_state_from_launch(launch: DashboardLaunch) -> DashboardState:
+        return DashboardState(
+            tuple(
+                DashboardPaneState(index, pane, "chart")
+                for index, pane in enumerate(launch.panes)
+            ),
+            launch.host.grid,
+            launch.host.layout,
+            launch.host.column_weights,
+            launch.host.row_weights,
+            launch.host.theme,
+            launch.host.style,
+            launch.host.header_style,
+            launch.host.header_summary,
+            "chart",
+        )
+
+    def builtin_preset_launch(name: str) -> DashboardLaunch:
+        from ccusage_viz.cli import parse_pane_fragment
+
+        preset = DASHBOARD_PRESETS[name]
+        base = DashboardLaunch(
+            options.process,
+            replace(
+                options.host,
+                grid=preset.grid,
+                layout=preset.layout,
+                row_weights=preset.row_weights,
+                refresh_interval=preset.refresh_interval,
+                sampling_interval=preset.sampling_interval,
+                style=preset.style,
+            ),
+            (),
+            launcher=options.launcher,
+        )
+        panes = tuple(
+            parse_pane_fragment(fragment, host=base, language=translator.language)
+            for fragment in preset.panels
+        )
+        if name in {"wide-clock", "narrow-clock"} and panes and isinstance(
+            panes[0], AnimationPaneConfig
+        ):
+            panes = (
+                replace(
+                    panes[0],
+                    overlay=OverlayConfig(
+                        command=f"{options.launcher} text time-state --run", position="bottom-right"
+                    ),
+                ),
+                *panes[1:],
+            )
+        return replace(base, panes=panes)
+
+    def execute_preset_command(command: object) -> None:
+        nonlocal options, preset_manager, current_preset_key
+        if isinstance(command, ClosePresetManager):
+            preset_manager = None
+            return
+        if isinstance(command, SavePreset):
+            try:
+                record = preset_from_launch(command.name, active_dashboard_launch())
+                DashboardPresetStore(dashboard_preset_state_root()).save(record)
+            except (DashboardPresetStoreError, DashboardPresetValidationError):
+                preset_manager = replace(preset_manager, notice="preset-save-failed")
+            else:
+                current_preset_key = f"user:{command.name}"
+            return
+        if isinstance(command, DeletePreset):
+            try:
+                DashboardPresetStore(dashboard_preset_state_root()).delete(command.key.removeprefix("user:"))
+            except DashboardPresetStoreError:
+                preset_manager = replace(preset_manager, notice="preset-delete-failed")
+            else:
+                if current_preset_key == command.key:
+                    current_preset_key = None
+            return
+        if isinstance(command, LoadPreset):
+            try:
+                if command.key.startswith("builtin:"):
+                    launch = builtin_preset_launch(command.key.removeprefix("builtin:"))
+                else:
+                    from ccusage_viz.datasets.service import DatasetService
+
+                    record = DashboardPresetStore(dashboard_preset_state_root()).get(
+                        command.key.removeprefix("user:")
+                    )
+                    launch = materialize_preset(record, DatasetService().installed_command_source)
+                loaded_options = replace(launch, explicit=options.explicit, launcher=options.launcher)
+
+                def apply_loaded_preset() -> None:
+                    nonlocal options
+                    options = loaded_options
+                    apply_dashboard_state(preset_state_from_launch(loaded_options))
+
+                record_mutation(("preset", "load", command.key), apply_loaded_preset)
+            except (DashboardPresetStoreError, DashboardPresetValidationError, UsageError):
+                preset_manager = replace(preset_manager, notice="preset-load-failed")
+            else:
+                current_preset_key = command.key
+                preset_manager = None
+
+    def open_preset_manager(*, save: bool = False) -> None:
+        nonlocal preset_manager
+        preset_manager = reconcile_preset_manager(
+            PresetManagerState(mode="save" if save else "list"),
+            preset_catalog(),
+            visible_rows=max(1, get_terminal_size().lines - 4),
+        )
 
     def open_help(
         *,
@@ -5017,18 +5370,30 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             )
         )
         summary.select(config.source, config.filters)
-        intent = custom_summary_query_intent(
-            config.source,
-            plan,
-            filters=config.filters,
-            timezone=options.host.timezone,
-            owner_id=operation.owner_id,
-            generation=operation.generation,
-            trigger=query_trigger(operation.trigger),
-            process=pane.process,
+        intent = (
+            custom_v2_summary_query_intent(
+                config,
+                plan,
+                timezone=options.host.timezone,
+                owner_id=operation.owner_id,
+                generation=operation.generation,
+                trigger=query_trigger(operation.trigger),
+                process=pane.process,
+            )
+            if config.metric_id is not None
+            else custom_summary_query_intent(
+                config.source,
+                plan,
+                filters=config.filters,
+                timezone=options.host.timezone,
+                owner_id=operation.owner_id,
+                generation=operation.generation,
+                trigger=query_trigger(operation.trigger),
+                process=pane.process,
+            )
         )
         request = intent.payload
-        if not isinstance(request, CustomSummaryRequest):
+        if not isinstance(request, (CustomSummaryRequest, V2SummaryRequest)):
             raise TypeError("custom Pane summary intent has an unexpected payload")
         summary.requested_period = request.scope
         summary.requested_as_of_date = request.current.until
@@ -5581,15 +5946,14 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         if isinstance(pane.component, CustomMonitorComponent):
                             if not isinstance(response, V2ProbeResponse):
                                 raise TypeError("custom monitor probe did not return a V2 response")
-                            pane.component.configure(
-                                resolve_metric(pane.component.candidate, response.descriptor),
-                                data_affecting=False,
+                            resolved = resolve_metric(
+                                pane.component.candidate, response.descriptor
                             )
                             metric = next(
                                 (
                                     item
                                     for item in response.descriptor.metrics
-                                    if item.id == pane.component.candidate.metric_id
+                                    if item.id == resolved.metric_id
                                 ),
                                 None,
                             )
@@ -5599,19 +5963,30 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                 raise TypeError(
                                     "custom monitor metric is not supported by runtime probe"
                                 )
+                            from ccusage_viz.custom_monitor_component import (
+                                apply_custom_monitor_defaults,
+                            )
+
+                            resolved, display_window = apply_custom_monitor_defaults(resolved, metric)
+                            pane.component.configure(resolved, data_affecting=False)
+                            pane.component.set_metric(metric)
+                            if display_window is not None:
+                                pane.component.configure_display_window(display_window)
                         elif isinstance(response, V2ProbeResponse):
-                            resolved = resolve_metric(
-                                pane.component.candidate, response.descriptor
+                            resolved = resolve_metric(pane.component.candidate, response.descriptor)
+                            descriptor = v2_metric_probe_descriptor(
+                                response.descriptor, resolved.metric_id
                             )
                             pane.component.configure(
                                 apply_custom_probe_defaults(
                                     resolved,
-                                    v2_metric_probe_descriptor(
-                                        response.descriptor, resolved.metric_id
-                                    ),
+                                    descriptor,
                                     timezone=options.host.timezone or "UTC",
                                 ),
                                 data_affecting=False,
+                            )
+                            pane.component.set_capability(
+                                descriptor.capabilities.charts[pane.component.candidate.kind]
                             )
                         elif not isinstance(response, CustomProbeResponse):
                             raise TypeError(
@@ -5630,7 +6005,20 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                 ),
                                 data_affecting=False,
                             )
+                            pane.component.set_capability(
+                                response.descriptor.capabilities.charts[
+                                    pane.component.candidate.kind
+                                ]
+                            )
                         pane.probe_complete = True
+                        try:
+                            from ccusage_viz.datasets.service import DatasetService
+
+                            DatasetService().update_runtime_probe(
+                                pane.component.candidate.source, response
+                            )
+                        except OSError:
+                            pass
                         record_custom_warnings(pane.component.candidate.source, response)
                         pane.lifecycle.complete(operation, generation=outcome.generation)
                         refresh(
@@ -5655,6 +6043,14 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                             )
                             pane.lifecycle.complete(operation, generation=outcome.generation)
                             last_successful_update = pane.component.accepted_at
+                            if pane.attachment is not None:
+                                _update_custom_monitor_attachment_activity(
+                                    pane.component,
+                                    pane.attachment,
+                                    now=time.monotonic(),
+                                    wall=pane.component.accepted_at,
+                                    translator=translator,
+                                )
                             changed = True
                         else:
                             pane.lifecycle.abandon(operation)
@@ -5839,6 +6235,10 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 if isinstance(pane, TuiChartPane)
                 and pane.body_view == "chart"
                 and pane.attachment is not None
+                else (pane.attachment.next_deadline,)
+                if isinstance(pane, TuiCustomPane)
+                and pane.body_view == "chart"
+                and pane.attachment is not None
                 else ()
             )
             if deadline is not None
@@ -5851,11 +6251,15 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             if isinstance(pane, TuiEmptyPane):
                 pane_states.append(DashboardPaneState(pane.pane_id, EmptyPaneConfig(), "chart"))
             elif isinstance(pane, TuiCustomPane):
+                attachment = pane.attachment
                 pane_states.append(
                     DashboardPaneState(
                         pane.pane_id,
                         CustomChartPaneConfig(pane.component.candidate),
                         pane.body_view,
+                        attachment.spec.style if attachment is not None else None,
+                        attachment.theme if attachment is not None else None,
+                        pane.attachment_enabled,
                     )
                 )
             elif isinstance(pane, TuiAnimationPane):
@@ -5961,6 +6365,14 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         pane.probe_complete = False
                     if data_affecting or summary_affecting:
                         refresh_indexes.append((len(reconciled), data_affecting, summary_affecting))
+                if pane.attachment is not None:
+                    if pane_state.attachment_style is not None:
+                        pane.attachment.set_style(
+                            animation_spec(pane_state.attachment_style, target="monitor"), now
+                        )
+                    if pane_state.attachment_theme is not None:
+                        pane.attachment.set_theme(pane_state.attachment_theme, now)
+                    pane.attachment_enabled = pane_state.attachment_enabled
             elif isinstance(pane, TuiChartPane):
                 assert isinstance(pane_state.config, ChartPaneConfig)
                 component = pane.component
@@ -6087,6 +6499,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             width=width,
             color=dashboard_theme != "no-color",
         )
+
+    def preset_operations(width: int) -> str:
+        return clip_width(translator.text("status.tui_preset_operations"), width)
 
     def help_lines(width: int) -> tuple[str, ...]:
         mode = (
@@ -6395,6 +6810,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 (translator.text("status.tui_help_browse_view"), ()),
                 (translator.text("status.tui_help_browse_pane"), ()),
                 (translator.text("status.tui_help_browse_dashboard"), ()),
+                (translator.text("status.tui_help_browse_presets"), ()),
             ]
             if body_view == "chart":
                 browse_children[:0] = [
@@ -6796,7 +7212,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             f"status.tui_{body_view.replace('-', '_')}_controls",
             action=translator.text("status.hide_controls"),
         )
-        return (clip_width(context, width), global_operations(width))
+        return (clip_width(context, width), preset_operations(width), global_operations(width))
 
     def notices() -> tuple[str, ...]:
         feedback = feedback_lines(
@@ -6968,6 +7384,16 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         else:
             _paint_dataset_modal()
         size = get_terminal_size()
+        if preset_manager is not None:
+            frame = render_preset_manager(
+                preset_manager,
+                preset_catalog(),
+                translator,
+                Terminal(size.columns, size.lines, dashboard_theme != "no-color", options.host.ascii),
+            )
+            screen.paint(frame, force=force, atomic=True)
+            help_was_active = False
+            return
         atomic = (
             help_overlay is not None
             or help_was_active
@@ -7507,10 +7933,17 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 f"{'›' if item_index == modal.index else ' '} {_dataset_title(metric.title, translator)}"
                 for item_index, metric in enumerate(modal.metrics)
             ]
-            body, modal.offset = _chooser_viewport(
-                rows, index=modal.index, offset=modal.offset, height=height
+            selected = next(
+                status.registration.probe.descriptor
+                for status in modal.statuses
+                if status.registration.dataset_id == modal.draft.dataset_id
             )
-            title = translator.text("status.dataset_chooser_title")
+            assert isinstance(selected, V2ProbeDescriptor)
+            metric_body, modal.offset = _chooser_viewport(
+                rows, index=modal.index, offset=modal.offset, height=height, reserved_rows=4
+            )
+            title, prompt = _dataset_metric_chooser_chrome(selected, translator)
+            body = "\n".join((prompt, metric_body))
             controls = translator.text("status.dataset_chooser_controls")
         else:
             fields = (
@@ -7700,6 +8133,12 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             elif key in {"\r", "\n"}:
                 status = entries[modal.index]
                 modal.draft.dataset_id = status.registration.dataset_id
+                modal.metrics = ()
+                modal.metric_id = None
+                modal.metric_summary = "comparisons"
+                modal.metric_periods = ()
+                modal.metric_titles = None
+                modal.chart_kinds = ()
                 descriptor = status.registration.probe.descriptor
                 if isinstance(descriptor, V2ProbeDescriptor):
                     modal.metrics = descriptor.metrics
@@ -7732,9 +8171,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 modal.metric_titles = (metric.title.en, metric.title.zh_cn)
                 ranking = metric.capabilities.charts.get("ranking")
                 modal.metric_periods = (
-                    ranking.periods
-                    if isinstance(ranking, V2HistoricalChartCapability)
-                    else ()
+                    ranking.periods if isinstance(ranking, V2HistoricalChartCapability) else ()
                 )
                 modal.chart_kinds = tuple(metric.capabilities.charts)
                 if modal.chart_kinds:
@@ -7836,7 +8273,19 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 )
                 return
             if key == "\x1b":
-                modal.stage, modal.index, modal.offset = "source", 0, 0
+                if modal.metrics:
+                    modal.index = next(
+                        (
+                            position
+                            for position, metric in enumerate(modal.metrics)
+                            if metric.id == modal.metric_id
+                        ),
+                        0,
+                    )
+                    modal.offset = 0
+                    modal.stage = "metric"
+                else:
+                    modal.stage, modal.index, modal.offset = "source", 0, 0
             elif key in {"j", "\x1b[B"}:
                 modal.index = (modal.index + 1) % len(modal.chart_kinds)
             elif key in {"k", "\x1b[A"}:
@@ -7975,6 +8424,20 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     continue
                 if help_overlay is not None:
                     process_help_event(event)
+                    continue
+                if preset_manager is not None:
+                    if isinstance(event, (KeyEvent, PasteEvent)):
+                        update = reduce_preset_manager(preset_manager, preset_catalog(), event)
+                        preset_manager = update.state
+                        if update.command is not None:
+                            execute_preset_command(update.command)
+                        if preset_manager is not None:
+                            preset_manager = reconcile_preset_manager(
+                                preset_manager,
+                                preset_catalog(),
+                                visible_rows=max(1, get_terminal_size().lines - 4),
+                            )
+                    paint()
                     continue
                 if dataset_modal is not None:
                     handle_dataset_modal(event)
@@ -8223,7 +8686,12 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                             continue
                         animation_pane = pane
                         if adjustment_page == "quick" and key in {"p", "P"}:
-                            animation_pane.overlay.cycle_position(1 if key == "p" else -1)
+                            record_mutation(
+                                ("pane", focused, "overlay-position"),
+                                lambda pane=animation_pane: pane.overlay.cycle_position(
+                                    1 if key == "p" else -1
+                                ),
+                            )
                         elif adjustment_page == "quick" and key in {"t", "T"}:
                             record_mutation(
                                 ("pane", focused, "theme"),
@@ -8245,15 +8713,30 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                 ),
                             )
                         elif adjustment_page == "advanced" and key == "\x1b[A":
-                            pane.overlay.adjust_offset(dy=-1)
+                            record_mutation(
+                                ("pane", focused, "overlay-offset"),
+                                lambda pane=animation_pane: pane.overlay.adjust_offset(dy=-1),
+                            )
                         elif adjustment_page == "advanced" and key == "\x1b[B":
-                            pane.overlay.adjust_offset(dy=1)
+                            record_mutation(
+                                ("pane", focused, "overlay-offset"),
+                                lambda pane=animation_pane: pane.overlay.adjust_offset(dy=1),
+                            )
                         elif adjustment_page == "advanced" and key == "\x1b[C":
-                            pane.overlay.adjust_offset(dx=1)
+                            record_mutation(
+                                ("pane", focused, "overlay-offset"),
+                                lambda pane=animation_pane: pane.overlay.adjust_offset(dx=1),
+                            )
                         elif adjustment_page == "advanced" and key == "\x1b[D":
-                            pane.overlay.adjust_offset(dx=-1)
+                            record_mutation(
+                                ("pane", focused, "overlay-offset"),
+                                lambda pane=animation_pane: pane.overlay.adjust_offset(dx=-1),
+                            )
                         elif adjustment_page == "advanced" and key == "0":
-                            pane.overlay.reset_offset()
+                            record_mutation(
+                                ("pane", focused, "overlay-offset"),
+                                lambda pane=animation_pane: pane.overlay.reset_offset(),
+                            )
                         elif adjustment_page == "advanced" and key == "i":
                             record_mutation(
                                 ("pane", focused, "overlay-interval"),
@@ -8331,6 +8814,78 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
 
                         if key == "L":
                             custom_logs_pane = focused_index
+                        elif (
+                            isinstance(component, CustomMonitorComponent)
+                            and adjustment_page == "advanced"
+                            and pane.attachment is not None
+                            and base.presentation.style in {"ranking", "list"}
+                            and key in {"s", "S", "t", "T"}
+                        ):
+                            attachment = pane.attachment
+
+                            def adjust_custom_attachment(
+                                pane: TuiCustomPane = pane,
+                                attachment: AnimationSessionState = attachment,
+                            ) -> None:
+                                now = time.monotonic()
+                                if key in {"s", "S"}:
+                                    pane.attachment_enabled = cycle_monitor_attachment(
+                                        attachment,
+                                        enabled=pane.attachment_enabled,
+                                        step=1 if key == "s" else -1,
+                                        now=now,
+                                    )
+                                else:
+                                    attachment.set_theme(
+                                        _cycle(
+                                            COLOR_SCHEMES, attachment.theme, 1 if key == "t" else -1
+                                        ),
+                                        now,
+                                    )
+
+                            record_mutation(
+                                ("pane", focused_index, "custom-monitor-animation"),
+                                adjust_custom_attachment,
+                            )
+                        elif isinstance(component, CustomMonitorComponent) and key in {
+                            "d",
+                            "s",
+                            "S",
+                            "t",
+                            "T",
+                            "l",
+                            "+",
+                            "=",
+                            "-",
+                            "_",
+                            "o",
+                        }:
+                            updated = _adjust_custom_monitor_chart(
+                                base, key, aggregation=component.aggregation
+                            )
+                            if updated != base:
+                                record_mutation(
+                                    ("pane", focused_index, "custom-monitor-presentation"),
+                                    lambda config=updated: component.configure(
+                                        config, data_affecting=False
+                                    ),
+                                )
+                        elif isinstance(component, CustomMonitorComponent) and key == "w":
+                            if base.presentation.style == "cumulative-bars":
+                                record_mutation(
+                                    ("pane", focused_index, "custom-monitor-distribution-day"),
+                                    component.toggle_distribution_day_window,
+                                )
+                            else:
+                                window = _cycle_custom_monitor_window(
+                                    component.display_window_seconds
+                                )
+                                record_mutation(
+                                    ("pane", focused_index, "custom-monitor-window"),
+                                    lambda window=window: component.configure_display_window(
+                                        window
+                                    ),
+                                )
                         elif key in {"p", "P"}:
                             updated = adjust_custom_chart(base, key)
                             if updated != base:
@@ -8339,6 +8894,10 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                     lambda config=updated: apply_custom_query(
                                         config, mutation="period"
                                     ),
+                                )
+                            elif base.metric_periods:
+                                copy_feedback.show(
+                                    translator.text("status.custom_period_restricted")
                                 )
                         elif (
                             key in {"g", "G"}
@@ -8357,10 +8916,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                     ),
                                 )
                         elif (
-                            key in {"b", "B"}
-                            and base.kind != "calendar"
-                            and capability is not None
-                            and capability.group_by
+                            key in {"b", "B"} and base.kind != "calendar" and capability is not None
                         ):
                             updated = _cycle_custom_grouping(
                                 base, capability.group_by, step=1 if key == "b" else -1
@@ -8371,6 +8927,10 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                     lambda config=updated: apply_custom_query(
                                         config, mutation="group"
                                     ),
+                                )
+                            else:
+                                copy_feedback.show(
+                                    translator.text("status.custom_group_restricted")
                                 )
                         elif (
                             key == "f"
@@ -8427,11 +8987,32 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                             updated = adjust_custom_chart(base, key)
                             if updated != base:
 
+                                if (
+                                    key in {"+", "="}
+                                    and isinstance(component, CustomHistoricalComponent)
+                                    and component.capability is not None
+                                    and component.capability.max_items is not None
+                                    and updated.top is not None
+                                    and updated.top > component.capability.max_items
+                                ):
+                                    copy_feedback.show(
+                                        translator.text(
+                                            "status.custom_top_source_limit",
+                                            max=component.capability.max_items,
+                                        )
+                                    )
+
                                 def apply_custom_presentation(
                                     pane: TuiCustomPane = pane,
                                     config: CustomChartConfig = updated,
                                 ) -> None:
-                                    pane.component.configure(config, data_affecting=False)
+                                    if (
+                                        isinstance(pane.component, CustomHistoricalComponent)
+                                        and _custom_top_refresh_required(pane.component, config)
+                                    ):
+                                        apply_custom_query(config, mutation="top")
+                                    else:
+                                        pane.component.configure(config, data_affecting=False)
 
                                 record_mutation(
                                     ("pane", focused_index, "custom-presentation"),
@@ -8917,6 +9498,14 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         )
                     )
                     paint(force=True)
+                elif key == "p" and body_view == "chart":
+                    open_preset_manager()
+                    paint()
+                    continue
+                elif key == "s" and body_view == "chart":
+                    open_preset_manager(save=True)
+                    paint()
+                    continue
                 elif key in {"v", "V"}:
 
                     def cycle_dashboard_view() -> None:

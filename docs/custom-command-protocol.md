@@ -25,14 +25,71 @@ Each metric declares `aggregation: "sum"` or `aggregation: "value"`.
 `value` is source-owned: ccuv displays only the exact query result and asks the
 Dataset again whenever range, grouping, granularity, filters, or chart changes.
 
+Local Dataset registration caches its successful Probe for discovery, environment
+state, and the nonblocking chooser. Re-running `ccuv dataset add-local COMMAND`
+replaces an existing local registration with the same Dataset ID and refreshes
+that cache. A Custom Monitor Pane still performs a new runtime Probe before it
+starts sampling; cached metadata is never its final capability authority.
+
 V2 metrics may declare `summary: "comparisons" | "total" | "none"`.
 `comparisons` is the default and permits the ordinary current/sequential/year-over-year
 summary. `total` permits only one total value. `none` suppresses Dataset summary
-acquisition. A Ranking capability may declare its supported `periods`. `all` is
-Ranking-only: ccuv sends `period: "all"` with an anchored range from
+acquisition. A historical chart capability may declare its supported `periods`.
+When present, ccuv limits `p/P` to that ordered list. `all` is Ranking-only:
+ccuv sends `period: "all"` with an anchored range from
 `1971-01-01` through today. The marker, not the anchor date, means all source
 data. Datasets must reject unsupported periods with their existing
 `unsupported_query` response for `range.period`.
+
+Each chart's `group_by` is also an ordered set of permitted query values. Use
+JSON `null` to permit the ungrouped total; dimension IDs remain strings, so a
+dimension named `total` is unambiguous. When either declared list prevents a
+requested change, ccuv keeps the current query and shows a short notice rather
+than sending an unsupported request. Omit `periods` to let ccuv use its normal
+period cycle and let the Dataset dynamically interpret each request.
+
+### V2 chart defaults
+
+Each Metric may use `defaults` to suggest its initial state for a chart. This is
+a best-effort presentation and query suggestion, not a validity requirement:
+ccuv ignores an invalid field and keeps its standalone or Dashboard default.
+An explicit CLI or Dashboard Pane option overrides the Dataset field.
+
+```json
+"defaults": {
+  "timeline": {
+    "period": "30d",
+    "granularity": "week",
+    "group_by": "book",
+    "filters": {"category": ["literature"]},
+    "top": 8,
+    "other": "hide",
+    "style": "line-points",
+    "theme": "nord"
+  },
+  "monitor": {"style": "ranking", "window": "6h"}
+}
+```
+
+All fields are optional. `filters` maps a declared multi-select filter ID to
+one or more declared option IDs. ccuv discards unknown filters and options,
+retaining compatible choices. `period`, `granularity`, and `group_by` must be
+supported by the selected chart capability; `top` needs a valid final grouping;
+and style must be compatible with that grouping. `other` is `"show"` or
+`"hide"`. `theme` and `style` use ccuv's ordinary CLI values.
+
+`defaults.top` is only the first-screen Top N suggestion. For a historical
+Ranking, `capabilities.charts.ranking.max_items` may declare a positive
+source-owned upper bound on raw ranking items. It is not a display default.
+ccuv includes the selected Top as optional `query.top`, which expresses both
+the visible Top N and the requested raw ranking coverage; Datasets may return
+more entries when needed for an honest `Other` row. A `null` query value means
+no requested Top bound. ccuv retains user selections above `max_items`, but
+reports the source limit rather than issuing a request that cannot add entries.
+
+For a Custom Monitor, `window` is ccuv's local display horizon (`5m` through
+`24h`), not the source business window. The fixed request interval remains
+`capabilities.charts.monitor.window_seconds`.
 
 V2 metrics may declare `monitor`. A Monitor metric declares its fixed business
 `window_seconds` and may declare `refresh_interval_seconds`. ccuv's Monitor
@@ -120,14 +177,31 @@ ccuv dashboard --empty --grid 2x2 \
   --pane 'animate --style rain'
 ```
 
-Dashboard presets remain the built-in token-consumption templates; adding a
-Dataset pane does not create or modify a Dataset preset.
+Dashboard presets begin with built-in token-consumption templates, and the
+Dashboard preset manager can also save complete user configurations. In browse
+mode, press `s` to save and `p` to manage saved presets. Presets retain installed
+Dataset identities, local-command Dataset argv, and command-driven overlays.
+They are trusted user-local automation: loading a preset can execute its commands,
+so only load presets you trust. Presets never contain environment variables,
+credentials, results, or runtime/UI state.
+
+User names match `^[a-z][a-z0-9-]*$`. They can shadow built-ins: user-first
+resolution loads the saved record, while deleting the user override exposes the
+same-named built-in again. The manager asks before overwriting an existing user
+preset or deleting one. A name is launchable as `ccuv dashboard <name>`; that
+closed form accepts only `--demo`, `--lang`, `--empty`, and `--ccusage-bin` as
+additional options. A missing installed Dataset does not make a preset unavailable;
+only unreadable, malformed, or unsupported preset storage is unavailable and
+protected from writes.
 
 `dashboard --empty` suppresses default ccusage panes and their default data
 dependencies. It uses the normal default Dashboard layout and fills it with
 `empty` panes; `--grid` or an explicit layout sets their initial count and
 placement. It does not add a clock. Existing `wide-clock` and `narrow-clock`
-presets retain their clock pane.
+presets retain their clock pane. For a named preset, `ccuv dashboard <name>
+--empty` preserves that preset's layout, weights, display and cadence settings,
+timezone, demo and safe process configuration, replacing only its panes in memory;
+it never changes the stored preset. A demo-enabled preset remains demo-enabled.
 
 After a custom Dashboard pane is selected, `v` and `V` cycle forward and backward
 through chart, compact command, full command, data table, and JSON views. The

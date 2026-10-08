@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from collections import defaultdict
 from collections.abc import Iterable
+from datetime import datetime
 from typing import TYPE_CHECKING, Literal
 
 from ccusage_viz.chart_models import (
@@ -19,6 +20,8 @@ from ccusage_viz.processing import process_historical
 from ccusage_viz.processing.custom_historical import CustomChartProjection, CustomProjectedSeries
 from ccusage_viz.processing.filtering import prepare_filtered_scope
 from ccusage_viz.project_identity import (
+    FIXED_UNASSIGNED_PROJECT,
+    FIXED_UNVERIFIED_PROJECT,
     ExactProjectDisplayKey,
     ProjectDisplayKey,
     exact_project_agent,
@@ -31,9 +34,9 @@ from ccusage_viz.project_identity import (
 if TYPE_CHECKING:
     from ccusage_viz.historical_component import UsageSnapshot
     from ccusage_viz.i18n import Translator
+    from ccusage_viz.monitor_component import MonitorComponent
     from ccusage_viz.options import StandaloneLaunch
     from ccusage_viz.processing.monitor import ObservedBucket
-    from ccusage_viz.monitor_component import MonitorComponent
     from ccusage_viz.terminal import Terminal
 
 
@@ -59,9 +62,7 @@ def next_body_view(view: BodyView) -> BodyView:
     return cycle_body_view(view)
 
 
-def cycle_dashboard_body_view(
-    view: DashboardBodyView, *, step: int = 1
-) -> DashboardBodyView:
+def cycle_dashboard_body_view(view: DashboardBodyView, *, step: int = 1) -> DashboardBodyView:
     """Cycle a full-screen Dashboard body view in either direction."""
     views: tuple[DashboardBodyView, ...] = ("chart", "full-command")
     return views[(views.index(view) + step) % len(views)]
@@ -128,9 +129,11 @@ def _project_source_rows(
     groups = project_groups(projects, options.project_aggregation)
     projects_by_key = {project.key: project for project in projects}
     usage_by_project: dict[tuple[str, str], TokenUsage] = defaultdict(TokenUsage.zero)
+    source_records_by_project: dict[tuple[str, str], list[UsageRecord]] = defaultdict(list)
     for record in scope.records:
         if record.project is not None:
             usage_by_project[record.project.key] += record.usage
+            source_records_by_project[record.project.key].append(record)
 
     entries = {entry.key: (rank, entry) for rank, entry in enumerate(model.entries, start=1)}
     member_keys = {
@@ -164,6 +167,24 @@ def _project_source_rows(
             continue
         for project_key in member_keys.get(key, ()):
             project = projects_by_key[project_key]
+            if project.raw_id in {FIXED_UNASSIGNED_PROJECT, FIXED_UNVERIFIED_PROJECT}:
+                rows.extend(
+                    {
+                        "rank": rank,
+                        "display_project": entry.label,
+                        "project": entry.label,
+                        "agent": record.agent,
+                        "attribution": record.attribution,
+                        "period": record.day.isoformat() if record.day is not None else None,
+                        "source_project": record.source_project,
+                        "session_id": record.session_id,
+                        "merge_group": merge_groups.get(key),
+                        "is_other": False,
+                        **_usage_values(record.usage),
+                    }
+                    for record in source_records_by_project[project_key]
+                )
+                continue
             rows.append(
                 {
                     "rank": rank,
@@ -358,7 +379,11 @@ def render_custom_data(
     assert isinstance(rows, list)
     if not rows:
         return translator.text("message.no_data")
-    return json.dumps(payload, indent=2, ensure_ascii=False) if view == "data-json" else _markdown(rows)
+    return (
+        json.dumps(payload, indent=2, ensure_ascii=False)
+        if view == "data-json"
+        else _markdown(rows)
+    )
 
 
 def _monitor_display_project(name: ProjectDisplayKey) -> str:

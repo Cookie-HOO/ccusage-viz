@@ -5,7 +5,7 @@ from typing import Any
 
 from ccusage_viz.domain import ModelBreakdown, ProjectRef, SourceKind, TokenUsage, UsageRecord
 from ccusage_viz.errors import SchemaError
-from ccusage_viz.project_identity import make_project_ref
+from ccusage_viz.project_identity import fixed_project_ref, make_project_ref
 from ccusage_viz.query.models import QueryKind
 
 _TOKEN_FIELDS = (
@@ -107,6 +107,9 @@ def _record(
     source: SourceKind,
     project: ProjectRef | None = None,
     day: date | None = None,
+    attribution: str | None = None,
+    source_project: str | None = None,
+    session_id: str | None = None,
 ) -> UsageRecord:
     return UsageRecord(
         day=_day(row, path) if day is None and source is not SourceKind.CODEX_SESSIONS else day,
@@ -115,6 +118,9 @@ def _record(
         source=source,
         project=project,
         models=_models(row, path),
+        attribution=attribution,
+        source_project=source_project,
+        session_id=session_id,
     )
 
 
@@ -209,7 +215,7 @@ def parse_codex_sessions(data: object) -> tuple[UsageRecord, ...]:
         project = (
             make_project_ref("codex", *identity, path_backed=True)
             if identity is not None
-            else make_project_ref("codex", "unassigned-codex", "Unassigned Codex")
+            else fixed_project_ref("codex", "unassigned")
         )
         records.append(
             _record(
@@ -219,6 +225,8 @@ def parse_codex_sessions(data: object) -> tuple[UsageRecord, ...]:
                 source=SourceKind.CODEX_SESSIONS,
                 project=project,
                 day=None,
+                attribution="unassigned" if identity is None else None,
+                session_id=row.get("sessionId") if isinstance(row.get("sessionId"), str) else None,
             )
         )
     return tuple(records)

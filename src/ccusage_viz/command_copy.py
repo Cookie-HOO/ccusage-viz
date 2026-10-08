@@ -272,6 +272,10 @@ def format_full_dashboard_command(
                     fragment_args.extend(("--overlay-interval", f"{overlay.interval:g}"))
                 if overlay.max_width != 40:
                     fragment_args.extend(("--overlay-max-width", str(overlay.max_width)))
+                if overlay.offset_x:
+                    fragment_args.extend(("--overlay-offset-x", str(overlay.offset_x)))
+                if overlay.offset_y:
+                    fragment_args.extend(("--overlay-offset-y", str(overlay.offset_y)))
             fragment = shlex.join(fragment_args)
         else:
             fragment = shlex.join(

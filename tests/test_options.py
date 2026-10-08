@@ -121,6 +121,51 @@ def test_custom_probe_defaults_preserve_explicit_range_grouping_and_top() -> Non
     assert resolved == initial
 
 
+def test_invalid_custom_probe_defaults_leave_host_values_intact() -> None:
+    source = CustomCommandSource("weread", ("reader", "ccuv"))
+    initial = CustomChartConfig(
+        "ranking",
+        source,
+        resolve_date_range("ranking", period="14d", since=None, until=None),
+        presentation=ChartPresentation(theme="classic", style="dot"),
+    )
+    descriptor = _probe_descriptor()
+    descriptor = CustomProbeDescriptor(
+        descriptor.revision,
+        descriptor.version,
+        descriptor.dataset,
+        descriptor.capabilities,
+        {
+            "ranking": CustomChartDefaults(
+                "all",
+                "missing",
+                10,
+                style="not-a-style",
+                theme="not-a-theme",
+                declared=frozenset({"period", "group_by", "top", "style", "theme"}),
+            )
+        },
+        descriptor.environment,
+    )
+
+    resolved = apply_custom_probe_defaults(initial, descriptor, timezone="UTC")
+
+    assert resolved == initial
+
+
+@pytest.mark.parametrize("kind", ("timeline", "calendar", "stack", "ranking"))
+def test_custom_declared_periods_limit_every_historical_chart_cycle(kind: str) -> None:
+    chart = CustomChartConfig(
+        kind,  # type: ignore[arg-type]
+        CustomCommandSource("reading", ("reader", "ccuv")),
+        resolve_date_range(kind, period="7d", since=None, until=None),
+        metric_periods=("7d", "30d"),
+    )
+
+    assert adjust_custom_chart(chart, "p").date_range.period == "30d"
+    assert adjust_custom_chart(chart, "P").date_range.period == "30d"
+
+
 def test_custom_pane_and_empty_pane_are_discriminated() -> None:
     dashboard = DashboardLaunch(ProcessConfig(), DashboardHostConfig(), ())
     custom = default_custom_pane(

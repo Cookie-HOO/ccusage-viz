@@ -48,6 +48,33 @@ def test_overlay_config_rejects_invalid_values() -> None:
         OverlayConfig(text="text", color="orange")
     with pytest.raises(ValueError, match="five"):
         OverlayConfig(command="date", interval=4)
+    for value in (1.5, True, "1"):
+        with pytest.raises(ValueError, match="offsets"):
+            OverlayConfig(text="text", offset_x=value)  # type: ignore[arg-type]
+        with pytest.raises(ValueError, match="offsets"):
+            OverlayConfig(text="text", offset_y=value)  # type: ignore[arg-type]
+
+
+def test_runtime_mirrors_declarative_position_and_offsets_after_adjustments() -> None:
+    runtime = AnimationOverlayRuntime(
+        OverlayConfig(text="hello", position="top-left", offset_x=-2, offset_y=3)
+    )
+    try:
+        assert runtime.presentation.position == "top-left"
+        assert runtime.presentation.offset_x == -2
+        assert runtime.presentation.offset_y == 3
+
+        runtime.cycle_position()
+        runtime.adjust_offset(dx=5, dy=-4)
+        assert runtime.config.position == runtime.presentation.position == "top-center"
+        assert runtime.config.offset_x == runtime.presentation.offset_x == 3
+        assert runtime.config.offset_y == runtime.presentation.offset_y == -1
+
+        runtime.reset_offset()
+        assert runtime.config.offset_x == runtime.presentation.offset_x == 0
+        assert runtime.config.offset_y == runtime.presentation.offset_y == 0
+    finally:
+        runtime.close()
 
 
 def test_sanitize_ansi_keeps_safe_foreground_and_strips_terminal_controls() -> None:
@@ -271,10 +298,10 @@ def test_placements_hide_outside_vertical_bounds_without_clamping_offsets() -> N
 
         runtime.adjust_offset(dx=-10)
         assert runtime.placements(width=10, height=2) == ()
-        assert runtime.presentation.offset_x == -10
+        assert runtime.config.offset_x == -10
 
         runtime.reset_offset()
-        assert runtime.presentation.position == "top-left"
-        assert runtime.presentation.offset_x == runtime.presentation.offset_y == 0
+        assert runtime.config.position == "top-left"
+        assert runtime.config.offset_x == runtime.config.offset_y == 0
     finally:
         runtime.close()

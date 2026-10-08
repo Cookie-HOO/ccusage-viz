@@ -72,6 +72,8 @@ class OverlayConfig:
     color: str = "auto"
     interval: float = 60.0
     max_width: int = 40
+    offset_x: int = 0
+    offset_y: int = 0
 
     def __post_init__(self) -> None:
         if sum(source is not None for source in (self.text, self.command)) + self.time_band > 1:
@@ -84,6 +86,13 @@ class OverlayConfig:
             raise ValueError("overlay interval must be finite and at least five seconds")
         if self.max_width < 1:
             raise ValueError("overlay max width must be positive")
+        if (
+            not isinstance(self.offset_x, int)
+            or isinstance(self.offset_x, bool)
+            or not isinstance(self.offset_y, int)
+            or isinstance(self.offset_y, bool)
+        ):
+            raise ValueError("overlay offsets must be integers")
 
     @property
     def mode(self) -> SourceMode | None:
@@ -133,9 +142,9 @@ class OverlayPlacement:
     text: str
 
 
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class OverlayPresentation:
-    """Mutable, run-local presentation settings derived from an overlay config."""
+    """Run-local rendering values mirrored from an overlay config."""
 
     position: str
     color: str
@@ -531,7 +540,11 @@ class AnimationOverlayRuntime:
     def __init__(self, config: OverlayConfig | None = None) -> None:
         self.config = config or OverlayConfig()
         self.presentation = OverlayPresentation(
-            self.config.position, self.config.color, self.config.max_width
+            self.config.position,
+            self.config.color,
+            self.config.max_width,
+            self.config.offset_x,
+            self.config.offset_y,
         )
         self.text_draft = self.config.text or ""
         self.command_draft = self.config.command or ""
@@ -557,7 +570,13 @@ class AnimationOverlayRuntime:
         current = time.monotonic() if now is None else now
         self._generation += 1
         self.config = config
-        self.presentation = OverlayPresentation(config.position, config.color, config.max_width)
+        self.presentation = OverlayPresentation(
+            config.position,
+            config.color,
+            config.max_width,
+            config.offset_x,
+            config.offset_y,
+        )
         self.text_draft = config.text if config.text is not None else self.text_draft
         self.command_draft = config.command if config.command is not None else self.command_draft
         self.output = config.text or ""
@@ -642,19 +661,28 @@ class AnimationOverlayRuntime:
             raise ValueError("time-band overlays do not have an editable source draft")
 
     def cycle_position(self, step: int = 1) -> None:
-        """Move through anchor positions without changing the declared config."""
-        index = OVERLAY_POSITIONS.index(self.presentation.position)
-        self.presentation.position = OVERLAY_POSITIONS[(index + step) % len(OVERLAY_POSITIONS)]
+        """Cycle the declarative anchor position."""
+        index = OVERLAY_POSITIONS.index(self.config.position)
+        self.apply(
+            replace(
+                self.config,
+                position=OVERLAY_POSITIONS[(index + step) % len(OVERLAY_POSITIONS)],
+            )
+        )
 
     def adjust_offset(self, *, dx: int = 0, dy: int = 0) -> None:
-        """Accumulate an unrestricted, run-local display-cell offset."""
-        self.presentation.offset_x += dx
-        self.presentation.offset_y += dy
+        """Accumulate an unrestricted declarative display-cell offset."""
+        self.apply(
+            replace(
+                self.config,
+                offset_x=self.config.offset_x + dx,
+                offset_y=self.config.offset_y + dy,
+            )
+        )
 
     def reset_offset(self) -> None:
-        """Return to the selected anchor without changing it."""
-        self.presentation.offset_x = 0
-        self.presentation.offset_y = 0
+        """Reset the declarative offset while retaining its anchor."""
+        self.apply(replace(self.config, offset_x=0, offset_y=0))
 
     def lines(self, *, available_width: int) -> tuple[str, ...]:
         return normalized_lines(
@@ -669,9 +697,9 @@ class AnimationOverlayRuntime:
             self.lines(available_width=self.presentation.max_width),
             width=width,
             height=height,
-            position=self.presentation.position,
-            offset_x=self.presentation.offset_x,
-            offset_y=self.presentation.offset_y,
+            position=self.config.position,
+            offset_x=self.config.offset_x,
+            offset_y=self.config.offset_y,
         )
 
     def placements(self, *, width: int, height: int) -> tuple[OverlayPlacement, ...]:
@@ -680,9 +708,9 @@ class AnimationOverlayRuntime:
             self.lines(available_width=width),
             width=width,
             height=height,
-            position=self.presentation.position,
-            offset_x=self.presentation.offset_x,
-            offset_y=self.presentation.offset_y,
+            position=self.config.position,
+            offset_x=self.config.offset_x,
+            offset_y=self.config.offset_y,
         )
 
     def history_text(self, *, empty: str = "No command executions yet.") -> str:

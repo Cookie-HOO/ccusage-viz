@@ -95,6 +95,85 @@ def test_empty_dashboard_pane_renders_localized_placeholder() -> None:
     )
 
 
+def test_dashboard_preset_shortcuts_open_the_manager_and_do_not_adjust_dashboard(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    options = _to_options(
+        build_parser(load_translator("en")).parse_args(
+            ["dashboard", "--demo", "--header-style", "hidden", "--pane", "timeline"]
+        )
+    )
+    frames: list[object] = []
+
+    class Runtime:
+        def cancel(self) -> None:
+            pass
+
+    class Submission:
+        purpose = tui_module.HistoricalPurpose.PRIMARY
+        handle: "Submission"
+
+        def __init__(self, generation: int) -> None:
+            self.generation = generation
+            self.handle = self
+
+        def cancel(self) -> None:
+            pass
+
+        def result(self) -> object:
+            raise RuntimeError("not reached")
+
+    class Component:
+        def __init__(self, selected: object, **_kwargs: object) -> None:
+            self.candidate = selected
+            self.accepted_options = None
+            self.error = None
+            self.generation = 0
+            self.snapshot = None
+
+        def configure(self, selected: object, *, data_affecting: bool) -> None:
+            self.candidate = selected
+            if data_affecting:
+                self.generation += 1
+
+        def missing_comparison_coverage(self) -> DateCoverage:
+            return DateCoverage()
+
+        def submit(self, _trigger: QueryTrigger, **_kwargs: object) -> Submission:
+            return Submission(self.generation)
+
+        def fail(self, *_args: object, **_kwargs: object) -> bool:
+            return True
+
+    class Screen:
+        def __init__(self, _stream: object) -> None:
+            pass
+
+        def paint(self, frame: object, **_kwargs: object) -> None:
+            frames.append(frame)
+
+        def finish(self) -> None:
+            pass
+
+    events = iter((KeyEvent("p"), KeyEvent("s"), KeyEvent("\x1b"), KeyEvent("\x03")))
+    monkeypatch.setattr(tui_module, "build_query_runtime", Runtime)
+    monkeypatch.setattr(tui_module, "build_chart_registry", lambda: object())
+    monkeypatch.setattr(tui_module, "HistoricalChartComponent", Component)
+    monkeypatch.setattr(tui_module, "FramePainter", Screen)
+    monkeypatch.setattr(tui_module, "tui_input_mode", nullcontext)
+    monkeypatch.setattr(tui_module, "read_event", lambda _decoder, _timeout: next(events))
+    monkeypatch.setattr(
+        tui_module, "get_terminal_size", lambda: __import__("os").terminal_size((120, 35))
+    )
+    monkeypatch.setattr(tui_module, "_pane_render", lambda *_args: tui_module.PaneRender("chart"))
+
+    assert tui_module.run_tui(options, load_translator("en")) == 0
+
+    text = "\n".join("\n".join(frame.rows) for frame in frames)
+    assert "Dashboard presets" in text
+    assert "Save current Dashboard as:" in text
+
+
 def _catalog_entries(count: int = 1) -> tuple[object, ...]:
     return tuple(
         SimpleNamespace(

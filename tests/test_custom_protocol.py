@@ -9,16 +9,17 @@ from ccusage_viz.coverage import DateInterval
 from ccusage_viz.custom_protocol import (
     PROTOCOL_VERSION,
     V2_PROTOCOL_VERSION,
-    V2MonitorRequest,
-    V2ProbeRequest,
-    V2MonitorResponse,
-    V2ProbeResponse,
-    V2SummaryRequest,
-    V2SummaryResponse,
     CustomChartRequest,
     CustomProbeRequest,
     CustomProtocolError,
     CustomSummaryRequest,
+    V2ChartRequest,
+    V2MonitorRequest,
+    V2MonitorResponse,
+    V2ProbeRequest,
+    V2ProbeResponse,
+    V2SummaryRequest,
+    V2SummaryResponse,
     canonical_custom_request_key,
     parse_custom_response,
     parse_v2_probe_descriptor,
@@ -88,7 +89,7 @@ def v2_probe_descriptor() -> dict[str, object]:
         "metrics": [
             {
                 "id": "tokens",
-                "title": text("Token throughput", "Token 吞吐"),
+                "title": text("TPM", "TPM"),
                 "description": text("Recent token usage", "近期 Token 用量"),
                 "unit": {"id": "token", "label": text("tokens", "Token"), "placement": "suffix", "decimal_places": 0},
                 "aggregation": "sum",
@@ -104,7 +105,27 @@ def v2_probe_descriptor() -> dict[str, object]:
                         }
                     },
                 },
-                "defaults": {},
+                "defaults": {"monitor": {"style": "ranking", "window": "6h"}},
+            },
+            {
+                "id": "completed_requests",
+                "title": text("QPM", "QPM"),
+                "description": text("Recent completed requests", "近期完成请求"),
+                "unit": {"id": "request", "label": text("requests", "请求"), "placement": "suffix", "decimal_places": 0},
+                "aggregation": "sum",
+                "capabilities": {
+                    "group_by": [{"id": "public_model", "label": text("Public model", "公开模型")}],
+                    "filters": [],
+                    "charts": {
+                        "monitor": {
+                            "window_seconds": 60,
+                            "refresh_interval_seconds": 10,
+                            "group_by": ["public_model"],
+                            "filters": [],
+                        }
+                    },
+                },
+                "defaults": {"monitor": {"style": "ranking", "window": "6h"}},
             },
             {
                 "id": "average_tokens_per_request",
@@ -123,7 +144,7 @@ def v2_probe_descriptor() -> dict[str, object]:
                         }
                     },
                 },
-                "defaults": {},
+                "defaults": {"monitor": {"style": "ranking", "window": "6h"}},
             },
         ],
         "environment": [],
@@ -136,15 +157,23 @@ def test_v2_probe_descriptor_parses_multiple_metrics_and_monitor_capabilities() 
     assert V2_PROTOCOL_VERSION == "ccuv.custom/v2"
     assert tuple(metric.id for metric in descriptor.metrics) == (
         "tokens",
+        "completed_requests",
         "average_tokens_per_request",
+    )
+    assert tuple(metric.title.en for metric in descriptor.metrics) == (
+        "TPM",
+        "QPM",
+        "Average tokens per request",
     )
     assert descriptor.metrics[0].aggregation == "sum"
     assert descriptor.default_metric_id == "tokens"
     monitor = descriptor.metrics[0].capabilities.charts["monitor"]
     assert monitor.window_seconds == 60
+    assert descriptor.metrics[0].defaults["monitor"].style == "ranking"
+    assert descriptor.metrics[0].defaults["monitor"].window_seconds == 21600
     assert monitor.refresh_interval_seconds == 10
-    assert descriptor.metrics[1].aggregation == "value"
-    assert descriptor.metrics[1].capabilities.charts["monitor"].refresh_interval_seconds is None
+    assert descriptor.metrics[2].aggregation == "value"
+    assert descriptor.metrics[2].capabilities.charts["monitor"].refresh_interval_seconds is None
 
 
 def test_v2_probe_and_monitor_wire_round_trip() -> None:
@@ -183,6 +212,41 @@ def test_v2_probe_and_monitor_wire_round_trip() -> None:
     assert isinstance(parsed, V2MonitorResponse)
     assert parsed.observation.total == Decimal("175")
     assert parsed.observation.groups[0].id == "terra"
+
+
+def test_v2_chart_top_is_transmitted_and_distinguishes_request_identity() -> None:
+    request = V2ChartRequest(
+        "chart-v2",
+        "example",
+        "events",
+        "Asia/Shanghai",
+        date(2026, 10, 1),
+        date(2026, 10, 8),
+        group_by="project",
+        top=12,
+    )
+
+    assert request.to_wire()["query"]["top"] == 12
+    assert canonical_custom_request_key(request) != canonical_custom_request_key(
+        V2ChartRequest(
+            "chart-v2", "example", "events", "Asia/Shanghai",
+            date(2026, 10, 1), date(2026, 10, 8), group_by="project", top=10,
+        )
+    )
+
+
+def test_v2_ranking_capability_accepts_a_positive_source_limit() -> None:
+    descriptor = v2_probe_descriptor()
+    descriptor["metrics"][0]["capabilities"]["charts"]["ranking"] = {  # type: ignore[index]
+        "granularities": ["day"],
+        "group_by": ["real_model"],
+        "filters": [],
+        "max_items": 10,
+    }
+
+    capability = parse_v2_probe_descriptor(descriptor).metrics[0].capabilities.charts["ranking"]
+
+    assert capability.max_items == 10  # type: ignore[union-attr]
 
 
 def test_v2_total_summary_wire_round_trip() -> None:
@@ -226,7 +290,7 @@ def test_v2_probe_descriptor_rejects_invalid_metric_contract(
         parse_v2_probe_descriptor(descriptor)
 
 
-def test_v2_ranking_default_all_is_allowed_but_other_chart_defaults_reject_it() -> None:
+def test_v2_ranking_default_all_is_allowed_and_invalid_defaults_are_ignored() -> None:
     descriptor = v2_probe_descriptor()
     descriptor["metrics"][0]["capabilities"]["charts"] = {
         "ranking": {"granularities": ["day"], "group_by": [], "filters": [], "periods": ["all"]}
@@ -236,8 +300,25 @@ def test_v2_ranking_default_all_is_allowed_but_other_chart_defaults_reject_it() 
     assert parse_v2_probe_descriptor(descriptor).metrics[0].defaults["ranking"].period == "all"
 
     descriptor["metrics"][0]["defaults"] = {"timeline": {"period": "all", "group_by": None, "top": None}}
-    with pytest.raises(CustomProtocolError, match="period must be valid"):
-        parse_v2_probe_descriptor(descriptor)
+    parsed = parse_v2_probe_descriptor(descriptor)
+    assert parsed.metrics[0].defaults["timeline"].period is None
+
+
+def test_v2_historical_capabilities_accept_declared_periods_for_every_chart_kind() -> None:
+    descriptor = v2_probe_descriptor()
+    descriptor["metrics"][0]["capabilities"]["charts"] = {
+        kind: {
+            "granularities": ["day"],
+            "group_by": [],
+            "filters": [],
+            "periods": ["7d", "30d"],
+        }
+        for kind in ("timeline", "calendar", "stack", "ranking")
+    }
+
+    charts = parse_v2_probe_descriptor(descriptor).metrics[0].capabilities.charts
+
+    assert all(charts[kind].periods == ("7d", "30d") for kind in charts)
 
 
 def capabilities() -> dict[str, object]:

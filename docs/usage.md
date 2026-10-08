@@ -476,9 +476,12 @@ their clock is a complete animation Pane, not a Dashboard header: `wide-clock` u
 `spotlight-wide` gives its first pane the leading wide area; `spotlight-wide2`
 gives the first two panes consecutive wide rows.
 
-Presets are startup templates. They are not values for `--grid`. Repeated
-`--pane` values append panes after a preset's panes, and the host expands a
-preset grid where required to make room.
+Built-in presets remain startup templates, not values for `--grid`. In ordinary
+unnamed startup composition, repeated `--pane` values append panes after a
+built-in template and the host expands its grid where required. Named built-in or
+saved presets launched as `ccuv dashboard <name>` are deliberately closed: they
+reject `--pane` and every configuration override except `--demo`, `--lang`,
+`--empty`, and `--ccusage-bin`.
 
 ### Build a custom Dashboard
 
@@ -713,7 +716,8 @@ Dashboard has separate navigation and ownership rules. In browse mode:
 | Key | Behavior |
 | --- | --- |
 | `r` | In chart browse mode, refresh all panes; it has no action in the full-command view. |
-| `s` | Adjust the first pane. |
+| `s` | Save the current Dashboard as a named preset. |
+| `p` | Open the full-screen Dashboard preset manager. |
 | Mouse click | Adjust the clicked pane. |
 | `d` | Open global Dashboard adjustment. |
 | `h` | Open contextual Help. In the full-command view, lowercase `h` goes to the first line. |

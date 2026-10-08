@@ -7,7 +7,11 @@ from datetime import datetime
 from typing import Any, Literal
 
 from ccusage_viz.core.time import DateRange
-from ccusage_viz.custom_models import CustomPresentationDescriptor, CustomProtocolFailure
+from ccusage_viz.custom_models import (
+    CustomChartCapability,
+    CustomPresentationDescriptor,
+    CustomProtocolFailure,
+)
 from ccusage_viz.custom_protocol import CustomChartResponse, V2ChartResponse
 from ccusage_viz.errors import QueryError
 from ccusage_viz.options import CustomChartConfig, has_complete_content
@@ -93,6 +97,7 @@ class CustomHistoricalComponent:
 
     __slots__ = (
         "candidate",
+        "capability",
         "accepted_config",
         "accepted_response",
         "accepted_at",
@@ -106,10 +111,12 @@ class CustomHistoricalComponent:
         "pending_generation",
         "presentation",
         "render_revision",
+        "retrieval_top",
     )
 
     def __init__(self, config: CustomChartConfig) -> None:
         self.candidate = config
+        self.capability: CustomChartCapability | None = None
         self.accepted_config: CustomChartConfig | None = None
         self.accepted_response: CustomChartResponse | None = None
         self.accepted_at: datetime | None = None
@@ -123,6 +130,7 @@ class CustomHistoricalComponent:
         self.pending_generation: int | None = None
         self.presentation: CustomPresentationDescriptor | None = None
         self.render_revision = 0
+        self.retrieval_top: int | None = None
 
     @property
     def is_pending(self) -> bool:
@@ -166,6 +174,8 @@ class CustomHistoricalComponent:
             return
         self.candidate = config
         if data_affecting:
+            if self.accepted_config is not None and self.accepted_config.source != config.source:
+                self.capability = None
             self.generation += 1
             self.pending_generation = self.generation if self.model is not None else None
             self.comparison_config = None
@@ -182,6 +192,14 @@ class CustomHistoricalComponent:
         ):
             self.accepted_config = config
             self._reproject()
+
+    def set_capability(self, capability: CustomChartCapability) -> None:
+        """Keep Probe-declared controls available across rejected chart queries."""
+
+        if capability == self.capability:
+            return
+        self.capability = capability
+        self.render_revision += 1
 
     def adjust(self, config: CustomChartConfig, *, data_affecting: bool) -> None:
         """Scheduler-facing alias matching the custom pane adjustment path."""
@@ -206,6 +224,7 @@ class CustomHistoricalComponent:
             return False
         self.accepted_config = self.candidate
         self.accepted_response = completion.response
+        self.retrieval_top = completion.config.top
         self.presentation = CustomPresentationDescriptor(
             completion.response.dataset,
             {
@@ -213,6 +232,7 @@ class CustomHistoricalComponent:
                 for dimension in completion.response.capabilities.group_by
             },
         )
+        self.capability = completion.response.capabilities.charts.get(self.candidate.kind)
         self.comparison_config = None
         self.comparison_response = None
         self.comparison_error = None

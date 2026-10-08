@@ -9,9 +9,9 @@ from threading import Event
 from ccusage_viz.coverage import DateCoverage
 from ccusage_viz.custom_protocol import (
     CustomProbeRequest,
-    V2ProbeRequest,
     CustomProtocolError,
     CustomRequest,
+    V2ProbeRequest,
     canonical_custom_request_key,
     parse_custom_response,
 )

@@ -26,6 +26,18 @@ from ccusage_viz.dashboard_layout import (
     parse_layout,
     reconcile_weights,
 )
+from ccusage_viz.dashboard_preset_store import (
+    DashboardPresetStore,
+    DashboardPresetStoreCorruptError,
+    DashboardPresetStoreError,
+    DashboardPresetStoreNotFoundError,
+)
+from ccusage_viz.dashboard_presets import (
+    DashboardPresetValidationError,
+    empty_preset_launch,
+    materialize_preset,
+)
+from ccusage_viz.datasets.paths import dashboard_preset_state_root
 from ccusage_viz.diagnostics import color_enabled, format_error
 from ccusage_viz.errors import UsageError, VizError
 from ccusage_viz.i18n import Translator, detect_language, load_translator
@@ -375,7 +387,7 @@ def build_parser(tr: Translator) -> argparse.ArgumentParser:
     )
     chart_subparsers = chart.add_subparsers(dest="chart_kind", required=True, metavar="KIND")
 
-    def add_custom_source_arguments(chart_parser: argparse.ArgumentParser) -> None:
+    def add_custom_source_arguments(chart_parser: argparse.ArgumentParser, command: str) -> None:
         chart_parser.add_argument("--dataset", metavar="ID")
         chart_parser.add_argument("--metric", metavar="ID")
         chart_parser.add_argument("--command", dest="command_text", metavar="TEXT")
@@ -383,6 +395,10 @@ def build_parser(tr: Translator) -> argparse.ArgumentParser:
             "--filter", dest="custom_filters", action="append", default=[], metavar="ID=OPTION"
         )
         chart_parser.add_argument("--group-by")
+        if command == "monitor":
+            chart_parser.add_argument(
+                "--other", choices=OTHER_MODES, default="show", help=tr.text("help.other")
+            )
 
     for command in _TUI_COMMANDS:
         chart_parser = chart_subparsers.add_parser(
@@ -400,16 +416,25 @@ def build_parser(tr: Translator) -> argparse.ArgumentParser:
                     help=tr.text("help.by"),
                 )
                 chart_parser.add_argument("--top", type=int, default=None, help=tr.text("help.top"))
-                chart_parser.add_argument("--other", choices=OTHER_MODES, default="show", help=tr.text("help.other"))
+                chart_parser.add_argument(
+                    "--other", choices=OTHER_MODES, default="show", help=tr.text("help.other")
+                )
             if command == "stack":
-                chart_parser.add_argument("--cache", choices=CACHE_MODES, default="combined", help=tr.text("help.cache"))
+                chart_parser.add_argument(
+                    "--cache", choices=CACHE_MODES, default="combined", help=tr.text("help.cache")
+                )
             elif command == "ranking":
                 chart_parser.add_argument(
-                    "--by", choices=("composition", "agent", "model", "project"), default="project", help=tr.text("help.by")
+                    "--by",
+                    choices=("composition", "agent", "model", "project"),
+                    default="project",
+                    help=tr.text("help.by"),
                 )
                 chart_parser.add_argument("--top", type=int, default=10, help=tr.text("help.top"))
-                chart_parser.add_argument("--other", choices=OTHER_MODES, default="show", help=tr.text("help.other"))
-        add_custom_source_arguments(chart_parser)
+                chart_parser.add_argument(
+                    "--other", choices=OTHER_MODES, default="show", help=tr.text("help.other")
+                )
+        add_custom_source_arguments(chart_parser, command)
 
     tui = subparsers.add_parser(
         "dashboard", help=tr.text("help.dashboard"), description=tr.text("help.dashboard")
@@ -417,7 +442,7 @@ def build_parser(tr: Translator) -> argparse.ArgumentParser:
     tui.add_argument(
         "preset",
         nargs="?",
-        choices=tuple(DASHBOARD_PRESETS),
+        metavar="PRESET",
         help=tr.text("help.dashboard_preset"),
     )
     tui.add_argument("--empty", action="store_true", help=argparse.SUPPRESS)
@@ -427,11 +452,11 @@ def build_parser(tr: Translator) -> argparse.ArgumentParser:
         "dataset", help=tr.text("help.dataset"), description=tr.text("help.dataset")
     )
     dataset.add_argument("--lang", choices=("en", "zh"), help=tr.text("help.lang"))
-    dataset_subparsers = dataset.add_subparsers(
-        dest="dataset_command", metavar="COMMAND"
-    )
+    dataset_subparsers = dataset.add_subparsers(dest="dataset_command", metavar="COMMAND")
     dataset_subparsers.add_parser("list", help=tr.text("help.dataset_list"))
-    dataset_local = dataset_subparsers.add_parser("add-local", help="Register a local Dataset command")
+    dataset_local = dataset_subparsers.add_parser(
+        "add-local", help="Register a local Dataset command"
+    )
     dataset_local.add_argument("command_argv", nargs=argparse.REMAINDER, metavar="COMMAND")
 
     animate = subparsers.add_parser(
@@ -460,6 +485,12 @@ def build_parser(tr: Translator) -> argparse.ArgumentParser:
     animate.add_argument("--overlay-interval", type=float, help=tr.text("help.overlay_interval"))
     animate.add_argument(
         "--overlay-max-width", type=int, default=40, help=tr.text("help.overlay_max_width")
+    )
+    animate.add_argument(
+        "--overlay-offset-x", type=int, default=0, help=tr.text("help.overlay_offset_x")
+    )
+    animate.add_argument(
+        "--overlay-offset-y", type=int, default=0, help=tr.text("help.overlay_offset_y")
     )
     animate.add_argument("--ascii", action="store_true", help=tr.text("help.ascii"))
 
@@ -638,13 +669,17 @@ def _custom_chart_from_namespace(
     kind = _chart_kind(namespace)
     group_by = namespace.group_by
     top = getattr(namespace, "top", None)
+    if kind == "monitor" and group_by is not None and top is None:
+        top = 3
     if kind == "ranking" and group_by is None and top == 10 and "top" not in explicit:
         top = None
     if top is not None and top < 1:
         raise UsageError("error.top_positive")
     if top is not None and group_by is None:
         raise UsageError("error.top_requires_by")
-    style = namespace.style or compatible_styles(kind, group_by)[0]
+    style = namespace.style or (
+        "points" if kind == "monitor" else compatible_styles(kind, group_by)[0]
+    )
     if style not in compatible_styles(kind, group_by):
         raise UsageError("error.style_incompatible", style=style, mode=group_by or "total")
     date_range = resolve_date_range(
@@ -673,7 +708,8 @@ def _custom_chart_from_namespace(
         other=getattr(namespace, "other", "show"),
         granularity=getattr(namespace, "granularity", "day"),
         weekdays=getattr(namespace, "weekdays", "show"),
-        initial_explicit=explicit & {"period", "since", "until", "group_by", "top"},
+        initial_explicit=explicit
+        & {"period", "since", "until", "group_by", "top", "filter", "granularity", "other", "style", "color_scheme", "window"},
         metric_id=namespace.metric,
     )
 
@@ -701,13 +737,7 @@ def _validate_chart(
     interval = requested
     if command == "monitor" and interval is None:
         interval = 1.0 if demo is not None else 15.0
-    minimum = (
-        1
-        if command == "monitor" and demo is not None
-        else 5
-        if command == "monitor"
-        else 2
-    )
+    minimum = 1 if command == "monitor" and demo is not None else 5 if command == "monitor" else 2
     if interval is not None and (not math.isfinite(interval) or interval < minimum):
         raise UsageError("error.interval_min", minimum=minimum)
     return interval if interval is not None else 10.0
@@ -786,6 +816,8 @@ def parse_pane_fragment(
             parser.add_argument("--overlay-color", choices=OVERLAY_COLORS, default="auto")
             parser.add_argument("--overlay-interval", type=float)
             parser.add_argument("--overlay-max-width", type=int, default=40)
+            parser.add_argument("--overlay-offset-x", type=int, default=0)
+            parser.add_argument("--overlay-offset-y", type=int, default=0)
             overlay_args = parser.parse_args(tokens[2:])
             has_source = (
                 overlay_args.overlay_text is not None
@@ -813,6 +845,8 @@ def parse_pane_fragment(
                 if overlay_args.overlay_interval is None
                 else overlay_args.overlay_interval,
                 max_width=overlay_args.overlay_max_width,
+                offset_x=overlay_args.overlay_offset_x,
+                offset_y=overlay_args.overlay_offset_y,
             )
             return AnimationPaneConfig(animation, overlay)
         except (UsageError, ValueError) as exc:
@@ -858,7 +892,10 @@ def _to_options(
     launcher: str = "ccuv",
 ) -> LaunchConfig:
     command = namespace.command or "chart"
-    if getattr(namespace, "command_text", None) is not None and getattr(namespace, "dataset", None) is None:
+    if (
+        getattr(namespace, "command_text", None) is not None
+        and getattr(namespace, "dataset", None) is None
+    ):
         raise UsageError("error.arguments", detail="--command requires --dataset")
     if getattr(namespace, "dataset", None) is not None:
         timezone = _request_timezone(namespace)
@@ -885,6 +922,8 @@ def _to_options(
             "overlay_color",
             "overlay_interval",
             "overlay_max_width",
+            "overlay_offset_x",
+            "overlay_offset_y",
         }
         if namespace.gallery and (has_source or explicit & overlay_fields):
             raise UsageError("error.arguments", detail="--gallery does not support overlay options")
@@ -912,6 +951,8 @@ def _to_options(
                 color=namespace.overlay_color,
                 interval=60.0 if namespace.overlay_interval is None else namespace.overlay_interval,
                 max_width=namespace.overlay_max_width,
+                offset_x=namespace.overlay_offset_x,
+                offset_y=namespace.overlay_offset_y,
             )
         except ValueError as exc:
             raise UsageError("error.arguments", detail=str(exc)) from exc
@@ -935,10 +976,59 @@ def _to_options(
     if command == "dashboard":
         timezone = _request_timezone(namespace)
         preset_name = namespace.preset
-        if namespace.empty and preset_name is not None:
-            raise UsageError(
-                "error.arguments", detail="--empty cannot be combined with a dashboard preset"
-            )
+        if preset_name is not None:
+            disallowed = explicit - {"demo", "lang", "empty", "ccusage_bin"}
+            if disallowed:
+                names = ", ".join(f"--{name.replace('_', '-')}" for name in sorted(disallowed))
+                raise UsageError(
+                    "error.arguments",
+                    detail=(
+                        "a named dashboard preset only permits --demo, --lang, --empty, "
+                        f"and --ccusage-bin; received {names}"
+                    ),
+                )
+            try:
+                record = DashboardPresetStore(dashboard_preset_state_root()).get(preset_name)
+            except DashboardPresetStoreNotFoundError:
+                record = None
+            except DashboardPresetStoreCorruptError:
+                # A damaged user collection must never make a valid built-in unavailable.
+                if preset_name not in DASHBOARD_PRESETS:
+                    raise UsageError(
+                        "error.arguments", detail="user dashboard preset storage is unavailable"
+                    ) from None
+                record = None
+            except DashboardPresetStoreError as exc:
+                raise UsageError(
+                    "error.arguments", detail="user dashboard preset storage is unavailable"
+                ) from exc
+            if record is not None:
+                from ccusage_viz.datasets.service import DatasetService
+
+                try:
+                    named_launch = materialize_preset(
+                        record, DatasetService().installed_command_source
+                    )
+                except (DashboardPresetValidationError, UsageError) as exc:
+                    raise UsageError(
+                        "error.arguments", detail=f"dashboard preset {preset_name!r} is unavailable"
+                    ) from exc
+                if "ccusage_bin" in explicit:
+                    named_launch = replace(
+                        named_launch,
+                        process=replace(named_launch.process, ccusage_bin=namespace.ccusage_bin),
+                    )
+                if "demo" in explicit:
+                    named_launch = replace(
+                        named_launch,
+                        host=replace(
+                            named_launch.host,
+                            demo_size=namespace.demo,
+                            demo_seed=_demo_seed(namespace),
+                        ),
+                    )
+                named_launch = replace(named_launch, explicit=explicit, launcher=launcher)
+                return empty_preset_launch(named_launch) if namespace.empty else named_launch
         if preset_name is None and not namespace.panes and not namespace.empty:
             structural_options = {"grid", "layout", "column_weights", "row_weights"}
             if explicit & structural_options:
@@ -958,8 +1048,10 @@ def _to_options(
                 detail="--layout cannot be combined with a dashboard preset or --grid",
             )
         preset = DASHBOARD_PRESETS.get(preset_name)
+        if preset_name is not None and preset is None:
+            raise UsageError("error.arguments", detail=f"unknown dashboard preset: {preset_name}")
         layout = namespace.layout or (preset.layout if preset is not None else None)
-        if namespace.empty:
+        if namespace.empty and preset_name is None:
             grid_text = layout or namespace.grid or "2x2"
             if grid_text in NAMED_LAYOUTS:
                 empty_count = 1 if grid_text == "auto" else 2
@@ -1071,7 +1163,12 @@ def _to_options(
                     ),
                     *panes[1:],
                 )
-        return replace(launch, panes=panes)
+        resolved_launch = replace(launch, panes=panes)
+        return (
+            empty_preset_launch(resolved_launch)
+            if namespace.empty and preset_name is not None
+            else resolved_launch
+        )
     timezone = _request_timezone(namespace)
     chart = _chart_from_namespace(namespace, timezone=timezone)
     interval = _validate_chart(namespace, chart, explicit=explicit, demo=namespace.demo)
@@ -1141,8 +1238,10 @@ def main(argv: list[str] | None = None) -> int:
                 return 0
             if namespace.dataset_command == "add-local":
                 if not namespace.command_argv:
-                    raise UsageError("error.arguments", detail="dataset add-local requires a command")
-                result = service.register_local_command(tuple(namespace.command_argv))
+                    raise UsageError(
+                        "error.arguments", detail="dataset add-local requires a command"
+                    )
+                result = service.register_local_command(tuple(namespace.command_argv), replace=True)
                 print(result.registration.dataset_id)
                 return 0
             return run_dataset_manager(service, tr)

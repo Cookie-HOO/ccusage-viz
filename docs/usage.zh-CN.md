@@ -379,8 +379,7 @@ ccuv dashboard --empty --grid 2x2 \
 是时钟预设：它们的时钟都是完整的动画 Pane，而不是 Dashboard Header；`wide-clock` 使用模拟时钟，`narrow-clock` 使用数字时钟。`spotlight-wide` 让第一个 Pane
 占据前导宽区域；`spotlight-wide2` 让前两个 Pane 占据连续的宽行。
 
-预设是启动模板，不是 `--grid` 的取值。重复 `--pane` 会追加到预设 Pane 后；需要时 Host 会扩展预设
-网格以容纳所有 Pane。
+内置预设仍是启动模板，不是 `--grid` 的取值。在普通未具名启动组合中，重复 `--pane` 会追加到内置模板 Pane 后；需要时 Host 会扩展其网格以容纳所有 Pane。以 `ccuv dashboard <name>` 启动的具名内置或用户预设则是封闭的：它们拒绝 `--pane` 以及除 `--demo`、`--lang`、`--empty` 和 `--ccusage-bin` 外的所有配置覆盖。
 
 ### 构造自定义 Dashboard
 
@@ -566,7 +565,8 @@ Dashboard 有独立的导航和归属规则。浏览模式中：
 | 按键 | 行为 |
 | --- | --- |
 | `r` | 仅在图表浏览模式刷新全部 Pane；完整命令视图中无操作。 |
-| `s` | 调整第一个 Pane。 |
+| `s` | 将当前 Dashboard 保存为具名预设。 |
+| `p` | 打开全屏 Dashboard 预设管理器。 |
 | 鼠标点击 | 调整被点击的 Pane。 |
 | `d` | 打开全局 Dashboard 调整。 |
 | `h` | 打开与当前界面对应的帮助；完整命令视图中小写 `h` 跳到首行。 |

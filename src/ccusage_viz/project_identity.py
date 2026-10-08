@@ -15,6 +15,8 @@ ProjectAggregation: TypeAlias = Literal["name", "exact"]
 ProjectLabelContext: TypeAlias = Literal[0, 1, 2]
 PROJECT_AGGREGATIONS: tuple[ProjectAggregation, ...] = ("name", "exact")
 ProjectGroupKey: TypeAlias = tuple[str, ...]
+FIXED_UNASSIGNED_PROJECT = "__ccuv_unassigned__"
+FIXED_UNVERIFIED_PROJECT = "__ccuv_unverified__"
 
 _GENERIC_PROJECT_NAMES = frozenset({"project", "unknown", "untitled"})
 _SHORT_OPAQUE_LABELS: dict[tuple[str, str], str] = {}
@@ -104,6 +106,13 @@ def make_project_ref(
     if not _is_safe_display_name(display):
         display = project_display_name(display)
     return ProjectRef(agent, raw_id, display, path_backed)
+
+
+def fixed_project_ref(agent: str, attribution: Literal["unassigned", "unverified"]) -> ProjectRef:
+    """Return one global visible bucket for non-project source usage."""
+    if attribution == "unassigned":
+        return ProjectRef(agent, FIXED_UNASSIGNED_PROJECT, "Unassigned")
+    return ProjectRef(agent, FIXED_UNVERIFIED_PROJECT, "Unverified")
 
 
 def _opaque_components(project: ProjectRef) -> tuple[str, ...] | None:
@@ -573,22 +582,29 @@ def project_groups(
     }
     grouped: dict[ProjectGroupKey, list[ProjectRef]] = {}
     for project in pool:
-        alias = pair_aliases.get(project.key)
-        component = component_keys.get(project.key)
-        shared_component = component is not None and len(components[component]) > 1
-        key = (
-            ("project", "name", alias)
-            if alias is not None
-            else ("project", "path", component)
-            if shared_component
-            else ("project", "exact", project.agent, project.raw_id)
-        )
+        if project.raw_id == FIXED_UNASSIGNED_PROJECT:
+            key = ("project", "fixed", "unassigned")
+        elif project.raw_id == FIXED_UNVERIFIED_PROJECT:
+            key = ("project", "fixed", "unverified")
+        else:
+            alias = pair_aliases.get(project.key)
+            component = component_keys.get(project.key)
+            shared_component = component is not None and len(components[component]) > 1
+            key = (
+                ("project", "name", alias)
+                if alias is not None
+                else ("project", "path", component)
+                if shared_component
+                else ("project", "exact", project.agent, project.raw_id)
+            )
         grouped.setdefault(key, []).append(project)
 
     result: dict[tuple[str, str], ProjectGroup] = {}
     for key, members in grouped.items():
         ordered = tuple(sorted(members, key=lambda item: item.key))
-        if key[1] in {"name", "path"}:
+        if key[1] == "fixed":
+            label = "Unassigned" if key[2] == "unassigned" else "Unverified"
+        elif key[1] in {"name", "path"}:
             label = merged_project_label(ordered, pool, labels=labels)
         else:
             label = exact_project_label(ordered[0], pool, labels=labels)

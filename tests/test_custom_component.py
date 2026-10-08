@@ -324,7 +324,6 @@ def test_period_unsupported_failure_clears_an_accepted_projection() -> None:
 def test_non_period_unsupported_failure_clears_the_replacement_projection() -> None:
     component = CustomHistoricalComponent(config())
     assert component.accept_response(response())
-    accepted = component.model
     failure = QueryError(
         "error.custom_command_protocol",
         custom_failure=CustomProtocolFailure(

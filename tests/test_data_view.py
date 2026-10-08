@@ -2,6 +2,7 @@ from datetime import UTC, date, datetime
 from decimal import Decimal
 from json import loads
 
+from ccusage_viz.bootstrap import build_chart_registry
 from ccusage_viz.chart_models import (
     DistributionCoverage,
     TimeOfDayBucket,
@@ -17,15 +18,21 @@ from ccusage_viz.data_view import (
     cycle_dashboard_body_view,
     next_body_view,
     next_dashboard_body_view,
-    render_custom_data,
     render_current_monitor_data,
+    render_custom_data,
     render_monitor_data,
     render_monitor_distribution_data,
     render_snapshot_data,
 )
-from ccusage_viz.domain import Agent, SourceKind, TokenUsage, UsageRecord
+from ccusage_viz.domain import (
+    Agent,
+    SourceKind,
+    TokenUsage,
+    UsageRecord,
+)
 from ccusage_viz.historical_component import UsageSnapshot
 from ccusage_viz.i18n import load_translator
+from ccusage_viz.monitor_component import MonitorCompletion, MonitorComponent
 from ccusage_viz.options import (
     ChartPresentation,
     MonitorConfig,
@@ -35,12 +42,10 @@ from ccusage_viz.options import (
     StandaloneLaunch,
     TimelineConfig,
 )
-from ccusage_viz.bootstrap import build_chart_registry
 from ccusage_viz.processing.custom_historical import CustomChartProjection, CustomProjectedSeries
 from ccusage_viz.processing.monitor import ObservedBucket
-from ccusage_viz.project_identity import ExactProjectDisplayKey, make_project_ref
+from ccusage_viz.project_identity import ExactProjectDisplayKey, fixed_project_ref, make_project_ref
 from ccusage_viz.terminal import Terminal
-from ccusage_viz.monitor_component import MonitorComponent, MonitorCompletion
 
 
 def _options() -> StandaloneLaunch:
@@ -83,6 +88,86 @@ def test_dashboard_body_view_cycle_has_no_data_views() -> None:
 
     assert observed == ["chart", "full-command", "chart"]
     assert cycle_dashboard_body_view("chart", step=-1) == "full-command"
+
+
+def test_project_ranking_data_expands_fixed_group_sources() -> None:
+    options = StandaloneLaunch(
+        ProcessConfig(),
+        StandaloneHostConfig(interval=5),
+        RankingConfig("ranking", DateRange(date(2026, 10, 7), date(2026, 10, 7)), by="project"),
+    )
+    snapshot = UsageSnapshot(
+        (
+            UsageRecord(
+                date(2026, 10, 7),
+                "codex",
+                TokenUsage(30, 0, 0, 0, 0),
+                SourceKind.CODEX_SESSIONS,
+                fixed_project_ref("codex", "unassigned"),
+                attribution="unassigned",
+                session_id="rollout-missing",
+            ),
+            UsageRecord(
+                date(2026, 10, 7),
+                "dsh",
+                TokenUsage(20, 0, 0, 0, 0),
+                SourceKind.UNIFIED_DAILY,
+                fixed_project_ref("dsh", "unverified"),
+                attribution="unverified",
+                source_project="relative/project",
+            ),
+        ),
+        (),
+        0.1,
+    )
+    payload = loads(
+        render_snapshot_data(
+            options,
+            snapshot,
+            load_translator("en"),
+            Terminal(120, 40, False, False),
+            view="data-json",
+        )
+    )
+
+    assert payload["rows"] == [
+        {
+            "rank": 1,
+            "display_project": "Unassigned",
+            "project": "Unassigned",
+            "agent": "codex",
+            "attribution": "unassigned",
+            "period": "2026-10-07",
+            "source_project": None,
+            "session_id": "rollout-missing",
+            "merge_group": None,
+            "is_other": False,
+            "total": 30,
+            "input": 0,
+            "output": 0,
+            "cache_read": 0,
+            "cache_creation": 0,
+            "other": 0,
+        },
+        {
+            "rank": 2,
+            "display_project": "Unverified",
+            "project": "Unverified",
+            "agent": "dsh",
+            "attribution": "unverified",
+            "period": "2026-10-07",
+            "source_project": "relative/project",
+            "session_id": None,
+            "merge_group": None,
+            "is_other": False,
+            "total": 20,
+            "input": 0,
+            "output": 0,
+            "cache_read": 0,
+            "cache_creation": 0,
+            "other": 0,
+        },
+    ]
 
 
 def test_custom_data_serializes_visible_decimal_projection() -> None:
@@ -515,7 +600,11 @@ def test_current_cumulative_monitor_data_uses_distribution_projection() -> None:
         return MonitorCompletion(
             0,
             options,
-            (UsageRecord(first.date(), "claude", TokenUsage(total, 0, 0, 0, 0), SourceKind.UNIFIED_DAILY),),
+            (
+                UsageRecord(
+                    first.date(), "claude", TokenUsage(total, 0, 0, 0, 0), SourceKind.UNIFIED_DAILY
+                ),
+            ),
             0.1,
         )
 

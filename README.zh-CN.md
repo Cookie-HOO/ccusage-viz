@@ -60,6 +60,23 @@ ccuv dashboard
 | `spotlight-wide` | `ccuv dashboard spotlight-wide` | 推荐用于优先关注 Timeline 趋势。Timeline 主导。 | <img src="docs/assets/readme/dashboard-spotlight-wide.png" alt="预览" width="180"> |
 | `spotlight-wide2` | `ccuv dashboard spotlight-wide2` | 推荐用于同时优先关注 Timeline 和 Stack。Timeline + Stack 主导。 | <img src="docs/assets/readme/dashboard-spotlight-wide2.png" alt="预览" width="180"> |
 
+### 你的 Dashboard 预设
+
+在 Dashboard 浏览模式中，按 `s` 可将当前 Dashboard 以名字保存，按 `p` 打开全屏预设管理器。管理器同时列出内置预设和你的预设；用方向键或 `j`/`k` 选择，按 `Enter` 加载，按 `s` 保存，按 `x` 删除选中的用户预设。内置预设可加载但不能删除。用与内置预设相同的名字保存用户预设会有意覆盖它；删除该用户预设即可重新显示内置预设。覆盖已有用户预设时，会要求选择覆盖或放弃。
+
+预设名必须匹配 `^[a-z][a-z0-9-]*$`。保存后的预设可以在新终端中通过 `ccuv dashboard <name>` 启动。具名启动不接受配置覆盖；只能同时使用 `--demo`、`--lang`、`--empty` 和 `--ccusage-bin`。例如：
+
+```bash
+ccuv dashboard weekly-review
+ccuv dashboard weekly-review --demo --lang zh-CN
+ccuv dashboard weekly-review --empty
+ccuv dashboard weekly-review --ccusage-bin /opt/bin/ccusage
+```
+
+具名预设的 `--empty` 会保留布局、权重、显示设置、刷新/采样节奏、时区、demo 和进程设置及其他安全的 ccuv 配置，但仅在内存中将每个 Pane 替换为空白 Pane；绝不会修改已保存的预设。原有未命名的 `ccuv dashboard --empty` 仍可用于临时组合新的 Dashboard。启用 demo 的预设加载后仍会启用 demo；Dashboard 目前没有运行时关闭 demo 的控制。
+
+预设会持久化声明式 Dashboard 配置，包括已安装 Dataset 的引用、本地命令 argv 和可执行 Overlay 命令，但不会保存查询结果、环境变量、凭据或 UI/运行时状态。预设属于可信的用户本地自动化配置：加载预设会执行其中包含的命令，因此只能加载你信任的预设。预设保存在 ccuv 的私有状态目录 `dashboard-presets/presets.json`：macOS 为 `~/Library/Application Support/ccuv`，Windows 为 `%LOCALAPPDATA%/ccuv`，其他系统为 `${XDG_STATE_HOME:-~/.local/state}/ccuv`。缺少已安装 Dataset 不会使预设不可加载，受影响 Pane 会报告不可用的数据源；只有预设存储不可读、格式错误或版本不支持时才显示为不可用，并阻止覆盖写入。
+
 > [!TIP]
 > Dashboard 会协调 Pane 查询：多个 Pane 刷新时，相同的进行中 Provider 请求会被共享，避免重复工作。
 
@@ -163,7 +180,13 @@ npm 不可用时，请手动安装 [`ccusage`](https://github.com/ryoppippi/ccus
 > [!TIP]
 > 已发布的 `ccusage` 包不包含 DeepSeek Harness（DSH）统计。非官方
 > [`oksure/ccusage` 的 DSH 分支](https://github.com/oksure/ccusage/tree/contrib/dsh-usage-adapter)
-> 提供 `ccusage dsh` 报告，可能与上游产生偏差；ccuv 本身没有 DSH collector。
+> 提供 `ccusage dsh` 报告。请使用下面的命令安装该分支，替代已发布的 npm 包：
+>
+> ```bash
+> npm install -g "git+https://github.com/oksure/ccusage.git#contrib/dsh-usage-adapter"
+> ```
+>
+> 该分支可能与上游产生偏差；ccuv 本身没有 DSH collector。
 
 ## 延伸阅读
 
@@ -175,6 +198,8 @@ npm 不可用时，请手动安装 [`ccusage`](https://github.com/ryoppippi/ccus
 | --- | --- |
 | [使用指南](docs/usage.zh-CN.md) | 如何安装、配置、组合和调整图表与 Dashboard？ |
 | [自定义命令协议](docs/custom-command-protocol.zh-CN.md) | 如何通过命令接入可相加的历史数据集、使用空白 Dashboard Pane，以及实现 JSON 契约？ |
+| [Dataset 开发者指南](docs/dataset-developer-guide.zh-CN.md) | 如何开发、在本地测试、实现 Probe/查询、打包并发布 Dataset？ |
+| [Dataset 使用者指南](docs/dataset-user-guide.zh-CN.md) | 如何安装、管理、选择和使用本地、官方或 GitHub Dataset？ |
 | [设计哲学](docs/design-philosophy.zh-CN.md) | 哪些产品边界、配置归属和呈现原则是刻意的设计？ |
 | [架构](docs/architecture.zh-CN.md) | 为维护者说明 CLI 路由、Host、Pane、Provider、处理和渲染如何组织。 |
 | [路线图（英文）](ROADMAP.md) | 计划、延后事项和反馈方向是什么？ |

@@ -13,9 +13,13 @@ from typing import Any, Final
 
 from ccusage_viz.codex_sessions import resolve_codex_session_cwds
 from ccusage_viz.coverage import DateCoverage, DateInterval
-from ccusage_viz.domain import Notice
+from ccusage_viz.domain import Notice, UsageRecord
 from ccusage_viz.errors import QueryError
-from ccusage_viz.project_identity import normalized_absolute_project_path
+from ccusage_viz.project_identity import (
+    fixed_project_ref,
+    make_project_ref,
+    normalized_absolute_project_path,
+)
 from ccusage_viz.query.models import (
     DataResolution,
     PhysicalPlan,
@@ -275,9 +279,8 @@ class CcusageProvider:
                 column=exc.colno,
                 stderr=_decode_stderr(result.diagnostics),
             ) from exc
-        codex_attribution_incomplete = False
         if result.query.operation in {"codex_sessions", "codex_ranking_sessions"}:
-            data, codex_attribution_incomplete = _enrich_codex_project_rows(data)
+            data = _enrich_codex_project_rows(data)
         records = parse_usage_records(_OPERATION_SOURCES[result.query.operation], data)
         if result.query.operation == "codex_sessions":
             intervals = result.query.coverage.intervals
@@ -292,36 +295,8 @@ class CcusageProvider:
             # Project ranking consumes period totals only, so anchor these private
             # range aggregates at the interval end without claiming daily detail.
             records = tuple(replace(record, day=intervals[0].until) for record in records)
-        unsupported_agents: tuple[str, ...] = ()
-        unverified_agents: tuple[str, ...] = ()
         if result.query.operation == "unified_daily_agent_observation":
-            observed_agents = {
-                record.agent
-                for record in records
-                if record.agent.casefold() not in _PROJECT_ATTRIBUTION_SUPPORTED_AGENTS
-            }
-            unsupported_agents = tuple(
-                sorted(
-                    (
-                        agent
-                        for agent in observed_agents
-                        if agent.casefold() in _PROJECT_ATTRIBUTION_UNSUPPORTED_AGENTS
-                    ),
-                    key=str.casefold,
-                )
-            )
-            unverified_agents = tuple(
-                sorted(
-                    (
-                        agent
-                        for agent in _agents_without_absolute_project_path(data)
-                        if agent.casefold() not in _PROJECT_ATTRIBUTION_SUPPORTED_AGENTS
-                        and agent.casefold() not in _PROJECT_ATTRIBUTION_UNSUPPORTED_AGENTS
-                    ),
-                    key=str.casefold,
-                )
-            )
-            records = ()
+            records = _fixed_project_observation_records(data, records)
         return ProviderResultFragment(
             records,
             (ProviderProvenance(result.query.provider, result.query.fingerprint),),
@@ -329,14 +304,7 @@ class CcusageProvider:
             DateCoverage()
             if result.query.operation == "unified_daily_agent_observation"
             else result.query.coverage,
-            provider_metadata=(
-                tuple(("unsupported_project_agent", agent) for agent in unsupported_agents)
-                + tuple(("unverified_project_agent", agent) for agent in unverified_agents)
-                + (("codex_project_attribution_incomplete", True),)
-                if codex_attribution_incomplete
-                else tuple(("unsupported_project_agent", agent) for agent in unsupported_agents)
-                + tuple(("unverified_project_agent", agent) for agent in unverified_agents)
-            ),
+            provider_metadata=(),
         )
 
     def assemble(
@@ -346,44 +314,11 @@ class CcusageProvider:
         provenance = ()
         coverage = DateCoverage()
         notices = plan.notices
-        unsupported_agents: set[str] = set()
-        unverified_agents: set[str] = set()
-        codex_attribution_incomplete = False
         for fragment in fragments:
             records += fragment.records
             provenance += fragment.provenance
             coverage = coverage.merge(fragment.coverage)
             notices += fragment.notices
-            unsupported_agents.update(
-                value
-                for key, value in fragment.provider_metadata
-                if key == "unsupported_project_agent" and isinstance(value, str)
-            )
-            unverified_agents.update(
-                value
-                for key, value in fragment.provider_metadata
-                if key == "unverified_project_agent" and isinstance(value, str)
-            )
-            codex_attribution_incomplete = codex_attribution_incomplete or any(
-                key == "codex_project_attribution_incomplete"
-                for key, _ in fragment.provider_metadata
-            )
-        if unsupported_agents:
-            notices += (
-                Notice(
-                    "notice.project_agent_attribution_unsupported",
-                    {"agents": ", ".join(sorted(unsupported_agents, key=str.casefold))},
-                ),
-            )
-        if unverified_agents:
-            notices += (
-                Notice(
-                    "notice.project_agent_attribution_unverified",
-                    {"agents": ", ".join(sorted(unverified_agents, key=str.casefold))},
-                ),
-            )
-        if codex_attribution_incomplete:
-            notices += (Notice("notice.codex_project_attribution_incomplete"),)
         return ProviderResult(
             records,
             provenance,
@@ -395,7 +330,8 @@ class CcusageProvider:
                 query.operation
                 in {"claude_daily_projects", "codex_sessions", "codex_ranking_sessions"}
                 for query in plan.queries
-            ),
+            )
+            or any(record.project is not None for record in records),
         )
 
 
@@ -406,26 +342,49 @@ def _days(interval: DateInterval):
         day += timedelta(days=1)
 
 
-def _agents_without_absolute_project_path(data: object) -> set[str]:
-    """Return observed non-Claude agents that lack an absolute project locator."""
+def _fixed_project_observation_records(
+    data: object, records: tuple[UsageRecord, ...]
+) -> tuple[UsageRecord, ...]:
+    """Map non-Claude observations to fixed project groups without losing token usage."""
     if not isinstance(data, dict) or not isinstance(daily := data.get("daily"), list):
-        return set()
-    agents: set[str] = set()
-    for day in daily:
-        if not isinstance(day, dict) or not isinstance(rows := day.get("agents"), list):
+        return ()
+    rows = (
+        row
+        for day in daily
+        if isinstance(day, dict) and isinstance(day.get("agents"), list)
+        for row in day["agents"]
+        if isinstance(row, dict)
+    )
+    projected: list[UsageRecord] = []
+    for row, record in zip(rows, records, strict=True):
+        project = row.get("project", row.get("cwd", row.get("projectPath")))
+        if record.agent.casefold() in _PROJECT_ATTRIBUTION_SUPPORTED_AGENTS:
             continue
-        for row in rows:
-            if not isinstance(row, dict) or not isinstance(agent := row.get("agent"), str):
-                continue
-            project = row.get("project", row.get("cwd", row.get("projectPath")))
-            if not isinstance(project, str) or normalized_absolute_project_path(project) is None:
-                agents.add(agent)
-    return agents
+        if record.agent.casefold() in _PROJECT_ATTRIBUTION_UNSUPPORTED_AGENTS or not isinstance(
+            project, str
+        ):
+            attribution = "unassigned"
+        elif normalized_absolute_project_path(project) is None:
+            attribution = "unverified"
+        else:
+            projected.append(
+                replace(record, project=make_project_ref(record.agent, project, path_backed=True))
+            )
+            continue
+        projected.append(
+            replace(
+                record,
+                project=fixed_project_ref(record.agent, attribution),
+                attribution=attribution,
+                source_project=project if isinstance(project, str) else None,
+            )
+        )
+    return tuple(projected)
 
 
-def _enrich_codex_project_rows(data: object) -> tuple[object, bool]:
+def _enrich_codex_project_rows(data: object) -> object:
     if not isinstance(data, dict):
-        return data, False
+        return data
     rows: list[dict[str, Any]] = []
     for field in ("sessions", "session", "data"):
         value = data.get(field)
@@ -436,23 +395,18 @@ def _enrich_codex_project_rows(data: object) -> tuple[object, bool]:
         row.get("sessionId")
         for index, row in enumerate(rows)
         if codex_project_identity(row, f"$.sessions[{index}]") is None
-        and isinstance(row.get("sessionId"), str)
-        and row["sessionId"]
     ]
     cwds = resolve_codex_session_cwds(
         session_id for session_id in missing if isinstance(session_id, str)
     )
-    incomplete = False
     for index, row in enumerate(rows):
         if codex_project_identity(row, f"$.sessions[{index}]") is not None:
             continue
         session_id = row.get("sessionId")
         cwd = cwds.get(session_id) if isinstance(session_id, str) else None
-        if cwd is None:
-            incomplete = True
-        else:
+        if cwd is not None:
             row["_ccusage_viz_project_cwd"] = cwd
-    return data, incomplete
+    return data
 
 
 CCUSAGE_DEFINITION = ProviderDefinition(CcusageProvider())

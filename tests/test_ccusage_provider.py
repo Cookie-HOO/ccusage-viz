@@ -4,7 +4,6 @@ from datetime import date
 import pytest
 
 from ccusage_viz.coverage import DateCoverage, DateInterval
-from ccusage_viz.domain import Notice
 from ccusage_viz.errors import QueryError
 from ccusage_viz.providers.ccusage import CCUSAGE_DEFINITION
 from ccusage_viz.query.models import (
@@ -55,7 +54,9 @@ def test_project_ranking_compiles_codex_as_one_range_query() -> None:
     assert plan.queries[0].arguments[5] == "20260102"
     assert plan.queries[1].arguments[4:7] == ("2026-01-02", "--until", "2026-01-03")
     assert plan.queries[2].arguments[4:7] == ("2026-01-02", "--until", "2026-01-03")
-    assert plan.queries[2].coverage == DateCoverage.from_interval(date(2026, 1, 2), date(2026, 1, 3))
+    assert plan.queries[2].coverage == DateCoverage.from_interval(
+        date(2026, 1, 2), date(2026, 1, 3)
+    )
     assert plan.summary_notices == ()
 
 
@@ -181,16 +182,21 @@ def test_codex_normalization_falls_back_without_treating_directory_as_project(
     (record,) = fragment.records
 
     assert record.project is not None
-    assert record.project.key == ("codex", "unassigned-codex")
-    assert fragment.provider_metadata == (("codex_project_attribution_incomplete", True),)
+    assert record.project.display_name == "Unassigned"
+    assert record.attribution == "unassigned"
+    assert record.session_id == "2026/01/03/rollout-missing"
+    assert fragment.provider_metadata == ()
 
 
-def test_codex_incomplete_attribution_emits_a_generic_notice() -> None:
+def test_codex_incomplete_attribution_retains_session_on_fixed_project_record(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     query = PhysicalQuery(
         ProviderRef("ccusage"),
         "codex_sessions",
         coverage=DateCoverage.from_interval(date(2026, 1, 3), date(2026, 1, 3)),
     )
+    monkeypatch.setattr("ccusage_viz.providers.ccusage.resolve_codex_session_cwds", lambda _: {})
     fragment = CCUSAGE_DEFINITION.provider.normalize(
         PhysicalResult(
             query,
@@ -198,12 +204,12 @@ def test_codex_incomplete_attribution_emits_a_generic_notice() -> None:
                 {
                     "sessions": [
                         {
+                            "sessionId": "2026/01/03/rollout-unassigned",
                             "inputTokens": 2,
                             "outputTokens": 3,
                             "cacheReadTokens": 5,
                             "cacheCreationTokens": 7,
                             "totalTokens": 20,
-                            "sessionId": "missing",
                         }
                     ]
                 }
@@ -211,9 +217,11 @@ def test_codex_incomplete_attribution_emits_a_generic_notice() -> None:
         )
     )
 
-    result = CCUSAGE_DEFINITION.provider.assemble(PhysicalPlan("plan", (query,)), (fragment,))
-
-    assert result.notices == (Notice("notice.codex_project_attribution_incomplete"),)
+    (record,) = fragment.records
+    assert record.project is not None
+    assert record.project.display_name == "Unassigned"
+    assert record.attribution == "unassigned"
+    assert record.session_id == "2026/01/03/rollout-unassigned"
 
 
 def test_codex_normalization_rejects_non_singleton_coverage() -> None:
@@ -229,7 +237,7 @@ def test_codex_normalization_rejects_non_singleton_coverage() -> None:
     assert caught.value.key == "error.ccusage_codex_date_attribution"
 
 
-def test_project_agent_observation_warns_without_contributing_records() -> None:
+def test_project_agent_observation_maps_unreliable_agents_to_fixed_projects() -> None:
     query = PhysicalQuery(
         ProviderRef("ccusage"),
         "unified_daily_agent_observation",
@@ -291,16 +299,50 @@ def test_project_agent_observation_warns_without_contributing_records() -> None:
     )
     result = CCUSAGE_DEFINITION.provider.assemble(PhysicalPlan("plan", (query,)), (fragment,))
 
-    assert not fragment.records
     assert not fragment.coverage.intervals
-    assert result.notices == (
-        Notice(
-            "notice.project_agent_attribution_unsupported",
-            {"agents": "antigravity, opencode"},
-        ),
-        Notice("notice.project_agent_attribution_unverified", {"agents": "pi"}),
+    assert [
+        (record.agent, record.project.display_name if record.project else None)
+        for record in fragment.records
+    ] == [
+        ("pi", "Unverified"),
+        ("dsh", "demo"),
+        ("antigravity", "Unassigned"),
+        ("opencode", "Unassigned"),
+    ]
+    assert not result.notices
+    assert result.includes_project_attribution
+
+
+def test_project_agent_observation_maps_relative_dsh_project_to_unverified() -> None:
+    query = PhysicalQuery(ProviderRef("ccusage"), "unified_daily_agent_observation")
+    payload = {
+        "daily": [
+            {
+                "date": "2026-01-03",
+                "agents": [
+                    {
+                        "agent": "dsh",
+                        "project": "relative/project",
+                        "inputTokens": 2,
+                        "outputTokens": 3,
+                        "cacheReadTokens": 5,
+                        "cacheCreationTokens": 7,
+                        "totalTokens": 20,
+                    }
+                ],
+            }
+        ]
+    }
+
+    fragment = CCUSAGE_DEFINITION.provider.normalize(
+        PhysicalResult(query, json.dumps(payload).encode())
     )
-    assert not result.includes_project_attribution
+
+    (record,) = fragment.records
+    assert record.project is not None
+    assert record.project.display_name == "Unverified"
+    assert record.attribution == "unverified"
+    assert record.source_project == "relative/project"
 
 
 def test_provider_preserves_source_identity() -> None:

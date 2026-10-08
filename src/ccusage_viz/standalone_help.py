@@ -3,7 +3,11 @@ from __future__ import annotations
 from collections.abc import Callable
 from shutil import get_terminal_size
 
-from ccusage_viz.adjustment_timeout import HELP_IDLE_TIMEOUT_SECONDS, AdjustmentIdleTimer, AdjustmentTimeout
+from ccusage_viz.adjustment_timeout import (
+    HELP_IDLE_TIMEOUT_SECONDS,
+    AdjustmentIdleTimer,
+    AdjustmentTimeout,
+)
 from ccusage_viz.i18n import Translator
 from ccusage_viz.terminal import compose_frame
 from ccusage_viz.terminal_ui import controls_line

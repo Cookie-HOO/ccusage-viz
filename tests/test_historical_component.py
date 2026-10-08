@@ -8,7 +8,12 @@ from ccusage_viz.bootstrap import build_chart_registry, build_query_runtime
 from ccusage_viz.chart_models import PeriodSummary
 from ccusage_viz.core.time import DateRange
 from ccusage_viz.coverage import DateCoverage, DateInterval
-from ccusage_viz.domain import ProjectRef, SourceKind, TokenUsage, UsageRecord
+from ccusage_viz.domain import (
+    ProjectRef,
+    SourceKind,
+    TokenUsage,
+    UsageRecord,
+)
 from ccusage_viz.historical_component import (
     HistoricalChartComponent,
     HistoricalCompletion,

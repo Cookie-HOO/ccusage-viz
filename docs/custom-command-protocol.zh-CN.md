@@ -12,7 +12,37 @@
 
 每个指标声明 `aggregation: "sum"` 或 `aggregation: "value"`。`sum` 允许 ccuv 对返回事实做历史投影聚合；`value` 是数据源拥有的最终事实，切换范围、分组、粒度、筛选或图表时 ccuv 必须重新请求，不能本地相加、平均或生成 Other。
 
-V2 指标可声明 `summary: "comparisons" | "total" | "none"`。`comparisons` 是默认值，允许普通的当前值、环比和同比摘要；`total` 只允许显示一个总数；`none` 不发起 Dataset 摘要请求。Ranking capability 可声明支持的 `periods`。`all` 仅用于 Ranking：ccuv 发送 `period: "all"`，并使用 `1971-01-01` 到今天的锚定范围。权威语义是 marker，不是锚定日期；Dataset 必须按照自身全量数据口径处理。若不支持某个周期，继续使用现有 `unsupported_query`，字段为 `range.period`。
+本地 Dataset 注册会缓存成功的 Probe，用于资源发现、环境状态和非阻塞选择器。再次执行 `ccuv dataset add-local COMMAND` 时，若 Dataset ID 相同，会直接覆盖本地注册并刷新该缓存。Custom Monitor Pane 启动前仍会重新发起 runtime Probe；缓存元数据不作为最终能力权威。
+
+V2 指标可声明 `summary: "comparisons" | "total" | "none"`。`comparisons` 是默认值，允许普通的当前值、环比和同比摘要；`total` 只允许显示一个总数；`none` 不发起 Dataset 摘要请求。每种历史图 capability 都可声明支持的有序 `periods`；声明后 ccuv 会将 `p/P` 限制为该列表。`all` 仅用于 Ranking：ccuv 发送 `period: "all"`，并使用 `1971-01-01` 到今天的锚定范围。权威语义是 marker，不是锚定日期；Dataset 必须按照自身全量数据口径处理。若不支持某个周期，继续使用现有 `unsupported_query`，字段为 `range.period`。
+
+每个图表的 `group_by` 同样是允许发送的有序查询值集合；使用 JSON `null` 明确表示允许未分组总计，维度 ID 仍是字符串，因此名为 `total` 的维度并不冲突。任一已声明列表阻止切换时，ccuv 会保持当前查询并短暂提示，不会发送不支持的请求。不声明 `periods` 时，ccuv 保持原有周期循环，并由 Dataset 动态解释每个请求。
+
+### V2 图表默认值
+
+每个指标可通过 `defaults` 建议图表首屏状态。这是尽力而为的查询和呈现建议，不是有效性要求：某个字段无效时 ccuv 会忽略它，继续使用独立图表或 Dashboard 默认值；显式 CLI 或 Dashboard Pane 参数会覆盖同名 Dataset 字段。
+
+```json
+"defaults": {
+  "timeline": {
+    "period": "30d",
+    "granularity": "week",
+    "group_by": "book",
+    "filters": {"category": ["literature"]},
+    "top": 8,
+    "other": "hide",
+    "style": "line-points",
+    "theme": "nord"
+  },
+  "monitor": {"style": "ranking", "window": "6h"}
+}
+```
+
+所有字段都可省略。`filters` 将已声明的多选 filter ID 映射到一个或多个已声明 option ID；未知 filter 或 option 会被丢弃，剩余兼容选择仍会保留。`period`、`granularity`、`group_by` 必须受当前图 capability 支持；`top` 需要最终有效的分组；style 必须与最终分组兼容。`other` 只能是 `"show"` 或 `"hide"`；`theme` 和 `style` 使用 ccuv 正常 CLI 值。
+
+`defaults.top` 只表示首屏 Top N 建议。历史 Ranking 可在 `capabilities.charts.ranking.max_items` 声明一个正整数，表示数据源最多能可信返回多少原始排行项目；它不是显示默认值。ccuv 会将当前 Top 写入可选 `query.top`，它同时表示用户希望显示的 Top N 和请求的原始排行覆盖量；在需要诚实计算 `Other` 时，Dataset 可以返回更多项目。请求值为 `null` 表示不限制 Top。用户将 Top 调到超过 `max_items` 时，ccuv 会保留选择并提示数据源上限，而不会发送不可能增加项目的请求。
+
+对于 Custom Monitor，`window` 是 ccuv 本地显示范围（`5m` 到 `24h`），不是数据源业务窗口。固定请求窗口始终是 `capabilities.charts.monitor.window_seconds`。
 
 V2 指标可以声明 `monitor`。它声明固定业务口径 `window_seconds`，也可声明 `refresh_interval_seconds`。ccuv 的 Monitor 显示历史仅决定本地可见观测，不会修改指标业务窗口。Dashboard 现有全局采样周期仍是实际周期；若与声明周期不同，会显示警告。Custom Monitor 支持 bars、ranking 和 list，不提供 `cumulative-bars`，因为固定滚动观测不是互不重叠的累计增量。
 
@@ -68,9 +98,11 @@ ccuv dashboard --empty --grid 2x2 \
   --pane 'animate --style rain'
 ```
 
-Dashboard 预设仍是内置的 token 消耗统计模板；添加 Dataset Pane 不会创建或修改 Dataset 预设。
+Dashboard 预设以内置 token 消耗统计模板为基础，Dashboard 预设管理器也可以保存完整的用户配置。在浏览模式中按 `s` 保存，按 `p` 管理已保存的预设。预设会保留已安装 Dataset 引用、本地命令 Dataset Pane 的 argv 和命令驱动的 Overlay。它们是可信的用户本地自动化配置：加载预设会执行其中包含的命令，因此只能加载你信任的预设。预设绝不包含环境变量、凭据、结果或运行时/UI 状态。
 
-`dashboard --empty` 会关闭默认 ccusage Pane 及其默认数据依赖。它使用普通默认 Dashboard 布局并填入 `empty` Pane；`--grid` 或显式 layout 决定初始空 Pane 的数量和位置。它不会添加时钟。已有 `wide-clock` 和 `narrow-clock` 预设仍保留时钟 Pane。
+用户预设名必须匹配 `^[a-z][a-z0-9-]*$`。用户预设可以覆盖同名内置预设：按用户优先的规则加载用户记录；删除用户覆盖后会重新显示同名内置预设。管理器在覆盖已有用户预设或删除用户预设前都会要求确认。可用 `ccuv dashboard <name>` 启动具名预设；这一封闭形式只接受 `--demo`、`--lang`、`--empty` 和 `--ccusage-bin` 作为附加选项。缺少已安装 Dataset 不会使预设变为不可用；只有预设存储不可读、格式错误或版本不支持时才显示为不可用，并阻止写入。
+
+`dashboard --empty` 会关闭默认 ccusage Pane 及其默认数据依赖。它使用普通默认 Dashboard 布局并填入 `empty` Pane；`--grid` 或显式 layout 决定初始空 Pane 的数量和位置。它不会添加时钟。已有 `wide-clock` 和 `narrow-clock` 预设仍保留时钟 Pane。对于具名预设，`ccuv dashboard <name> --empty` 则会保留该预设的拓扑、权重、显示与节奏设置、时区、demo 和安全进程配置，只在本次启动时把所有 Pane 替换为空白 Pane；保存的记录不会变化。启用 demo 的预设加载后仍会启用 demo。
 
 选中自定义 Dashboard Pane 后，`v` 和 `V` 可在图表、紧凑命令、完整命令、数据表和 JSON 视图间向前/向后循环。数据视图序列化 ccuv 当前本地投影的图表数据，遵守当前范围、筛选、分组、粒度、Top/Other 选择和单位精度。JSON 会同时保留规范 series ID、Decimal 字符串值和本地化显示名称，不会暴露不透明的原始进程响应。
 

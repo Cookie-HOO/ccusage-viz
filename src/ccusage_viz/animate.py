@@ -556,9 +556,9 @@ def _run_adjustment(
             theme=session.theme,
             theme_index=COLOR_SCHEMES.index(session.theme) + 1,
             theme_count=len(COLOR_SCHEMES),
-            position=overlay.presentation.position,
-            offset_x=overlay.presentation.offset_x,
-            offset_y=overlay.presentation.offset_y,
+            position=overlay.config.position,
+            offset_x=overlay.config.offset_x,
+            offset_y=overlay.config.offset_y,
             interval=_format_overlay_interval(overlay.config.interval),
         )
         controls = adjustment_rows(

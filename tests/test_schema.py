@@ -112,8 +112,8 @@ def test_codex_directory_is_never_a_project_identity() -> None:
     (record,) = parse_usage_records(QueryKind.CODEX_SESSIONS, payload)
 
     assert record.project is not None
-    assert record.project.key == ("codex", "unassigned-codex")
-    assert record.project.display_name == "Unassigned Codex"
+    assert record.project.display_name == "Unassigned"
+    assert record.attribution == "unassigned"
 
 
 def test_parse_codex_model_map_with_official_project() -> None:

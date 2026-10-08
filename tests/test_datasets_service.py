@@ -15,10 +15,6 @@ from ccusage_viz.custom_models import (
     CustomProbeDescriptor,
     CustomUnit,
     LocalizedText,
-)
-from ccusage_viz.custom_models import (
-    CustomUnit,
-    LocalizedText,
     V2Dataset,
     V2MetricCapabilities,
     V2MetricDescriptor,
@@ -30,6 +26,7 @@ from ccusage_viz.datasets.archive import sha256_bytes
 from ccusage_viz.datasets.models import ReleaseArtifact
 from ccusage_viz.datasets.service import DatasetService
 from ccusage_viz.errors import UsageError
+from ccusage_viz.options import CustomCommandSource
 
 
 def test_status_exposes_corrupt_dataset_without_executing_it(tmp_path: Path) -> None:
@@ -85,7 +82,7 @@ def v2_probe(dataset_id: str = "router") -> V2ProbeResponse:
                 CustomUnit("token", text, "suffix", 0),
                 "sum",
                 V2MetricCapabilities((), (), {"monitor": V2MonitorCapability(60, 10, (), ())}),
-                {},
+                {"monitor": CustomChartDefaults(None, None, None, style="ranking", window_seconds=21600, declared=frozenset({"style", "window"}))},
             ),
             V2MetricDescriptor(
                 "completed_requests",
@@ -94,7 +91,7 @@ def v2_probe(dataset_id: str = "router") -> V2ProbeResponse:
                 CustomUnit("request", text, "suffix", 0),
                 "sum",
                 V2MetricCapabilities((), (), {"monitor": V2MonitorCapability(60, 10, (), ())}),
-                {},
+                {"monitor": CustomChartDefaults(None, None, None, style="ranking", window_seconds=21600, declared=frozenset({"style", "window"}))},
             ),
         ),
         (),
@@ -112,6 +109,29 @@ def test_registers_and_persists_a_v2_multi_metric_local_dataset(tmp_path: Path) 
     assert tuple(metric.id for metric in restored.probe.descriptor.metrics) == (
         "tokens",
         "completed_requests",
+    )
+
+
+def test_runtime_probe_refreshes_matching_registered_local_command(tmp_path: Path) -> None:
+    service = DatasetService(root=tmp_path, environ={}, probe_runner=lambda _argv: v2_probe())
+    registration = service.register_local_command(("router-dataset",)).registration
+    response = v2_probe()
+
+    assert service.update_runtime_probe(
+        CustomCommandSource("router", ("router-dataset",)), response
+    )
+    refreshed = service.store.load_registration("router")
+
+    assert refreshed.probe.descriptor == response.descriptor
+    assert refreshed.updated_at != registration.updated_at
+
+
+def test_runtime_probe_does_not_replace_a_different_local_command(tmp_path: Path) -> None:
+    service = DatasetService(root=tmp_path, environ={}, probe_runner=lambda _argv: v2_probe())
+    service.register_local_command(("router-dataset",))
+
+    assert not service.update_runtime_probe(
+        CustomCommandSource("router", ("other-router-dataset",)), v2_probe()
     )
 
 

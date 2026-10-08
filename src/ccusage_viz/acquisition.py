@@ -10,9 +10,9 @@ from ccusage_viz.custom_protocol import (
     CustomChartRequest,
     CustomProbeRequest,
     CustomSummaryRequest,
-    V2ProbeRequest,
-    V2MonitorRequest,
     V2ChartRequest,
+    V2MonitorRequest,
+    V2ProbeRequest,
     V2SummaryRequest,
 )
 from ccusage_viz.options import (
@@ -307,6 +307,7 @@ def custom_historical_query_intent(
         filters=config.filters,
         group_by=config.group_by,
         granularity=config.granularity,
+        **({"top": config.top} if config.metric_id is not None else {}),
         command_argv=config.source.command_argv,
     )
     return QueryIntent(

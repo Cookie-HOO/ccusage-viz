@@ -34,8 +34,7 @@ from ccusage_viz.datasets.models import (
 )
 from ccusage_viz.datasets.paths import dataset_state_root
 from ccusage_viz.datasets.store import DatasetStore
-from ccusage_viz.errors import UsageError
-from ccusage_viz.errors import QueryError
+from ccusage_viz.errors import QueryError, UsageError
 from ccusage_viz.lifecycle import QueryTrigger
 from ccusage_viz.options import CustomCommandSource
 
@@ -215,6 +214,35 @@ class DatasetService:
                 )
             self.store.save_registration(updated)
         return self.registrations()
+
+    def update_runtime_probe(
+        self,
+        source: CustomCommandSource,
+        response: CustomProbeResponse | V2ProbeResponse,
+    ) -> bool:
+        """Persist a live Pane Probe only when it matches a registered command."""
+
+        try:
+            current = self.store.load_registration(response.dataset_id)
+        except UsageError:
+            return False
+        if not isinstance(current.source, LocalDatasetSource):
+            return False
+        if current.source.command_argv != source.command_argv:
+            return False
+        now = datetime.now(UTC).isoformat()
+        try:
+            self.store.save_registration(
+                replace(
+                    current,
+                    updated_at=now,
+                    probe=DatasetProbeSnapshot(current.dataset_id, response.descriptor, now),
+                    last_probe_error=None,
+                )
+            )
+        except OSError:
+            return False
+        return True
 
     def _update_candidate(self, registration: DatasetRegistration) -> DatasetUpdateCandidate | None:
         if not isinstance(registration.source, ManagedDatasetSource):
