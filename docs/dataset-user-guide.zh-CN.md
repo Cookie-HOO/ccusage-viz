@@ -83,7 +83,7 @@ ccuv chart monitor --dataset router --metric tokens
 
 通过 `ccuv dataset` 的详情查看每个 Metric 支持哪些图。历史 Metric 可以支持 Timeline、Calendar、Stack、Ranking 的任意组合；只有声明 Monitor capability 的 Metric 才能运行 Monitor。
 
-Dataset 可建议初始 period、group、filters、Top N、Other、style、theme 和 Monitor 本地显示范围，但只是建议。显式参数优先：
+Dataset 可建议初始 period、group、Top N、Other、style、theme 和 Monitor 本地显示范围，但只是建议。显式参数优先：
 
 ```bash
 ccuv chart timeline --dataset example-activity --metric events \
@@ -91,7 +91,7 @@ ccuv chart timeline --dataset example-activity --metric events \
   --style points --theme classic
 ```
 
-Custom Dataset 使用 `--group-by`，不是内置图的 `--by`；filter 使用可重复的 `--filter ID=OPTION`。带 `--dataset` 时不能同时用内置 `--agent`、`--model`、`--project`、`--cache`。无效 Dataset default 只会忽略对应字段，不会阻止图表打开。
+Custom Dataset 使用 `--group-by`，不是内置图的 `--by`；只有 Dataset 已返回对应运行时 option 时才可使用可重复的 `--filter ID=OPTION`。带 `--dataset` 时不能同时用内置 `--agent`、`--model`、`--project`、`--cache`。无效 Dataset default 只会忽略对应字段，不会阻止图表打开。
 
 ## 在 Dashboard 中使用
 
@@ -103,7 +103,7 @@ Custom Dataset 使用 `--group-by`，不是内置图的 `--by`；filter 使用�
 4. 从该 Metric 支持的 chart kinds 中选一种。
 5. ccuv 重新 Probe、应用有效首屏建议、再查询 Pane。配置或源端错误会显示在 Pane，不会用零覆盖数据。
 
-之后可在 Pane 调整 period、group、filter、Top、Other、style、theme、Monitor 本地显示范围。这些是当前运行本地状态，不会修改 Dataset 或注册。
+之后可在 Pane 调整 period、group、Dataset 本次响应提供的 filter、Top、Other、style、theme、Monitor 本地显示范围。这些是当前运行本地状态，不会修改 Dataset 或注册。
 
 ### CLI 声明 Pane
 

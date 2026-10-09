@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 
 from ccusage_viz.acquisition import custom_v2_monitor_query_intent, custom_v2_probe_query_intent
 from ccusage_viz.bootstrap import build_query_runtime
+from ccusage_viz.custom_filter_draft import run_custom_filter_editor
 from ccusage_viz.custom_models import V2MonitorCapability
 from ccusage_viz.custom_monitor_component import (
     CustomMonitorCompletion,
@@ -38,8 +39,10 @@ from ccusage_viz.terminal import FramePainter, Terminal, compose_frame, inspect_
 from ccusage_viz.terminal_ui import AdjustmentAction, adjustment_rows, input_mode, read_key
 
 
-def _metric_capability(probe: V2ProbeResponse, config: CustomChartConfig) -> V2MonitorCapability:
-    metric = next((item for item in probe.descriptor.metrics if item.id == config.metric_id), None)
+def _metric_capability(descriptor: object, config: CustomChartConfig) -> V2MonitorCapability:
+    if isinstance(descriptor, V2ProbeResponse):
+        descriptor = descriptor.descriptor
+    metric = next((item for item in getattr(descriptor, "metrics", ()) if item.id == config.metric_id), None)
     if metric is None:
         raise ValueError("runtime probe does not declare selected metric")
     capability = metric.capabilities.charts.get("monitor")
@@ -183,10 +186,11 @@ def _custom_monitor_actions(
     """Expose the standalone native Monitor action split with Dataset capabilities."""
 
     if page == "advanced":
+        filters = (("f", "filters"),) if component.runtime is not None and component.runtime.filters else ()
         return (
-            (("o", "other"), ("l", "legend"))
+            (*filters, *(("o", "other"), ("l", "legend")))
             if component.aggregation == "sum"
-            else (("l", "legend"),)
+            else (*filters, ("l", "legend"))
         )
     actions: list[tuple[str, str]] = [("w", "window")]
     if component.monitor_capability is not None and component.monitor_capability.group_by:
@@ -271,6 +275,7 @@ def run_custom_monitor(options: StandaloneLaunch, translator: Translator) -> int
                 CustomMonitorCompletion(operation.generation, component.candidate, response),
                 accepted_at=datetime.now().astimezone(),
             )
+            capability = _metric_capability(response.descriptor, component.candidate)
             lifecycle.complete(operation, generation=operation.generation)
         except BaseException as error:
             component.fail(error, generation=operation.generation)
@@ -349,6 +354,46 @@ def run_custom_monitor(options: StandaloneLaunch, translator: Translator) -> int
                         break
                     if adjusted == "a":
                         page = "advanced" if page == "quick" else "quick"
+                        continue
+                    if (
+                        adjusted == "f"
+                        and page == "advanced"
+                        and component.runtime is not None
+                        and component.runtime.filters
+                    ):
+                        filter_height = terminal.height
+
+                        def paint_filter_editor(
+                            body: str, controls: str, *, height: int = filter_height
+                        ) -> None:
+                            screen.paint(
+                                compose_frame(
+                                    body,
+                                    translator.text("label.adjust_filters"),
+                                    controls,
+                                    height=height,
+                                )
+                            )
+
+                        edited = run_custom_filter_editor(
+                            component.candidate.filters,
+                            component.runtime.filters,
+                            translator,
+                            width=terminal.width,
+                            paint=paint_filter_editor,
+                            read_key=lambda: read_key(5),
+                        )
+                        if edited is not None and edited != component.candidate.filters:
+                            component.configure(
+                                replace(component.candidate, filters=edited), data_affecting=True
+                            )
+                            lifecycle.request(
+                                LifecycleTrigger.CONFIGURATION,
+                                generation=component.generation,
+                                now=time.monotonic(),
+                                replace_active=True,
+                                start=submit,
+                            )
                         continue
                     if adjusted in {"b", "B"} and _adjust(component, adjusted):
                         lifecycle.request(

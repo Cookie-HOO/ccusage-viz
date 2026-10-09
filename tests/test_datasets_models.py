@@ -102,12 +102,12 @@ def test_manifest_accepts_v2_static_probe_and_uses_default_metric() -> None:
                         {
                             "id": "tokens", "title": {"en": "Tokens", "zh-CN": "Token"}, "description": {"en": "Live", "zh-CN": "实时"},
                             "unit": {"id": "token", "label": {"en": "tokens", "zh-CN": "Token"}, "placement": "suffix", "decimal_places": 0},
-                            "aggregation": "sum", "capabilities": {"group_by": [], "filters": [], "charts": {"monitor": {"window_seconds": 60, "group_by": [], "filters": []}}}, "defaults": {}
+                            "aggregation": "sum", "capabilities": {"group_by": [], "charts": {"monitor": {"window_seconds": 60, "group_by": []}}}, "defaults": {}
                         },
                         {
                             "id": "requests", "title": {"en": "Requests", "zh-CN": "请求"}, "description": {"en": "Live", "zh-CN": "实时"},
                             "unit": {"id": "request", "label": {"en": "requests", "zh-CN": "请求"}, "placement": "suffix", "decimal_places": 0},
-                            "aggregation": "sum", "capabilities": {"group_by": [], "filters": [], "charts": {"monitor": {"window_seconds": 60, "group_by": [], "filters": []}}}, "defaults": {}
+                            "aggregation": "sum", "capabilities": {"group_by": [], "charts": {"monitor": {"window_seconds": 60, "group_by": []}}}, "defaults": {}
                         },
                     ], "environment": []
                 }

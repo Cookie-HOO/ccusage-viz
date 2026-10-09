@@ -91,7 +91,6 @@ from ccusage_viz.custom_component import (
 )
 from ccusage_viz.custom_filter_draft import run_custom_filter_editor
 from ccusage_viz.custom_models import (
-    CustomCapabilities,
     CustomChartCapability,
     CustomFilter,
     CustomProtocolFailure,
@@ -2370,11 +2369,11 @@ def _custom_top_limit_notice(pane: TuiCustomPane, translator: Translator) -> tup
     return (translator.text("status.custom_top_source_limit", max=capability.max_items),)
 
 
-def _custom_supported_filters(
-    capabilities: CustomCapabilities, capability: CustomChartCapability
-) -> tuple[CustomFilter, ...]:
-    allowed = set(capability.filters)
-    return tuple(item for item in capabilities.filters if item.id in allowed)
+def _custom_runtime_filters(component: CustomHistoricalComponent | CustomMonitorComponent) -> tuple[CustomFilter, ...]:
+    """Return only controls accepted with the current Dataset query snapshot."""
+
+    runtime = component.runtime
+    return runtime.filters if runtime is not None else ()
 
 
 def _custom_pane_adjustment_bindings(pane: TuiCustomPane, page: str) -> tuple[tuple[str, str], ...]:
@@ -2393,7 +2392,9 @@ def _custom_pane_adjustment_bindings(pane: TuiCustomPane, page: str) -> tuple[tu
             if chart.group_by is not None:
                 actions.append(("+/-", "top"))
             return (*actions, *_COMMON_PANE_QUICK_ACTIONS)
-        actions = [("f", "filters"), ("l", "legend"), ("L", "custom_logs")]
+        actions = [("l", "legend"), ("L", "custom_logs")]
+        if _custom_runtime_filters(pane.component):
+            actions.insert(0, ("f", "filters"))
         if chart.group_by is not None and pane.component.aggregation == "sum":
             actions.insert(0, ("o", "other"))
         config = pane.component.accepted_config or pane.component.candidate
@@ -2407,7 +2408,7 @@ def _custom_pane_adjustment_bindings(pane: TuiCustomPane, page: str) -> tuple[tu
                 actions.append(("g/G", "granularity"))
             if chart.kind != "calendar":
                 actions.append(("b/B", "group"))
-            if capability.filters:
+            if _custom_runtime_filters(pane.component):
                 actions.append(("f", "filters"))
         if chart.group_by is not None:
             actions.append(("+/-", "top"))
@@ -4047,7 +4048,7 @@ def _custom_standalone_actions(
             actions.append(("g/G", "granularity"))
         if chart.kind != "calendar" and capability.group_by:
             actions.append(("b/B", "group"))
-        if capability.filters:
+        if component.runtime is not None and component.runtime.filters:
             actions.append(("f", "filters"))
     if chart.group_by is not None:
         actions.extend((("+/-", "top"), ("o", "other")))
@@ -4236,6 +4237,29 @@ def _run_custom_standalone_adjustment(
                         capability.group_by,
                         step=1 if key == "b" else -1,
                     )
+                elif key == "f" and _custom_runtime_filters(component):
+                    size = get_terminal_size()
+
+                    def paint_filter_editor(body: str, controls: str) -> None:
+                        screen.paint(
+                            compose_frame(
+                                body,
+                                translator.text("label.adjust_filters"),
+                                controls,
+                                height=size.lines,
+                            )
+                        )
+
+                    edited = run_custom_filter_editor(
+                        current.filters,
+                        _custom_runtime_filters(component),
+                        translator,
+                        width=size.columns,
+                        paint=paint_filter_editor,
+                        read_key=lambda: read_key(min(0.1, timer.remaining())),
+                    )
+                    if edited is not None:
+                        updated = replace(current, filters=edited)
                 if updated != current:
                     current = updated
                     paint()
@@ -9000,11 +9024,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         elif (
                             key == "f"
                             and capability is not None
-                            and capability.filters
-                            and component.accepted_response is not None
+                            and _custom_runtime_filters(component)
                         ):
-                            response = component.accepted_response
-                            filters = _custom_supported_filters(response.capabilities, capability)
+                            filters = _custom_runtime_filters(component)
                             size = get_terminal_size()
 
                             def paint_custom_filter_editor(body: str, editor_controls: str) -> None:

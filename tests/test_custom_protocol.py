@@ -95,13 +95,11 @@ def v2_probe_descriptor() -> dict[str, object]:
                 "aggregation": "sum",
                 "capabilities": {
                     "group_by": [{"id": "real_model", "label": text("Real model", "真实模型")}],
-                    "filters": [],
                     "charts": {
                         "monitor": {
                             "window_seconds": 60,
                             "refresh_interval_seconds": 10,
                             "group_by": ["real_model"],
-                            "filters": [],
                         }
                     },
                 },
@@ -115,13 +113,11 @@ def v2_probe_descriptor() -> dict[str, object]:
                 "aggregation": "sum",
                 "capabilities": {
                     "group_by": [{"id": "public_model", "label": text("Public model", "公开模型")}],
-                    "filters": [],
                     "charts": {
                         "monitor": {
                             "window_seconds": 60,
                             "refresh_interval_seconds": 10,
                             "group_by": ["public_model"],
-                            "filters": [],
                         }
                     },
                 },
@@ -135,12 +131,10 @@ def v2_probe_descriptor() -> dict[str, object]:
                 "aggregation": "value",
                 "capabilities": {
                     "group_by": [{"id": "agent", "label": text("Agent", "Agent")}],
-                    "filters": [],
                     "charts": {
                         "monitor": {
                             "window_seconds": 60,
                             "group_by": ["agent"],
-                            "filters": [],
                         }
                     },
                 },
@@ -202,6 +196,8 @@ def test_v2_probe_and_monitor_wire_round_trip() -> None:
         "dataset_id": "router",
         "metric_id": "tokens",
         "status": "ok",
+        "descriptor": v2_probe_descriptor(),
+        "runtime": {"filters": []},
         "observation": {
             "end_at": "2026-10-07T14:00:00+00:00",
             "total": "175",
@@ -212,6 +208,69 @@ def test_v2_probe_and_monitor_wire_round_trip() -> None:
     assert isinstance(parsed, V2MonitorResponse)
     assert parsed.observation.total == Decimal("175")
     assert parsed.observation.groups[0].id == "terra"
+
+
+def test_v2_query_response_requires_a_complete_descriptor_and_runtime_controls() -> None:
+    descriptor = v2_probe_descriptor()
+    descriptor["metrics"][0]["capabilities"]["charts"]["timeline"] = {  # type: ignore[index]
+        "granularities": ["day"],
+        "group_by": [],
+    }
+    request = V2ChartRequest(
+        "chart-v2-snapshot",
+        "router",
+        "tokens",
+        "Asia/Shanghai",
+        date(2026, 10, 1),
+        date(2026, 10, 8),
+    )
+    response = {
+        "protocol": V2_PROTOCOL_VERSION,
+        "request_id": "chart-v2-snapshot",
+        "request_kind": "chart",
+        "dataset_id": "router",
+        "metric_id": "tokens",
+        "status": "ok",
+        "descriptor": descriptor,
+        "runtime": {
+            "filters": [
+                {
+                    "id": "project",
+                    "label": text("Project", "项目"),
+                    "mode": "multi_select",
+                    "options": [{"id": "core", "label": text("Core", "核心")}],
+                }
+            ]
+        },
+        "data": {"series": []},
+    }
+
+    parsed = parse_custom_response(json.dumps(response).encode(), request)
+
+    assert parsed.descriptor.default_metric_id == "tokens"  # type: ignore[union-attr]
+    assert parsed.runtime.filters[0].id == "project"  # type: ignore[union-attr]
+
+
+@pytest.mark.parametrize("field", ("descriptor", "runtime"))
+def test_v2_query_response_rejects_missing_snapshot_fields(field: str) -> None:
+    request = V2MonitorRequest(
+        "monitor-v2-required", "router", "tokens", "Asia/Shanghai", datetime(2026, 10, 7, tzinfo=UTC)
+    )
+    response = {
+        "protocol": V2_PROTOCOL_VERSION,
+        "request_id": "monitor-v2-required",
+        "request_kind": "monitor",
+        "dataset_id": "router",
+        "metric_id": "tokens",
+        "status": "ok",
+        "descriptor": v2_probe_descriptor(),
+        "runtime": {"filters": []},
+        "observation": {"end_at": "2026-10-07T00:00:00+00:00", "total": "1", "groups": []},
+    }
+    response.pop(field)
+
+    with pytest.raises(CustomProtocolError, match=field):
+        parse_custom_response(json.dumps(response).encode(), request)
 
 
 def test_v2_chart_top_is_transmitted_and_distinguishes_request_identity() -> None:
@@ -240,7 +299,6 @@ def test_v2_ranking_capability_accepts_a_positive_source_limit() -> None:
     descriptor["metrics"][0]["capabilities"]["charts"]["ranking"] = {  # type: ignore[index]
         "granularities": ["day"],
         "group_by": ["real_model"],
-        "filters": [],
         "max_items": 10,
     }
 
@@ -303,7 +361,7 @@ def test_v2_probe_descriptor_rejects_invalid_metric_contract(
 def test_v2_ranking_default_all_is_allowed_and_invalid_defaults_are_ignored() -> None:
     descriptor = v2_probe_descriptor()
     descriptor["metrics"][0]["capabilities"]["charts"] = {
-        "ranking": {"granularities": ["day"], "group_by": [], "filters": [], "periods": ["all"]}
+        "ranking": {"granularities": ["day"], "group_by": [], "periods": ["all"]}
     }
     descriptor["metrics"][0]["defaults"] = {"ranking": {"period": "all", "group_by": None, "top": None}}
 
@@ -320,8 +378,7 @@ def test_v2_historical_capabilities_accept_declared_periods_for_every_chart_kind
         kind: {
             "granularities": ["day"],
             "group_by": [],
-            "filters": [],
-            "periods": ["7d", "30d"],
+                "periods": ["7d", "30d"],
         }
         for kind in ("timeline", "calendar", "stack", "ranking")
     }

@@ -8,9 +8,14 @@ from typing import Any, Literal
 
 from ccusage_viz.core.time import DateRange
 from ccusage_viz.custom_models import (
+    CustomCapabilities,
     CustomChartCapability,
+    CustomDataset,
     CustomPresentationDescriptor,
     CustomProtocolFailure,
+    V2HistoricalChartCapability,
+    V2ProbeDescriptor,
+    V2Runtime,
 )
 from ccusage_viz.custom_protocol import CustomChartResponse, V2ChartResponse
 from ccusage_viz.errors import QueryError
@@ -112,6 +117,8 @@ class CustomHistoricalComponent:
         "presentation",
         "render_revision",
         "retrieval_top",
+        "runtime",
+        "v2_descriptor",
     )
 
     def __init__(self, config: CustomChartConfig) -> None:
@@ -131,6 +138,8 @@ class CustomHistoricalComponent:
         self.presentation: CustomPresentationDescriptor | None = None
         self.render_revision = 0
         self.retrieval_top: int | None = None
+        self.runtime: V2Runtime | None = None
+        self.v2_descriptor: V2ProbeDescriptor | None = None
 
     @property
     def is_pending(self) -> bool:
@@ -275,11 +284,39 @@ class CustomHistoricalComponent:
     ) -> bool:
         """Apply the provider's typed optional custom payload when available."""
         payload = getattr(result, "custom_response", None)
+        descriptor: V2ProbeDescriptor | None = None
+        runtime: V2Runtime | None = None
         if isinstance(payload, V2ChartResponse):
-            payload = CustomChartResponse(payload.dataset, payload.capabilities, payload.data, warnings=payload.warnings)
+            metric = next(item for item in payload.descriptor.metrics if item.id == payload.metric_id)
+            capability = metric.capabilities.charts.get(self.candidate.kind)
+            if not isinstance(capability, V2HistoricalChartCapability):
+                raise TypeError("v2 chart response does not describe the selected historical chart")
+            descriptor = payload.descriptor
+            runtime = payload.runtime
+            payload = CustomChartResponse(
+                CustomDataset(metric.title, metric.description, metric.unit),
+                CustomCapabilities(
+                    metric.capabilities.group_by,
+                    payload.runtime.filters,
+                    {
+                        self.candidate.kind: CustomChartCapability(
+                            capability.granularities,
+                            capability.group_by,
+                            tuple(item.id for item in payload.runtime.filters),
+                            capability.max_items,
+                        )
+                    },
+                ),
+                payload.data,
+                warnings=payload.warnings,
+            )
         if not isinstance(payload, CustomChartResponse):
             raise TypeError("custom provider result does not contain a chart response")
-        return self.accept_response(payload, purpose=purpose, accepted_at=accepted_at)
+        accepted = self.accept_response(payload, purpose=purpose, accepted_at=accepted_at)
+        if accepted and purpose == "primary" and descriptor is not None and runtime is not None:
+            self.v2_descriptor = descriptor
+            self.runtime = runtime
+        return accepted
 
     def fail(
         self, error: BaseException, *, generation: int, purpose: CustomPurpose = "primary"

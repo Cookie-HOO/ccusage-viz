@@ -17,7 +17,7 @@ supports. Depending on its capabilities, a Dataset can provide:
 - source-owned non-additive historical values when ccuv must not aggregate;
 - source-owned fixed-window Monitor observations such as events per minute;
 - current/comparison summaries, or an explicit decision to provide none;
-- compatible first-screen defaults for period, grouping, filters, Top/Other,
+- compatible first-screen defaults for period, grouping, Top/Other,
   style, theme, and Monitor's local display horizon.
 
 It does **not** become a ccuv collector or change built-in token calculations.
@@ -113,7 +113,7 @@ func descriptor() map[string]any {
     }
     historical := map[string]any{
         "granularities": []string{"day"}, "group_by": []any{nil, "project"},
-        "filters": []string{"category"}, "periods": []string{"7d", "14d", "30d"},
+        "periods": []string{"7d", "14d", "30d"},
     }
     return map[string]any{
         "revision": "example-activity-1", "version": "0.1.0", "default_metric_id": "events",
@@ -122,10 +122,10 @@ func descriptor() map[string]any {
             "id": "events", "title": text("Events", "事件"), "description": text("Daily activity", "每日活动"),
             "unit": unit(), "aggregation": "sum", "summary": "total",
             "capabilities": map[string]any{
-                "group_by": []any{project}, "filters": []any{category},
+                "group_by": []any{project},
                 "charts": map[string]any{
                     "timeline": historical, "ranking": historical,
-                    "monitor": map[string]any{"window_seconds": 60, "refresh_interval_seconds": 10, "group_by": []string{"project"}, "filters": []string{"category"}},
+                    "monitor": map[string]any{"window_seconds": 60, "refresh_interval_seconds": 10, "group_by": []string{"project"}},
                 },
             },
             "defaults": map[string]any{
@@ -154,8 +154,7 @@ func handleChart(req Request) map[string]any {
     }
     return ok(req, map[string]any{
         "metric_id": "events",
-        "dataset": map[string]any{"title": text("Example activity", "示例活动"), "description": text("Minimal V2 Dataset", "最小 V2 Dataset"), "unit": unit()},
-        "capabilities": descriptor()["metrics"].([]any)[0].(map[string]any)["capabilities"],
+        "descriptor": descriptor(), "runtime": map[string]any{"filters": []any{},},
         "data": map[string]any{"series": []any{map[string]any{"id": "example", "label": text("Example", "示例"), "points": points}}},
     })
 }
@@ -168,7 +167,7 @@ func main() {
     case "probe": response = ok(req, map[string]any{"descriptor": descriptor()})
     case "chart": response = handleChart(req)
     case "monitor":
-        response = ok(req, map[string]any{"metric_id": "events", "observation": map[string]any{"end_at": req.Range["end_at"], "total": "42", "groups": []any{map[string]any{"id": "example", "label": text("Example", "示例"), "value": "42"}}}})
+        response = ok(req, map[string]any{"metric_id": "events", "descriptor": descriptor(), "runtime": map[string]any{"filters": []any{}}, "observation": map[string]any{"end_at": req.Range["end_at"], "total": "42", "groups": []any{map[string]any{"id": "example", "label": text("Example", "示例"), "value": "42"}}}})
     case "summary":
         response = ok(req, map[string]any{"metric_id": "events", "summary": map[string]any{"metric": map[string]any{"id": "events", "label": text("Events", "事件"), "current": map[string]any{"value": "42", "display": text("42 events", "42 个事件")}, "sequential": map[string]string{"status": "unavailable"}, "year_over_year": map[string]string{"status": "unavailable"}}}})
     default: response = fail(req, "invalid_request", "request_kind", req.RequestKind)
@@ -225,13 +224,14 @@ and again before a live custom Monitor starts.
 | `metrics` | One or more independent measurements | Lets users choose a Metric and prevents unsupported chart choices. |
 | `unit` | Stable unit ID, bilingual label, prefix/suffix, precision | Formats chart, table, and summary values. |
 | `aggregation` | `sum` for additive facts; `value` for source-owned values | Controls whether ccuv can locally project Top/Other and history. |
-| `capabilities` | Dimensions, filters, supported chart kinds and values | Gates controls and validates requests ccuv sends. Historical Ranking may declare `max_items` when its source has a fixed raw-row limit. |
+| `capabilities` | Dimensions and supported chart kinds | Gates static controls and validates requests ccuv sends. Historical Ranking may declare `max_items` when its source has a fixed raw-row limit. |
+| `runtime.filters` | Query-context filter dimensions and options | Returned only with each successful chart/Monitor response; enables the `f` filter editor for that accepted snapshot. |
 | `defaults` | Optional initial chart suggestions | Applies only compatible fields; a bad suggestion is ignored. |
 | `summary` | `comparisons`, `total`, or `none` | Determines whether/how ccuv issues summary requests. |
 | `environment` | Required/optional variable names and setup instructions | Shows setup status only; ccuv never saves values. |
 
 For historical charts, a Metric capability has `granularities`, `group_by`,
-`filters`, and optionally ordered `periods`. A Ranking may also declare positive
+and optionally ordered `periods`. A Ranking may also declare positive
 `max_items` when the source can never provide more raw ranking entries. Use
 `null` in `group_by` to permit an ungrouped total. For Monitor, declare fixed
 positive `window_seconds`; this is the business semantics of every observation.
@@ -257,11 +257,11 @@ ccuv sends historical data requests like this:
 
 Treat `start_date` and `end_date` as inclusive and authoritative. `period` is
 extra rolling-range context and is `null` for fixed bounds. Apply only the
-declared filters/groupings/granularities. `query.top` is optional and unifies
+accepted response's runtime filters and static groupings/granularities. `query.top` is optional and unifies
 the user's visible Top N with the requested ranking coverage. A Dataset may
 return additional raw rows when it needs them to form an honest `Other` row;
-`null` means no requested Top bound. Return a `chart` success with `dataset`,
-effective `capabilities`, and dated `data.series` points. Every point uses ISO
+`null` means no requested Top bound. Return a `chart` success with the complete
+Probe-shaped `descriptor`, `runtime: {"filters": [...]}`, and dated `data.series` points. Every point uses ISO
 `YYYY-MM-DD`; return an empty series list when the requested valid range has no
 facts. Do not invent zeros unless zero is a true source fact.
 
@@ -298,7 +298,8 @@ a user-selectable duration:
 ```
 
 Calculate the fixed source window ending at that point, using your declared
-`window_seconds`, and return one source-owned `observation` with an aware
+`window_seconds`, and return the complete Probe-shaped `descriptor`,
+`runtime: {"filters": [...]}`, and one source-owned `observation` with an aware
 `end_at`, decimal-string `total`, and optional groups. If the source cannot
 answer that exact window, send `status: "error"` with `code:
 "range_not_available"`; never silently substitute zero. Dataset `defaults`

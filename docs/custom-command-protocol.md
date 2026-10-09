@@ -31,6 +31,14 @@ replaces an existing local registration with the same Dataset ID and refreshes
 that cache. A Custom Monitor Pane still performs a new runtime Probe before it
 starts sampling; cached metadata is never its final capability authority.
 
+Every successful V2 `chart` and `monitor` response is a complete accepted
+snapshot: it includes the full Probe-shaped `descriptor`, a `runtime` object,
+and its `data` or `observation`. After the initial Probe chooses the Dataset and
+Metric, ccuv reads static controls from the latest accepted response descriptor.
+`runtime.filters` is required (and may be empty); it is the only filter catalog
+that ccuv offers through `f`. Probe descriptors and static chart capabilities do
+not declare filters or option values.
+
 V2 metrics may declare `summary: "comparisons" | "total" | "none"`.
 `comparisons` is the default and permits the ordinary current/sequential/year-over-year
 summary. `total` permits only one total value. `none` suppresses Dataset summary
@@ -61,7 +69,6 @@ An explicit CLI or Dashboard Pane option overrides the Dataset field.
     "period": "30d",
     "granularity": "week",
     "group_by": "book",
-    "filters": {"category": ["literature"]},
     "top": 8,
     "other": "hide",
     "style": "line-points",
@@ -71,12 +78,11 @@ An explicit CLI or Dashboard Pane option overrides the Dataset field.
 }
 ```
 
-All fields are optional. `filters` maps a declared multi-select filter ID to
-one or more declared option IDs. ccuv discards unknown filters and options,
-retaining compatible choices. `period`, `granularity`, and `group_by` must be
+All fields are optional. `period`, `granularity`, and `group_by` must be
 supported by the selected chart capability; `top` needs a valid final grouping;
 and style must be compatible with that grouping. `other` is `"show"` or
-`"hide"`. `theme` and `style` use ccuv's ordinary CLI values.
+`"hide"`. `theme` and `style` use ccuv's ordinary CLI values. Filters have no
+static default: their IDs and options are response-owned `runtime.filters`.
 
 `defaults.top` is only the first-screen Top N suggestion. For a historical
 Ranking, `capabilities.charts.ranking.max_items` may declare a positive
@@ -350,9 +356,11 @@ metrics remain independent from token totals.
 
 ## Successful responses and numbers
 
-A successful chart response includes `protocol`, `request_id`, `request_kind`,
+A successful V1 chart response includes `protocol`, `request_id`, `request_kind`,
 `dataset_id`, `status: "ok"`, `dataset`, `capabilities`, and `data`. A successful
-summary response contains `summary.metric`. Either successful response may also
+V2 chart or Monitor response instead includes `descriptor`, `runtime`, and its
+`data` or `observation`. A successful summary response contains `summary.metric`.
+Either successful response may also
 include a non-blocking `warnings` array. Each warning has an open-ended stable
 `code` and a localized `message`; ccuv shows it while retaining the successful
 chart or summary. Dataset titles/descriptions,

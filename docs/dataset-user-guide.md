@@ -131,7 +131,7 @@ Use `ccuv dataset` details to see which chart kinds each Metric supports. A
 historical Metric may support Timeline, Calendar, Stack, and/or Ranking.
 Monitor is only available when that Metric declares Monitor capability.
 
-Dataset defaults can set an initial period, group, filters, Top N, Other,
+Dataset defaults can set an initial period, group, Top N, Other,
 style, theme, and Monitor display horizon. They are suggestions. Your explicit
 options override them:
 
@@ -142,7 +142,8 @@ ccuv chart timeline --dataset example-activity --metric events \
 ```
 
 For custom Datasets, use `--group-by`, not the built-in `--by`; use repeated
-`--filter ID=OPTION` for dataset-declared filters. Run `ccuv chart KIND --help`
+`--filter ID=OPTION` only after the Dataset has returned the corresponding
+runtime filter option. Run `ccuv chart KIND --help`
 to see the accepted presentation arguments. A Dataset cannot accept built-in
 `--agent`, `--model`, `--project`, or `--cache` alongside `--dataset`.
 
@@ -164,7 +165,7 @@ ignores just that field and opens the chart with the normal standalone default.
    Pane. A setup or source failure appears in the Pane instead of replacing data
    with zero.
 
-Use the Pane adjustment controls afterward: period, grouping, filters, Top,
+Use the Pane adjustment controls afterward: period, grouping, runtime-provided filters, Top,
 Other, style, theme, and local Monitor display window are local choices. They
 do not rewrite the Dataset or its registration.
 

@@ -119,18 +119,6 @@ def apply_custom_probe_defaults(
         and defaults.granularity in capability.granularities
     ):
         granularity = defaults.granularity
-    filters = config.filters
-    if "filter" not in explicit and _declared(defaults, "filters"):
-        valid_options = {
-            item.id: {option.id for option in item.options}
-            for item in descriptor.capabilities.filters
-            if item.id in capability.filters
-        }
-        filters = tuple(
-            (identifier, selected)
-            for identifier, options in defaults.filters
-            if (selected := tuple(option for option in options if option in valid_options.get(identifier, set())))
-        )
     other = config.other
     if (
         config.kind in {"timeline", "stack", "ranking"}
@@ -156,7 +144,7 @@ def apply_custom_probe_defaults(
     return replace(
         config,
         date_range=date_range,
-        filters=filters,
+        filters=config.filters,
         presentation=replace(config.presentation, theme=theme, style=style),
         group_by=group_by,
         top=top,
@@ -192,14 +180,14 @@ def v2_metric_probe_descriptor(
             charts[kind] = CustomChartCapability(
                 capability.granularities,
                 capability.group_by,
-                capability.filters,
+                (),
                 capability.max_items,
             )
     return CustomProbeDescriptor(
         descriptor.revision,
         descriptor.version,
         CustomDataset(metric.title, metric.description, metric.unit),
-        CustomCapabilities(metric.capabilities.group_by, metric.capabilities.filters, charts),
+        CustomCapabilities(metric.capabilities.group_by, (), charts),
         metric.defaults,
         descriptor.environment,
         descriptor.source_timezone,

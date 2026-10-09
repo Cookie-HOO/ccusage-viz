@@ -112,7 +112,7 @@ def test_custom_provider_executes_a_v2_probe(tmp_path: Path) -> None:
                 "description": {"en": "Live", "zh-CN": "实时"},
                 "unit": {"id": "token", "label": {"en": "tokens", "zh-CN": "Token"}, "placement": "suffix", "decimal_places": 0},
                 "aggregation": "sum",
-                "capabilities": {"group_by": [], "filters": [], "charts": {"monitor": {"window_seconds": 60, "group_by": [], "filters": []}}},
+                "capabilities": {"group_by": [], "charts": {"monitor": {"window_seconds": 60, "group_by": []}}},
                 "defaults": {},
             }
             print(json.dumps({
@@ -146,13 +146,22 @@ def test_custom_provider_executes_a_v2_chart_metric(tmp_path: Path) -> None:
             import json, sys
             request = json.loads(sys.stdin.read())
             text = {"en": "Reading", "zh-CN": "阅读"}
-            dataset = {"title": text, "description": text, "unit": {"id": "minute", "label": text, "placement": "suffix", "decimal_places": 2}}
-            capability = {"group_by": [], "filters": [], "charts": {"timeline": {"granularities": ["day"], "group_by": [], "filters": []}}}
+            descriptor = {
+                "revision": "reading-1", "version": "0.1.0",
+                "dataset": {"title": text, "description": text},
+                "metrics": [{
+                    "id": "reading_time", "title": text, "description": text,
+                    "unit": {"id": "minute", "label": text, "placement": "suffix", "decimal_places": 2},
+                    "aggregation": "sum",
+                    "capabilities": {"group_by": [], "charts": {"timeline": {"granularities": ["day"], "group_by": []}}},
+                    "defaults": {}
+                }], "environment": []
+            }
             data = {"series": [{"id": "total", "label": text, "points": [{"date": "2026-09-17", "value": "1.25"}]}]}
             print(json.dumps({
                 "protocol": "ccuv.custom/v2", "request_id": request["request_id"], "request_kind": "chart",
                 "dataset_id": "weread", "metric_id": request["metric_id"], "status": "ok",
-                "dataset": dataset, "capabilities": capability, "data": data
+                "descriptor": descriptor, "runtime": {"filters": []}, "data": data
             }))
             """
         )

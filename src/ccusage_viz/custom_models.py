@@ -197,6 +197,13 @@ class V2MonitorObservation:
 
 
 @dataclass(frozen=True, slots=True)
+class V2Runtime:
+    """Query-context controls accepted together with one V2 response."""
+
+    filters: tuple[CustomFilter, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class CustomPoint:
     date: date
     value: Decimal

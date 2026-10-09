@@ -28,6 +28,7 @@ from ccusage_viz.custom_models import (
     V2MonitorCapability,
     V2MonitorObservation,
     V2ProbeDescriptor,
+    V2Runtime,
 )
 from ccusage_viz.custom_protocol import V2MonitorResponse
 from ccusage_viz.options import CustomChartConfig, compatible_styles
@@ -139,6 +140,8 @@ class CustomMonitorComponent:
         "monitor_started_at",
         "presentation",
         "render_revision",
+        "runtime",
+        "v2_descriptor",
     )
 
     def __init__(self, config: CustomChartConfig) -> None:
@@ -159,6 +162,8 @@ class CustomMonitorComponent:
         self.history: list[V2MonitorResponse] = []
         self.monitor_started_at: datetime | None = None
         self.render_revision = 0
+        self.runtime: V2Runtime | None = None
+        self.v2_descriptor: V2ProbeDescriptor | None = None
 
     @property
     def pending(self) -> bool:
@@ -269,6 +274,19 @@ class CustomMonitorComponent:
             and completion.response.metric_id != self.candidate.metric_id
         ):
             return False
+        descriptor = completion.response.descriptor
+        if descriptor is not None:
+            metric = next(
+                (item for item in descriptor.metrics if item.id == completion.response.metric_id),
+                None,
+            )
+            if metric is None or not isinstance(
+                metric.capabilities.charts.get("monitor"), V2MonitorCapability
+            ):
+                return False
+            self.set_metric(metric)
+            self.v2_descriptor = descriptor
+        self.runtime = completion.response.runtime
         self.accepted_config = completion.config
         self.accepted_response = completion.response
         self.accepted_at = accepted_at
@@ -809,18 +827,6 @@ def apply_custom_monitor_defaults(
         presentation = replace(presentation, theme=defaults.theme)
     if "style" not in explicit and defaults.style in compatible_styles("monitor", group_by):
         presentation = replace(presentation, style=defaults.style)
-    filters = config.filters
-    if "filter" not in explicit and defaults.filters:
-        valid_options = {
-            item.id: {option.id for option in item.options}
-            for item in metric.capabilities.filters
-            if item.id in capability.filters
-        }
-        filters = tuple(
-            (identifier, selected)
-            for identifier, options in defaults.filters
-            if (selected := tuple(option for option in options if option in valid_options.get(identifier, set())))
-        )
     other = (
         defaults.other
         if "other" not in explicit and defaults.other is not None and metric.aggregation == "sum"
@@ -830,7 +836,7 @@ def apply_custom_monitor_defaults(
     return (
         replace(
             config,
-            filters=filters,
+            filters=config.filters,
             presentation=presentation,
             group_by=group_by,
             top=top,

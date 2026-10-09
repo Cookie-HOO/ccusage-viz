@@ -14,6 +14,8 @@
 
 本地 Dataset 注册会缓存成功的 Probe，用于资源发现、环境状态和非阻塞选择器。再次执行 `ccuv dataset add-local COMMAND` 时，若 Dataset ID 相同，会直接覆盖本地注册并刷新该缓存。Custom Monitor Pane 启动前仍会重新发起 runtime Probe；缓存元数据不作为最终能力权威。
 
+每次成功的 V2 `chart` 和 `monitor` 响应都是完整的 accepted snapshot：同时携带完整 Probe 形状的 `descriptor`、`runtime` 对象与本次 `data` 或 `observation`。首次 Probe 完成 Dataset/Metric 选择后，ccuv 从最近接受响应的 descriptor 读取静态控制能力。`runtime.filters` 为必填项（可以为空），并且是 ccuv 通过 `f` 展示的唯一 filter 目录；Probe descriptor 与静态 chart capability 不再声明 filter 或 option 值。
+
 V2 指标可声明 `summary: "comparisons" | "total" | "none"`。`comparisons` 是默认值，允许普通的当前值、环比和同比摘要；`total` 只允许显示一个总数；`none` 不发起 Dataset 摘要请求。每种历史图 capability 都可声明支持的有序 `periods`；声明后 ccuv 会将 `p/P` 限制为该列表。`all` 仅用于 Ranking：ccuv 发送 `period: "all"`，并使用 `1971-01-01` 到今天的锚定范围。权威语义是 marker，不是锚定日期；Dataset 必须按照自身全量数据口径处理。若不支持某个周期，继续使用现有 `unsupported_query`，字段为 `range.period`。
 
 每个图表的 `group_by` 同样是允许发送的有序查询值集合；使用 JSON `null` 明确表示允许未分组总计，维度 ID 仍是字符串，因此名为 `total` 的维度并不冲突。任一已声明列表阻止切换时，ccuv 会保持当前查询并短暂提示，不会发送不支持的请求。不声明 `periods` 时，ccuv 保持原有周期循环，并由 Dataset 动态解释每个请求。
@@ -28,7 +30,6 @@ V2 指标可声明 `summary: "comparisons" | "total" | "none"`。`comparisons` �
     "period": "30d",
     "granularity": "week",
     "group_by": "book",
-    "filters": {"category": ["literature"]},
     "top": 8,
     "other": "hide",
     "style": "line-points",
@@ -38,7 +39,7 @@ V2 指标可声明 `summary: "comparisons" | "total" | "none"`。`comparisons` �
 }
 ```
 
-所有字段都可省略。`filters` 将已声明的多选 filter ID 映射到一个或多个已声明 option ID；未知 filter 或 option 会被丢弃，剩余兼容选择仍会保留。`period`、`granularity`、`group_by` 必须受当前图 capability 支持；`top` 需要最终有效的分组；style 必须与最终分组兼容。`other` 只能是 `"show"` 或 `"hide"`；`theme` 和 `style` 使用 ccuv 正常 CLI 值。
+所有字段都可省略。`period`、`granularity`、`group_by` 必须受当前图 capability 支持；`top` 需要最终有效的分组；style 必须与最终分组兼容。`other` 只能是 `"show"` 或 `"hide"`；`theme` 和 `style` 使用 ccuv 正常 CLI 值。filter 没有静态 default；其 ID 与 option 由响应的 `runtime.filters` 提供。
 
 `defaults.top` 只表示首屏 Top N 建议。历史 Ranking 可在 `capabilities.charts.ranking.max_items` 声明一个正整数，表示数据源最多能可信返回多少原始排行项目；它不是显示默认值。ccuv 会将当前 Top 写入可选 `query.top`，它同时表示用户希望显示的 Top N 和请求的原始排行覆盖量；在需要诚实计算 `Other` 时，Dataset 可以返回更多项目。请求值为 `null` 表示不限制 Top。用户将 Top 调到超过 `max_items` 时，ccuv 会保留选择并提示数据源上限，而不会发送不可能增加项目的请求。
 
@@ -208,7 +209,7 @@ Dashboard 每个数据集 ID 显示一项汇总：按 Pane 可见顺序扫描，
 
 ## 成功响应与数值
 
-成功的 Chart 响应包括 `protocol`、`request_id`、`request_kind`、`dataset_id`、`status: "ok"`、`dataset`、`capabilities` 和 `data`。成功的 Summary 响应包含 `summary.metric`。两类成功响应都可额外包含非阻断的 `warnings` 数组；每个 warning 具有开放集合的稳定 `code` 和本地化 `message`，ccuv 会显示它，同时保留成功的图表或汇总。数据集标题/描述、单位标签、维度/筛选标签和选项、系列标签、指标标签、数据源展示文本和返回消息都必须同时提供 `en` 与 `zh-CN`；ccuv 选择当前应用语言。
+成功的 V1 Chart 响应包括 `protocol`、`request_id`、`request_kind`、`dataset_id`、`status: "ok"`、`dataset`、`capabilities` 和 `data`。V2 的 Chart 或 Monitor 成功响应则包括 `descriptor`、`runtime` 和对应的 `data` 或 `observation`。成功的 Summary 响应包含 `summary.metric`。各类成功响应都可额外包含非阻断的 `warnings` 数组；每个 warning 具有开放集合的稳定 `code` 和本地化 `message`，ccuv 会显示它，同时保留成功的图表或汇总。数据集标题/描述、单位标签、维度/筛选标签和选项、系列标签、指标标签、数据源展示文本和返回消息都必须同时提供 `en` 与 `zh-CN`；ccuv 选择当前应用语言。
 
 ```json
 {

@@ -48,14 +48,13 @@ func unit() map[string]any { return map[string]any{"id":"event","label":text("ev
 func ok(r Request, p map[string]any) map[string]any { out:=map[string]any{"protocol":protocol,"request_id":r.RequestID,"request_kind":r.RequestKind,"dataset_id":datasetID,"status":"ok"}; for k,v:=range p { out[k]=v }; return out }
 func descriptor() map[string]any {
   project:=map[string]any{"id":"project","label":text("Project","项目")}
-  hist:=map[string]any{"granularities":[]string{"day"},"group_by":[]any{nil,"project"},"filters":[]string{},"periods":[]string{"7d","14d","30d"}}
-  return map[string]any{"revision":"example-activity-1","version":"0.1.0","default_metric_id":"events","dataset":map[string]any{"title":text("Example activity","示例活动"),"description":text("Minimal V2 Dataset","最小 V2 Dataset")},"metrics":[]any{map[string]any{"id":"events","title":text("Events","事件"),"description":text("Daily activity","每日活动"),"unit":unit(),"aggregation":"sum","summary":"total","capabilities":map[string]any{"group_by":[]any{project},"filters":[]any{},"charts":map[string]any{"timeline":hist,"ranking":hist,"monitor":map[string]any{"window_seconds":60,"refresh_interval_seconds":10,"group_by":[]string{"project"},"filters":[]string{}}}},"defaults":map[string]any{"timeline":map[string]any{"period":"14d","group_by":"project","top":5,"style":"line-points","theme":"nord"},"monitor":map[string]any{"style":"ranking","window":"6h"}}}},"environment":[]any{}}
+  hist:=map[string]any{"granularities":[]string{"day"},"group_by":[]any{nil,"project"},"periods":[]string{"7d","14d","30d"}}
+  return map[string]any{"revision":"example-activity-1","version":"0.1.0","default_metric_id":"events","dataset":map[string]any{"title":text("Example activity","示例活动"),"description":text("Minimal V2 Dataset","最小 V2 Dataset")},"metrics":[]any{map[string]any{"id":"events","title":text("Events","事件"),"description":text("Daily activity","每日活动"),"unit":unit(),"aggregation":"sum","summary":"total","capabilities":map[string]any{"group_by":[]any{project},"charts":map[string]any{"timeline":hist,"ranking":hist,"monitor":map[string]any{"window_seconds":60,"refresh_interval_seconds":10,"group_by":[]string{"project"}}}},"defaults":map[string]any{"timeline":map[string]any{"period":"14d","group_by":"project","top":5,"style":"line-points","theme":"nord"},"monitor":map[string]any{"style":"ranking","window":"6h"}}}},"environment":[]any{}}
 }
 func handleChart(r Request) map[string]any {
   start,_:=time.Parse("2006-01-02",r.Range["start_date"].(string)); end,_:=time.Parse("2006-01-02",r.Range["end_date"].(string)); points:=[]any{}
   for day:=start; !day.After(end); day=day.AddDate(0,0,1) { points=append(points,map[string]string{"date":day.Format("2006-01-02"),"value":fmt.Sprintf("%d",1+day.Day()%5)}) }
-  caps:=descriptor()["metrics"].([]any)[0].(map[string]any)["capabilities"]
-  return ok(r,map[string]any{"metric_id":"events","dataset":map[string]any{"title":text("Example activity","示例活动"),"description":text("Minimal V2 Dataset","最小 V2 Dataset"),"unit":unit()},"capabilities":caps,"data":map[string]any{"series":[]any{map[string]any{"id":"example","label":text("Example","示例"),"points":points}}}})
+  return ok(r,map[string]any{"metric_id":"events","descriptor":descriptor(),"runtime":map[string]any{"filters":[]any{}},"data":map[string]any{"series":[]any{map[string]any{"id":"example","label":text("Example","示例"),"points":points}}}})
 }
 func main() {
   var r Request
@@ -112,11 +111,10 @@ def descriptor():
         "unit":unit(), "aggregation":"sum", "summary":"total",
         "capabilities":{
           "group_by":[{"id":"project","label":text("Project","项目")}],
-          "filters":[{"id":"category","label":text("Category","类别"),"mode":"multi_select","options":[{"id":"work","label":text("Work","工作")}]}],
           "charts":{
-            "timeline":{"granularities":["day"],"group_by":[None,"project"],"filters":["category"],"periods":["7d","14d","30d"]},
-            "ranking":{"granularities":["day"],"group_by":["project"],"filters":["category"]},
-            "monitor":{"window_seconds":60,"refresh_interval_seconds":10,"group_by":["project"],"filters":["category"]}
+            "timeline":{"granularities":["day"],"group_by":[None,"project"],"periods":["7d","14d","30d"]},
+            "ranking":{"granularities":["day"],"group_by":["project"]},
+            "monitor":{"window_seconds":60,"refresh_interval_seconds":10,"group_by":["project"]}
           }
         },
         "defaults":{"timeline":{"period":"14d","group_by":"project","top":5,"style":"line-points","theme":"nord"},"monitor":{"style":"ranking","window":"6h"}}
@@ -140,10 +138,10 @@ def main():
     if kind == "probe": response=ok(req, descriptor=descriptor())
     elif kind == "chart":
         r=req["range"]; start=date.fromisoformat(r["start_date"]); end=date.fromisoformat(r["end_date"])
-        response=ok(req, metric_id="events", dataset={"title":text("Example activity","示例活动"),"description":text("Minimal V2 Dataset","最小 V2 Dataset"),"unit":unit()}, capabilities=descriptor()["metrics"][0]["capabilities"], data={"series":[{"id":"example","label":text("Example","示例"),"points":daily_facts(start,end)}]})
+        response=ok(req, metric_id="events", descriptor=descriptor(), runtime={"filters": []}, data={"series":[{"id":"example","label":text("Example","示例"),"points":daily_facts(start,end)}]})
     elif kind == "monitor":
         end_at=datetime.fromisoformat(req["range"]["end_at"])
-        response=ok(req, metric_id="events", observation={"end_at":end_at.isoformat(),"total":"42","groups":[{"id":"example","label":text("Example","示例"),"value":"42"}]})
+        response=ok(req, metric_id="events", descriptor=descriptor(), runtime={"filters": []}, observation={"end_at":end_at.isoformat(),"total":"42","groups":[{"id":"example","label":text("Example","示例"),"value":"42"}]})
     elif kind == "summary":
         response=ok(req, metric_id="events", summary={"metric":{"id":"events","label":text("Events","事件"),"current":{"value":"42","display":text("42 events","42 个事件")},"sequential":{"status":"unavailable"},"year_over_year":{"status":"unavailable"}}})
     else: response=error(req,"invalid_request","request_kind",str(kind))
@@ -166,14 +164,15 @@ Probe 只能返回元数据：不能获取收费业务数据、校验 secret、�
 | `metrics` | 彼此独立的度量 | 让用户选 Metric，并限制可选图表。 |
 | `unit` | 稳定 ID、双语标签、前/后缀、精度 | 格式化图、表格和 summary 数值。 |
 | `aggregation` | `sum` 或 `value` | 决定 ccuv 是否能做本地历史投影、Top/Other。 |
-| `capabilities` | 维度、filter、支持图类型和值 | 生成控制，并限制 ccuv 发出的请求。若历史 Ranking 的源端原始行数有固定上限，也可声明 `max_items`。 |
+| `capabilities` | 维度与支持图类型 | 生成静态控制，并限制 ccuv 发出的请求。若历史 Ranking 的源端原始行数有固定上限，也可声明 `max_items`。 |
+| `runtime.filters` | 当前查询上下文的 filter 维度和 option | 仅随每次成功 chart/Monitor 响应返回；为该 accepted snapshot 启用 `f` filter 编辑器。 |
 | `defaults` | 可选首屏建议 | 仅应用兼容字段；错误字段会忽略。 |
 | `summary` | `comparisons`、`total`、`none` | 决定是否发 summary 请求。 |
 | `environment` | 所需变量名、获取方法 | 显示配置状态，绝不保存变量值。 |
 
 所有人类文本必须同时有 `en` 和 `zh-CN`。所有度量值都必须是十进制**字符串**，如 `"42"`、`"1.25"`，不能是 JSON number、科学记数、NaN 或无穷。
 
-历史 capability 声明 `granularities`、`group_by`、`filters` 与可选有序 `periods`；若 Ranking 的源端永远无法提供更多原始排行项目，还可声明正整数 `max_items`。`group_by` 中的 JSON `null` 表示允许未分组总计。Monitor 必须声明固定正数 `window_seconds`，它定义每条 observation 的业务事实窗口；`refresh_interval_seconds` 只是建议采样频率。
+历史 capability 声明 `granularities`、`group_by` 与可选有序 `periods`；若 Ranking 的源端永远无法提供更多原始排行项目，还可声明正整数 `max_items`。`group_by` 中的 JSON `null` 表示允许未分组总计。filter 不属于 Probe 的静态能力，而是在每一次成功查询的 `runtime.filters` 中声明。Monitor 必须声明固定正数 `window_seconds`，它定义每条 observation 的业务事实窗口；`refresh_interval_seconds` 只是建议采样频率。
 
 ## 每种查询如何处理
 
@@ -183,7 +182,7 @@ Probe 只能返回元数据：不能获取收费业务数据、校验 secret、�
 
 请求给出时区、含首尾的 `range.start_date/end_date`、可选 `period`，以及 `query.filters/group_by/granularity/top`。日期范围权威且包含两端；`period` 仅是滚动范围上下文。`query.top` 可选，它统一表示用户希望显示的 Top N 与请求的原始排行覆盖量；若为诚实计算 `Other` 需要更多原始项目，Dataset 可以返回更多。`null` 表示不限制 Top。只接受自己 capability 声明过的选择。
 
-成功响应包含 `dataset`、有效 `capabilities` 和 `data.series`。每个 point 的 `date` 是 `YYYY-MM-DD`，`value` 是十进制字符串。有效范围没有事实时返回空 series，不要把未知事实伪造成零。
+成功响应包含完整 `descriptor`、`runtime:{"filters":[...]}` 和 `data.series`。每个 point 的 `date` 是 `YYYY-MM-DD`，`value` 是十进制字符串。有效范围没有事实时返回空 series，不要把未知事实伪造成零。
 
 ### `summary`
 
@@ -191,7 +190,7 @@ Probe 只能返回元数据：不能获取收费业务数据、校验 secret、�
 
 ### `monitor`
 
-请求只有带时区的 `range.end_at`，没有用户自选业务时长。按 capability 声明的固定 `window_seconds` 计算截止时刻前的源端总量和 group，返回 aware `observation.end_at`、字符串 `total` 和可选 groups。无法回答精确窗口时返回 `status:"error"` 和 `code:"range_not_available"`，绝不能用零替代。defaults 中的 `window:"6h"` 只是 ccuv 本地显示历史范围，不改变源端 `window_seconds`。
+请求只有带时区的 `range.end_at`，没有用户自选业务时长。按 capability 声明的固定 `window_seconds` 计算截止时刻前的源端总量和 group，返回完整 `descriptor`、`runtime:{"filters":[...]}`、aware `observation.end_at`、字符串 `total` 和可选 groups。无法回答精确窗口时返回 `status:"error"` 和 `code:"range_not_available"`，绝不能用零替代。defaults 中的 `window:"6h"` 只是 ccuv 本地显示历史范围，不改变源端 `window_seconds`。
 
 ### 错误与警告
 

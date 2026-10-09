@@ -39,6 +39,7 @@ from ccusage_viz.custom_models import (
     V2MonitorCapability,
     V2MonitorObservation,
     V2ProbeDescriptor,
+    V2Runtime,
 )
 
 PROTOCOL_VERSION = "ccuv.custom/v1"
@@ -375,9 +376,9 @@ class V2ProbeResponse:
 @dataclass(frozen=True, slots=True)
 class V2ChartResponse:
     metric_id: str
-    dataset: CustomDataset
-    capabilities: CustomCapabilities
     data: CustomData
+    descriptor: V2ProbeDescriptor
+    runtime: V2Runtime
     warnings: tuple[CustomProtocolWarning, ...] = field(default=(), kw_only=True)
 
 
@@ -385,6 +386,8 @@ class V2ChartResponse:
 class V2MonitorResponse:
     metric_id: str
     observation: V2MonitorObservation
+    descriptor: V2ProbeDescriptor | None = None
+    runtime: V2Runtime = field(default_factory=lambda: V2Runtime(()))
     warnings: tuple[CustomProtocolWarning, ...] = field(default=(), kw_only=True)
 
 
@@ -481,17 +484,25 @@ def parse_custom_response(raw: bytes, request: CustomRequest) -> CustomResponse:
         raise CustomProtocolError("response status must be 'ok' or 'error'")
     warnings = _parse_warnings(root.get("warnings"))
     if isinstance(request, V2ChartRequest):
+        metric_id = _response_metric_id(root, request.metric_id)
+        descriptor = parse_v2_probe_descriptor(root.get("descriptor"))
+        _validate_v2_query_descriptor(descriptor, metric_id, "chart")
         return V2ChartResponse(
-            _response_metric_id(root, request.metric_id),
-            _parse_dataset(root.get("dataset")),
-            _parse_capabilities(root.get("capabilities")),
+            metric_id,
             _parse_data(root.get("data")),
+            descriptor,
+            _parse_v2_runtime(root.get("runtime")),
             warnings=warnings,
         )
     if isinstance(request, V2MonitorRequest):
+        metric_id = _response_metric_id(root, request.metric_id)
+        descriptor = parse_v2_probe_descriptor(root.get("descriptor"))
+        _validate_v2_query_descriptor(descriptor, metric_id, "monitor")
         return V2MonitorResponse(
-            _response_metric_id(root, request.metric_id),
+            metric_id,
             _parse_v2_monitor_observation(root.get("observation")),
+            descriptor,
+            _parse_v2_runtime(root.get("runtime")),
             warnings=warnings,
         )
     if isinstance(request, V2SummaryRequest):
@@ -549,6 +560,30 @@ def _response_metric_id(root: dict[str, object], expected: str) -> str:
     if metric_id != expected:
         raise CustomProtocolError("v2 response metric ID does not match request")
     return metric_id
+
+
+def _validate_v2_query_descriptor(
+    descriptor: V2ProbeDescriptor, metric_id: str, chart_kind: str
+) -> None:
+    metric = next((item for item in descriptor.metrics if item.id == metric_id), None)
+    if metric is None:
+        raise CustomProtocolError("v2 response descriptor does not declare response metric")
+    supported = metric.capabilities.charts
+    if chart_kind == "chart":
+        if not {"timeline", "calendar", "stack", "ranking"} & set(supported):
+            raise CustomProtocolError("v2 response descriptor does not support a historical chart")
+        return
+    if chart_kind not in supported:
+        raise CustomProtocolError("v2 response descriptor does not support requested chart kind")
+
+
+def _parse_v2_runtime(value: object) -> V2Runtime:
+    source = _mapping(value, "v2 response runtime")
+    if set(source) != {"filters"}:
+        raise CustomProtocolError("v2 response runtime must contain only filters")
+    filters = tuple(_parse_filter(item) for item in _sequence(source.get("filters"), "runtime filters"))
+    _unique_ids(filters, "runtime filters")
+    return V2Runtime(filters)
 
 
 def _parse_failure(root: dict[str, object]) -> CustomProtocolError:
@@ -748,14 +783,14 @@ def _parse_v2_capabilities(value: object) -> V2MetricCapabilities:
         _parse_dimension(item, "v2 group-by dimension")
         for item in _sequence(source.get("group_by"), "v2 capabilities group_by")
     )
-    filters = tuple(
-        _parse_filter(item) for item in _sequence(source.get("filters"), "v2 capabilities filters")
-    )
+    if "filters" in source:
+        raise CustomProtocolError("v2 metric capabilities must not declare filters")
     charts: dict[str, V2HistoricalChartCapability | V2MonitorCapability] = {}
     for kind, raw in _mapping(source.get("charts"), "v2 capabilities charts").items():
         chart = _mapping(raw, f"v2 chart capability {kind}")
         group_by = _group_by_tuple(chart.get("group_by"), f"v2 chart {kind} group_by")
-        filters_value = _string_tuple(chart.get("filters"), f"v2 chart {kind} filters")
+        if "filters" in chart:
+            raise CustomProtocolError(f"v2 chart {kind} must not declare filters")
         if kind == "monitor":
             window_seconds = chart.get("window_seconds")
             refresh = chart.get("refresh_interval_seconds")
@@ -771,14 +806,14 @@ def _parse_v2_capabilities(value: object) -> V2MetricCapabilities:
                 raise CustomProtocolError(
                     "v2 monitor refresh_interval_seconds must be a positive integer"
                 )
-            charts[kind] = V2MonitorCapability(window_seconds, refresh, group_by, filters_value)
+            charts[kind] = V2MonitorCapability(window_seconds, refresh, group_by, ())
             rate_label = chart.get("rate_label")
             if rate_label is not None:
                 charts[kind] = V2MonitorCapability(
                     window_seconds,
                     refresh,
                     group_by,
-                    filters_value,
+                    (),
                     _parse_localized(rate_label, "v2 monitor rate_label"),
                 )
         elif kind in {"timeline", "calendar", "stack", "ranking"}:
@@ -806,15 +841,14 @@ def _parse_v2_capabilities(value: object) -> V2MetricCapabilities:
             charts[kind] = V2HistoricalChartCapability(
                 _string_tuple(chart.get("granularities"), f"v2 chart {kind} granularities"),
                 group_by,
-                filters_value,
+                (),
                 periods,
                 max_items,
             )
         else:
             raise CustomProtocolError(f"unsupported v2 chart capability: {kind}")
     _unique_ids(dimensions, "v2 group-by dimensions")
-    _unique_ids(filters, "v2 filters")
-    return V2MetricCapabilities(dimensions, filters, charts)
+    return V2MetricCapabilities(dimensions, (), charts)
 
 
 def _parse_v2_defaults(value: object) -> dict[str, CustomChartDefaults]:
@@ -975,7 +1009,7 @@ def v2_probe_descriptor_to_wire(descriptor: V2ProbeDescriptor) -> dict[str, obje
         return {"id": value.id, "label": localized(value.label), "placement": value.placement, "decimal_places": value.decimal_places}
 
     def capability(value: V2HistoricalChartCapability | V2MonitorCapability) -> dict[str, object]:
-        common = {"group_by": list(value.group_by), "filters": list(value.filters)}
+        common = {"group_by": list(value.group_by)}
         if isinstance(value, V2MonitorCapability):
             return {
                 **common,
@@ -1004,7 +1038,6 @@ def v2_probe_descriptor_to_wire(descriptor: V2ProbeDescriptor) -> dict[str, obje
                 "aggregation": metric.aggregation,
                 "capabilities": {
                     "group_by": [{"id": item.id, "label": localized(item.label)} for item in metric.capabilities.group_by],
-                    "filters": [],
                     "charts": {kind: capability(item) for kind, item in metric.capabilities.charts.items()},
                 },
                 "defaults": {
@@ -1037,8 +1070,6 @@ def _defaults_to_wire(value: CustomChartDefaults) -> dict[str, object]:
     ):
         if name in declared:
             fields[name] = item
-    if "filters" in declared:
-        fields["filters"] = {identifier: list(options) for identifier, options in value.filters}
     if "window" in declared and value.window_seconds is not None:
         suffix = "h" if value.window_seconds % 3600 == 0 else "m"
         divisor = 3600 if suffix == "h" else 60
