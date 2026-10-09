@@ -14,3 +14,11 @@ wheels/
 # Local agent and brainstorming state
 .claude/
 .superpowers/
+
+# Local JavaScript tooling caches and scratch output
+.dsh-bin/
+.pnpm/
+.pnpm-home/
+.pnpm-store/
+node_modules/
+tmp.txt
