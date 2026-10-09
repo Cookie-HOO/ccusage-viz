@@ -231,11 +231,15 @@ class StandaloneHostConfig:
 @dataclass(frozen=True, slots=True)
 class ChartPaneConfig:
     chart: HistoricalChartConfig | MonitorConfig
+    attachment_style: str | None = None
+    attachment_theme: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class CustomChartPaneConfig:
     chart: CustomChartConfig
+    attachment_style: str | None = None
+    attachment_theme: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -167,6 +167,36 @@ def test_round_trip_all_pane_kinds_and_trusted_command_configuration() -> None:
     assert animation.overlay.command == "date +%H:%M"
 
 
+def test_round_trip_preserves_monitor_attachment_configuration() -> None:
+    panes = (
+        ChartPaneConfig(
+            MonitorConfig("monitor", 3600, by="agent"),
+            attachment_style="rain",
+            attachment_theme="dracula",
+        ),
+        CustomChartPaneConfig(
+            CustomChartConfig(
+                "monitor",
+                CustomCommandSource("reader", ("reader",)),
+                RANGE,
+                presentation=ChartPresentation(style="points"),
+            ),
+            attachment_style="snow",
+            attachment_theme="nord",
+        ),
+    )
+    record = preset_from_launch("monitors", _launch(panes=panes), now=NOW)
+    restored = DashboardPresetDocument.parse(DashboardPresetDocument((record,)).to_wire()).presets
+
+    assert restored[0].panes[0] == panes[0]
+    custom = restored[0].panes[1]
+    original_custom = panes[1]
+    assert isinstance(custom, CustomChartPaneConfig)
+    assert isinstance(original_custom, CustomChartPaneConfig)
+    assert custom.attachment_style == original_custom.attachment_style
+    assert custom.attachment_theme == original_custom.attachment_theme
+
+
 def test_loaded_custom_preset_preserves_its_configuration_over_probe_defaults() -> None:
     saved_chart = CustomChartConfig(
         "ranking",

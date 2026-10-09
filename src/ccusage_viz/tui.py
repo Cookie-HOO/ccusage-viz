@@ -1343,7 +1343,7 @@ def _new_pane(
                 attachment.set_idle_animation_requested(True, started_at)
                 attachment.set_visible(False, started_at)
                 attachment_renderer = AnimationRenderer()
-            return TuiCustomPane(
+            pane = TuiCustomPane(
                 component,
                 FixedIntervalScheduler(
                     options.host.sampling_interval
@@ -1364,11 +1364,32 @@ def _new_pane(
                 attachment=attachment,
                 attachment_renderer=attachment_renderer,
             )
+            if attachment is not None:
+                if pane_config.attachment_style is not None:
+                    attachment.set_style(
+                        animation_spec(pane_config.attachment_style, target="monitor"), started_at
+                    )
+                if pane_config.attachment_theme is not None:
+                    attachment.set_theme(pane_config.attachment_theme, started_at)
+                pane.attachment_enabled = pane_config.attachment_style is not None
+            return pane
         from ccusage_viz.configuration import standalone_from_chart_pane
 
-        return _new_pane(
+        pane = _new_pane(
             standalone_from_chart_pane(options, pane_config), owner_id, runtime=runtime
         )
+        assert isinstance(pane, TuiChartPane)
+        attachment = pane.attachment
+        if attachment is not None:
+            now = time.monotonic()
+            if pane_config.attachment_style is not None:
+                attachment.set_style(
+                    animation_spec(pane_config.attachment_style, target="monitor"), now
+                )
+            if pane_config.attachment_theme is not None:
+                attachment.set_theme(pane_config.attachment_theme, now)
+            pane.attachment_enabled = pane_config.attachment_style is not None
+        return pane
     if not isinstance(pane_config_or_owner, str):
         raise TypeError("chart pane owner id is required")
     if isinstance(owner_id, QueryRuntime):
@@ -2329,6 +2350,24 @@ def _custom_top_refresh_required(
         return False
     capability = component.capability
     return capability is None or capability.max_items is None or updated.top <= capability.max_items
+
+
+def _custom_top_limit_notice(pane: TuiCustomPane, translator: Translator) -> tuple[str, ...]:
+    """Return the active Dataset source bound as a notice below its chart."""
+
+    if pane.body_view != "chart" or not isinstance(pane.component, CustomHistoricalComponent):
+        return ()
+    chart = pane.component.candidate
+    capability = pane.component.capability
+    if (
+        chart.kind != "ranking"
+        or chart.top is None
+        or capability is None
+        or capability.max_items is None
+        or chart.top <= capability.max_items
+    ):
+        return ()
+    return (translator.text("status.custom_top_source_limit", max=capability.max_items),)
 
 
 def _custom_supported_filters(
@@ -4970,7 +5009,19 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
     def preset_state_from_launch(launch: DashboardLaunch) -> DashboardState:
         return DashboardState(
             tuple(
-                DashboardPaneState(index, pane, "chart")
+                DashboardPaneState(
+                    index,
+                    pane,
+                    "chart",
+                    pane.attachment_style
+                    if isinstance(pane, (ChartPaneConfig, CustomChartPaneConfig))
+                    else None,
+                    pane.attachment_theme
+                    if isinstance(pane, (ChartPaneConfig, CustomChartPaneConfig))
+                    else None,
+                    isinstance(pane, (ChartPaneConfig, CustomChartPaneConfig))
+                    and pane.attachment_style is not None,
+                )
                 for index, pane in enumerate(launch.panes)
             ),
             launch.host.grid,
@@ -6255,7 +6306,13 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 pane_states.append(
                     DashboardPaneState(
                         pane.pane_id,
-                        CustomChartPaneConfig(pane.component.candidate),
+                        CustomChartPaneConfig(
+                            pane.component.candidate,
+                            attachment.spec.style
+                            if attachment is not None and pane.attachment_enabled
+                            else None,
+                            attachment.theme if attachment is not None else None,
+                        ),
                         pane.body_view,
                         attachment.spec.style if attachment is not None else None,
                         attachment.theme if attachment is not None else None,
@@ -6279,7 +6336,13 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 pane_states.append(
                     DashboardPaneState(
                         pane.pane_id,
-                        ChartPaneConfig(chart),
+                        ChartPaneConfig(
+                            chart,
+                            attachment.spec.style
+                            if attachment is not None and pane.attachment_enabled
+                            else None,
+                            attachment.theme if attachment is not None else None,
+                        ),
                         pane.body_view,
                         attachment.spec.style if attachment is not None else None,
                         attachment.theme if attachment is not None else None,
@@ -7586,7 +7649,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         )
                     )
                 local_notices = format_notice_lines(
-                    rendered.notices,
+                    (*rendered.notices, *_custom_top_limit_notice(pane, translator))
+                    if isinstance(pane, TuiCustomPane)
+                    else rendered.notices,
                     width=interior_width,
                     color=terminal.color,
                     ascii=terminal.ascii,
@@ -8986,21 +9051,6 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         elif key in {"d", "t", "T", "s", "S", "k", "l", "o", "+", "=", "-", "_"}:
                             updated = adjust_custom_chart(base, key)
                             if updated != base:
-
-                                if (
-                                    key in {"+", "="}
-                                    and isinstance(component, CustomHistoricalComponent)
-                                    and component.capability is not None
-                                    and component.capability.max_items is not None
-                                    and updated.top is not None
-                                    and updated.top > component.capability.max_items
-                                ):
-                                    copy_feedback.show(
-                                        translator.text(
-                                            "status.custom_top_source_limit",
-                                            max=component.capability.max_items,
-                                        )
-                                    )
 
                                 def apply_custom_presentation(
                                     pane: TuiCustomPane = pane,

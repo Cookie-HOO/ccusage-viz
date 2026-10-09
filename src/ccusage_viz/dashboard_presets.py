@@ -45,6 +45,7 @@ from ccusage_viz.options import (
     TimelineConfig,
 )
 from ccusage_viz.project_identity import PROJECT_AGGREGATIONS
+from ccusage_viz.render.palette import COLOR_SCHEMES
 
 PRESET_SCHEMA = "ccuv.dashboard-presets/v1"
 PRESET_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9-]*$")
@@ -542,6 +543,36 @@ def _chart_wire(chart: object) -> dict[str, object]:
     raise AssertionError(f"unsupported chart type: {type(chart)!r}")
 
 
+def _attachment_wire(
+    *, style: str | None, theme: str | None
+) -> dict[str, object] | None:
+    if style is None and theme is None:
+        return None
+    return {"style": style, "theme": theme}
+
+
+def _attachment_parse(value: object) -> tuple[str | None, str | None]:
+    if value is None:
+        return None, None
+    wire = _exact(value, frozenset(("style", "theme")), "monitor attachment")
+    style = _optional_string(wire["style"], "monitor attachment.style")
+    if style is not None:
+        try:
+            animation_spec(style, target="monitor")
+        except ValueError as exc:
+            raise DashboardPresetValidationError("unsupported monitor attachment style") from exc
+    theme = _optional_choice(wire["theme"], COLOR_SCHEMES, "monitor attachment.theme")
+    return style, theme
+
+
+def _pane_fields(wire: Mapping[str, object], fields: frozenset[str], label: str) -> tuple[
+    Mapping[str, object], tuple[str | None, str | None]
+]:
+    payload = dict(wire)
+    attachment = _attachment_parse(payload.pop("attachment", None))
+    return _exact(payload, fields, label), attachment
+
+
 def _optional_int(value: object, label: str, *, minimum: int | None = None) -> int | None:
     return None if value is None else _integer(value, label, minimum=minimum)
 
@@ -625,14 +656,19 @@ def _parse_pane(value: object) -> PaneConfig:
         _exact(wire, frozenset(("kind",)), "empty pane")
         return EmptyPaneConfig()
     if kind == "chart":
-        _exact(
+        chart_wire, attachment = _pane_fields(
             wire,
             frozenset(("kind", "chart_kind", "date_range", "filters", "presentation", "options")),
             "chart pane",
         )
-        return _parse_builtin_chart(wire)
+        config = _parse_builtin_chart(chart_wire)
+        return replace(
+            config,
+            attachment_style=attachment[0],
+            attachment_theme=attachment[1],
+        )
     if kind == "monitor":
-        _exact(
+        monitor_wire, attachment = _pane_fields(
             wire,
             frozenset(
                 (
@@ -651,24 +687,24 @@ def _parse_pane(value: object) -> PaneConfig:
         )
         chart = MonitorConfig(
             "monitor",
-            _integer(wire["window_seconds"], "monitor.window_seconds", minimum=1),
-            _filters_parse(wire["filters"]),
-            _presentation_parse(wire["presentation"], "monitor"),
+            _integer(monitor_wire["window_seconds"], "monitor.window_seconds", minimum=1),
+            _filters_parse(monitor_wire["filters"]),
+            _presentation_parse(monitor_wire["presentation"], "monitor"),
             _optional_choice(
-                wire["by"], ("composition", "agent", "model", "project"), "monitor.by"
+                monitor_wire["by"], ("composition", "agent", "model", "project"), "monitor.by"
             ),
-            _optional_int(wire["top"], "monitor.top", minimum=1),
+            _optional_int(monitor_wire["top"], "monitor.top", minimum=1),
             _choice(
-                wire["project_aggregation"], PROJECT_AGGREGATIONS, "monitor.project_aggregation"
+                monitor_wire["project_aggregation"], PROJECT_AGGREGATIONS, "monitor.project_aggregation"
             ),
-            _choice(wire["day_window"], ("today", "yesterday"), "monitor.day_window"),
+            _choice(monitor_wire["day_window"], ("today", "yesterday"), "monitor.day_window"),
             _choice(
-                wire["distribution_granularity"],
+                monitor_wire["distribution_granularity"],
                 ("hour", "half-hour"),
                 "monitor.distribution_granularity",
             ),
         )
-        return ChartPaneConfig(chart)
+        return ChartPaneConfig(chart, *attachment)
     if kind == "custom":
         fields = frozenset(
             (
@@ -691,17 +727,17 @@ def _parse_pane(value: object) -> PaneConfig:
                 "metric_titles",
             )
         )
-        _exact(wire, fields, "custom pane")
-        dataset_id = _string(wire["dataset_id"], "custom.dataset_id")
-        source_kind = _choice(wire["source_kind"], ("command", "installed"), "custom.source_kind")
-        command_argv = _string_list(wire["command_argv"], "custom.command_argv")
+        custom_wire, attachment = _pane_fields(wire, fields, "custom pane")
+        dataset_id = _string(custom_wire["dataset_id"], "custom.dataset_id")
+        source_kind = _choice(custom_wire["source_kind"], ("command", "installed"), "custom.source_kind")
+        command_argv = _string_list(custom_wire["command_argv"], "custom.command_argv")
         try:
             source = CustomCommandSource(dataset_id, command_argv, source_kind)
         except ValueError as exc:
             raise DashboardPresetValidationError(
                 "invalid custom command source"
             ) from exc
-        titles_value = wire["metric_titles"]
+        titles_value = custom_wire["metric_titles"]
         if titles_value is None:
             titles = None
         elif isinstance(titles_value, list) and len(titles_value) == 2:
@@ -715,30 +751,30 @@ def _parse_pane(value: object) -> PaneConfig:
             )
         chart = CustomChartConfig(
             _choice(
-                wire["chart_kind"],
+                custom_wire["chart_kind"],
                 ("timeline", "calendar", "stack", "ranking", "monitor"),
                 "custom.chart_kind",
             ),
             source,
-            _date_range_parse(wire["date_range"]),
-            _custom_filters_parse(wire["filters"]),
+            _date_range_parse(custom_wire["date_range"]),
+            _custom_filters_parse(custom_wire["filters"]),
             _presentation_parse(
-                wire["presentation"], _string(wire["chart_kind"], "custom.chart_kind")
+                custom_wire["presentation"], _string(custom_wire["chart_kind"], "custom.chart_kind")
             ),
-            _optional_string(wire["group_by"], "custom.group_by"),
-            _optional_int(wire["top"], "custom.top", minimum=1),
-            _choice(wire["other"], ("show", "hide"), "custom.other"),
-            _choice(wire["granularity"], GRANULARITIES, "custom.granularity"),
-            _choice(wire["weekdays"], ("show", "hide"), "custom.weekdays"),
+            _optional_string(custom_wire["group_by"], "custom.group_by"),
+            _optional_int(custom_wire["top"], "custom.top", minimum=1),
+            _choice(custom_wire["other"], ("show", "hide"), "custom.other"),
+            _choice(custom_wire["granularity"], GRANULARITIES, "custom.granularity"),
+            _choice(custom_wire["weekdays"], ("show", "hide"), "custom.weekdays"),
             initial_explicit=_PERSISTED_CUSTOM_EXPLICIT,
-            metric_id=_optional_string(wire["metric_id"], "custom.metric_id"),
+            metric_id=_optional_string(custom_wire["metric_id"], "custom.metric_id"),
             metric_summary=_choice(
-                wire["metric_summary"], ("comparisons", "total", "none"), "custom.metric_summary"
+                custom_wire["metric_summary"], ("comparisons", "total", "none"), "custom.metric_summary"
             ),
-            metric_periods=_string_list(wire["metric_periods"], "custom.metric_periods"),
+            metric_periods=_string_list(custom_wire["metric_periods"], "custom.metric_periods"),
             metric_titles=titles,
         )
-        return CustomChartPaneConfig(chart)
+        return CustomChartPaneConfig(chart, *attachment)
     if kind == "animation":
         _exact(wire, frozenset(("kind", "style", "overlay")), "animation pane")
         try:
@@ -759,9 +795,23 @@ def _pane_wire(pane: object) -> dict[str, object]:
             "overlay": _overlay_wire(pane.overlay),
         }
     if isinstance(pane, CustomChartPaneConfig):
-        return _chart_wire(pane.chart)
+        wire = _chart_wire(pane.chart)
+        attachment = _attachment_wire(
+            style=pane.attachment_style,
+            theme=pane.attachment_theme,
+        )
+        if attachment is not None:
+            wire["attachment"] = attachment
+        return wire
     if isinstance(pane, ChartPaneConfig):
-        return _chart_wire(pane.chart)
+        wire = _chart_wire(pane.chart)
+        attachment = _attachment_wire(
+            style=pane.attachment_style,
+            theme=pane.attachment_theme,
+        )
+        if attachment is not None:
+            wire["attachment"] = attachment
+        return wire
     raise AssertionError(f"unsupported pane type: {type(pane)!r}")
 
 
