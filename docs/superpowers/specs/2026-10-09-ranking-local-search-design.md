@@ -17,6 +17,7 @@ Add an immediate, request-free search interaction to Dashboard Ranking panes. It
 
 - Press `/` while a Ranking pane is focused to enter its search editor.
 - The title remains at the top. Directly below it, render a localized line in the form `Search: <query>` (`搜索：<query>` in Chinese). This line is visible while typing, and remains visible after Enter whenever the query is non-empty.
+- In every density except `minimal`, render a second localized auxiliary line beneath the title/search area stating the actual number of currently rendered Ranking entries. It is not the configured Top or Dataset maximum, and updates after local filtering. `minimal` suppresses it; an active search line remains visible even at `minimal` density.
 - Printable input, paste, and backspace update the query and redraw immediately.
 - Enter leaves editing mode while retaining the query and active filter.
 - Escape clears the query and leaves editing mode. The search line then disappears and the unfiltered Ranking returns.
@@ -38,11 +39,13 @@ Add an immediate, request-free search interaction to Dashboard Ranking panes. It
 3. Pass the pane query into both native and Custom historical Ranking rendering paths. The shared historical Ranking presentation renderer owns Custom Dataset filtering/highlighting; native Ranking uses the same helper behavior at its native presentation boundary.
 4. The Dashboard event loop captures `/` only for focused Ranking panes, routes editor keystrokes before normal pane adjustments, and calls `paint()` after each local change. Search transitions do not call `refresh()`.
 5. Top commands stay on their current configuration/query path. They must leave the pane's search state untouched.
+6. When creating a Dataset Ranking pane, initialize its period from the Dataset metric/capability default rather than the native `14d` fallback. Once created, explicit user period changes remain authoritative across refreshes, Top changes, and search.
 
 ## Edge Cases
 
 - An empty editor query does not filter and has no visible search line.
 - Search remains active with a query even if its source momentarily has no entries.
+- Density behavior is intentionally distinct: `minimal` shows only required Ranking chrome and rows; `compact` adds the visible-entry count but suppresses Dataset descriptions; `normal` adds the count and preserves current normal summary/comparison behavior; `detailed` is `normal` with Dataset descriptions expanded by default.
 - Description-only matches remain included even if descriptions are currently collapsed; when rendered, matching description spans are highlighted.
 - Terminal ANSI styling must not alter display-width calculations, truncation, or wrapping.
 - Switching/replacing a pane creates fresh pane-local search state; an existing pane retains it across ordinary redraws and Top adjustments.
@@ -54,3 +57,5 @@ Add an immediate, request-free search interaction to Dashboard Ranking panes. It
 - Cover native and Custom Dataset Ranking paths.
 - Exercise `/`, type/paste, backspace, Enter persistence, Escape clearing, and assert those paths do not invoke refresh/query submission.
 - Verify `+`/`-` retains the query and that no additional matching row after a Top increase is treated as valid behavior.
+- Verify the entry-count line reflects actual rendered entries, honors density visibility, and updates after filtering.
+- Verify a newly created Dataset Ranking pane adopts its declared default period, while a manually changed period is retained.
