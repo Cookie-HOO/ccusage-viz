@@ -608,10 +608,19 @@ def _parse_capabilities(value: object) -> CustomCapabilities:
         if kind not in {"timeline", "calendar", "stack", "ranking"}:
             raise CustomProtocolError(f"unsupported chart capability: {kind}")
         chart = _mapping(item, f"chart capability {kind}")
+        max_items = chart.get("max_items")
+        if max_items is not None and (
+            kind != "ranking"
+            or not isinstance(max_items, int)
+            or isinstance(max_items, bool)
+            or max_items < 1
+        ):
+            raise CustomProtocolError("ranking max_items must be a positive integer")
         parsed[kind] = CustomChartCapability(
             _string_tuple(chart.get("granularities"), f"chart {kind} granularities"),
             _group_by_tuple(chart.get("group_by"), f"chart {kind} group_by"),
             _string_tuple(chart.get("filters"), f"chart {kind} filters"),
+            max_items,
         )
     _unique_ids(dimensions, "group-by dimensions")
     _unique_ids(filters, "filters")

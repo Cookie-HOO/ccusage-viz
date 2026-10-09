@@ -249,6 +249,16 @@ def test_v2_ranking_capability_accepts_a_positive_source_limit() -> None:
     assert capability.max_items == 10  # type: ignore[union-attr]
 
 
+def test_chart_response_preserves_a_ranking_source_limit() -> None:
+    request = chart_request()
+    response = chart_response()
+    response["capabilities"]["charts"]["ranking"]["max_items"] = 10  # type: ignore[index]
+
+    parsed = parse_custom_response(json.dumps(response).encode(), request)
+
+    assert parsed.capabilities.charts["ranking"].max_items == 10  # type: ignore[union-attr]
+
+
 def test_v2_total_summary_wire_round_trip() -> None:
     request = V2SummaryRequest(
         "summary-v2", "weread", "total_notes", "Asia/Shanghai", "total",

@@ -16,6 +16,7 @@ from ccusage_viz.custom_models import (
     CustomComparison,
     CustomData,
     CustomDataset,
+    CustomDimension,
     CustomMetric,
     CustomPaneSummary,
     CustomPoint,
@@ -40,6 +41,7 @@ from ccusage_viz.custom_monitor_component import (
     custom_monitor_y_axis_max,
 )
 from ccusage_viz.custom_protocol import (
+    CustomChartResponse,
     CustomPaneResponse,
     CustomSummaryResponse,
     V2MonitorResponse,
@@ -554,6 +556,75 @@ def test_v2_ranking_top_above_dataset_maximum_does_not_request_more_coverage() -
     assert not tui_module._custom_top_refresh_required(
         component, replace(component.candidate, top=11)
     )
+
+
+def test_v2_ranking_response_keeps_the_source_limit_for_later_top_adjustments() -> None:
+    component = CustomHistoricalComponent(
+        CustomChartConfig(
+            "ranking",
+            CustomCommandSource("weread", ("weread",)),
+            DateRange(date(2026, 1, 1), date(2026, 10, 8)),
+            metric_id="reading_time",
+            group_by="book",
+            top=10,
+        )
+    )
+    source = CustomChartResponse(
+        CustomDataset(
+            LocalizedText("WeRead", "微信读书"),
+            LocalizedText("Reading time", "阅读时长"),
+            CustomUnit("minute", LocalizedText("minutes", "分钟"), "suffix", 2),
+        ),
+        CustomCapabilities(
+            (CustomDimension("book", LocalizedText("Book", "书籍")),),
+            (),
+            {"ranking": CustomChartCapability(("day",), ("book",), (), max_items=10)},
+        ),
+        CustomData(
+            (
+                CustomSeries(
+                    "book:1",
+                    LocalizedText("One", "一"),
+                    (CustomPoint(date(2026, 10, 8), Decimal("1")),),
+                ),
+            )
+        ),
+    )
+
+    assert component.accept_response(source)
+
+    assert component.capability is not None
+    assert component.capability.max_items == 10
+    assert not tui_module._custom_top_refresh_required(
+        component, replace(component.candidate, top=11)
+    )
+
+
+def test_v2_ranking_source_limit_is_a_pane_local_notice() -> None:
+    component = CustomHistoricalComponent(
+        CustomChartConfig(
+            "ranking",
+            CustomCommandSource("weread", ("weread",)),
+            DateRange(date(2026, 1, 1), date(2026, 10, 8)),
+            metric_id="reading_time",
+            group_by="book",
+            top=11,
+        )
+    )
+    component.set_capability(CustomChartCapability(("day",), ("book",), (), max_items=10))
+    pane = tui_module.TuiCustomPane(
+        component,
+        FixedIntervalScheduler(10, now=0),
+        LifecycleOperation("custom-ranking-limit"),
+        _to_options(build_parser(load_translator("en")).parse_args(["dashboard", "--empty"])).process,
+    )
+
+    assert tui_module._custom_top_limit_notice(pane, load_translator("en")) == (
+        "This Dataset can provide at most 10 ranking items.",
+    )
+
+    pane.body_view = "command"
+    assert tui_module._custom_top_limit_notice(pane, load_translator("en")) == ()
 
 
 def test_custom_monitor_grouping_cycles_from_total_in_declared_order() -> None:
