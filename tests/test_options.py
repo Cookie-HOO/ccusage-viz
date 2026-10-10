@@ -11,6 +11,7 @@ from ccusage_viz.configuration import (
     apply_custom_probe_defaults,
     default_custom_pane,
     default_pane,
+    v2_metric_probe_descriptor,
 )
 from ccusage_viz.core.time import DateRange, local_today, refresh_date_range
 from ccusage_viz.custom_models import (
@@ -21,6 +22,11 @@ from ccusage_viz.custom_models import (
     CustomProbeDescriptor,
     CustomUnit,
     LocalizedText,
+    V2Dataset,
+    V2HistoricalChartCapability,
+    V2MetricCapabilities,
+    V2MetricDescriptor,
+    V2ProbeDescriptor,
 )
 from ccusage_viz.errors import UsageError
 from ccusage_viz.formatting import display_width
@@ -121,6 +127,42 @@ def test_custom_probe_defaults_preserve_explicit_range_grouping_and_top() -> Non
     assert resolved == initial
 
 
+def test_v2_ranking_all_default_period_survives_compatibility_projection() -> None:
+    text = LocalizedText("Stars", "Star 数")
+    descriptor = V2ProbeDescriptor(
+        "stars-1",
+        "0.1.0",
+        V2Dataset(text, text),
+        (
+            V2MetricDescriptor(
+                "stars",
+                text,
+                text,
+                CustomUnit("star", text, "suffix", 0),
+                "sum",
+                V2MetricCapabilities(
+                    (),
+                    (),
+                    {"ranking": V2HistoricalChartCapability(("day",), (), (), ("all",))},
+                ),
+                {"ranking": CustomChartDefaults("all", None, None)},
+            ),
+        ),
+        (),
+    )
+    initial = CustomChartConfig(
+        "ranking",
+        CustomCommandSource("stars", ("stars",)),
+        resolve_date_range("ranking", period="14d", since=None, until=None),
+    )
+
+    projected = v2_metric_probe_descriptor(descriptor, "stars")
+    resolved = apply_custom_probe_defaults(initial, projected, timezone="UTC")
+
+    assert projected.capabilities.charts["ranking"].periods == ("all",)
+    assert resolved.date_range.period == "all"
+
+
 def test_invalid_custom_probe_defaults_leave_host_values_intact() -> None:
     source = CustomCommandSource("weread", ("reader", "ccuv"))
     initial = CustomChartConfig(
@@ -195,6 +237,20 @@ def test_custom_display_adjustments_stay_local() -> None:
     assert adjust_custom_chart(chart, "o").other == "hide"
     assert adjust_custom_chart(chart, "l").presentation.legend == "inside"
     assert adjust_custom_chart(chart, "d").presentation.density == DENSITIES[0]
+
+
+def test_custom_ranking_top_adjusts_without_an_explicit_grouping() -> None:
+    chart = CustomChartConfig(
+        "ranking",
+        CustomCommandSource("reading", ("reader", "ccuv")),
+        resolve_date_range("ranking", period="14d", since=None, until=None),
+        group_by=None,
+    )
+
+    assert adjust_custom_chart(chart, "+").top == 1
+    assert adjust_custom_chart(chart, "-").top is None
+    assert adjust_custom_chart(replace(chart, top=1), "-").top is None
+    assert adjust_custom_chart(replace(chart, top=2), "-").top == 1
 
 
 def test_stack_defaults_to_composition_and_cycles_native_groupings() -> None:
@@ -308,7 +364,7 @@ def test_ranking_defaults_to_dot_across_programmatic_and_dashboard_entry_points(
     )
 
     assert RankingConfig("ranking", date_range).presentation.style == "dot"
-    assert native.chart.presentation == ChartPresentation(style="dot", density="compact")
+    assert native.chart.presentation == ChartPresentation(style="dot", density="full")
     assert custom.chart.presentation == native.chart.presentation
 
 
@@ -503,7 +559,8 @@ def test_runtime_adjustments_replace_owned_nested_configs() -> None:
     )
     assert adjust_standalone(source, "S").chart.presentation.style == "stem"
     assert adjust_standalone(source, "G").chart.granularity == "year"
-    for uppercase_alias in ("D", "K", "L", "C", "O", "W", "I"):
+    assert adjust_standalone(source, "D").chart.presentation.density == "full"
+    for uppercase_alias in ("K", "L", "C", "O", "W", "I"):
         assert adjust_standalone(source, uppercase_alias) == source
     assert adjust_standalone(source, "B").chart.by == "agent"
     assert adjust_standalone(source, "+").chart.top == 11

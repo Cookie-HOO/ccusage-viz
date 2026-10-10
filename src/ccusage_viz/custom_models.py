@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
 from types import MappingProxyType
@@ -35,9 +35,13 @@ class CustomPresentationDescriptor:
 
     dataset: CustomDataset
     group_labels: Mapping[str, LocalizedText]
+    filter_labels: Mapping[str, LocalizedText] = field(default_factory=dict)
+    filter_values: Mapping[tuple[str, str], LocalizedText] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "group_labels", MappingProxyType(dict(self.group_labels)))
+        object.__setattr__(self, "filter_labels", MappingProxyType(dict(self.filter_labels)))
+        object.__setattr__(self, "filter_values", MappingProxyType(dict(self.filter_values)))
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,6 +70,11 @@ class CustomChartCapability:
     group_by: tuple[str | None, ...]
     filters: tuple[str, ...]
     max_items: int | None = None
+    descriptions_default: Literal["expanded", "collapsed"] = "collapsed"
+    periods: tuple[str, ...] = ()
+    comparison: Literal["full", "rank", "none"] = "full"
+    show_percentage: bool = True
+    refresh_interval_seconds: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,6 +141,10 @@ class V2HistoricalChartCapability:
     filters: tuple[str, ...]
     periods: tuple[str, ...] = ()
     max_items: int | None = None
+    descriptions_default: Literal["expanded", "collapsed"] = "collapsed"
+    comparison: Literal["full", "rank", "none"] = "full"
+    show_percentage: bool = True
+    refresh_interval_seconds: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -214,6 +227,10 @@ class CustomSeries:
     id: str
     label: LocalizedText
     points: tuple[CustomPoint, ...]
+    description: LocalizedText | None = None
+    display: LocalizedText | None = None
+    comparison_display: LocalizedText | None = None
+    link: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

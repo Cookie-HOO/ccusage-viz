@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Literal, TypeAlias
+from urllib.parse import urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from ccusage_viz.core.time import parse_period
@@ -191,7 +192,11 @@ class V2ProbeRequest:
         _require_id(self.request_id, "request ID")
 
     def to_wire(self) -> dict[str, object]:
-        return {"protocol": V2_PROTOCOL_VERSION, "request_id": self.request_id, "request_kind": self.request_kind}
+        return {
+            "protocol": V2_PROTOCOL_VERSION,
+            "request_id": self.request_id,
+            "request_kind": self.request_kind,
+        }
 
     def to_json_bytes(self) -> bytes:
         return _json_bytes(self.to_wire())
@@ -441,8 +446,8 @@ def canonical_custom_request_key(request: CustomRequest) -> tuple[object, ...]:
             request.period,
             request.filters,
             request.group_by,
-                request.granularity,
-                request.top if isinstance(request, V2ChartRequest) else None,
+            request.granularity,
+            request.top if isinstance(request, V2ChartRequest) else None,
         )
     if isinstance(request, V2MonitorRequest):
         return common + (
@@ -489,7 +494,7 @@ def parse_custom_response(raw: bytes, request: CustomRequest) -> CustomResponse:
         _validate_v2_query_descriptor(descriptor, metric_id, "chart")
         return V2ChartResponse(
             metric_id,
-            _parse_data(root.get("data")),
+            _parse_data(root.get("data"), descriptions_allowed=True),
             descriptor,
             _parse_v2_runtime(root.get("runtime")),
             warnings=warnings,
@@ -507,13 +512,15 @@ def parse_custom_response(raw: bytes, request: CustomRequest) -> CustomResponse:
         )
     if isinstance(request, V2SummaryRequest):
         return V2SummaryResponse(
-            _response_metric_id(root, request.metric_id), _parse_summary(root.get("summary")), warnings=warnings
+            _response_metric_id(root, request.metric_id),
+            _parse_summary(root.get("summary")),
+            warnings=warnings,
         )
     if isinstance(request, CustomChartRequest):
         return CustomChartResponse(
             _parse_dataset(root.get("dataset")),
             _parse_capabilities(root.get("capabilities")),
-            _parse_data(root.get("data")),
+            _parse_data(root.get("data"), descriptions_allowed=True),
             warnings=warnings,
         )
     if isinstance(request, CustomSummaryRequest):
@@ -533,9 +540,13 @@ def parse_custom_response(raw: bytes, request: CustomRequest) -> CustomResponse:
 
 def _validate_envelope(root: dict[str, object], request: CustomRequest) -> None:
     expected_protocol = (
-        V2_PROTOCOL_VERSION if isinstance(request, (V2ProbeRequest, V2ChartRequest, V2MonitorRequest, V2SummaryRequest)) else None
+        V2_PROTOCOL_VERSION
+        if isinstance(request, (V2ProbeRequest, V2ChartRequest, V2MonitorRequest, V2SummaryRequest))
+        else None
     )
-    if root.get("protocol") not in ({expected_protocol} if expected_protocol else {PROTOCOL_VERSION, V2_PROTOCOL_VERSION}):
+    if root.get("protocol") not in (
+        {expected_protocol} if expected_protocol else {PROTOCOL_VERSION, V2_PROTOCOL_VERSION}
+    ):
         raise CustomProtocolError(f"unsupported protocol version: {root.get('protocol')!r}")
     for field_name, expected in (
         ("request_id", request.request_id),
@@ -581,7 +592,9 @@ def _parse_v2_runtime(value: object) -> V2Runtime:
     source = _mapping(value, "v2 response runtime")
     if set(source) != {"filters"}:
         raise CustomProtocolError("v2 response runtime must contain only filters")
-    filters = tuple(_parse_filter(item) for item in _sequence(source.get("filters"), "runtime filters"))
+    filters = tuple(
+        _parse_filter(item) for item in _sequence(source.get("filters"), "runtime filters")
+    )
     _unique_ids(filters, "runtime filters")
     return V2Runtime(filters)
 
@@ -651,11 +664,42 @@ def _parse_capabilities(value: object) -> CustomCapabilities:
             or max_items < 1
         ):
             raise CustomProtocolError("ranking max_items must be a positive integer")
+        descriptions_default = chart.get("descriptions_default", "collapsed")
+        if (kind != "ranking" and "descriptions_default" in chart) or descriptions_default not in {
+            "expanded",
+            "collapsed",
+        }:
+            raise CustomProtocolError("ranking descriptions_default must be expanded or collapsed")
+        comparison = chart.get("comparison", "full")
+        if (kind != "ranking" and "comparison" in chart) or comparison not in {
+            "full",
+            "rank",
+            "none",
+        }:
+            raise CustomProtocolError("ranking comparison must be full, rank, or none")
+        show_percentage = chart.get("show_percentage", True)
+        if (
+            (kind != "ranking" and "show_percentage" in chart)
+            or not isinstance(show_percentage, bool)
+        ):
+            raise CustomProtocolError("ranking show_percentage must be a boolean")
+        refresh_interval_seconds = chart.get("refresh_interval_seconds")
+        if refresh_interval_seconds is not None and (
+            not isinstance(refresh_interval_seconds, int)
+            or isinstance(refresh_interval_seconds, bool)
+            or refresh_interval_seconds < 1
+        ):
+            raise CustomProtocolError("chart refresh_interval_seconds must be a positive integer")
         parsed[kind] = CustomChartCapability(
             _string_tuple(chart.get("granularities"), f"chart {kind} granularities"),
             _group_by_tuple(chart.get("group_by"), f"chart {kind} group_by"),
             _string_tuple(chart.get("filters"), f"chart {kind} filters"),
             max_items,
+            descriptions_default,  # type: ignore[arg-type]
+            (),
+            comparison,  # type: ignore[arg-type]
+            show_percentage,
+            refresh_interval_seconds,
         )
     _unique_ids(dimensions, "group-by dimensions")
     _unique_ids(filters, "filters")
@@ -677,7 +721,9 @@ def _parse_probe_descriptor(value: object) -> CustomProbeDescriptor:
             raise CustomProtocolError(f"unsupported chart default: {kind}")
         item = _mapping(value, f"chart default {kind}")
         if set(item) != {"period", "group_by", "top"}:
-            raise CustomProtocolError(f"chart default {kind} must contain period, group_by, and top")
+            raise CustomProtocolError(
+                f"chart default {kind} must contain period, group_by, and top"
+            )
         period = item["period"]
         group_by = item["group_by"]
         top = item["top"]
@@ -693,7 +739,8 @@ def _parse_probe_descriptor(value: object) -> CustomProbeDescriptor:
             raise CustomProtocolError(f"chart default {kind} top must be a positive integer")
         defaults[kind] = CustomChartDefaults(period, group_by, top)
     environment = tuple(
-        _parse_environment_declaration(item) for item in _sequence(source.get("environment"), "environment")
+        _parse_environment_declaration(item)
+        for item in _sequence(source.get("environment"), "environment")
     )
     if len({item.name for item in environment}) != len(environment):
         raise CustomProtocolError("environment names must be unique")
@@ -823,9 +870,7 @@ def _parse_v2_capabilities(value: object) -> V2MetricCapabilities:
                     try:
                         parse_period(period)
                     except ValueError as exc:
-                        raise CustomProtocolError(
-                            f"v2 chart {kind} period must be valid"
-                        ) from exc
+                        raise CustomProtocolError(f"v2 chart {kind} period must be valid") from exc
             if kind != "ranking" and "all" in periods:
                 raise CustomProtocolError("v2 all period is supported only by ranking")
             if "all" in periods and periods[-1] != "all":
@@ -838,12 +883,45 @@ def _parse_v2_capabilities(value: object) -> V2MetricCapabilities:
                 or max_items < 1
             ):
                 raise CustomProtocolError("v2 ranking max_items must be a positive integer")
+            descriptions_default = chart.get("descriptions_default", "collapsed")
+            if (
+                kind != "ranking" and "descriptions_default" in chart
+            ) or descriptions_default not in {"expanded", "collapsed"}:
+                raise CustomProtocolError(
+                    "v2 ranking descriptions_default must be expanded or collapsed"
+                )
+            comparison = chart.get("comparison", "full")
+            if (kind != "ranking" and "comparison" in chart) or comparison not in {
+                "full",
+                "rank",
+                "none",
+            }:
+                raise CustomProtocolError("v2 ranking comparison must be full, rank, or none")
+            show_percentage = chart.get("show_percentage", True)
+            if (
+                (kind != "ranking" and "show_percentage" in chart)
+                or not isinstance(show_percentage, bool)
+            ):
+                raise CustomProtocolError("v2 ranking show_percentage must be a boolean")
+            refresh_interval_seconds = chart.get("refresh_interval_seconds")
+            if refresh_interval_seconds is not None and (
+                not isinstance(refresh_interval_seconds, int)
+                or isinstance(refresh_interval_seconds, bool)
+                or refresh_interval_seconds < 1
+            ):
+                raise CustomProtocolError(
+                    "v2 historical refresh_interval_seconds must be a positive integer"
+                )
             charts[kind] = V2HistoricalChartCapability(
                 _string_tuple(chart.get("granularities"), f"v2 chart {kind} granularities"),
                 group_by,
                 (),
                 periods,
                 max_items,
+                descriptions_default,  # type: ignore[arg-type]
+                comparison,  # type: ignore[arg-type]
+                show_percentage,
+                refresh_interval_seconds,
             )
         else:
             raise CustomProtocolError(f"unsupported v2 chart capability: {kind}")
@@ -860,9 +938,11 @@ def _parse_v2_defaults(value: object) -> dict[str, CustomChartDefaults]:
             continue
         declared = frozenset(raw)
         period = raw.get("period")
-        if not isinstance(period, str) or (
-            period != "all" and _valid_period(period) is False
-        ) or (period == "all" and kind != "ranking"):
+        if (
+            not isinstance(period, str)
+            or (period != "all" and _valid_period(period) is False)
+            or (period == "all" and kind != "ranking")
+        ):
             period = None
         group_by = raw.get("group_by")
         if group_by is not None and not isinstance(group_by, str):
@@ -956,8 +1036,7 @@ def probe_descriptor_to_wire(descriptor: CustomProbeDescriptor) -> dict[str, obj
                 "label": localized(item.label),
                 "mode": item.mode,
                 "options": [
-                    {"id": option.id, "label": localized(option.label)}
-                    for option in item.options
+                    {"id": option.id, "label": localized(option.label)} for option in item.options
                 ],
             }
             for item in descriptor.capabilities.filters
@@ -967,6 +1046,22 @@ def probe_descriptor_to_wire(descriptor: CustomProbeDescriptor) -> dict[str, obj
                 "granularities": list(value.granularities),
                 "group_by": list(value.group_by),
                 "filters": list(value.filters),
+                **(
+                    {"descriptions_default": value.descriptions_default}
+                    if kind == "ranking" and value.descriptions_default != "collapsed"
+                    else {}
+                ),
+                **({"comparison": value.comparison} if value.comparison != "full" else {}),
+                **(
+                    {"show_percentage": False}
+                    if kind == "ranking" and not value.show_percentage
+                    else {}
+                ),
+                **(
+                    {"refresh_interval_seconds": value.refresh_interval_seconds}
+                    if value.refresh_interval_seconds is not None
+                    else {}
+                ),
             }
             for kind, value in sorted(descriptor.capabilities.charts.items())
         },
@@ -1006,7 +1101,12 @@ def v2_probe_descriptor_to_wire(descriptor: V2ProbeDescriptor) -> dict[str, obje
         return {"en": value.en, "zh-CN": value.zh_cn}
 
     def unit(value: CustomUnit) -> dict[str, object]:
-        return {"id": value.id, "label": localized(value.label), "placement": value.placement, "decimal_places": value.decimal_places}
+        return {
+            "id": value.id,
+            "label": localized(value.label),
+            "placement": value.placement,
+            "decimal_places": value.decimal_places,
+        }
 
     def capability(value: V2HistoricalChartCapability | V2MonitorCapability) -> dict[str, object]:
         common = {"group_by": list(value.group_by)}
@@ -1014,21 +1114,44 @@ def v2_probe_descriptor_to_wire(descriptor: V2ProbeDescriptor) -> dict[str, obje
             return {
                 **common,
                 "window_seconds": value.window_seconds,
-                **({"refresh_interval_seconds": value.refresh_interval_seconds} if value.refresh_interval_seconds is not None else {}),
-                **({"rate_label": localized(value.rate_label)} if value.rate_label is not None else {}),
+                **(
+                    {"refresh_interval_seconds": value.refresh_interval_seconds}
+                    if value.refresh_interval_seconds is not None
+                    else {}
+                ),
+                **(
+                    {"rate_label": localized(value.rate_label)}
+                    if value.rate_label is not None
+                    else {}
+                ),
             }
         return {
             **common,
             "granularities": list(value.granularities),
             **({"periods": list(value.periods)} if value.periods else {}),
             **({"max_items": value.max_items} if value.max_items is not None else {}),
+            **(
+                {"descriptions_default": value.descriptions_default}
+                if value.descriptions_default != "collapsed"
+                else {}
+            ),
+            **({"comparison": value.comparison} if value.comparison != "full" else {}),
+            **({"show_percentage": False} if not value.show_percentage else {}),
+            **(
+                {"refresh_interval_seconds": value.refresh_interval_seconds}
+                if value.refresh_interval_seconds is not None
+                else {}
+            ),
         }
 
     return {
         "revision": descriptor.revision,
         "version": descriptor.version,
         **({"source_timezone": descriptor.source_timezone} if descriptor.source_timezone else {}),
-        "dataset": {"title": localized(descriptor.dataset.title), "description": localized(descriptor.dataset.description)},
+        "dataset": {
+            "title": localized(descriptor.dataset.title),
+            "description": localized(descriptor.dataset.description),
+        },
         "metrics": [
             {
                 "id": metric.id,
@@ -1037,20 +1160,35 @@ def v2_probe_descriptor_to_wire(descriptor: V2ProbeDescriptor) -> dict[str, obje
                 "unit": unit(metric.unit),
                 "aggregation": metric.aggregation,
                 "capabilities": {
-                    "group_by": [{"id": item.id, "label": localized(item.label)} for item in metric.capabilities.group_by],
-                    "charts": {kind: capability(item) for kind, item in metric.capabilities.charts.items()},
+                    "group_by": [
+                        {"id": item.id, "label": localized(item.label)}
+                        for item in metric.capabilities.group_by
+                    ],
+                    "charts": {
+                        kind: capability(item) for kind, item in metric.capabilities.charts.items()
+                    },
                 },
                 "defaults": {
-                    kind: _defaults_to_wire(item)
-                    for kind, item in metric.defaults.items()
+                    kind: _defaults_to_wire(item) for kind, item in metric.defaults.items()
                 },
                 "summary": metric.summary,
             }
             for metric in descriptor.metrics
         ],
-        **({"default_metric_id": descriptor.default_metric_id} if descriptor.default_metric_id else {}),
+        **(
+            {"default_metric_id": descriptor.default_metric_id}
+            if descriptor.default_metric_id
+            else {}
+        ),
         "environment": [
-            {"name": item.name, "required": item.required, "sensitive": item.sensitive, "label": localized(item.label), "how_to_get": localized(item.how_to_get), **({"help_url": item.help_url} if item.help_url else {})}
+            {
+                "name": item.name,
+                "required": item.required,
+                "sensitive": item.sensitive,
+                "label": localized(item.label),
+                "how_to_get": localized(item.how_to_get),
+                **({"help_url": item.help_url} if item.help_url else {}),
+            }
             for item in descriptor.environment
         ],
     }
@@ -1123,9 +1261,12 @@ def _parse_filter(value: object) -> CustomFilter:
     )
 
 
-def _parse_data(value: object) -> CustomData:
+def _parse_data(value: object, *, descriptions_allowed: bool = False) -> CustomData:
     source = _mapping(value, "data")
-    series = tuple(_parse_series(item) for item in _sequence(source.get("series"), "data series"))
+    series = tuple(
+        _parse_series(item, descriptions_allowed=descriptions_allowed)
+        for item in _sequence(source.get("series"), "data series")
+    )
     _unique_ids(series, "data series")
     return CustomData(series)
 
@@ -1151,8 +1292,12 @@ def _parse_v2_monitor_observation(value: object) -> V2MonitorObservation:
     )
 
 
-def _parse_series(value: object) -> CustomSeries:
+def _parse_series(value: object, *, descriptions_allowed: bool) -> CustomSeries:
     source = _mapping(value, "series")
+    if not descriptions_allowed and (
+        {"description", "display", "comparison_display", "link"} & source.keys()
+    ):
+        raise CustomProtocolError("series presentation fields are supported only by ranking")
     points = tuple(
         _parse_point(point) for point in _sequence(source.get("points"), "series points")
     )
@@ -1162,6 +1307,14 @@ def _parse_series(value: object) -> CustomSeries:
         _string(source.get("id"), "series ID"),
         _parse_localized(source.get("label"), "series label"),
         points,
+        _parse_localized(source["description"], "series description")
+        if "description" in source
+        else None,
+        _parse_localized(source["display"], "series display") if "display" in source else None,
+        _parse_localized(source["comparison_display"], "series comparison display")
+        if "comparison_display" in source
+        else None,
+        _parse_https_url(source["link"], "series link") if "link" in source else None,
     )
 
 
@@ -1229,6 +1382,18 @@ def _parse_localized(value: object, name: str) -> LocalizedText:
     return LocalizedText(
         _string(source.get("en"), f"{name} en"), _string(source.get("zh-CN"), f"{name} zh-CN")
     )
+
+
+def _parse_https_url(value: object, name: str) -> str:
+    url = _string(value, name)
+    parsed = urlparse(url)
+    if (
+        parsed.scheme != "https"
+        or not parsed.netloc
+        or any(ord(character) < 32 or ord(character) == 127 for character in url)
+    ):
+        raise CustomProtocolError(f"{name} must be an absolute https URL")
+    return url
 
 
 def _parse_decimal(value: object, name: str) -> Decimal:
@@ -1313,9 +1478,7 @@ def _string_tuple(value: object, name: str) -> tuple[str, ...]:
 
 
 def _group_by_tuple(value: object, name: str) -> tuple[str | None, ...]:
-    values = tuple(
-        item if item is None else _string(item, name) for item in _sequence(value, name)
-    )
+    values = tuple(item if item is None else _string(item, name) for item in _sequence(value, name))
     if len(set(values)) != len(values):
         raise CustomProtocolError(f"{name} must not contain duplicates")
     return values

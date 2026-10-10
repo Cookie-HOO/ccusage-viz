@@ -21,6 +21,8 @@ def test_catalogs_have_the_same_keys_and_placeholders() -> None:
     assert "spotlight-wide2" in ZH_MESSAGES["help.dashboard_preset"]
     assert "wide-clock" in EN_MESSAGES["help.dashboard_preset"]
     assert "wide-clock" in ZH_MESSAGES["help.dashboard_preset"]
+    assert "single" in EN_MESSAGES["help.dashboard_preset"]
+    assert "single" in ZH_MESSAGES["help.dashboard_preset"]
     assert "spotlight-" + "tall" not in EN_MESSAGES["help.dashboard_preset"]
     assert "spotlight-" + "tall" not in ZH_MESSAGES["help.dashboard_preset"]
     assert "spotlight-monitor" not in EN_MESSAGES["help.dashboard_preset"]
@@ -42,8 +44,14 @@ def test_catalogs_have_the_same_keys_and_placeholders() -> None:
         ZH_MESSAGES["status.tui_global_operations"]
         == "全局操作：u 撤销 · U 重做 · h 打开帮助"
     )
-    assert EN_MESSAGES["status.tui_preset_operations"] == "s save as new preset · p manage presets"
-    assert ZH_MESSAGES["status.tui_preset_operations"] == "s 保存为新预设 · p 管理预设"
+    assert (
+        EN_MESSAGES["status.tui_preset_operations"]
+        == "Ctrl-S save as new preset · Ctrl-P manage presets"
+    )
+    assert (
+        ZH_MESSAGES["status.tui_preset_operations"]
+        == "Ctrl-S 保存为新预设 · Ctrl-P 管理预设"
+    )
     assert " d adjust dashboard " in EN_MESSAGES["status.tui_chart_controls"]
     assert "c {action}" in EN_MESSAGES["status.tui_chart_controls"]
     assert " d 调整仪表盘 " in ZH_MESSAGES["status.tui_chart_controls"]

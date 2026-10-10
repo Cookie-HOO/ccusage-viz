@@ -6,6 +6,7 @@ from decimal import Decimal
 import pytest
 
 from ccusage_viz.coverage import DateInterval
+from ccusage_viz.custom_models import LocalizedText
 from ccusage_viz.custom_protocol import (
     PROTOCOL_VERSION,
     V2_PROTOCOL_VERSION,
@@ -91,7 +92,12 @@ def v2_probe_descriptor() -> dict[str, object]:
                 "id": "tokens",
                 "title": text("TPM", "TPM"),
                 "description": text("Recent token usage", "近期 Token 用量"),
-                "unit": {"id": "token", "label": text("tokens", "Token"), "placement": "suffix", "decimal_places": 0},
+                "unit": {
+                    "id": "token",
+                    "label": text("tokens", "Token"),
+                    "placement": "suffix",
+                    "decimal_places": 0,
+                },
                 "aggregation": "sum",
                 "capabilities": {
                     "group_by": [{"id": "real_model", "label": text("Real model", "真实模型")}],
@@ -109,7 +115,12 @@ def v2_probe_descriptor() -> dict[str, object]:
                 "id": "completed_requests",
                 "title": text("QPM", "QPM"),
                 "description": text("Recent completed requests", "近期完成请求"),
-                "unit": {"id": "request", "label": text("requests", "请求"), "placement": "suffix", "decimal_places": 0},
+                "unit": {
+                    "id": "request",
+                    "label": text("requests", "请求"),
+                    "placement": "suffix",
+                    "decimal_places": 0,
+                },
                 "aggregation": "sum",
                 "capabilities": {
                     "group_by": [{"id": "public_model", "label": text("Public model", "公开模型")}],
@@ -127,7 +138,12 @@ def v2_probe_descriptor() -> dict[str, object]:
                 "id": "average_tokens_per_request",
                 "title": text("Average tokens per request", "平均每请求 Token"),
                 "description": text("Recent request average", "近期请求均值"),
-                "unit": {"id": "token-per-request", "label": text("tokens/request", "Token/请求"), "placement": "suffix", "decimal_places": 1},
+                "unit": {
+                    "id": "token-per-request",
+                    "label": text("tokens/request", "Token/请求"),
+                    "placement": "suffix",
+                    "decimal_places": 1,
+                },
                 "aggregation": "value",
                 "capabilities": {
                     "group_by": [{"id": "agent", "label": text("Agent", "Agent")}],
@@ -185,7 +201,12 @@ def test_v2_probe_and_monitor_wire_round_trip() -> None:
     assert parsed_probe.descriptor.metrics[0].id == "tokens"
 
     request = V2MonitorRequest(
-        "monitor-v2", "router", "tokens", "Asia/Shanghai", datetime(2026, 10, 7, 14, 0, tzinfo=UTC), group_by="real_model"
+        "monitor-v2",
+        "router",
+        "tokens",
+        "Asia/Shanghai",
+        datetime(2026, 10, 7, 14, 0, tzinfo=UTC),
+        group_by="real_model",
     )
     wire = request.to_wire()
     assert wire["range"] == {"end_at": "2026-10-07T14:00:00+00:00"}
@@ -254,7 +275,11 @@ def test_v2_query_response_requires_a_complete_descriptor_and_runtime_controls()
 @pytest.mark.parametrize("field", ("descriptor", "runtime"))
 def test_v2_query_response_rejects_missing_snapshot_fields(field: str) -> None:
     request = V2MonitorRequest(
-        "monitor-v2-required", "router", "tokens", "Asia/Shanghai", datetime(2026, 10, 7, tzinfo=UTC)
+        "monitor-v2-required",
+        "router",
+        "tokens",
+        "Asia/Shanghai",
+        datetime(2026, 10, 7, tzinfo=UTC),
     )
     response = {
         "protocol": V2_PROTOCOL_VERSION,
@@ -288,8 +313,14 @@ def test_v2_chart_top_is_transmitted_and_distinguishes_request_identity() -> Non
     assert request.to_wire()["query"]["top"] == 12
     assert canonical_custom_request_key(request) != canonical_custom_request_key(
         V2ChartRequest(
-            "chart-v2", "example", "events", "Asia/Shanghai",
-            date(2026, 10, 1), date(2026, 10, 8), group_by="project", top=10,
+            "chart-v2",
+            "example",
+            "events",
+            "Asia/Shanghai",
+            date(2026, 10, 1),
+            date(2026, 10, 8),
+            group_by="project",
+            top=10,
         )
     )
 
@@ -307,6 +338,73 @@ def test_v2_ranking_capability_accepts_a_positive_source_limit() -> None:
     assert capability.max_items == 10  # type: ignore[union-attr]
 
 
+def test_ranking_capabilities_accept_description_defaults_and_reject_them_elsewhere() -> None:
+    descriptor = probe_response()
+    descriptor["descriptor"]["capabilities"]["charts"]["ranking"][  # type: ignore[index]
+        "descriptions_default"
+    ] = "expanded"
+
+    parsed = parse_custom_response(json.dumps(descriptor).encode(), probe_request())
+
+    assert parsed.descriptor.capabilities.charts["ranking"].descriptions_default == "expanded"  # type: ignore[union-attr]
+
+    descriptor["descriptor"]["capabilities"]["charts"]["timeline"][  # type: ignore[index]
+        "descriptions_default"
+    ] = "expanded"
+    with pytest.raises(CustomProtocolError, match="descriptions_default"):
+        parse_custom_response(json.dumps(descriptor).encode(), probe_request())
+
+
+def test_v2_ranking_capability_accepts_a_description_default() -> None:
+    descriptor = v2_probe_descriptor()
+    descriptor["metrics"][0]["capabilities"]["charts"] = {  # type: ignore[index]
+        "ranking": {
+            "granularities": ["day"],
+            "group_by": ["real_model"],
+            "descriptions_default": "expanded",
+        }
+    }
+
+    capability = parse_v2_probe_descriptor(descriptor).metrics[0].capabilities.charts["ranking"]
+
+    assert capability.descriptions_default == "expanded"  # type: ignore[union-attr]
+
+
+def test_ranking_response_parses_a_localized_description() -> None:
+    payload = chart_response()
+    payload["data"]["series"][0]["description"] = text("Release validation", "发布验证")  # type: ignore[index]
+
+    parsed = parse_custom_response(json.dumps(payload).encode(), chart_request())
+
+    assert parsed.data.series[0].description == LocalizedText("Release validation", "发布验证")  # type: ignore[union-attr]
+
+
+def test_ranking_response_parses_a_dataset_owned_display() -> None:
+    payload = chart_response()
+    payload["data"]["series"][0]["display"] = text("15 pages", "15 页")  # type: ignore[index]
+
+    parsed = parse_custom_response(json.dumps(payload).encode(), chart_request())
+
+    assert parsed.data.series[0].display == LocalizedText("15 pages", "15 页")  # type: ignore[union-attr]
+
+
+def test_ranking_response_accepts_only_absolute_https_project_links() -> None:
+    payload = chart_response()
+    payload["data"]["series"][0]["link"] = "https://example.com/books/book-001"  # type: ignore[index]
+
+    parsed = parse_custom_response(json.dumps(payload).encode(), chart_request())
+
+    assert parsed.data.series[0].link == "https://example.com/books/book-001"  # type: ignore[union-attr]
+
+    payload["data"]["series"][0]["link"] = "http://example.com/books/book-001"  # type: ignore[index]
+    with pytest.raises(CustomProtocolError, match="absolute https"):
+        parse_custom_response(json.dumps(payload).encode(), chart_request())
+
+    payload["data"]["series"][0]["link"] = "https://example.com/\x1b]8;;evil"  # type: ignore[index]
+    with pytest.raises(CustomProtocolError, match="absolute https"):
+        parse_custom_response(json.dumps(payload).encode(), chart_request())
+
+
 def test_chart_response_preserves_a_ranking_source_limit() -> None:
     request = chart_request()
     response = chart_response()
@@ -319,17 +417,29 @@ def test_chart_response_preserves_a_ranking_source_limit() -> None:
 
 def test_v2_total_summary_wire_round_trip() -> None:
     request = V2SummaryRequest(
-        "summary-v2", "weread", "total_notes", "Asia/Shanghai", "total",
+        "summary-v2",
+        "weread",
+        "total_notes",
+        "Asia/Shanghai",
+        "total",
         DateInterval(date(1971, 1, 1), date(2026, 10, 8)),
     )
     response = {
-        "protocol": V2_PROTOCOL_VERSION, "request_id": "summary-v2", "request_kind": "summary",
-        "dataset_id": "weread", "metric_id": "total_notes", "status": "ok",
-        "summary": {"metric": {
-            "id": "total_notes", "label": text("Total notes", "总笔记数"),
-            "current": {"value": "9", "display": text("9 notes", "9 条笔记")},
-            "sequential": {"status": "unavailable"}, "year_over_year": {"status": "unavailable"},
-        }},
+        "protocol": V2_PROTOCOL_VERSION,
+        "request_id": "summary-v2",
+        "request_kind": "summary",
+        "dataset_id": "weread",
+        "metric_id": "total_notes",
+        "status": "ok",
+        "summary": {
+            "metric": {
+                "id": "total_notes",
+                "label": text("Total notes", "总笔记数"),
+                "current": {"value": "9", "display": text("9 notes", "9 条笔记")},
+                "sequential": {"status": "unavailable"},
+                "year_over_year": {"status": "unavailable"},
+            }
+        },
     }
 
     parsed = parse_custom_response(json.dumps(response).encode(), request)
@@ -341,16 +451,22 @@ def test_v2_total_summary_wire_round_trip() -> None:
 @pytest.mark.parametrize(
     ("mutate", "message"),
     [
-        (lambda value: value["metrics"].append(value["metrics"][0].copy()), "metric IDs must be unique"),
+        (
+            lambda value: value["metrics"].append(value["metrics"][0].copy()),
+            "metric IDs must be unique",
+        ),
         (lambda value: value["metrics"][0].pop("aggregation"), "aggregation"),
         (lambda value: value["metrics"][0].__setitem__("aggregation", "ratio"), "aggregation"),
-        (lambda value: value["metrics"][0]["capabilities"]["charts"]["monitor"].__setitem__("window_seconds", 0), "window_seconds"),
+        (
+            lambda value: value["metrics"][0]["capabilities"]["charts"]["monitor"].__setitem__(
+                "window_seconds", 0
+            ),
+            "window_seconds",
+        ),
         (lambda value: value.__setitem__("default_metric_id", "missing"), "default_metric_id"),
     ],
 )
-def test_v2_probe_descriptor_rejects_invalid_metric_contract(
-    mutate: object, message: str
-) -> None:
+def test_v2_probe_descriptor_rejects_invalid_metric_contract(mutate: object, message: str) -> None:
     descriptor = v2_probe_descriptor()
     mutate(descriptor)  # type: ignore[operator]
 
@@ -363,13 +479,48 @@ def test_v2_ranking_default_all_is_allowed_and_invalid_defaults_are_ignored() ->
     descriptor["metrics"][0]["capabilities"]["charts"] = {
         "ranking": {"granularities": ["day"], "group_by": [], "periods": ["all"]}
     }
-    descriptor["metrics"][0]["defaults"] = {"ranking": {"period": "all", "group_by": None, "top": None}}
+    descriptor["metrics"][0]["defaults"] = {
+        "ranking": {"period": "all", "group_by": None, "top": None}
+    }
 
     assert parse_v2_probe_descriptor(descriptor).metrics[0].defaults["ranking"].period == "all"
 
-    descriptor["metrics"][0]["defaults"] = {"timeline": {"period": "all", "group_by": None, "top": None}}
+    descriptor["metrics"][0]["defaults"] = {
+        "timeline": {"period": "all", "group_by": None, "top": None}
+    }
     parsed = parse_v2_probe_descriptor(descriptor)
     assert parsed.metrics[0].defaults["timeline"].period is None
+
+
+@pytest.mark.parametrize("comparison", ("full", "rank", "none"))
+def test_v2_ranking_capability_accepts_comparison_presentation(comparison: str) -> None:
+    descriptor = v2_probe_descriptor()
+    descriptor["metrics"][0]["capabilities"]["charts"] = {  # type: ignore[index]
+        "ranking": {
+            "granularities": ["day"],
+            "group_by": [],
+            "comparison": comparison,
+        }
+    }
+
+    capability = parse_v2_probe_descriptor(descriptor).metrics[0].capabilities.charts["ranking"]
+
+    assert capability.comparison == comparison  # type: ignore[union-attr]
+
+
+def test_v2_ranking_comparison_rejects_invalid_or_nonranking_values() -> None:
+    descriptor = v2_probe_descriptor()
+    descriptor["metrics"][0]["capabilities"]["charts"] = {  # type: ignore[index]
+        "ranking": {"granularities": ["day"], "group_by": [], "comparison": "growth"}
+    }
+    with pytest.raises(CustomProtocolError, match="comparison"):
+        parse_v2_probe_descriptor(descriptor)
+
+    descriptor["metrics"][0]["capabilities"]["charts"] = {  # type: ignore[index]
+        "timeline": {"granularities": ["day"], "group_by": [], "comparison": "rank"}
+    }
+    with pytest.raises(CustomProtocolError, match="comparison"):
+        parse_v2_probe_descriptor(descriptor)
 
 
 def test_v2_historical_capabilities_accept_declared_periods_for_every_chart_kind() -> None:
@@ -378,7 +529,7 @@ def test_v2_historical_capabilities_accept_declared_periods_for_every_chart_kind
         kind: {
             "granularities": ["day"],
             "group_by": [],
-                "periods": ["7d", "30d"],
+            "periods": ["7d", "30d"],
         }
         for kind in ("timeline", "calendar", "stack", "ranking")
     }
@@ -430,13 +581,17 @@ def probe_response() -> dict[str, object]:
                 "stack": {"period": "14d", "group_by": None, "top": None},
                 "ranking": {"period": "1y", "group_by": "book", "top": 10},
             },
-            "environment": [{
-                "name": "WEREAD_API_KEY",
-                "required": True,
-                "sensitive": True,
-                "label": text("WeRead API key", "微信读书 API 密钥"),
-                "how_to_get": text("Set the key in your environment.", "请通过环境变量设置密钥。"),
-            }],
+            "environment": [
+                {
+                    "name": "WEREAD_API_KEY",
+                    "required": True,
+                    "sensitive": True,
+                    "label": text("WeRead API key", "微信读书 API 密钥"),
+                    "how_to_get": text(
+                        "Set the key in your environment.", "请通过环境变量设置密钥。"
+                    ),
+                }
+            ],
         },
     }
 

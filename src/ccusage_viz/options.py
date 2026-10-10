@@ -152,7 +152,7 @@ class RankingConfig:
     kind: Literal["ranking"]
     date_range: DateRange
     filters: Filters = Filters()
-    presentation: ChartPresentation = ChartPresentation(style="dot")
+    presentation: ChartPresentation = ChartPresentation(style="dot", density="full")
     by: Dimension = "project"
     top: int = 10
     other: str = "show"
@@ -211,6 +211,7 @@ class CustomChartConfig:
     metric_summary: Literal["comparisons", "total", "none"] = "comparisons"
     metric_periods: tuple[str, ...] = ()
     metric_titles: tuple[str, str] | None = None
+    ranking_comparison: Literal["full", "rank", "none"] = "full"
 
 
 HistoricalChartConfig: TypeAlias = TimelineConfig | CalendarConfig | StackConfig | RankingConfig
@@ -386,9 +387,7 @@ def _adjust_period(date_range: DateRange, key: str, *, kind: str) -> DateRange:
     if not date_range.relative_until or date_range.period is None:
         return date_range
     if kind == "ranking" and date_range.period == "all":
-        period = _cycle(
-            RANKING_INTERACTIVE_PERIOD_PRESETS, "all", 1 if key == "p" else -1
-        )
+        period = _cycle(RANKING_INTERACTIVE_PERIOD_PRESETS, "all", 1 if key == "p" else -1)
         return resolve_date_range(kind, period=period, since=None, until=None)
     _, unit = parse_period(date_range.period)
     granularity = UNIT_GRANULARITIES[unit]
@@ -396,9 +395,7 @@ def _adjust_period(date_range: DateRange, key: str, *, kind: str) -> DateRange:
         RANKING_INTERACTIVE_PERIOD_PRESETS if kind == "ranking" else INTERACTIVE_PERIOD_PRESETS
     )
     if date_range.period in presets:
-        period = _cycle(
-            presets, date_range.period, 1 if key == "p" else -1
-        )
+        period = _cycle(presets, date_range.period, 1 if key == "p" else -1)
     else:
         period = DEFAULT_PERIODS[granularity]
     if kind == "ranking" and period == "all":
@@ -429,12 +426,12 @@ def _with_granularity_period(
 
 
 def adjust_chart(chart: ChartConfig, key: str, *, demo: bool = False) -> ChartConfig:
-    if key == "d":
+    if key in {"d", "D"}:
         return replace(
             chart,
             presentation=replace(
                 chart.presentation,
-                density=_cycle(DENSITIES, chart.presentation.density, 1),
+                density=_cycle(DENSITIES, chart.presentation.density, 1 if key == "d" else -1),
             ),
         )
     if key in {"s", "S"}:
@@ -539,12 +536,12 @@ def adjust_custom_chart(chart: CustomChartConfig, key: str) -> CustomChartConfig
                 date_range=resolve_date_range(chart.kind, period=period, since=None, until=None),
             )
         return replace(chart, date_range=_adjust_period(chart.date_range, key, kind=chart.kind))
-    if key == "d":
+    if key in {"d", "D"}:
         return replace(
             chart,
             presentation=replace(
                 chart.presentation,
-                density=_cycle(DENSITIES, chart.presentation.density, 1),
+                density=_cycle(DENSITIES, chart.presentation.density, 1 if key == "d" else -1),
             ),
         )
     if key in {"s", "S"}:
@@ -581,10 +578,11 @@ def adjust_custom_chart(chart: CustomChartConfig, key: str) -> CustomChartConfig
         )
     if key == "o" and chart.group_by is not None:
         return replace(chart, other=_cycle(OTHER_MODES, chart.other, 1))
-    if key in {"+", "="} and chart.group_by is not None:
+    if key in {"+", "="} and (chart.kind == "ranking" or chart.group_by is not None):
         return replace(chart, top=(chart.top or 0) + 1)
-    if key in {"-", "_"} and chart.group_by is not None:
-        return replace(chart, top=max(1, (chart.top or 1) - 1))
+    if key in {"-", "_"} and (chart.kind == "ranking" or chart.group_by is not None):
+        # Ranking cycles from its smallest explicit selection back to All.
+        return replace(chart, top=None if chart.top in {None, 1} else chart.top - 1)
     return chart
 
 

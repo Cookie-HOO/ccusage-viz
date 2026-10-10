@@ -41,7 +41,7 @@ def _default_dashboard_chart_presentation(kind: str) -> ChartPresentation:
             "ranking": "dot",
             "monitor": "points",
         }[kind],
-        density="compact",
+        density="full" if kind == "ranking" else "compact",
     )
 
 
@@ -180,8 +180,13 @@ def v2_metric_probe_descriptor(
             charts[kind] = CustomChartCapability(
                 capability.granularities,
                 capability.group_by,
-                (),
+                capability.filters,
                 capability.max_items,
+                capability.descriptions_default,
+                capability.periods,
+                capability.comparison,
+                capability.show_percentage,
+                capability.refresh_interval_seconds,
             )
     return CustomProbeDescriptor(
         descriptor.revision,
@@ -208,7 +213,9 @@ def default_custom_pane(
     if kind not in {"timeline", "calendar", "stack", "ranking", "monitor"}:
         raise ValueError(f"unknown custom chart kind: {kind}")
     presentation = _default_dashboard_chart_presentation(kind)
-    date_range = resolve_date_range("timeline" if kind == "monitor" else kind, period=None, since=None, until=None)
+    date_range = resolve_date_range(
+        "timeline" if kind == "monitor" else kind, period=None, since=None, until=None
+    )
     return CustomChartPaneConfig(
         CustomChartConfig(
             kind,
