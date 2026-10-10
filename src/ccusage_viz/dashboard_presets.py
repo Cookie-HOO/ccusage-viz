@@ -543,9 +543,7 @@ def _chart_wire(chart: object) -> dict[str, object]:
     raise AssertionError(f"unsupported chart type: {type(chart)!r}")
 
 
-def _attachment_wire(
-    *, style: str | None, theme: str | None
-) -> dict[str, object] | None:
+def _attachment_wire(*, style: str | None, theme: str | None) -> dict[str, object] | None:
     if style is None and theme is None:
         return None
     return {"style": style, "theme": theme}
@@ -565,9 +563,9 @@ def _attachment_parse(value: object) -> tuple[str | None, str | None]:
     return style, theme
 
 
-def _pane_fields(wire: Mapping[str, object], fields: frozenset[str], label: str) -> tuple[
-    Mapping[str, object], tuple[str | None, str | None]
-]:
+def _pane_fields(
+    wire: Mapping[str, object], fields: frozenset[str], label: str
+) -> tuple[Mapping[str, object], tuple[str | None, str | None]]:
     payload = dict(wire)
     attachment = _attachment_parse(payload.pop("attachment", None))
     return _exact(payload, fields, label), attachment
@@ -695,7 +693,9 @@ def _parse_pane(value: object) -> PaneConfig:
             ),
             _optional_int(monitor_wire["top"], "monitor.top", minimum=1),
             _choice(
-                monitor_wire["project_aggregation"], PROJECT_AGGREGATIONS, "monitor.project_aggregation"
+                monitor_wire["project_aggregation"],
+                PROJECT_AGGREGATIONS,
+                "monitor.project_aggregation",
             ),
             _choice(monitor_wire["day_window"], ("today", "yesterday"), "monitor.day_window"),
             _choice(
@@ -729,14 +729,14 @@ def _parse_pane(value: object) -> PaneConfig:
         )
         custom_wire, attachment = _pane_fields(wire, fields, "custom pane")
         dataset_id = _string(custom_wire["dataset_id"], "custom.dataset_id")
-        source_kind = _choice(custom_wire["source_kind"], ("command", "installed"), "custom.source_kind")
+        source_kind = _choice(
+            custom_wire["source_kind"], ("command", "installed"), "custom.source_kind"
+        )
         command_argv = _string_list(custom_wire["command_argv"], "custom.command_argv")
         try:
             source = CustomCommandSource(dataset_id, command_argv, source_kind)
         except ValueError as exc:
-            raise DashboardPresetValidationError(
-                "invalid custom command source"
-            ) from exc
+            raise DashboardPresetValidationError("invalid custom command source") from exc
         titles_value = custom_wire["metric_titles"]
         if titles_value is None:
             titles = None
@@ -769,7 +769,9 @@ def _parse_pane(value: object) -> PaneConfig:
             initial_explicit=_PERSISTED_CUSTOM_EXPLICIT,
             metric_id=_optional_string(custom_wire["metric_id"], "custom.metric_id"),
             metric_summary=_choice(
-                custom_wire["metric_summary"], ("comparisons", "total", "none"), "custom.metric_summary"
+                custom_wire["metric_summary"],
+                ("comparisons", "total", "none"),
+                "custom.metric_summary",
             ),
             metric_periods=_string_list(custom_wire["metric_periods"], "custom.metric_periods"),
             metric_titles=titles,
@@ -847,9 +849,7 @@ class DashboardPresetRecord:
         }
 
     @classmethod
-    def parse(
-        cls, value: object
-    ) -> DashboardPresetRecord:
+    def parse(cls, value: object) -> DashboardPresetRecord:
         wire = _exact(
             value,
             frozenset(("name", "created_at", "updated_at", "process", "host", "panes")),

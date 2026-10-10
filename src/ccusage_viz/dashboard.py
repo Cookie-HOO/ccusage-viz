@@ -10,6 +10,7 @@ class DashboardPreset:
     layout: str | None = None
     refresh_interval: float = 60.0
     sampling_interval: float = 15.0
+    header_summary: str = "day"
     style: str = "split"
     row_weights: tuple[int, ...] | None = None
 
@@ -68,4 +69,10 @@ DASHBOARD_PRESETS["wide-clock"] = DashboardPreset(
     layout="spotlight-wide",
     style="framed",
     row_weights=(9, 13, 12),
+)
+DASHBOARD_PRESETS["single"] = DashboardPreset(
+    ("animate analog-clock",),
+    "1x1",
+    header_summary="none",
+    style="minimal",
 )

@@ -52,6 +52,7 @@ ccuv dashboard
 
 | 预设 | 命令 | 布局 | 预览 |
 | --- | --- | --- | --- |
+| `single` | `ccuv dashboard single` | 单个实时模拟时钟，无文字叠层和 Dashboard 边框。 | - |
 | 【推荐-宽终端】 `wide-clock` **（未指定预设时的默认值）** | `ccuv dashboard wide-clock` | 推荐用于带实时模拟时钟的通用总览。模拟时钟 + 均衡 2×2。 | <img src="docs/assets/readme/dashboard-wide-clock.png" alt="预览" width="180"> |
 | 【推荐-侧边栏】 `narrow-clock` | `ccuv dashboard narrow-clock` | 推荐用于带实时时钟的侧边栏。时钟 + 纵向 4×1。 | <img src="docs/assets/readme/dashboard-narrow-clock.png" alt="预览" width="180"> |
 | `wide` | `ccuv dashboard wide` | 推荐用于只看数据的均衡总览。均衡 2×2。 | <img src="docs/assets/readme/dashboard-wide.png" alt="预览" width="180"> |
@@ -62,7 +63,7 @@ ccuv dashboard
 
 ### 你的 Dashboard 预设
 
-在 Dashboard 浏览模式中，按 `s` 可将当前 Dashboard 以名字保存，按 `p` 打开全屏预设管理器。管理器同时列出内置预设和你的预设；用方向键或 `j`/`k` 选择，按 `Enter` 加载，按 `s` 保存，按 `x` 删除选中的用户预设。内置预设可加载但不能删除。用与内置预设相同的名字保存用户预设会有意覆盖它；删除该用户预设即可重新显示内置预设。覆盖已有用户预设时，会要求选择覆盖或放弃。
+在 Dashboard 浏览模式中，按 `Ctrl-S` 可将当前 Dashboard 以名字保存，按 `Ctrl-P` 打开全屏预设管理器。管理器同时列出内置预设和你的预设；用方向键或 `j`/`k` 选择，按 `Enter` 加载，按 `s` 保存，按 `x` 删除选中的用户预设。内置预设可加载但不能删除。用与内置预设相同的名字保存用户预设会有意覆盖它；删除该用户预设即可重新显示内置预设。覆盖已有用户预设时，会要求选择覆盖或放弃。
 
 预设名必须匹配 `^[a-z][a-z0-9-]*$`。保存后的预设可以在新终端中通过 `ccuv dashboard <name>` 启动。具名启动不接受配置覆盖；只能同时使用 `--demo`、`--lang`、`--empty` 和 `--ccusage-bin`。例如：
 

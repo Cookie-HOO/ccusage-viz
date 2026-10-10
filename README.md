@@ -67,6 +67,7 @@ ccuv dashboard
 
 | Preset | Command | Layout | Preview |
 | --- | --- | --- | --- |
+| `single` | `ccuv dashboard single` | A single live analog clock without a text overlay or Dashboard frame. | - |
 | 【Recommended—wide terminal】 `wide-clock` **(default without a preset)** | `ccuv dashboard wide-clock` | Best for an all-purpose overview with a live analog clock. Analog clock + balanced 2×2. | <img src="docs/assets/readme/dashboard-wide-clock.png" alt="Preview" width="180"> |
 | 【Recommended—sidebar】 `narrow-clock` | `ccuv dashboard narrow-clock` | Best for a sidebar with a live clock. Clock + vertical 4×1. | <img src="docs/assets/readme/dashboard-narrow-clock.png" alt="Preview" width="180"> |
 | `wide` | `ccuv dashboard wide` | Best for a balanced data-only overview. Balanced 2×2. | <img src="docs/assets/readme/dashboard-wide.png" alt="Preview" width="180"> |
@@ -77,8 +78,8 @@ ccuv dashboard
 
 ### Your Dashboard presets
 
-In Dashboard browse mode, press `s` to save the current Dashboard under a name,
-or `p` to open the full-screen preset manager. The manager lists built-in and
+In Dashboard browse mode, press `Ctrl-S` to save the current Dashboard under a name,
+or `Ctrl-P` to open the full-screen preset manager. The manager lists built-in and
 your saved presets; use arrows or `j`/`k` to select, `Enter` to load, `s` to
 save, and `x` to delete a selected user preset. Built-ins can be loaded but not
 deleted. Saving a user preset with a built-in name intentionally overrides it;
