@@ -5066,14 +5066,6 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
                 if not isinstance(event, KeyEvent):
                     continue
                 key = event.value
-                if body_view == "chart" and current.kind == "ranking" and key in {"\x1b[A", "\x1b[B"}:
-                    before = ranking_viewport.display_offset
-                    ranking_viewport = advance_ranking_wheel(
-                        ranking_viewport, delta=-1 if key == "\x1b[A" else 1
-                    )
-                    if ranking_viewport.display_offset != before:
-                        paint()
-                    continue
                 if key == "\x03":
                     raise KeyboardInterrupt
                 error_body = (
@@ -9183,31 +9175,6 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         paint()
                         continue
                 key = event.value if isinstance(event, KeyEvent) else None
-                if (
-                    key in {"\x1b[A", "\x1b[B"}
-                    and body_view == "chart"
-                    and focused is not None
-                    and isinstance(panes[focused], (TuiChartPane, TuiCustomPane))
-                ):
-                    pane = panes[focused]
-                    historical_ranking = (
-                        isinstance(pane, TuiChartPane)
-                        and isinstance(pane.component, HistoricalChartComponent)
-                        and _pane_display_options(pane).chart.kind == "ranking"
-                    ) or (
-                        isinstance(pane, TuiCustomPane)
-                        and isinstance(pane.component, CustomHistoricalComponent)
-                        and pane.component.candidate.kind == "ranking"
-                    )
-                    if historical_ranking:
-                        before = pane.ranking_viewport.display_offset
-                        pane.ranking_viewport = advance_ranking_wheel(
-                            pane.ranking_viewport,
-                            delta=-1 if key == "\x1b[A" else 1,
-                        )
-                        if pane.ranking_viewport.display_offset != before:
-                            paint()
-                        continue
                 if key == "\x03":
                     raise KeyboardInterrupt
                 # A draft owns every ordinary key: root shortcuts must not leak in.
