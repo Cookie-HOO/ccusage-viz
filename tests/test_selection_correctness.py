@@ -58,6 +58,22 @@ def test_model_case_variants_filter_and_group_as_one_model() -> None:
     ]
 
 
+def test_model_source_prefixes_filter_and_group_as_one_model() -> None:
+    records = (
+        _record(1, "pi", "/pi/app", "[pi] GPT-5.6-Luna", 10),
+        _record(1, "codex", "/codex/app", "gpt-5.6-luna", 20),
+    )
+    selected_range = DateRange(date(2026, 1, 1), date(2026, 1, 1))
+
+    filtered, notices = filter_records(records, selected_range, models=("[pi] gpt-5.6-luna",))
+    model = build_timeline(filtered, selected_range, by="model", notices=notices)
+
+    assert sum(record.usage.total for record in filtered) == 30
+    assert [(series.label, series.values[0].total) for series in model.series] == [
+        ("gpt-5.6-luna", 30)
+    ]
+
+
 def test_selected_values_without_rows_emit_notices_and_keep_available_groups() -> None:
     records = (
         _record(1, "claude", "/claude/app", "sonnet", 10),

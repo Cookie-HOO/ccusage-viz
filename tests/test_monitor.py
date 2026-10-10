@@ -265,6 +265,14 @@ def test_model_casing_is_one_continuous_monitor_counter() -> None:
     assert observer.rates(60.0) == {"gpt-5.6-luna": 50.0}
 
 
+def test_model_source_prefix_is_one_continuous_monitor_counter() -> None:
+    observer = ObservedTPM(window_seconds=3600, by="model", top=None)
+    observer.add(snapshot(100, **{"[pi] GPT-5.6-Luna": 100}), 0.0)
+    observer.add(snapshot(150, **{"gpt-5.6-luna": 150}), 60.0)
+
+    assert observer.rates(60.0) == {"gpt-5.6-luna": 50.0}
+
+
 def test_model_projection_preserves_authoritative_total_with_residual_other() -> None:
     observer = ObservedTPM(window_seconds=3600, by="model", top=None)
     observer.add(snapshot(100, sonnet=60), 0.0)
