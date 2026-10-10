@@ -43,7 +43,7 @@ def test_ccusage_provider_owns_logical_to_physical_planning() -> None:
     assert CCUSAGE_DEFINITION.provider.fingerprint(query) == query.fingerprint
 
 
-def test_project_ranking_compiles_codex_as_one_range_query() -> None:
+def test_project_ranking_compiles_primary_queries_without_speculative_fallbacks() -> None:
     plan = CCUSAGE_DEFINITION.provider.compile(intent("ranking"))
 
     assert [query.operation for query in plan.queries] == [
@@ -116,6 +116,206 @@ def test_range_codex_ranking_normalization_anchors_totals_at_interval_end() -> N
     assert record.project is not None
     assert record.project.raw_id == "/workspace/project"
     assert record.usage.total == 20
+
+
+def test_project_fallback_normalization_resolves_pi_session_cwd(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    query = PhysicalQuery(
+        ProviderRef("ccusage"),
+        "project_fallback_sessions:pi",
+        coverage=DateCoverage.from_interval(date(2026, 1, 2), date(2026, 1, 3)),
+    )
+    monkeypatch.setattr(
+        "ccusage_viz.providers.ccusage.resolve_pi_session_cwds",
+        lambda session_ids: {"pi-session": "/workspace/github-projects"},
+    )
+    payload = {
+        "sessions": [
+            {
+                "sessionId": "pi-session",
+                "projectPath": "--workspace-github-projects--",
+                "inputTokens": 2,
+                "outputTokens": 3,
+                "cacheReadTokens": 5,
+                "cacheCreationTokens": 7,
+                "totalTokens": 20,
+            }
+        ]
+    }
+
+    (record,) = CCUSAGE_DEFINITION.provider.normalize(
+        PhysicalResult(query, json.dumps(payload).encode())
+    ).records
+
+    assert record.day == date(2026, 1, 3)
+    assert record.project is not None
+    assert record.project.key == ("pi", "/workspace/github-projects")
+    assert record.attribution is None
+
+
+def test_project_fallback_replaces_matching_unverified_observation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observation = PhysicalQuery(
+        ProviderRef("ccusage"),
+        "unified_daily_agent_observation",
+        coverage=DateCoverage.from_interval(date(2026, 1, 3), date(2026, 1, 3)),
+    )
+    session = PhysicalQuery(
+        ProviderRef("ccusage"),
+        "project_fallback_sessions:pi",
+        coverage=DateCoverage.from_interval(date(2026, 1, 3), date(2026, 1, 3)),
+    )
+    monkeypatch.setattr(
+        "ccusage_viz.providers.ccusage.resolve_pi_session_cwds",
+        lambda session_ids: {"pi-session": "/workspace/github-projects"},
+    )
+    observation_fragment = CCUSAGE_DEFINITION.provider.normalize(
+        PhysicalResult(
+            observation,
+            json.dumps(
+                {
+                    "daily": [
+                        {
+                            "date": "2026-01-03",
+                            "agents": [
+                                {
+                                    "agent": "pi",
+                                    "project": "--workspace-github-projects--",
+                                    "inputTokens": 2,
+                                    "outputTokens": 3,
+                                    "cacheReadTokens": 5,
+                                    "cacheCreationTokens": 7,
+                                    "totalTokens": 20,
+                                }
+                            ],
+                        }
+                    ]
+                }
+            ).encode(),
+        )
+    )
+    session_fragment = CCUSAGE_DEFINITION.provider.normalize(
+        PhysicalResult(
+            session,
+            json.dumps(
+                {
+                    "sessions": [
+                        {
+                            "sessionId": "pi-session",
+                            "projectPath": "--workspace-github-projects--",
+                            "inputTokens": 2,
+                            "outputTokens": 3,
+                            "cacheReadTokens": 5,
+                            "cacheCreationTokens": 7,
+                            "totalTokens": 20,
+                        }
+                    ]
+                }
+            ).encode(),
+        )
+    )
+
+    result = CCUSAGE_DEFINITION.provider.assemble(
+        PhysicalPlan("pi-reconciliation", (observation, session)),
+        (observation_fragment, session_fragment),
+    )
+
+    assert [
+        (record.agent, record.project.raw_id) for record in result.records if record.project
+    ] == [("pi", "/workspace/github-projects")]
+
+
+def test_pending_unverified_agents_generate_optional_session_fallbacks() -> None:
+    observation = PhysicalQuery(
+        ProviderRef("ccusage"),
+        "unified_daily_agent_observation",
+        coverage=DateCoverage.from_interval(date(2026, 1, 3), date(2026, 1, 3)),
+    )
+    fragment = CCUSAGE_DEFINITION.provider.normalize(
+        PhysicalResult(
+            observation,
+            json.dumps(
+                {
+                    "daily": [
+                        {
+                            "date": "2026-01-03",
+                            "agents": [
+                                {
+                                    "agent": "pi",
+                                    "project": "encoded-pi-project",
+                                    "inputTokens": 2,
+                                    "outputTokens": 3,
+                                    "cacheReadTokens": 5,
+                                    "cacheCreationTokens": 7,
+                                    "totalTokens": 20,
+                                },
+                                {
+                                    "agent": "future-agent",
+                                    "project": "opaque-future-project",
+                                    "inputTokens": 2,
+                                    "outputTokens": 3,
+                                    "cacheReadTokens": 5,
+                                    "cacheCreationTokens": 7,
+                                    "totalTokens": 20,
+                                },
+                            ],
+                        }
+                    ]
+                }
+            ).encode(),
+        )
+    )
+
+    queries = CCUSAGE_DEFINITION.provider.supplemental_queries(
+        PhysicalPlan("fallbacks", (observation,)), (fragment,)
+    )
+
+    assert [query.arguments[:3] for query in queries] == [
+        ("future-agent", "session", "--json"),
+        ("pi", "session", "--json"),
+    ]
+    assert all(query.required is False for query in queries)
+
+
+def test_pending_unassigned_agent_generates_optional_session_fallback() -> None:
+    observation = PhysicalQuery(
+        ProviderRef("ccusage"),
+        "unified_daily_agent_observation",
+        coverage=DateCoverage.from_interval(date(2026, 1, 3), date(2026, 1, 3)),
+    )
+    fragment = CCUSAGE_DEFINITION.provider.normalize(
+        PhysicalResult(
+            observation,
+            json.dumps(
+                {
+                    "daily": [
+                        {
+                            "date": "2026-01-03",
+                            "agents": [
+                                {
+                                    "agent": "pi",
+                                    "inputTokens": 2,
+                                    "outputTokens": 3,
+                                    "cacheReadTokens": 5,
+                                    "cacheCreationTokens": 7,
+                                    "totalTokens": 20,
+                                }
+                            ],
+                        }
+                    ]
+                }
+            ).encode(),
+        )
+    )
+
+    (query,) = CCUSAGE_DEFINITION.provider.supplemental_queries(
+        PhysicalPlan("fallbacks", (observation,)), (fragment,)
+    )
+
+    assert query.arguments[:3] == ("pi", "session", "--json")
+    assert query.required is False
 
 
 def test_codex_normalization_uses_local_session_cwd(monkeypatch: pytest.MonkeyPatch) -> None:

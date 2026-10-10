@@ -13,8 +13,9 @@ from typing import Any, Final
 
 from ccusage_viz.codex_sessions import resolve_codex_session_cwds
 from ccusage_viz.coverage import DateCoverage, DateInterval
-from ccusage_viz.domain import Notice, UsageRecord
+from ccusage_viz.domain import Notice, SourceKind, UsageRecord
 from ccusage_viz.errors import QueryError
+from ccusage_viz.pi_sessions import resolve_pi_session_cwds
 from ccusage_viz.project_identity import (
     fixed_project_ref,
     make_project_ref,
@@ -33,7 +34,7 @@ from ccusage_viz.query.models import (
     QueryKind,
 )
 from ccusage_viz.query.provider import ProviderCapabilities, ProviderDefinition
-from ccusage_viz.schema import codex_project_identity, parse_usage_records
+from ccusage_viz.schema import codex_project_identity, parse_project_sessions, parse_usage_records
 
 CCUSAGE_PROVIDER = ProviderRef("ccusage")
 _STDERR_LIMIT: Final = 16 * 1024
@@ -281,7 +282,12 @@ class CcusageProvider:
             ) from exc
         if result.query.operation in {"codex_sessions", "codex_ranking_sessions"}:
             data = _enrich_codex_project_rows(data)
-        records = parse_usage_records(_OPERATION_SOURCES[result.query.operation], data)
+        fallback_agent = _fallback_agent(result.query.operation)
+        records = (
+            parse_project_sessions(data, fallback_agent)
+            if fallback_agent is not None
+            else parse_usage_records(_OPERATION_SOURCES[result.query.operation], data)
+        )
         if result.query.operation == "codex_sessions":
             intervals = result.query.coverage.intervals
             if len(intervals) != 1 or intervals[0].since != intervals[0].until:
@@ -295,6 +301,22 @@ class CcusageProvider:
             # Project ranking consumes period totals only, so anchor these private
             # range aggregates at the interval end without claiming daily detail.
             records = tuple(replace(record, day=intervals[0].until) for record in records)
+        elif fallback_agent is not None:
+            intervals = result.query.coverage.intervals
+            if len(intervals) != 1:
+                raise QueryError("error.ccusage_codex_date_attribution")
+            cwds = _fallback_session_cwds(fallback_agent, records)
+            records = tuple(
+                replace(
+                    record,
+                    day=intervals[0].until,
+                    project=make_project_ref(fallback_agent, cwd, path_backed=True),
+                    attribution=None,
+                )
+                if (cwd := cwds.get(record.session_id or "")) is not None
+                else record
+                for record in records
+            )
         if result.query.operation == "unified_daily_agent_observation":
             records = _fixed_project_observation_records(data, records)
         return ProviderResultFragment(
@@ -307,10 +329,61 @@ class CcusageProvider:
             provider_metadata=(),
         )
 
+    def supplemental_queries(
+        self, plan: PhysicalPlan, fragments: tuple[ProviderResultFragment, ...]
+    ) -> tuple[PhysicalQuery, ...]:
+        """Try session reports for agents whose primary records lack a verified path."""
+
+        observation = next(
+            (
+                query
+                for query in plan.queries
+                if query.operation == "unified_daily_agent_observation"
+            ),
+            None,
+        )
+        if observation is None:
+            return ()
+        since, until = _query_dates(observation.coverage)
+        if since is None or until is None:
+            return ()
+        agents = tuple(
+            sorted(
+                {
+                    record.agent.casefold()
+                    for fragment in fragments
+                    for record in fragment.records
+                    if record.source is SourceKind.UNIFIED_DAILY
+                    and record.attribution in {"unassigned", "unverified"}
+                }
+            )
+        )
+        return tuple(
+            PhysicalQuery(
+                self.provider,
+                f"project_fallback_sessions:{agent}",
+                (
+                    agent,
+                    "session",
+                    "--json",
+                    "--since",
+                    since,
+                    "--until",
+                    until,
+                    "--offline",
+                    "--no-cost",
+                ),
+                observation.execution_context,
+                observation.coverage,
+                required=False,
+            )
+            for agent in agents
+        )
+
     def assemble(
         self, plan: PhysicalPlan, fragments: tuple[ProviderResultFragment, ...]
     ) -> ProviderResult:
-        records = ()
+        records: tuple[UsageRecord, ...] = ()
         provenance = ()
         coverage = DateCoverage()
         notices = plan.notices
@@ -319,6 +392,7 @@ class CcusageProvider:
             provenance += fragment.provenance
             coverage = coverage.merge(fragment.coverage)
             notices += fragment.notices
+        records = _replace_unverified_records(records)
         return ProviderResult(
             records,
             provenance,
@@ -328,7 +402,11 @@ class CcusageProvider:
             plan.summary_notices,
             includes_project_attribution=any(
                 query.operation
-                in {"claude_daily_projects", "codex_sessions", "codex_ranking_sessions"}
+                in {
+                    "claude_daily_projects",
+                    "codex_sessions",
+                    "codex_ranking_sessions",
+                }
                 for query in plan.queries
             )
             or any(record.project is not None for record in records),
@@ -380,6 +458,63 @@ def _fixed_project_observation_records(
             )
         )
     return tuple(projected)
+
+
+def _fallback_agent(operation: str) -> str | None:
+    marker = "project_fallback_sessions:"
+    return operation.removeprefix(marker) if operation.startswith(marker) else None
+
+
+def _query_dates(coverage: DateCoverage) -> tuple[str | None, str | None]:
+    if len(coverage.intervals) != 1:
+        return None, None
+    interval = coverage.intervals[0]
+    return interval.since.isoformat(), interval.until.isoformat()
+
+
+def _fallback_session_cwds(agent: str, records: tuple[UsageRecord, ...]) -> dict[str, str]:
+    if agent != "pi":
+        return {}
+    return resolve_pi_session_cwds(
+        record.session_id for record in records if record.session_id is not None
+    )
+
+
+def _replace_unverified_records(records: tuple[UsageRecord, ...]) -> tuple[UsageRecord, ...]:
+    """Use fully reconciled fallback session totals instead of unverified aggregates."""
+
+    replaceable: set[str] = set()
+    agents = {
+        record.agent.casefold()
+        for record in records
+        if record.source is SourceKind.PROJECT_SESSIONS
+    }
+    for agent in agents:
+        observations = tuple(
+            record
+            for record in records
+            if record.agent.casefold() == agent
+            and record.source is SourceKind.UNIFIED_DAILY
+            and record.attribution in {"unassigned", "unverified"}
+        )
+        sessions = tuple(
+            record
+            for record in records
+            if record.agent.casefold() == agent and record.source is SourceKind.PROJECT_SESSIONS
+        )
+        if observations and sum(record.usage.total for record in observations) == sum(
+            record.usage.total for record in sessions
+        ):
+            replaceable.add(agent)
+    return tuple(
+        record
+        for record in records
+        if not (
+            record.agent.casefold() in replaceable
+            and record.source is SourceKind.UNIFIED_DAILY
+            and record.attribution in {"unassigned", "unverified"}
+        )
+    )
 
 
 def _enrich_codex_project_rows(data: object) -> object:

@@ -5,7 +5,7 @@ import pytest
 from ccusage_viz.domain import SourceKind
 from ccusage_viz.errors import SchemaError
 from ccusage_viz.query.models import QueryKind
-from ccusage_viz.schema import parse_usage_records
+from ccusage_viz.schema import parse_project_sessions, parse_usage_records
 
 
 def usage(**extra: object) -> dict[str, object]:
@@ -114,6 +114,27 @@ def test_codex_directory_is_never_a_project_identity() -> None:
     assert record.project is not None
     assert record.project.display_name == "Unassigned"
     assert record.attribution == "unassigned"
+
+
+def test_parse_project_sessions_keeps_ccusage_project_path_as_unverified_evidence() -> None:
+    payload = {
+        "sessions": [
+            usage(
+                sessionId="pi-session",
+                projectPath="--Users-me-Projects-github-projects--",
+            )
+        ]
+    }
+
+    (record,) = parse_project_sessions(payload, "pi")
+
+    assert record.day is None
+    assert record.source is SourceKind.PROJECT_SESSIONS
+    assert record.project is not None
+    assert record.project.display_name == "Unverified"
+    assert record.attribution == "unverified"
+    assert record.source_project == "--Users-me-Projects-github-projects--"
+    assert record.session_id == "pi-session"
 
 
 def test_parse_codex_model_map_with_official_project() -> None:

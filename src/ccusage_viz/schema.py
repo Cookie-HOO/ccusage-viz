@@ -112,7 +112,11 @@ def _record(
     session_id: str | None = None,
 ) -> UsageRecord:
     return UsageRecord(
-        day=_day(row, path) if day is None and source is not SourceKind.CODEX_SESSIONS else day,
+        day=(
+            _day(row, path)
+            if day is None and source not in {SourceKind.CODEX_SESSIONS, SourceKind.PROJECT_SESSIONS}
+            else day
+        ),
         agent=agent,
         usage=_usage(row, path),
         source=source,
@@ -227,6 +231,32 @@ def parse_codex_sessions(data: object) -> tuple[UsageRecord, ...]:
                 day=None,
                 attribution="unassigned" if identity is None else None,
                 session_id=row.get("sessionId") if isinstance(row.get("sessionId"), str) else None,
+            )
+        )
+    return tuple(records)
+
+
+def parse_project_sessions(data: object, agent: str) -> tuple[UsageRecord, ...]:
+    """Parse a ccusage-compatible session report for a pending project agent."""
+
+    root = _object(data, "$.")
+    records: list[UsageRecord] = []
+    for index, item in enumerate(_array(root.get("sessions"), "$.sessions")):
+        path = f"$.sessions[{index}]"
+        row = _object(item, path)
+        session_id = _string(row.get("sessionId"), f"{path}.sessionId")
+        source_project = _string(row.get("projectPath"), f"{path}.projectPath")
+        records.append(
+            _record(
+                row,
+                path,
+                agent=agent,
+                source=SourceKind.PROJECT_SESSIONS,
+                project=fixed_project_ref(agent, "unverified"),
+                day=None,
+                attribution="unverified",
+                source_project=source_project,
+                session_id=session_id,
             )
         )
     return tuple(records)
