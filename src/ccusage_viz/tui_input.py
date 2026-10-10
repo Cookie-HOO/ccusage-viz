@@ -25,22 +25,13 @@ class MouseEvent:
 
 
 @dataclass(frozen=True, slots=True)
-class WheelEvent:
-    """One signed SGR mouse-wheel report."""
-
-    delta: int
-    x: int
-    y: int
-
-
-@dataclass(frozen=True, slots=True)
 class PasteEvent:
     """One complete terminal bracketed-paste payload."""
 
     value: str
 
 
-InputEvent = KeyEvent | MouseEvent | WheelEvent | PasteEvent
+InputEvent = KeyEvent | MouseEvent | PasteEvent
 
 _MOUSE_ENABLE = "\x1b[?1000h\x1b[?1006h\x1b[?2004h"
 _MOUSE_DISABLE = "\x1b[?1000l\x1b[?1006l\x1b[?2004l"
@@ -206,22 +197,7 @@ class InputDecoder:
             self.control_at = None
             modifiers = button & ~_MOUSE_BUTTON_MASK
             if modifiers & _MOUSE_WHEEL:
-                # A terminal read can contain a large trackpad burst. Keep only
-                # its latest report instead of replaying a stale input queue after
-                # the user's hand has stopped. Do not cross a non-wheel report.
-                event = WheelEvent(1 if button & 1 else -1, x, y)
-                while (following := _SGR_MOUSE.match(self.buffer)) is not None:
-                    following_button, following_x, following_y = (
-                        int(value) for value in following.groups()[:3]
-                    )
-                    following_modifiers = following_button & ~_MOUSE_BUTTON_MASK
-                    if not following_modifiers & _MOUSE_WHEEL:
-                        break
-                    self.buffer = self.buffer[following.end() :]
-                    event = WheelEvent(
-                        1 if following_button & 1 else -1, following_x, following_y
-                    )
-                return event
+                return None
             return MouseEvent(button & _MOUSE_BUTTON_MASK, x, y, mouse.group(4) == "M", modifiers)
 
         if self.buffer.startswith("\x1b[<"):

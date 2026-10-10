@@ -3,7 +3,7 @@ from io import StringIO
 import pytest
 
 import ccusage_viz.tui_input as tui_input_module
-from ccusage_viz.tui_input import InputDecoder, KeyEvent, MouseEvent, PasteEvent, WheelEvent
+from ccusage_viz.tui_input import InputDecoder, KeyEvent, MouseEvent, PasteEvent
 
 
 def test_tui_input_decodes_keys_and_fragmented_mouse_press() -> None:
@@ -27,20 +27,12 @@ def test_tui_input_preserves_control_keys() -> None:
     assert decoder.next() == KeyEvent("\x19")
 
 
-def test_tui_input_coalesces_a_buffered_trackpad_wheel_burst_to_its_latest_report() -> None:
+def test_tui_input_ignores_trackpad_wheel_reports() -> None:
     decoder = InputDecoder()
-    decoder.feed("\x1b[<64;20;5M\x1b[<65;20;5M\x1b[<64;22;7M")
+    decoder.feed("\x1b[<64;20;5M\x1b[<65;20;5M")
 
-    assert decoder.next() == WheelEvent(-1, 22, 7)
+    assert decoder.next() is None
     assert decoder.buffer == ""
-
-
-def test_tui_input_does_not_coalesce_across_a_non_wheel_mouse_report() -> None:
-    decoder = InputDecoder()
-    decoder.feed("\x1b[<65;20;5M\x1b[<0;20;5M")
-
-    assert decoder.next() == WheelEvent(1, 20, 5)
-    assert decoder.next() == MouseEvent(0, 20, 5, True, 0)
 
 
 def test_tui_input_decodes_bracketed_paste_as_one_event() -> None:

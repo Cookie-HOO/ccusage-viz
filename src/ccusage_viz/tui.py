@@ -233,7 +233,6 @@ from ccusage_viz.processing.summaries import (
 from ccusage_viz.query.coordinator import QueryHandle
 from ccusage_viz.query.models import ProviderResult
 from ccusage_viz.query.runtime import QueryRuntime
-from ccusage_viz.ranking_scroll import RankingViewport, advance_ranking_wheel
 from ccusage_viz.render.base import (
     RenderAudit,
     RenderContext,
@@ -291,7 +290,6 @@ from ccusage_viz.tui_input import (
     KeyEvent,
     MouseEvent,
     PasteEvent,
-    WheelEvent,
     read_event,
     tui_input_mode,
 )
@@ -431,7 +429,6 @@ class TuiCustomPane:
     copied_ranking_until: float = 0.0
     ranking_search: RankingSearchState = field(default_factory=RankingSearchState)
     ranking_item_spacing: str = "compact"
-    ranking_viewport: RankingViewport = field(default_factory=RankingViewport)
 
     @property
     def interval(self) -> float:
@@ -465,7 +462,6 @@ class TuiChartPane:
     attachment_renderer: AnimationRenderer | None = None
     attachment_enabled: bool = False
     ranking_search: RankingSearchState = field(default_factory=RankingSearchState)
-    ranking_viewport: RankingViewport = field(default_factory=RankingViewport)
 
     @property
     def interval(self) -> float:
@@ -4510,8 +4506,6 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
     logs: list[CustomLogRecord] = []
     copy_feedback = TransientFeedback()
     last_size: tuple[int, int] | None = None
-    ranking_viewport = RankingViewport()
-
     def record(status: str, detail: str) -> None:
         logs.append(CustomLogRecord(datetime.now().astimezone(), status, detail))
         logs[:] = logs[-20:]
@@ -4692,7 +4686,6 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
 
     def paint(*, force: bool = False) -> None:
         nonlocal last_size, error_offset, error_line_count, error_visible_rows
-        nonlocal ranking_viewport
         size = get_terminal_size()
         last_size = (size.columns, size.lines)
         terminal = Terminal(
@@ -4768,17 +4761,7 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
                 else translator.text("status.loading")
             )
         error_body = body_view == "chart" and provisional.error_body
-        if body_view == "chart" and current.kind == "ranking" and not error_body:
-            viewport = render_text_viewport(
-                body, offset=ranking_viewport.display_offset, visible_rows=body_height
-            )
-            ranking_viewport = RankingViewport(
-                min(viewport.line_count - viewport.visible_rows, ranking_viewport.offset),
-                viewport.line_count,
-                viewport.visible_rows,
-            )
-            body = viewport.body
-        elif error_body:
+        if error_body:
             body_rows = wrap_text_rows(body, width=size.columns)
             error_visible_rows = body_height
             error_line_count = len(body_rows)
@@ -5057,12 +5040,6 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
                     paint()
                     lifecycle.start_ready(now=time.monotonic(), start=start)
                 event = read_event(decoder, 0.05)
-                if isinstance(event, WheelEvent) and body_view == "chart" and current.kind == "ranking":
-                    before = ranking_viewport.display_offset
-                    ranking_viewport = advance_ranking_wheel(ranking_viewport, delta=event.delta)
-                    if ranking_viewport.display_offset != before:
-                        paint()
-                    continue
                 if not isinstance(event, KeyEvent):
                     continue
                 key = event.value
@@ -7633,41 +7610,6 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
 
         return record_mutation(("layout", "row-weight", slot.row), adjust_row)
 
-    def handle_ranking_wheel(event: WheelEvent) -> bool:
-        """Directly scroll the pointed Ranking without changing Dashboard focus."""
-
-        if body_view != "chart" or help_overlay is not None or dataset_modal is not None:
-            return False
-        size = get_terminal_size()
-        header_rows = len(
-            _header_lines(
-                header,
-                header_style,
-                translator,
-                Terminal(size.columns, 4, dashboard_theme != "no-color", options.host.ascii),
-                last_successful_update,
-            )
-        )
-        layout = grid_geometry(size.columns, size.lines, header_rows, 0)
-        selected = layout_pane_at(layout, event.x - 1, event.y - header_rows - 1)
-        if selected is None or not isinstance(panes[selected], (TuiChartPane, TuiCustomPane)):
-            return False
-        pane = panes[selected]
-        historical_ranking = (
-            isinstance(pane, TuiChartPane)
-            and isinstance(pane.component, HistoricalChartComponent)
-            and _pane_display_options(pane).chart.kind == "ranking"
-        ) or (
-            isinstance(pane, TuiCustomPane)
-            and isinstance(pane.component, CustomHistoricalComponent)
-            and pane.component.candidate.kind == "ranking"
-        )
-        if not historical_ranking or pane.ranking_viewport.maximum_offset == 0:
-            return False
-        before = pane.ranking_viewport.display_offset
-        pane.ranking_viewport = advance_ranking_wheel(pane.ranking_viewport, delta=event.delta)
-        return pane.ranking_viewport.display_offset != before
-
     def handle_pane_mouse(event: MouseEvent) -> bool:
         """Handle pane focus clicks before pane-local modal input consumes them."""
 
@@ -8096,20 +8038,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     else None
                 )
                 error_body = isinstance(text_pane, TuiCustomPane) and rendered.error_body
-                ranking_chart = (
-                    isinstance(text_pane, TuiCustomPane)
-                    and isinstance(text_pane.component, CustomHistoricalComponent)
-                    and text_pane.component.candidate.kind == "ranking"
-                    and text_pane.body_view == "chart"
-                ) or (
-                    isinstance(text_pane, TuiChartPane)
-                    and isinstance(text_pane.component, HistoricalChartComponent)
-                    and _pane_display_options(text_pane).chart.kind == "ranking"
-                    and text_pane.body_view == "chart"
-                )
-                fixed_ranking_rows = _ranking_fixed_rows(chart) if ranking_chart else 0
+                fixed_ranking_rows = 0
                 scrollable = text_pane is not None and (
-                    text_pane.body_view != "chart" or error_body or ranking_chart
+                    text_pane.body_view != "chart" or error_body
                 )
                 pane_content = _local_pane_content(
                     chart,
@@ -8119,28 +8050,18 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     offset=(
                         text_pane.error_offset
                         if error_body
-                        else text_pane.ranking_viewport.display_offset
-                        if ranking_chart
                         else text_pane.text_offsets.get(text_pane.body_view, 0)
                     )
                     if text_pane is not None
                     else 0,
                     scrollable=scrollable,
-                    preserve_layout=ranking_chart,
-                    fixed_rows=fixed_ranking_rows,
+                    preserve_layout=False,
+                    fixed_rows=0,
                     return_metadata=True,
                 )
                 assert isinstance(pane_content, tuple)
                 content, offset, line_count, visible_rows = pane_content
-                if ranking_chart:
-                    assert isinstance(text_pane, (TuiChartPane, TuiCustomPane))
-                    maximum = max(0, line_count - visible_rows)
-                    text_pane.ranking_viewport = RankingViewport(
-                        min(maximum, max(0, text_pane.ranking_viewport.offset)),
-                        line_count,
-                        visible_rows,
-                    )
-                elif text_pane is not None and scrollable:
+                if text_pane is not None and scrollable:
                     if error_body:
                         text_pane.error_offset = offset
                         text_pane.error_line_count = line_count
@@ -8976,10 +8897,6 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 if dataset_modal is not None:
                     handle_dataset_modal(event)
                     paint()
-                    continue
-                if isinstance(event, WheelEvent):
-                    if handle_ranking_wheel(event):
-                        paint()
                     continue
                 if isinstance(event, MouseEvent):
                     if handle_pane_mouse(event):

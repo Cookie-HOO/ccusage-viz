@@ -70,7 +70,6 @@ from ccusage_viz.options import (
 from ccusage_viz.processing.summaries import SummaryQueryPlan
 from ccusage_viz.query.coordinator import QueryHandle
 from ccusage_viz.query.models import ProviderResult
-from ccusage_viz.ranking_scroll import RankingViewport, advance_ranking_wheel
 from ccusage_viz.render.palette import COLOR_SCHEMES
 from ccusage_viz.render.surfaces import (
     EMPTY_SURFACE_CONTROLS,
@@ -94,7 +93,7 @@ from ccusage_viz.text_viewport import (
     render_text_viewport,
     text_viewport_overflows,
 )
-from ccusage_viz.tui_input import KeyEvent, WheelEvent, read_event, tui_input_mode
+from ccusage_viz.tui_input import KeyEvent, read_event, tui_input_mode
 
 
 @dataclass(frozen=True, slots=True)
@@ -548,7 +547,6 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
     base_status = translator.text("status.loading")
     manual_refresh_operations: set[OperationToken] = set()
     copy_feedback = TransientFeedback()
-    ranking_viewport = RankingViewport()
 
     def historical_chart(config: StandaloneLaunch) -> HistoricalChartConfig:
         if isinstance(config.chart, (CustomChartConfig, MonitorConfig)):
@@ -608,7 +606,6 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
 
     def paint(*, force: bool = False) -> None:
         nonlocal last_chart, last_notices, last_snapshot, terminal_error, render_warning, last_size
-        nonlocal ranking_viewport
         size = terminal_size()
         last_size = (size.columns, size.lines)
         color = style_enabled()
@@ -673,18 +670,6 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
                 last_chart = rendered.chart
                 last_notices = rendered.notices
                 render_warning = None
-                if current.chart.kind == "ranking":
-                    viewport = render_text_viewport(
-                        last_chart,
-                        offset=ranking_viewport.display_offset,
-                        visible_rows=terminal.height,
-                    )
-                    ranking_viewport = RankingViewport(
-                        min(viewport.line_count - viewport.visible_rows, ranking_viewport.offset),
-                        viewport.line_count,
-                        viewport.visible_rows,
-                    )
-                    last_chart = viewport.body
         overflowing = text_viewport_overflows(
             line_count=text_line_counts.get(body_view, 0),
             visible_rows=text_visible_rows.get(body_view, 0),
@@ -1094,12 +1079,6 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
 
                 remaining = copy_feedback.remaining(now=time.monotonic())
                 event = read_event(decoder, min(0.05, remaining) if remaining is not None else 0.05)
-                if isinstance(event, WheelEvent) and body_view == "chart" and current.chart.kind == "ranking":
-                    before = ranking_viewport.display_offset
-                    ranking_viewport = advance_ranking_wheel(ranking_viewport, delta=event.delta)
-                    if ranking_viewport.display_offset != before:
-                        paint()
-                    continue
                 if not isinstance(event, KeyEvent):
                     continue
                 key = event.value
