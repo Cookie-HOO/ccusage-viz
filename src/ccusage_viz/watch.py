@@ -1103,6 +1103,14 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
                 if not isinstance(event, KeyEvent):
                     continue
                 key = event.value
+                if body_view == "chart" and current.chart.kind == "ranking" and key in {"\x1b[A", "\x1b[B"}:
+                    before = ranking_viewport.display_offset
+                    ranking_viewport = advance_ranking_wheel(
+                        ranking_viewport, delta=-1 if key == "\x1b[A" else 1
+                    )
+                    if ranking_viewport.display_offset != before:
+                        paint()
+                    continue
                 if key == "\x03":
                     raise KeyboardInterrupt
                 if body_view == "chart" and key == "r":
