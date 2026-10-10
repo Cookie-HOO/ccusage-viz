@@ -158,6 +158,15 @@ class QueryCoordinator:
             executor.shutdown(wait=True)
         ordered = tuple(result for result in results if result is not None)
         fragments = tuple(provider.normalize(result) for result in ordered)
+        supplemental = getattr(provider, "supplemental_queries", lambda _plan, _fragments: ())(
+            plan, fragments
+        )
+        for query in supplemental:
+            try:
+                fragments += (provider.normalize(self._run_one(run, provider, query)),)
+            except BaseException:
+                if query.required or run.cancelled.is_set() or self._shutdown.is_set():
+                    raise
         return provider.assemble(plan, fragments)
 
     def _run_one(self, run: _PlanRun, provider: Provider, query: PhysicalQuery) -> PhysicalResult:
