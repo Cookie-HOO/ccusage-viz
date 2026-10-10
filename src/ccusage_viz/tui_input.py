@@ -193,14 +193,7 @@ class InputDecoder:
         }:
             value, self.buffer = self.buffer[:3], self.buffer[3:]
             self.control_at = None
-            value = "\x1b[H" if value == "\x1bOH" else value
-            # Terminal key-repeat data can arrive after the key has been
-            # released. Keep only the latest same-direction arrow in this read
-            # buffer so stale repeats cannot continue a Ranking scroll.
-            if value in {"\x1b[A", "\x1b[B"}:
-                while self.buffer.startswith(value):
-                    self.buffer = self.buffer[len(value) :]
-            return KeyEvent(value)
+            return KeyEvent("\x1b[H" if value == "\x1bOH" else value)
         if self.buffer.startswith("\x1b[1~"):
             self.buffer = self.buffer[4:]
             self.control_at = None
