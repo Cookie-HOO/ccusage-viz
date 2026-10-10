@@ -1,40 +1,42 @@
 from ccusage_viz.ranking_scroll import (
+    RANKING_SCROLL_ACTIVE_SECONDS,
+    RankingScrollQueue,
     RankingViewport,
-    RankingWheelBurst,
-    advance_ranking_wheel,
-    advance_ranking_wheel_burst,
+    advance_ranking_scroll,
+    enqueue_ranking_scroll,
 )
 
 
-def test_wheel_moves_one_eighth_of_visible_rows_without_retained_motion() -> None:
+def test_active_scroll_displays_one_queued_row_per_frame() -> None:
     viewport = RankingViewport(total_rows=100, visible_rows=24)
-    moved = advance_ranking_wheel(viewport, delta=1)
+    queue = RankingScrollQueue()
+    for _ in range(5):
+        queue = enqueue_ranking_scroll(queue, delta=1, now=0.0)
 
-    assert moved.offset == 3
-    assert advance_ranking_wheel(moved, delta=-1).offset == 0
-    assert moved == advance_ranking_wheel(moved, delta=0)
-
-
-def test_same_direction_wheel_burst_accelerates_and_resets() -> None:
-    viewport = RankingViewport(total_rows=200, visible_rows=16)
-    burst = RankingWheelBurst()
     offsets = []
-    for now in (0.00, 0.01, 0.02, 0.03, 0.04):
-        viewport, burst = advance_ranking_wheel_burst(viewport, burst, delta=1, now=now)
+    for now in (0.0, 0.01, 0.02):
+        viewport, queue = advance_ranking_scroll(viewport, queue, now=now)
         offsets.append(viewport.offset)
 
-    assert offsets == [2, 6, 12, 20, 28]
-    viewport, burst = advance_ranking_wheel_burst(viewport, burst, delta=1, now=0.13)
-    assert viewport.offset == 30
-    viewport, burst = advance_ranking_wheel_burst(viewport, burst, delta=-1, now=0.13)
-    assert viewport.offset == 28
+    assert offsets == [1, 2, 3]
+    assert queue.pending_rows == 2
 
 
-def test_wheel_moves_at_least_one_row_and_clamps_at_boundaries() -> None:
-    viewport = RankingViewport(total_rows=12, visible_rows=3)
-    assert advance_ranking_wheel(viewport, delta=1).offset == 1
+def test_scroll_drops_pending_rows_when_input_becomes_idle() -> None:
+    viewport = RankingViewport(total_rows=100, visible_rows=24)
+    queue = enqueue_ranking_scroll(RankingScrollQueue(), delta=1, now=0.0)
+    queue = enqueue_ranking_scroll(queue, delta=1, now=0.0)
 
-    bottom = advance_ranking_wheel(RankingViewport(offset=8, total_rows=12, visible_rows=3), delta=1)
-    assert bottom.offset == 9
-    assert advance_ranking_wheel(bottom, delta=1) == bottom
-    assert advance_ranking_wheel(RankingViewport(total_rows=12, visible_rows=3), delta=-1).offset == 0
+    unchanged, stopped = advance_ranking_scroll(
+        viewport, queue, now=RANKING_SCROLL_ACTIVE_SECONDS
+    )
+    assert unchanged == viewport
+    assert stopped == RankingScrollQueue()
+
+
+def test_scroll_clamps_and_bounds_pending_rows() -> None:
+    viewport = RankingViewport(offset=9, total_rows=12, visible_rows=3)
+    queue = enqueue_ranking_scroll(RankingScrollQueue(), delta=1, now=0.0)
+    viewport, queue = advance_ranking_scroll(viewport, queue, now=0.0)
+    assert viewport.offset == 9
+    assert queue.pending_rows == 0

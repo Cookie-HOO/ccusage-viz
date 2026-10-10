@@ -234,10 +234,11 @@ from ccusage_viz.query.coordinator import QueryHandle
 from ccusage_viz.query.models import ProviderResult
 from ccusage_viz.query.runtime import QueryRuntime
 from ccusage_viz.ranking_scroll import (
+    RANKING_SCROLL_FRAME_SECONDS,
+    RankingScrollQueue,
     RankingViewport,
-    RankingWheelBurst,
-    advance_ranking_wheel,
-    advance_ranking_wheel_burst,
+    advance_ranking_scroll,
+    enqueue_ranking_scroll,
 )
 from ccusage_viz.render.base import (
     RenderAudit,
@@ -412,6 +413,17 @@ class RankingSearchState:
 
 
 @dataclass(slots=True)
+class RankingJumpState:
+    """A pending Dashboard rank ordinal awaiting its short input debounce."""
+
+    digits: str = ""
+    at: float | None = None
+
+
+_RANKING_JUMP_DEBOUNCE_SECONDS = 0.4
+
+
+@dataclass(slots=True)
 class TuiCustomPane:
     component: CustomHistoricalComponent | CustomMonitorComponent
     scheduler: FixedIntervalScheduler
@@ -437,7 +449,8 @@ class TuiCustomPane:
     ranking_search: RankingSearchState = field(default_factory=RankingSearchState)
     ranking_item_spacing: str = "compact"
     ranking_viewport: RankingViewport = field(default_factory=RankingViewport)
-    ranking_wheel_burst: RankingWheelBurst = field(default_factory=RankingWheelBurst)
+    ranking_scroll_queue: RankingScrollQueue = field(default_factory=RankingScrollQueue)
+    ranking_rank_offsets: tuple[int, ...] = ()
 
     @property
     def interval(self) -> float:
@@ -472,7 +485,8 @@ class TuiChartPane:
     attachment_enabled: bool = False
     ranking_search: RankingSearchState = field(default_factory=RankingSearchState)
     ranking_viewport: RankingViewport = field(default_factory=RankingViewport)
-    ranking_wheel_burst: RankingWheelBurst = field(default_factory=RankingWheelBurst)
+    ranking_scroll_queue: RankingScrollQueue = field(default_factory=RankingScrollQueue)
+    ranking_rank_offsets: tuple[int, ...] = ()
 
     @property
     def interval(self) -> float:
@@ -2311,6 +2325,19 @@ def _ranking_fixed_rows(chart: str) -> int:
         if prefix.isdecimal():
             return index
     return 0
+
+
+def _ranking_rank_offset(chart: str, *, rank: int) -> int:
+    """Return the scrollable rendered-row offset for a clamped rank ordinal."""
+    fixed_rows = _ranking_fixed_rows(chart)
+    rank_rows = [
+        index
+        for index, row in enumerate(chart.splitlines())
+        if row.lstrip().partition(" ")[0].isdecimal()
+    ]
+    if not rank_rows:
+        return 0
+    return max(0, rank_rows[min(max(1, rank), len(rank_rows)) - 1] - fixed_rows)
 
 
 def _custom_ranking_copyable_entries(
@@ -4518,7 +4545,7 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
     copy_feedback = TransientFeedback()
     last_size: tuple[int, int] | None = None
     ranking_viewport = RankingViewport()
-    ranking_wheel_burst = RankingWheelBurst()
+    ranking_scroll_queue = RankingScrollQueue()
 
     def record(status: str, detail: str) -> None:
         logs.append(CustomLogRecord(datetime.now().astimezone(), status, detail))
@@ -4700,7 +4727,7 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
 
     def paint(*, force: bool = False) -> None:
         nonlocal last_size, error_offset, error_line_count, error_visible_rows
-        nonlocal ranking_viewport, ranking_wheel_burst
+        nonlocal ranking_viewport, ranking_scroll_queue
         size = get_terminal_size()
         last_size = (size.columns, size.lines)
         terminal = Terminal(
@@ -5067,8 +5094,11 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
                 event = read_event(decoder, 0.05)
                 if isinstance(event, WheelEvent) and body_view == "chart" and current.kind == "ranking":
                     before = ranking_viewport.display_offset
-                    ranking_viewport, ranking_wheel_burst = advance_ranking_wheel_burst(
-                        ranking_viewport, ranking_wheel_burst, delta=event.delta, now=time.monotonic()
+                    ranking_scroll_queue = enqueue_ranking_scroll(
+                        ranking_scroll_queue, delta=event.delta, now=time.monotonic()
+                    )
+                    ranking_viewport, ranking_scroll_queue = advance_ranking_scroll(
+                        ranking_viewport, ranking_scroll_queue, now=time.monotonic()
                     )
                     if ranking_viewport.display_offset != before:
                         paint()
@@ -5078,10 +5108,12 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
                 key = event.value
                 if body_view == "chart" and current.kind == "ranking" and key in {"\x1b[A", "\x1b[B"}:
                     before = ranking_viewport.display_offset
-                    ranking_viewport = advance_ranking_wheel(
-                        ranking_viewport, delta=-1 if key == "\x1b[A" else 1
+                    ranking_scroll_queue = enqueue_ranking_scroll(
+                        ranking_scroll_queue, delta=-1 if key == "\x1b[A" else 1, now=time.monotonic()
                     )
-                    ranking_wheel_burst = RankingWheelBurst()
+                    ranking_viewport, ranking_scroll_queue = advance_ranking_scroll(
+                        ranking_viewport, ranking_scroll_queue, now=time.monotonic()
+                    )
                     if ranking_viewport.display_offset != before:
                         paint()
                     continue
@@ -5242,6 +5274,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
     custom_logs_pane: int | None = None
     help_overlay: HelpOverlayState | None = None
     help_was_active = False
+    ranking_jump = RankingJumpState()
     last_click: tuple[int, float] | None = None
     copy_feedback = TransientFeedback()
     manual_refresh_operations: set[OperationToken] = set()
@@ -5456,8 +5489,32 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         if adjustment_mode is not None and remaining is not None:
             adjustment_timer = AdjustmentIdleTimer.from_remaining(remaining)
 
+    def advance_ranking_scrolls(*, now: float) -> bool:
+        """Consume one queued row per active Ranking before the next input frame."""
+        changed = False
+        for pane in panes:
+            if not isinstance(pane, (TuiChartPane, TuiCustomPane)):
+                continue
+            before = pane.ranking_viewport.display_offset
+            pane.ranking_viewport, pane.ranking_scroll_queue = advance_ranking_scroll(
+                pane.ranking_viewport, pane.ranking_scroll_queue, now=now
+            )
+            changed = changed or pane.ranking_viewport.display_offset != before
+        return changed
+
+    def ranking_scroll_active() -> bool:
+        return any(
+            isinstance(pane, (TuiChartPane, TuiCustomPane))
+            and pane.ranking_scroll_queue.last_input_at is not None
+            for pane in panes
+        )
+
     def read_adjustment_event(decoder: InputDecoder) -> object:
         timeout = 0.1
+        if ranking_scroll_active():
+            timeout = min(timeout, RANKING_SCROLL_FRAME_SECONDS)
+        if ranking_jump.at is not None:
+            timeout = min(timeout, max(0.0, ranking_jump.at + _RANKING_JUMP_DEBOUNCE_SECONDS - time.monotonic()))
         if help_overlay is not None:
             timeout = min(timeout, help_overlay.timer.remaining())
         deadline = animation_deadline()
@@ -7652,9 +7709,32 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
 
         return record_mutation(("layout", "row-weight", slot.row), adjust_row)
 
+    def commit_ranking_jump() -> bool:
+        """Apply a pending rank ordinal to the focused Ranking viewport."""
+
+        nonlocal ranking_jump
+        if not ranking_jump.digits or focused is None or not isinstance(
+            panes[focused], (TuiChartPane, TuiCustomPane)
+        ):
+            ranking_jump = RankingJumpState()
+            return False
+        pane = panes[focused]
+        if not pane.ranking_rank_offsets:
+            ranking_jump = RankingJumpState()
+            return False
+        target = pane.ranking_rank_offsets[
+            min(int(ranking_jump.digits), len(pane.ranking_rank_offsets)) - 1
+        ]
+        before = pane.ranking_viewport.display_offset
+        pane.ranking_viewport = replace(pane.ranking_viewport, offset=target)
+        ranking_jump = RankingJumpState()
+        return pane.ranking_viewport.display_offset != before
+
     def handle_ranking_wheel(event: WheelEvent) -> bool:
         """Directly scroll the pointed Ranking without changing Dashboard focus."""
 
+        if ranking_jump.digits:
+            commit_ranking_jump()
         if body_view != "chart" or help_overlay is not None or dataset_modal is not None:
             return False
         size = get_terminal_size()
@@ -7684,8 +7764,11 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         if not historical_ranking or pane.ranking_viewport.maximum_offset == 0:
             return False
         before = pane.ranking_viewport.display_offset
-        pane.ranking_viewport, pane.ranking_wheel_burst = advance_ranking_wheel_burst(
-            pane.ranking_viewport, pane.ranking_wheel_burst, delta=event.delta, now=time.monotonic()
+        pane.ranking_scroll_queue = enqueue_ranking_scroll(
+            pane.ranking_scroll_queue, delta=event.delta, now=time.monotonic()
+        )
+        pane.ranking_viewport, pane.ranking_scroll_queue = advance_ranking_scroll(
+            pane.ranking_viewport, pane.ranking_scroll_queue, now=time.monotonic()
         )
         return pane.ranking_viewport.display_offset != before
 
@@ -8128,6 +8211,23 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     and _pane_display_options(text_pane).chart.kind == "ranking"
                     and text_pane.body_view == "chart"
                 )
+                if ranking_chart:
+                    assert isinstance(text_pane, (TuiChartPane, TuiCustomPane))
+                    fixed_before_prompt = _ranking_fixed_rows(chart)
+                    text_pane.ranking_rank_offsets = tuple(
+                        row - fixed_before_prompt
+                        for row, value in enumerate(chart.splitlines())
+                        if value.lstrip().partition(" ")[0].isdecimal()
+                    )
+                jump_prompt = (
+                    focused == index
+                    and ranking_chart
+                    and ranking_jump.digits
+                    and adjustment_mode is None
+                    and body_view == "chart"
+                )
+                if jump_prompt:
+                    chart = f"Jump to rank: {ranking_jump.digits}_\n{chart}"
                 fixed_ranking_rows = _ranking_fixed_rows(chart) if ranking_chart else 0
                 scrollable = text_pane is not None and (
                     text_pane.body_view != "chart" or error_body or ranking_chart
@@ -8933,6 +9033,13 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 if dataset_modal is not None:
                     changed = collect_dataset_modal() or changed
                 now = time.monotonic()
+                scroll_changed = advance_ranking_scrolls(now=now)
+                jump_due = (
+                    ranking_jump.at is not None
+                    and now - ranking_jump.at >= _RANKING_JUMP_DEBOUNCE_SECONDS
+                )
+                if jump_due:
+                    changed = commit_ranking_jump() or changed
                 if header_style != "hidden" and header.scheduler.due(now=now):
                     refresh_header(trigger=LifecycleTrigger.PERIODIC)
                     refresh_custom_summaries(trigger=LifecycleTrigger.PERIODIC)
@@ -8962,6 +9069,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 cursor_tick = overlay_editor is not None and int(now * 2) != int((now - 0.1) * 2)
                 if (
                     changed
+                    or scroll_changed
                     or feedback_expired
                     or copied_ranking_icon_expired
                     or cursor_tick
@@ -9197,6 +9305,21 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         continue
                 key = event.value if isinstance(event, KeyEvent) else None
                 if (
+                    isinstance(event, KeyEvent)
+                    and key.isdecimal()
+                    and body_view == "chart"
+                    and adjustment_mode is None
+                    and focused is not None
+                    and isinstance(panes[focused], (TuiChartPane, TuiCustomPane))
+                    and panes[focused].ranking_rank_offsets
+                ):
+                    ranking_jump.digits += key
+                    ranking_jump.at = time.monotonic()
+                    paint()
+                    continue
+                if ranking_jump.digits:
+                    commit_ranking_jump()
+                if (
                     key in {"\x1b[A", "\x1b[B"}
                     and body_view == "chart"
                     and focused is not None
@@ -9214,9 +9337,13 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     )
                     if historical_ranking:
                         before = pane.ranking_viewport.display_offset
-                        pane.ranking_viewport = advance_ranking_wheel(
-                            pane.ranking_viewport,
+                        pane.ranking_scroll_queue = enqueue_ranking_scroll(
+                            pane.ranking_scroll_queue,
                             delta=-1 if key == "\x1b[A" else 1,
+                            now=time.monotonic(),
+                        )
+                        pane.ranking_viewport, pane.ranking_scroll_queue = advance_ranking_scroll(
+                            pane.ranking_viewport, pane.ranking_scroll_queue, now=time.monotonic()
                         )
                         if pane.ranking_viewport.display_offset != before:
                             paint()
