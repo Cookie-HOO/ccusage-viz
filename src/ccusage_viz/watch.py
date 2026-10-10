@@ -70,7 +70,12 @@ from ccusage_viz.options import (
 from ccusage_viz.processing.summaries import SummaryQueryPlan
 from ccusage_viz.query.coordinator import QueryHandle
 from ccusage_viz.query.models import ProviderResult
-from ccusage_viz.ranking_scroll import RankingViewport, advance_ranking_wheel
+from ccusage_viz.ranking_scroll import (
+    RankingViewport,
+    RankingWheelBurst,
+    advance_ranking_wheel,
+    advance_ranking_wheel_burst,
+)
 from ccusage_viz.render.palette import COLOR_SCHEMES
 from ccusage_viz.render.surfaces import (
     EMPTY_SURFACE_CONTROLS,
@@ -549,6 +554,7 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
     manual_refresh_operations: set[OperationToken] = set()
     copy_feedback = TransientFeedback()
     ranking_viewport = RankingViewport()
+    ranking_wheel_burst = RankingWheelBurst()
 
     def historical_chart(config: StandaloneLaunch) -> HistoricalChartConfig:
         if isinstance(config.chart, (CustomChartConfig, MonitorConfig)):
@@ -608,7 +614,7 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
 
     def paint(*, force: bool = False) -> None:
         nonlocal last_chart, last_notices, last_snapshot, terminal_error, render_warning, last_size
-        nonlocal ranking_viewport
+        nonlocal ranking_viewport, ranking_wheel_burst
         size = terminal_size()
         last_size = (size.columns, size.lines)
         color = style_enabled()
@@ -1096,7 +1102,9 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
                 event = read_event(decoder, min(0.05, remaining) if remaining is not None else 0.05)
                 if isinstance(event, WheelEvent) and body_view == "chart" and current.chart.kind == "ranking":
                     before = ranking_viewport.display_offset
-                    ranking_viewport = advance_ranking_wheel(ranking_viewport, delta=event.delta)
+                    ranking_viewport, ranking_wheel_burst = advance_ranking_wheel_burst(
+                        ranking_viewport, ranking_wheel_burst, delta=event.delta, now=time.monotonic()
+                    )
                     if ranking_viewport.display_offset != before:
                         paint()
                     continue
@@ -1108,6 +1116,7 @@ def run_watch(options: StandaloneLaunch, translator: Translator) -> int:
                     ranking_viewport = advance_ranking_wheel(
                         ranking_viewport, delta=-1 if key == "\x1b[A" else 1
                     )
+                    ranking_wheel_burst = RankingWheelBurst()
                     if ranking_viewport.display_offset != before:
                         paint()
                     continue

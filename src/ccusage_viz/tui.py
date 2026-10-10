@@ -233,7 +233,12 @@ from ccusage_viz.processing.summaries import (
 from ccusage_viz.query.coordinator import QueryHandle
 from ccusage_viz.query.models import ProviderResult
 from ccusage_viz.query.runtime import QueryRuntime
-from ccusage_viz.ranking_scroll import RankingViewport, advance_ranking_wheel
+from ccusage_viz.ranking_scroll import (
+    RankingViewport,
+    RankingWheelBurst,
+    advance_ranking_wheel,
+    advance_ranking_wheel_burst,
+)
 from ccusage_viz.render.base import (
     RenderAudit,
     RenderContext,
@@ -432,6 +437,7 @@ class TuiCustomPane:
     ranking_search: RankingSearchState = field(default_factory=RankingSearchState)
     ranking_item_spacing: str = "compact"
     ranking_viewport: RankingViewport = field(default_factory=RankingViewport)
+    ranking_wheel_burst: RankingWheelBurst = field(default_factory=RankingWheelBurst)
 
     @property
     def interval(self) -> float:
@@ -466,6 +472,7 @@ class TuiChartPane:
     attachment_enabled: bool = False
     ranking_search: RankingSearchState = field(default_factory=RankingSearchState)
     ranking_viewport: RankingViewport = field(default_factory=RankingViewport)
+    ranking_wheel_burst: RankingWheelBurst = field(default_factory=RankingWheelBurst)
 
     @property
     def interval(self) -> float:
@@ -4511,6 +4518,7 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
     copy_feedback = TransientFeedback()
     last_size: tuple[int, int] | None = None
     ranking_viewport = RankingViewport()
+    ranking_wheel_burst = RankingWheelBurst()
 
     def record(status: str, detail: str) -> None:
         logs.append(CustomLogRecord(datetime.now().astimezone(), status, detail))
@@ -4692,7 +4700,7 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
 
     def paint(*, force: bool = False) -> None:
         nonlocal last_size, error_offset, error_line_count, error_visible_rows
-        nonlocal ranking_viewport
+        nonlocal ranking_viewport, ranking_wheel_burst
         size = get_terminal_size()
         last_size = (size.columns, size.lines)
         terminal = Terminal(
@@ -5059,7 +5067,9 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
                 event = read_event(decoder, 0.05)
                 if isinstance(event, WheelEvent) and body_view == "chart" and current.kind == "ranking":
                     before = ranking_viewport.display_offset
-                    ranking_viewport = advance_ranking_wheel(ranking_viewport, delta=event.delta)
+                    ranking_viewport, ranking_wheel_burst = advance_ranking_wheel_burst(
+                        ranking_viewport, ranking_wheel_burst, delta=event.delta, now=time.monotonic()
+                    )
                     if ranking_viewport.display_offset != before:
                         paint()
                     continue
@@ -5071,6 +5081,7 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
                     ranking_viewport = advance_ranking_wheel(
                         ranking_viewport, delta=-1 if key == "\x1b[A" else 1
                     )
+                    ranking_wheel_burst = RankingWheelBurst()
                     if ranking_viewport.display_offset != before:
                         paint()
                     continue
@@ -7673,7 +7684,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         if not historical_ranking or pane.ranking_viewport.maximum_offset == 0:
             return False
         before = pane.ranking_viewport.display_offset
-        pane.ranking_viewport = advance_ranking_wheel(pane.ranking_viewport, delta=event.delta)
+        pane.ranking_viewport, pane.ranking_wheel_burst = advance_ranking_wheel_burst(
+            pane.ranking_viewport, pane.ranking_wheel_burst, delta=event.delta, now=time.monotonic()
+        )
         return pane.ranking_viewport.display_offset != before
 
     def handle_pane_mouse(event: MouseEvent) -> bool:
