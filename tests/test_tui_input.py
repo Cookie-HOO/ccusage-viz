@@ -3,13 +3,13 @@ from io import StringIO
 import pytest
 
 import ccusage_viz.tui_input as tui_input_module
-from ccusage_viz.tui_input import InputDecoder, KeyEvent, MouseEvent, PasteEvent
+from ccusage_viz.tui_input import InputDecoder, KeyEvent, MouseEvent, PasteEvent, WheelEvent
 
 
 def test_tui_input_decodes_keys_and_fragmented_mouse_press() -> None:
     decoder = InputDecoder()
     decoder.feed("r")
-    assert decoder.next() == KeyEvent("r")
+    assert decoder.next(now=0.0) == KeyEvent("r")
     decoder.feed("\x1b[<0;20")
     assert decoder.next() is None
     decoder.feed(";5M")
@@ -27,20 +27,20 @@ def test_tui_input_preserves_control_keys() -> None:
     assert decoder.next() == KeyEvent("\x19")
 
 
-def test_tui_input_ignores_trackpad_wheel_reports() -> None:
+def test_tui_input_coalesces_a_buffered_trackpad_wheel_burst_to_its_latest_report() -> None:
     decoder = InputDecoder()
-    decoder.feed("\x1b[<64;20;5M\x1b[<65;20;5M")
+    decoder.feed("\x1b[<64;20;5M\x1b[<65;20;5M\x1b[<64;22;7M")
 
-    assert decoder.next() is None
+    assert decoder.next() == WheelEvent(-1, 22, 7)
     assert decoder.buffer == ""
 
 
-def test_tui_input_drains_wheel_burst_before_next_key() -> None:
+def test_tui_input_does_not_coalesce_across_a_non_wheel_mouse_report() -> None:
     decoder = InputDecoder()
-    decoder.feed("\x1b[<64;20;5M" * 400 + "r")
+    decoder.feed("\x1b[<65;20;5M\x1b[<0;20;5M")
 
-    assert decoder.next() == KeyEvent("r")
-    assert decoder.buffer == ""
+    assert decoder.next() == WheelEvent(1, 20, 5)
+    assert decoder.next() == MouseEvent(0, 20, 5, True, 0)
 
 
 def test_tui_input_decodes_bracketed_paste_as_one_event() -> None:
@@ -100,7 +100,7 @@ def test_tui_input_mode_disables_mouse_and_restores_terminal_on_error(
         def fileno(self) -> int:
             return 7
 
-    previous = [termios.ICRNL, 0, 0, termios.ISIG, 0, 0, 0]
+    previous = [termios.ICRNL | termios.IXON, 0, 0, termios.ISIG, 0, 0, 0]
     attributes = list(previous)
     output = StringIO()
     tcset_calls: list[tuple[object, ...]] = []
@@ -129,6 +129,6 @@ def test_tui_input_mode_disables_mouse_and_restores_terminal_on_error(
     assert output.getvalue() == tui_input_module._MOUSE_ENABLE + tui_input_module._MOUSE_DISABLE
     assert setcbreak_fds == [7]
     assert tcset_calls[0][0:2] == (7, termios.TCSADRAIN)
-    assert tcset_calls[0][2][0] == previous[0] & ~termios.ICRNL
+    assert tcset_calls[0][2][0] == previous[0] & ~(termios.ICRNL | termios.IXON)
     assert tcset_calls[0][2][3] == previous[3] & ~termios.ISIG
     assert tcset_calls[-1] == (7, termios.TCSADRAIN, previous)

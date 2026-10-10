@@ -25,11 +25,11 @@ It does not change keyboard scrolling, non-Ranking charts, monitor rankings, cli
 
 ## Input Contract
 
-`InputDecoder` will decode one complete SGR wheel report into one `WheelEvent` with `delta` equal to `-1` or `1`.
+`InputDecoder` decodes every complete SGR wheel report as a signed unit (`-1` or `1`). `read_event()` dispatches the first report without waiting for a merge window, then consumes any already-buffered consecutive wheel reports into the same immediate wheel batch. The batch preserves each signed unit so acceleration is calculated exactly per physical report.
 
-`read_event()` will not drain already-readable terminal input to combine wheel reports. It reads and dispatches the currently available terminal delivery, leaving any subsequent reports to later input-loop iterations. Wheel reports do not use ordinary input backlog pacing, so the initial report is never delayed by overload throttling.
+The first report updates and redraws the viewport immediately. Later reports already available in that same terminal delivery update the target offset but do not require intermediate frames: the host paints at most once for the batch and directly displays its final target offset. If more reports arrive after that paint, the next read creates a new immediate batch.
 
-Reports that the terminal itself has already queued may still be handled after the user stops touching a trackpad. They are actual terminal input, not application-generated motion. The application must not retain a delta, deadline, timer, or animation target that produces additional movement after the final delivered report.
+This is input-frame coalescing, not synthetic inertia. It has no deadline, timer, animation, or deferred target playback. When terminal reports end, there is no pending application displacement or wheel repaint. It also prevents a high-rate trackpad from building a queue of full Dashboard redraws that plays after the hand stops.
 
 Malformed controls, fragmented controls, paste atomicity, ordinary keys, and mouse-click decoding retain their current behavior.
 
@@ -59,11 +59,11 @@ Wheel handling changes only `chart_offset` and ephemeral scroll-policy state. It
 
 ## Rendering and Performance
 
-After a changed offset, the host performs one synchronous presentation repaint. It uses the already accepted chart content and viewport metadata to slice the new visible rows; it performs no new projection/data acquisition because of scrolling.
+After a changed batch target, the host performs one synchronous presentation repaint. It uses the already accepted chart content and viewport metadata to slice the final visible rows; it performs no new projection/data acquisition because of scrolling.
 
 Dashboard continues to compose a complete terminal frame so borders, headers, focus indicators, and pane geometry remain correct. A wheel-triggered frame must not invoke refresh/query/provider paths. No periodic wheel repaint, deferred motion, or catch-up loop is introduced. If a wheel event cannot change the offset, no repaint occurs.
 
-Each delivered report can therefore cause at most one immediate redraw. This favors first-event responsiveness and exact stop behavior over batching; it avoids the previous merged tail that looked like inertia and avoids background redraw pressure after input stops.
+Each terminal read batch causes at most one immediate redraw. The first report never waits for a timer; under high-rate input, stale intermediate frames are discarded and the renderer jumps directly to the latest target. This avoids the previous merged tail and prevents background redraw pressure after input stops.
 
 ## Tests
 

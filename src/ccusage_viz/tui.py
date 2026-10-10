@@ -4,6 +4,7 @@ from __future__ import annotations
 import shlex
 import sys
 import time
+import webbrowser
 from collections.abc import Callable, Hashable
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
@@ -168,6 +169,7 @@ from ccusage_viz.formatting import (
     clip_width,
     display_width,
     pad_width,
+    strip_ansi,
     truncate_width,
     wrap_width,
 )
@@ -231,6 +233,7 @@ from ccusage_viz.processing.summaries import (
 from ccusage_viz.query.coordinator import QueryHandle
 from ccusage_viz.query.models import ProviderResult
 from ccusage_viz.query.runtime import QueryRuntime
+from ccusage_viz.ranking_scroll import RankingViewport, advance_ranking_wheel
 from ccusage_viz.render.base import (
     RenderAudit,
     RenderContext,
@@ -246,6 +249,7 @@ from ccusage_viz.render.custom import (
 from ccusage_viz.render.custom_monitor import render_custom_monitor
 from ccusage_viz.render.filters import active_filter_summary
 from ccusage_viz.render.palette import COLOR_SCHEMES, get_color_scheme
+from ccusage_viz.render.ranking_presentation import copyable_description_text
 from ccusage_viz.render.summary import render_custom_metrics, render_summary
 from ccusage_viz.render.surfaces import (
     EMPTY_SURFACE_CONTROLS,
@@ -287,6 +291,7 @@ from ccusage_viz.tui_input import (
     KeyEvent,
     MouseEvent,
     PasteEvent,
+    WheelEvent,
     read_event,
     tui_input_mode,
 )
@@ -393,6 +398,15 @@ class CustomLogRecord:
 
 
 @dataclass(slots=True)
+class RankingSearchState:
+    """Ephemeral local filter state for one Dashboard historical Ranking pane."""
+
+    query: str = ""
+    editing: bool = False
+    density_notice: str | None = None
+
+
+@dataclass(slots=True)
 class TuiCustomPane:
     component: CustomHistoricalComponent | CustomMonitorComponent
     scheduler: FixedIntervalScheduler
@@ -412,6 +426,12 @@ class TuiCustomPane:
     attachment: AnimationSessionState | None = None
     attachment_renderer: AnimationRenderer | None = None
     attachment_enabled: bool = False
+    ranking_copy_rows: dict[int, tuple[str, int, int | None]] = field(default_factory=dict)
+    copied_ranking_entry_id: str | None = None
+    copied_ranking_until: float = 0.0
+    ranking_search: RankingSearchState = field(default_factory=RankingSearchState)
+    ranking_item_spacing: str = "compact"
+    ranking_viewport: RankingViewport = field(default_factory=RankingViewport)
 
     @property
     def interval(self) -> float:
@@ -444,6 +464,8 @@ class TuiChartPane:
     attachment: AnimationSessionState | None = None
     attachment_renderer: AnimationRenderer | None = None
     attachment_enabled: bool = False
+    ranking_search: RankingSearchState = field(default_factory=RankingSearchState)
+    ranking_viewport: RankingViewport = field(default_factory=RankingViewport)
 
     @property
     def interval(self) -> float:
@@ -1342,14 +1364,16 @@ def _new_pane(
                 attachment.set_idle_animation_requested(True, started_at)
                 attachment.set_visible(False, started_at)
                 attachment_renderer = AnimationRenderer()
+            interval = (
+                options.host.sampling_interval
+                if pane_config.chart.kind == "monitor"
+                else options.host.refresh_interval
+            )
+            if isinstance(component, CustomHistoricalComponent) and component.capability is not None:
+                interval = component.capability.refresh_interval_seconds or interval
             pane = TuiCustomPane(
                 component,
-                FixedIntervalScheduler(
-                    options.host.sampling_interval
-                    if pane_config.chart.kind == "monitor"
-                    else options.host.refresh_interval,
-                    now=started_at,
-                ),
+                FixedIntervalScheduler(interval, now=started_at),
                 LifecycleOperation(owner_id),
                 options.process,
                 None
@@ -1783,6 +1807,12 @@ def _render_custom_projection(
     surface: HistoricalPresentationSurface,
     summary: CustomDashboardSummary | None = None,
     controls: SurfaceControls = EMPTY_SURFACE_CONTROLS,
+    search_query: str = "",
+    search_editing: bool = False,
+    copied_entry_id: str | None = None,
+    item_spacing: str = "compact",
+    entry_offset: int = 0,
+    entry_limit: int | None = None,
 ) -> PaneRender:
     context = _custom_render_context(
         config,
@@ -1828,7 +1858,15 @@ def _render_custom_projection(
                 reserved_summary_rows=len(summary_render.splitlines()),
             )
     rendered = render_custom_projection(
-        replace(projection, config=config, presentation=projection.presentation), context
+        replace(projection, config=config, presentation=projection.presentation),
+        context,
+        descriptions_visible=config.presentation.density in {"full", "detailed"},
+        search_query=search_query,
+        search_editing=search_editing,
+        show_visible_count=config.kind == "ranking",
+        copied_entry_id=copied_entry_id,
+        entry_offset=entry_offset,
+        entry_limit=entry_limit,
     )
     if summary_render:
         rendered = "\n".join((summary_render, rendered))
@@ -1845,6 +1883,8 @@ def _pane_render(
     *,
     dashboard: DashboardLaunch | None = None,
     defer_animation_overlay: bool = False,
+    ranking_entry_offset: int = 0,
+    ranking_entry_limit: int | None = None,
 ) -> PaneRender:
     if isinstance(pane, TuiEmptyPane):
         return PaneRender(
@@ -1936,7 +1976,40 @@ def _pane_render(
             pending=component.is_pending or pane.lifecycle.submission is not None,
             surface=dashboard_pane_surface((component.accepted_config or component.candidate).kind),
             summary=pane.summary,
+            search_query=(
+                pane.ranking_search.query
+                if component.candidate.kind == "ranking" and pane.body_view == "chart"
+                else ""
+            ),
+            search_editing=(
+                pane.ranking_search.editing
+                if component.candidate.kind == "ranking" and pane.body_view == "chart"
+                else False
+            ),
+            copied_entry_id=(
+                pane.copied_ranking_entry_id
+                if pane.copied_ranking_until > time.monotonic()
+                else None
+            ),
+            item_spacing=pane.ranking_item_spacing,
+            entry_offset=ranking_entry_offset,
+            entry_limit=ranking_entry_limit,
         )
+        if (
+            component.candidate.kind == "ranking"
+            and pane.body_view == "chart"
+            and pane.ranking_item_spacing != "compact"
+        ):
+            rendered = PaneRender(
+                _apply_custom_ranking_spacing(
+                    rendered.chart,
+                    mode=pane.ranking_item_spacing,
+                    width=terminal.width,
+                    ascii=terminal.ascii,
+                ),
+                rendered.notices,
+                rendered.error_body,
+            )
         if component.error is not None:
             return PaneRender(
                 rendered.chart, (format_error(component.error, translator, color=False),)
@@ -2032,6 +2105,13 @@ def _pane_render(
                 normalize_titles=True,
                 interval=pane.scheduler.interval,
                 refreshing=pane.lifecycle.submission is not None,
+                ranking_search_query=(
+                    pane.ranking_search.query if active.chart.kind == "ranking" else ""
+                ),
+                ranking_search_editing=(
+                    pane.ranking_search.editing if active.chart.kind == "ranking" else False
+                ),
+                ranking_show_visible_count=active.chart.kind == "ranking",
             )
             pane.last_render = PaneRender(rendered.chart, (*rendered.notices, *recovery))
             return pane.last_render
@@ -2112,6 +2192,13 @@ def _pane_render(
                 normalize_titles=True,
                 interval=pane.scheduler.interval,
                 refreshing=pane.lifecycle.submission is not None,
+                ranking_search_query=(
+                    pane.ranking_search.query if active.chart.kind == "ranking" else ""
+                ),
+                ranking_search_editing=(
+                    pane.ranking_search.editing if active.chart.kind == "ranking" else False
+                ),
+                ranking_show_visible_count=active.chart.kind == "ranking",
             )
             candidate = PaneRender(rendered.chart, rendered.notices)
     except UsageError as exc:
@@ -2210,6 +2297,74 @@ def _update_custom_monitor_attachment_activity(
         attachment.activity_label = last_activity_label(translator, wall)
 
 
+def _ranking_fixed_rows(chart: str) -> int:
+    """Keep Ranking chrome above the first numbered row while data scrolls."""
+    for index, row in enumerate(chart.splitlines()):
+        prefix, _, _ = row.lstrip().partition(" ")
+        if prefix.isdecimal():
+            return index
+    return 0
+
+
+def _custom_ranking_copyable_entries(
+    pane: TuiCustomPane, translator: Translator
+) -> tuple[tuple[int, str, str, str | None, str | None], ...]:
+    """Return visible concrete Dataset Ranking facts in chart order."""
+    component = pane.component
+    if not isinstance(component, CustomHistoricalComponent) or component.model is None:
+        return ()
+    query = pane.ranking_search.query.casefold()
+    entries = []
+    for rank, series in enumerate(component.model.series, start=1):
+        if series.is_other:
+            continue
+        label = series.label.zh_cn if translator.language == "zh" else series.label.en
+        description = (
+            None
+            if series.description is None
+            else series.description.zh_cn
+            if translator.language == "zh"
+            else series.description.en
+        )
+        search_text = f"{label} {copyable_description_text(description)}" if description else label
+        if query and query not in search_text.casefold():
+            continue
+        entries.append((rank, series.id, label, description, series.link))
+    return tuple(entries)
+
+
+def _apply_custom_ranking_spacing(chart: str, *, mode: str, width: int, ascii: bool) -> str:
+    """Insert presentation-only separators before numbered Custom Ranking rows."""
+
+    if mode == "compact":
+        return chart
+    separator = (
+        ""
+        if mode == "space"
+        else ("-" if ascii else "─") * width
+        if mode == "line"
+        else ("- " * max(1, width // 2)).rstrip()
+    )
+    rows: list[str] = []
+    for row in chart.splitlines():
+        prefix, _, _ = strip_ansi(row).lstrip().partition(" ")
+        if prefix.isdecimal() and rows:
+            rows.append(separator)
+        rows.append(row)
+    return "\n".join(rows)
+
+
+def _custom_ranking_clipboard_text(
+    label: str, description: str | None, project_link: str | None
+) -> str:
+    """Build one project copy payload, preserving every user-visible link target."""
+    return "\n".join(
+        part
+        for part in (label, copyable_description_text(description or ""), project_link)
+        if part
+    )
+
+
 def _local_pane_content(
     chart: str,
     notices: tuple[str, ...],
@@ -2218,14 +2373,29 @@ def _local_pane_content(
     width: int = 80,
     offset: int = 0,
     scrollable: bool = False,
+    preserve_layout: bool = False,
+    fixed_rows: int = 0,
     return_metadata: bool = False,
 ) -> str | tuple[str, int, int, int]:
     """Keep notices fixed below an optionally scrollable pane body."""
     notice_rows = min(len(notices), max(0, height - 3))
     chart_height = max(0, height - notice_rows)
-    rows = wrap_text_rows(chart, width=width) if scrollable else chart
-    viewport = render_text_viewport(rows, offset=offset, visible_rows=chart_height)
-    chart_lines = (viewport.body if scrollable else chart).splitlines()[:chart_height]
+    # Chart renderers already fit and wrap their own rows. Re-wrapping a
+    # Ranking as prose collapses intentional padding and destroys its columns.
+    rows = (
+        tuple(chart.splitlines())
+        if scrollable and preserve_layout
+        else (wrap_text_rows(chart, width=width) if scrollable else chart)
+    )
+    fixed_rows = min(max(0, fixed_rows), len(rows), chart_height)
+    fixed = rows[:fixed_rows]
+    viewport = render_text_viewport(
+        rows[fixed_rows:], offset=offset, visible_rows=max(0, chart_height - fixed_rows)
+    )
+    chart_lines = [
+        *fixed,
+        *((viewport.body if scrollable else chart).splitlines()[: chart_height - fixed_rows]),
+    ]
     chart_lines.extend("" for _ in range(chart_height - len(chart_lines)))
     content = "\n".join((*chart_lines, *notices[:notice_rows]))
     if not return_metadata:
@@ -2300,7 +2470,7 @@ _PANE_ADVANCED_ACTIONS = {
     "monitor": (("l", "legend"),),
 }
 _COMMON_PANE_QUICK_ACTIONS = (
-    ("d", "density"),
+    ("d/D", "density"),
     ("t/T", "theme"),
     ("s/S", "style"),
 )
@@ -2332,6 +2502,27 @@ def _custom_capability(pane: TuiCustomPane) -> CustomChartCapability | V2Monitor
     """Return the active Dashboard custom pane capability."""
 
     return _custom_capability_for_component(pane.component)
+
+
+def _ranking_search_eligible(pane: TuiPane) -> bool:
+    """Whether a pane can own an in-memory historical Ranking search query."""
+    if not isinstance(pane, (TuiChartPane, TuiCustomPane)) or pane.body_view != "chart":
+        return False
+    if isinstance(pane, TuiCustomPane):
+        return (
+            isinstance(pane.component, CustomHistoricalComponent)
+            and pane.component.candidate.kind == "ranking"
+        )
+    return (
+        isinstance(pane.component, HistoricalChartComponent)
+        and pane.component.candidate.chart.kind == "ranking"
+    )
+
+
+def _finish_ranking_search_editing(pane: TuiPane | None) -> None:
+    """Leave a pane-local Ranking search editor without clearing its filter."""
+    if isinstance(pane, (TuiChartPane, TuiCustomPane)):
+        pane.ranking_search.editing = False
 
 
 def _custom_top_refresh_required(
@@ -2369,7 +2560,9 @@ def _custom_top_limit_notice(pane: TuiCustomPane, translator: Translator) -> tup
     return (translator.text("status.custom_top_source_limit", max=capability.max_items),)
 
 
-def _custom_runtime_filters(component: CustomHistoricalComponent | CustomMonitorComponent) -> tuple[CustomFilter, ...]:
+def _custom_runtime_filters(
+    component: CustomHistoricalComponent | CustomMonitorComponent,
+) -> tuple[CustomFilter, ...]:
     """Return only controls accepted with the current Dataset query snapshot."""
 
     runtime = component.runtime
@@ -2403,6 +2596,8 @@ def _custom_pane_adjustment_bindings(pane: TuiCustomPane, page: str) -> tuple[tu
         return tuple(actions)
     if page == "quick":
         actions: list[tuple[str, str]] = [("p/P", "period")]
+        if chart.kind == "ranking":
+            actions.append(("g/G", "spacing"))
         if capability is not None:
             if len(capability.granularities) > 1:
                 actions.append(("g/G", "granularity"))
@@ -2410,7 +2605,7 @@ def _custom_pane_adjustment_bindings(pane: TuiCustomPane, page: str) -> tuple[tu
                 actions.append(("b/B", "group"))
             if _custom_runtime_filters(pane.component):
                 actions.append(("f", "filters"))
-        if chart.group_by is not None:
+        if chart.group_by is not None or chart.kind == "ranking":
             actions.append(("+/-", "top"))
         return (*actions, *_COMMON_PANE_QUICK_ACTIONS)
 
@@ -2442,7 +2637,7 @@ def _adjust_custom_monitor_chart(
                 ),
             ),
         )
-    if key in {"d", "t", "T", "l"}:
+    if key in {"d", "D", "t", "T", "l"}:
         return adjust_custom_chart(chart, key)
     return chart
 
@@ -2466,12 +2661,16 @@ def _custom_pane_adjustment_state(pane: TuiCustomPane, page: str, translator: Tr
     chart = pane.component.candidate
     if page == "quick":
         values = [
-            f"{chart.kind} · {chart.presentation.density} · {chart.presentation.theme} · "
-            f"{chart.presentation.style} · chart",
+            chart.kind,
+            chart.presentation.density,
+            chart.presentation.theme,
+            chart.presentation.style,
         ]
         if chart.group_by is not None:
             values.append(f"Group {chart.group_by}")
-            values.append(f"Top {chart.top or 0}")
+        if chart.group_by is not None or chart.kind == "ranking":
+            values.append(f"Top {chart.top or translator.text('label.all')}")
+        values.append("chart")
         settings = " · ".join(values)
     else:
         settings = []
@@ -3016,10 +3215,21 @@ def _adjustment_footer(
 def _pane_adjustment_state(pane: TuiChartPane, page: str, translator: Translator) -> str:
     chart = _pane_display_options(pane).chart
     if page == "quick":
-        settings = (
-            f"{chart.kind} · {chart.presentation.density} · {chart.presentation.theme} · "
-            f"{chart.presentation.style} · {pane.body_view}"
-        )
+        settings_parts = [
+            chart.kind,
+            chart.presentation.density,
+            chart.presentation.theme,
+            chart.presentation.style,
+        ]
+        if isinstance(chart, (TimelineConfig, StackConfig, RankingConfig, MonitorConfig)):
+            settings_parts.extend(
+                (
+                    f"Group {chart.by or translator.text('label.all')}",
+                    f"Top {chart.top or translator.text('label.all')}",
+                )
+            )
+        settings_parts.append(pane.body_view)
+        settings = " · ".join(settings_parts)
     else:
         advanced: list[str] = []
         if isinstance(chart, (TimelineConfig, StackConfig, RankingConfig)):
@@ -4050,13 +4260,13 @@ def _custom_standalone_actions(
             actions.append(("b/B", "group"))
         if component.runtime is not None and component.runtime.filters:
             actions.append(("f", "filters"))
-    if chart.group_by is not None:
+    if chart.group_by is not None or chart.kind == "ranking":
         actions.extend((("+/-", "top"), ("o", "other")))
     if chart.kind in {"timeline", "stack"}:
         actions.extend((("k", "weekdays"), ("l", "legend")))
     actions.extend(
         (
-            ("d", "density"),
+            ("d/D", "density"),
             ("t/T", "theme"),
             ("s/S", "style"),
             ("L", "custom_logs"),
@@ -4255,6 +4465,7 @@ def _run_custom_standalone_adjustment(
                         _custom_runtime_filters(component),
                         translator,
                         width=size.columns,
+                        height=max(0, size.lines - 2),
                         paint=paint_filter_editor,
                         read_key=lambda: read_key(min(0.1, timer.remaining())),
                     )
@@ -4299,6 +4510,7 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
     logs: list[CustomLogRecord] = []
     copy_feedback = TransientFeedback()
     last_size: tuple[int, int] | None = None
+    ranking_viewport = RankingViewport()
 
     def record(status: str, detail: str) -> None:
         logs.append(CustomLogRecord(datetime.now().astimezone(), status, detail))
@@ -4460,7 +4672,7 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
     def controls() -> str:
         if body_view == "chart" and controls_hidden:
             return ""
-        return translator.text(
+        base = translator.text(
             {
                 "chart": "status.keys",
                 "command": "status.command_keys",
@@ -4476,9 +4688,11 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
             )
             else "",
         )
+        return base
 
     def paint(*, force: bool = False) -> None:
         nonlocal last_size, error_offset, error_line_count, error_visible_rows
+        nonlocal ranking_viewport
         size = get_terminal_size()
         last_size = (size.columns, size.lines)
         terminal = Terminal(
@@ -4554,7 +4768,17 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
                 else translator.text("status.loading")
             )
         error_body = body_view == "chart" and provisional.error_body
-        if error_body:
+        if body_view == "chart" and current.kind == "ranking" and not error_body:
+            viewport = render_text_viewport(
+                body, offset=ranking_viewport.display_offset, visible_rows=body_height
+            )
+            ranking_viewport = RankingViewport(
+                min(viewport.line_count - viewport.visible_rows, ranking_viewport.offset),
+                viewport.line_count,
+                viewport.visible_rows,
+            )
+            body = viewport.body
+        elif error_body:
             body_rows = wrap_text_rows(body, width=size.columns)
             error_visible_rows = body_height
             error_line_count = len(body_rows)
@@ -4621,6 +4845,15 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
                                 data_affecting=False,
                             )
                             component.set_capability(descriptor.capabilities.charts[current.kind])
+                            if (
+                                options.was_explicit("interval")
+                                and component.capability is not None
+                                and component.capability.refresh_interval_seconds is not None
+                            ):
+                                raise UsageError(
+                                    "error.arguments",
+                                    detail="--interval cannot override a Dataset fixed refresh interval",
+                                )
                         elif isinstance(response, CustomProbeResponse):
                             component.configure(
                                 apply_custom_probe_defaults(
@@ -4633,6 +4866,15 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
                             component.set_capability(
                                 response.descriptor.capabilities.charts[current.kind]
                             )
+                            if (
+                                options.was_explicit("interval")
+                                and component.capability is not None
+                                and component.capability.refresh_interval_seconds is not None
+                            ):
+                                raise UsageError(
+                                    "error.arguments",
+                                    detail="--interval cannot override a Dataset fixed refresh interval",
+                                )
                         else:
                             raise TypeError(
                                 "custom provider result does not contain a probe response"
@@ -4699,7 +4941,7 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
                 return 0
             finally:
                 lifecycle.abandon(operation)
-        with input_mode():
+        with tui_input_mode() as decoder:
             paint()
             while True:
                 size = get_terminal_size()
@@ -4814,7 +5056,16 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
                         lifecycle.abandon(operation)
                     paint()
                     lifecycle.start_ready(now=time.monotonic(), start=start)
-                key = read_key(0.05)
+                event = read_event(decoder, 0.05)
+                if isinstance(event, WheelEvent) and body_view == "chart" and current.kind == "ranking":
+                    before = ranking_viewport.display_offset
+                    ranking_viewport = advance_ranking_wheel(ranking_viewport, delta=event.delta)
+                    if ranking_viewport.display_offset != before:
+                        paint()
+                    continue
+                if not isinstance(event, KeyEvent):
+                    continue
+                key = event.value
                 if key == "\x03":
                     raise KeyboardInterrupt
                 error_body = (
@@ -4958,7 +5209,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
     adjustment_mode: str | None = None
     adjustment_page = "quick"
     adjustment_timer: AdjustmentIdleTimer | None = None
-    browse_controls_hidden = False
+    controls_hidden = False
     body_view: DashboardBodyView = "chart"
     dashboard_text_offset = 0
     dashboard_text_line_count = 0
@@ -5016,8 +5267,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
 
     def preset_catalog() -> PresetCatalogSnapshot:
         entries = [
-            PresetCatalogEntry(f"builtin:{name}", name, "builtin")
-            for name in DASHBOARD_PRESETS
+            PresetCatalogEntry(f"builtin:{name}", name, "builtin") for name in DASHBOARD_PRESETS
         ]
         try:
             records = DashboardPresetStore(dashboard_preset_state_root()).list()
@@ -5027,7 +5277,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 current_source_key=current_preset_key,
                 warning=translator.text("status.tui_preset_store_unavailable"),
             )
-        entries.extend(PresetCatalogEntry(f"user:{record.name}", record.name, "user") for record in records)
+        entries.extend(
+            PresetCatalogEntry(f"user:{record.name}", record.name, "user") for record in records
+        )
         return PresetCatalogSnapshot(tuple(entries), current_source_key=current_preset_key)
 
     def preset_state_from_launch(launch: DashboardLaunch) -> DashboardState:
@@ -5081,8 +5333,10 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             parse_pane_fragment(fragment, host=base, language=translator.language)
             for fragment in preset.panels
         )
-        if name in {"wide-clock", "narrow-clock"} and panes and isinstance(
-            panes[0], AnimationPaneConfig
+        if (
+            name in {"wide-clock", "narrow-clock"}
+            and panes
+            and isinstance(panes[0], AnimationPaneConfig)
         ):
             panes = (
                 replace(
@@ -5111,7 +5365,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             return
         if isinstance(command, DeletePreset):
             try:
-                DashboardPresetStore(dashboard_preset_state_root()).delete(command.key.removeprefix("user:"))
+                DashboardPresetStore(dashboard_preset_state_root()).delete(
+                    command.key.removeprefix("user:")
+                )
             except DashboardPresetStoreError:
                 preset_manager = replace(preset_manager, notice="preset-delete-failed")
             else:
@@ -5129,7 +5385,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         command.key.removeprefix("user:")
                     )
                     launch = materialize_preset(record, DatasetService().installed_command_source)
-                loaded_options = replace(launch, explicit=options.explicit, launcher=options.launcher)
+                loaded_options = replace(
+                    launch, explicit=options.explicit, launcher=options.launcher
+                )
 
                 def apply_loaded_preset() -> None:
                     nonlocal options
@@ -6021,9 +6279,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         if isinstance(pane.component, CustomMonitorComponent):
                             if not isinstance(response, V2ProbeResponse):
                                 raise TypeError("custom monitor probe did not return a V2 response")
-                            resolved = resolve_metric(
-                                pane.component.candidate, response.descriptor
-                            )
+                            resolved = resolve_metric(pane.component.candidate, response.descriptor)
                             metric = next(
                                 (
                                     item
@@ -6042,7 +6298,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                 apply_custom_monitor_defaults,
                             )
 
-                            resolved, display_window = apply_custom_monitor_defaults(resolved, metric)
+                            resolved, display_window = apply_custom_monitor_defaults(
+                                resolved, metric
+                            )
                             pane.component.configure(resolved, data_affecting=False)
                             pane.component.set_metric(metric)
                             if display_window is not None:
@@ -6085,6 +6343,12 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                     pane.component.candidate.kind
                                 ]
                             )
+                        if isinstance(pane.component, CustomHistoricalComponent):
+                            capability = pane.component.capability
+                            if capability is not None and capability.refresh_interval_seconds is not None:
+                                pane.scheduler.rebuild(
+                                    capability.refresh_interval_seconds, now=observed_at
+                                )
                         pane.probe_complete = True
                         try:
                             from ccusage_viz.datasets.service import DatasetService
@@ -7179,7 +7443,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 close_help()
         paint()
 
-    def controls() -> tuple[str, ...]:
+    def _controls() -> tuple[str, ...]:
         width = get_terminal_size().columns
         if help_overlay is not None:
             return ()
@@ -7293,13 +7557,16 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 ),
                 global_operations(width),
             )
-        if browse_controls_hidden:
+        if controls_hidden:
             return ()
         context = grid_error or translator.text(
             f"status.tui_{body_view.replace('-', '_')}_controls",
             action=translator.text("status.hide_controls"),
         )
         return (clip_width(context, width), preset_operations(width), global_operations(width))
+
+    def controls() -> tuple[str, ...]:
+        return () if controls_hidden else _controls()
 
     def notices() -> tuple[str, ...]:
         feedback = feedback_lines(
@@ -7367,6 +7634,41 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
 
         return record_mutation(("layout", "row-weight", slot.row), adjust_row)
 
+    def handle_ranking_wheel(event: WheelEvent) -> bool:
+        """Directly scroll the pointed Ranking without changing Dashboard focus."""
+
+        if body_view != "chart" or help_overlay is not None or dataset_modal is not None:
+            return False
+        size = get_terminal_size()
+        header_rows = len(
+            _header_lines(
+                header,
+                header_style,
+                translator,
+                Terminal(size.columns, 4, dashboard_theme != "no-color", options.host.ascii),
+                last_successful_update,
+            )
+        )
+        layout = grid_geometry(size.columns, size.lines, header_rows, 0)
+        selected = layout_pane_at(layout, event.x - 1, event.y - header_rows - 1)
+        if selected is None or not isinstance(panes[selected], (TuiChartPane, TuiCustomPane)):
+            return False
+        pane = panes[selected]
+        historical_ranking = (
+            isinstance(pane, TuiChartPane)
+            and isinstance(pane.component, HistoricalChartComponent)
+            and _pane_display_options(pane).chart.kind == "ranking"
+        ) or (
+            isinstance(pane, TuiCustomPane)
+            and isinstance(pane.component, CustomHistoricalComponent)
+            and pane.component.candidate.kind == "ranking"
+        )
+        if not historical_ranking or pane.ranking_viewport.maximum_offset == 0:
+            return False
+        before = pane.ranking_viewport.display_offset
+        pane.ranking_viewport = advance_ranking_wheel(pane.ranking_viewport, delta=event.delta)
+        return pane.ranking_viewport.display_offset != before
+
     def handle_pane_mouse(event: MouseEvent) -> bool:
         """Handle pane focus clicks before pane-local modal input consumes them."""
 
@@ -7401,6 +7703,18 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             and now - last_click[1] <= _DOUBLE_CLICK_SECONDS
         )
         last_click = (selected, now) if selected is not None else None
+        if (
+            selected is not None
+            and isinstance(pane := panes[selected], TuiCustomPane)
+            and _copy_custom_ranking_entry_at(
+                pane,
+                row=grid_y - layout.pane(selected).top,
+                column=grid_x - layout.pane(selected).left,
+                framed=frame_style != "none" or selected == focused,
+                now=now,
+            )
+        ):
+            return True
         if adjustment_mode == "pane":
             if selected != focused and double_click and selected is not None:
                 overlay_editor = None
@@ -7418,6 +7732,76 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             adjustment_page = "quick"
             adjustment_timer = AdjustmentIdleTimer()
         return True
+
+    def _copy_custom_ranking_entry_at(
+        pane: TuiCustomPane,
+        *,
+        row: int,
+        column: int,
+        framed: bool,
+        now: float,
+    ) -> bool:
+        """Copy one clicked Dataset Ranking entry only when its icon is hit."""
+        interior_row = row - int(framed)
+        interior_column = column - int(framed)
+        target = pane.ranking_copy_rows.get(interior_row)
+        if target is None:
+            return False
+        link_hit = target[2] is not None and target[2] - 1 <= interior_column <= target[2] + 1
+        copy_hit = target[1] - 2 <= interior_column <= target[1] + 2
+        if not copy_hit and not link_hit:
+            return False
+        entries = _custom_ranking_copyable_entries(pane, translator)
+        entry = next((item for item in entries if item[1] == target[0]), None)
+        if entry is None:
+            return False
+        _, entry_id, label, description, project_link = entry
+        if link_hit and project_link is not None:
+            opened = webbrowser.open(project_link)
+            copy_feedback.show(
+                translator.text("status.data_copied" if opened else "status.command_copy_failed"),
+                now=now,
+            )
+            return True
+        copied = copy_command(_custom_ranking_clipboard_text(label, description, project_link))
+        if copied:
+            pane.copied_ranking_entry_id = entry_id
+            pane.copied_ranking_until = now + 1.5
+        copy_feedback.show(
+            translator.text("status.data_copied" if copied else "status.command_copy_failed"),
+            now=now,
+        )
+        return True
+
+    def capture_custom_ranking_copy_rows(
+        pane: TuiCustomPane,
+        content: str,
+        *,
+        fixed_rows: int,
+        framed: bool,
+    ) -> None:
+        """Map rendered copy markers to pane-local rows for the next mouse hit."""
+        del fixed_rows, framed
+        pane.ranking_copy_rows.clear()
+        entries_by_rank = {
+            rank: (entry_id, label, description, link)
+            for rank, entry_id, label, description, link in _custom_ranking_copyable_entries(
+                pane, translator
+            )
+        }
+        for row, line in enumerate(content.splitlines()):
+            visible = strip_ansi(line)
+            marker_column = (
+                display_width(visible.rsplit("⊞", 1)[0])
+                if "⊞" in visible
+                else (display_width(visible.rsplit("✓", 1)[0]) if "✓" in visible else None)
+            )
+            if marker_column is None:
+                continue
+            link_column = display_width(visible.rsplit("→", 1)[0]) if "→" in visible else None
+            prefix, _, _ = visible.lstrip().partition(" ")
+            if prefix.isdecimal() and (entry := entries_by_rank.get(int(prefix))) is not None:
+                pane.ranking_copy_rows[row] = (entry[0], marker_column, link_column)
 
     def pane_terminal(index: int) -> Terminal:
         size = get_terminal_size()
@@ -7476,7 +7860,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 preset_manager,
                 preset_catalog(),
                 translator,
-                Terminal(size.columns, size.lines, dashboard_theme != "no-color", options.host.ascii),
+                Terminal(
+                    size.columns, size.lines, dashboard_theme != "no-color", options.host.ascii
+                ),
             )
             screen.paint(frame, force=force, atomic=True)
             help_was_active = False
@@ -7653,7 +8039,12 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                             raise
                         rendered = _pane_render(pane, translator, terminal)
                 elif isinstance(pane, TuiCustomPane):
-                    rendered = _pane_render(pane, translator, terminal, dashboard=options)
+                    rendered = _pane_render(
+                        pane,
+                        translator,
+                        terminal,
+                        dashboard=options,
+                    )
                 else:
                     rendered = _pane_render(pane, translator, terminal)
                 if isinstance(pane, TuiAnimationPane):
@@ -7672,10 +8063,16 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                             width=terminal.width, height=terminal.height
                         )
                     )
+                search_notice = (
+                    (pane.ranking_search.density_notice,)
+                    if isinstance(pane, (TuiChartPane, TuiCustomPane))
+                    and pane.ranking_search.density_notice is not None
+                    else ()
+                )
                 local_notices = format_notice_lines(
-                    (*rendered.notices, *_custom_top_limit_notice(pane, translator))
+                    (*rendered.notices, *_custom_top_limit_notice(pane, translator), *search_notice)
                     if isinstance(pane, TuiCustomPane)
-                    else rendered.notices,
+                    else (*rendered.notices, *search_notice),
                     width=interior_width,
                     color=terminal.color,
                     ascii=terminal.ascii,
@@ -7700,8 +8097,20 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     else None
                 )
                 error_body = isinstance(text_pane, TuiCustomPane) and rendered.error_body
+                ranking_chart = (
+                    isinstance(text_pane, TuiCustomPane)
+                    and isinstance(text_pane.component, CustomHistoricalComponent)
+                    and text_pane.component.candidate.kind == "ranking"
+                    and text_pane.body_view == "chart"
+                ) or (
+                    isinstance(text_pane, TuiChartPane)
+                    and isinstance(text_pane.component, HistoricalChartComponent)
+                    and _pane_display_options(text_pane).chart.kind == "ranking"
+                    and text_pane.body_view == "chart"
+                )
+                fixed_ranking_rows = _ranking_fixed_rows(chart) if ranking_chart else 0
                 scrollable = text_pane is not None and (
-                    text_pane.body_view != "chart" or error_body
+                    text_pane.body_view != "chart" or error_body or ranking_chart
                 )
                 pane_content = _local_pane_content(
                     chart,
@@ -7711,16 +8120,28 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     offset=(
                         text_pane.error_offset
                         if error_body
+                        else text_pane.ranking_viewport.display_offset
+                        if ranking_chart
                         else text_pane.text_offsets.get(text_pane.body_view, 0)
                     )
                     if text_pane is not None
                     else 0,
                     scrollable=scrollable,
+                    preserve_layout=ranking_chart,
+                    fixed_rows=fixed_ranking_rows,
                     return_metadata=True,
                 )
                 assert isinstance(pane_content, tuple)
                 content, offset, line_count, visible_rows = pane_content
-                if text_pane is not None and scrollable:
+                if ranking_chart:
+                    assert isinstance(text_pane, (TuiChartPane, TuiCustomPane))
+                    maximum = max(0, line_count - visible_rows)
+                    text_pane.ranking_viewport = RankingViewport(
+                        min(maximum, max(0, text_pane.ranking_viewport.offset)),
+                        line_count,
+                        visible_rows,
+                    )
+                elif text_pane is not None and scrollable:
                     if error_body:
                         text_pane.error_offset = offset
                         text_pane.error_line_count = line_count
@@ -7729,6 +8150,15 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         text_pane.text_offsets[text_pane.body_view] = offset
                         text_pane.text_line_counts[text_pane.body_view] = line_count
                         text_pane.text_visible_rows[text_pane.body_view] = visible_rows
+                if isinstance(text_pane, TuiCustomPane) and isinstance(
+                    text_pane.component, CustomHistoricalComponent
+                ) and text_pane.component.candidate.kind == "ranking":
+                    capture_custom_ranking_copy_rows(
+                        text_pane,
+                        content,
+                        fixed_rows=fixed_ranking_rows,
+                        framed=framed,
+                    )
                 rendered_panes.append(content)
             return rendered_panes, tuple(overlays)
 
@@ -8495,10 +8925,25 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 feedback_expired = (
                     copy_feedback.message is not None and now >= copy_feedback.expires_at
                 )
+                copied_ranking_icon_expired = any(
+                    isinstance(pane, TuiCustomPane)
+                    and pane.copied_ranking_entry_id is not None
+                    and now >= pane.copied_ranking_until
+                    for pane in panes
+                )
+                if copied_ranking_icon_expired:
+                    for pane in panes:
+                        if (
+                            isinstance(pane, TuiCustomPane)
+                            and pane.copied_ranking_entry_id is not None
+                            and now >= pane.copied_ranking_until
+                        ):
+                            pane.copied_ranking_entry_id = None
                 cursor_tick = overlay_editor is not None and int(now * 2) != int((now - 0.1) * 2)
                 if (
                     changed
                     or feedback_expired
+                    or copied_ranking_icon_expired
                     or cursor_tick
                     or (deadline is not None and now >= deadline)
                 ):
@@ -8508,6 +8953,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 except AdjustmentTimeout:
                     if help_overlay is not None:
                         help_overlay = None
+                    _finish_ranking_search_editing(panes[focused] if focused is not None else None)
                     end_adjustment()
                     paint()
                     continue
@@ -8531,6 +8977,10 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 if dataset_modal is not None:
                     handle_dataset_modal(event)
                     paint()
+                    continue
+                if isinstance(event, WheelEvent):
+                    if handle_ranking_wheel(event):
+                        paint()
                     continue
                 if isinstance(event, MouseEvent):
                     if handle_pane_mouse(event):
@@ -8701,6 +9151,30 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     continue
                 if isinstance(event, MouseEvent):
                     continue
+                if focused is not None and _ranking_search_eligible(panes[focused]):
+                    search = panes[focused].ranking_search
+                    if search.editing:
+                        if isinstance(event, PasteEvent):
+                            search.query += event.value
+                        elif isinstance(event, KeyEvent):
+                            key = event.value
+                            if key == "\x1b":
+                                search.query = ""
+                                search.editing = False
+                                search.density_notice = None
+                            elif key in {"\r", "\n"}:
+                                search.editing = False
+                            elif key in {"\x7f", "\b"}:
+                                search.query = search.query[:-1]
+                            elif len(key) == 1 and key.isprintable():
+                                search.query += key
+                        paint()
+                        continue
+                    if isinstance(event, KeyEvent) and event.value == "/":
+                        search.editing = True
+                        search.density_notice = None
+                        paint()
+                        continue
                 key = event.value if isinstance(event, KeyEvent) else None
                 if key == "\x03":
                     raise KeyboardInterrupt
@@ -8752,6 +9226,10 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     continue
                 if key == "h":
                     open_help()
+                    continue
+                if key == "c":
+                    controls_hidden = not controls_hidden
+                    paint(force=True)
                     continue
                 if adjustment_mode == "pane":
                     if key is None:
@@ -8885,6 +9363,12 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         component = pane.component
                         base = component.candidate
                         capability = _custom_capability(pane)
+                        if key in {"d", "D"} and pane.ranking_search.query:
+                            pane.ranking_search.density_notice = translator.text(
+                                "status.ranking_search_density_locked"
+                            )
+                            paint()
+                            continue
 
                         def apply_custom_query(
                             config: CustomChartConfig,
@@ -8988,6 +9472,12 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                 copy_feedback.show(
                                     translator.text("status.custom_period_restricted")
                                 )
+                        elif key in {"g", "G"} and base.kind == "ranking":
+                            modes = ("compact", "space", "line", "dashed")
+                            position = modes.index(pane.ranking_item_spacing)
+                            pane.ranking_item_spacing = modes[
+                                (position + (1 if key == "g" else -1)) % len(modes)
+                            ]
                         elif (
                             key in {"g", "G"}
                             and capability is not None
@@ -9039,11 +9529,14 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                     )
                                 )
 
-                            def read_custom_filter_key() -> str | None:
+                            def read_custom_filter_key() -> KeyEvent | MouseEvent | PasteEvent | None:
                                 editor_event = raise_if_interrupt(read_adjustment_event(decoder))
+                                if isinstance(editor_event, MouseEvent):
+                                    # The filter body begins below compose_frame's title row.
+                                    return replace(editor_event, y=editor_event.y - 1)
                                 return (
-                                    editor_event.value
-                                    if isinstance(editor_event, KeyEvent)
+                                    editor_event
+                                    if isinstance(editor_event, (KeyEvent, PasteEvent))
                                     else None
                                 )
 
@@ -9053,6 +9546,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                     filters,
                                     translator,
                                     width=size.columns,
+                                    height=max(0, size.lines - 2),
                                     paint=paint_custom_filter_editor,
                                     read_key=read_custom_filter_key,
                                 )
@@ -9070,7 +9564,21 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                 )
                         elif key == "f":
                             copy_feedback.show(translator.text("status.custom_filter_unavailable"))
-                        elif key in {"d", "t", "T", "s", "S", "k", "l", "o", "+", "=", "-", "_"}:
+                        elif key in {
+                            "d",
+                            "D",
+                            "t",
+                            "T",
+                            "s",
+                            "S",
+                            "k",
+                            "l",
+                            "o",
+                            "+",
+                            "=",
+                            "-",
+                            "_",
+                        }:
                             updated = adjust_custom_chart(base, key)
                             if updated != base:
 
@@ -9078,10 +9586,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                     pane: TuiCustomPane = pane,
                                     config: CustomChartConfig = updated,
                                 ) -> None:
-                                    if (
-                                        isinstance(pane.component, CustomHistoricalComponent)
-                                        and _custom_top_refresh_required(pane.component, config)
-                                    ):
+                                    if isinstance(
+                                        pane.component, CustomHistoricalComponent
+                                    ) and _custom_top_refresh_required(pane.component, config):
                                         apply_custom_query(config, mutation="top")
                                     else:
                                         pane.component.configure(config, data_affecting=False)
@@ -9373,6 +9880,12 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     ):
                         component = pane.component
                         base = component.candidate
+                        if key in {"d", "D"} and pane.ranking_search.query:
+                            pane.ranking_search.density_notice = translator.text(
+                                "status.ranking_search_density_locked"
+                            )
+                            paint()
+                            continue
                         updated = adjust_standalone(base, key)
                         if updated != base:
                             data_affecting = (
@@ -9538,10 +10051,6 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     dashboard_text_offset = offset
                     paint(force=True)
                     continue
-                if body_view == "chart" and key == "c":
-                    browse_controls_hidden = not browse_controls_hidden
-                    paint(force=True)
-                    continue
                 if body_view == "chart" and key == "r":
                     manual_refresh_operations.clear()
                     for index in range(len(panes)):
@@ -9570,11 +10079,11 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         )
                     )
                     paint(force=True)
-                elif key == "p" and body_view == "chart":
+                elif key == "\x10" and body_view == "chart":
                     open_preset_manager()
                     paint()
                     continue
-                elif key == "s" and body_view == "chart":
+                elif key == "\x13" and body_view == "chart":
                     open_preset_manager(save=True)
                     paint()
                     continue

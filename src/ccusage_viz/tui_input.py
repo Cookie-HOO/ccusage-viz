@@ -25,13 +25,22 @@ class MouseEvent:
 
 
 @dataclass(frozen=True, slots=True)
+class WheelEvent:
+    """One signed SGR mouse-wheel report."""
+
+    delta: int
+    x: int
+    y: int
+
+
+@dataclass(frozen=True, slots=True)
 class PasteEvent:
     """One complete terminal bracketed-paste payload."""
 
     value: str
 
 
-InputEvent = KeyEvent | MouseEvent | PasteEvent
+InputEvent = KeyEvent | MouseEvent | WheelEvent | PasteEvent
 
 _MOUSE_ENABLE = "\x1b[?1000h\x1b[?1006h\x1b[?2004h"
 _MOUSE_DISABLE = "\x1b[?1000l\x1b[?1006l\x1b[?2004l"
@@ -197,7 +206,22 @@ class InputDecoder:
             self.control_at = None
             modifiers = button & ~_MOUSE_BUTTON_MASK
             if modifiers & _MOUSE_WHEEL:
-                return None
+                # A terminal read can contain a large trackpad burst. Keep only
+                # its latest report instead of replaying a stale input queue after
+                # the user's hand has stopped. Do not cross a non-wheel report.
+                event = WheelEvent(1 if button & 1 else -1, x, y)
+                while (following := _SGR_MOUSE.match(self.buffer)) is not None:
+                    following_button, following_x, following_y = (
+                        int(value) for value in following.groups()[:3]
+                    )
+                    following_modifiers = following_button & ~_MOUSE_BUTTON_MASK
+                    if not following_modifiers & _MOUSE_WHEEL:
+                        break
+                    self.buffer = self.buffer[following.end() :]
+                    event = WheelEvent(
+                        1 if following_button & 1 else -1, following_x, following_y
+                    )
+                return event
             return MouseEvent(button & _MOUSE_BUTTON_MASK, x, y, mouse.group(4) == "M", modifiers)
 
         if self.buffer.startswith("\x1b[<"):
@@ -251,7 +275,7 @@ def tui_input_mode() -> Iterator[InputDecoder]:
     try:
         tty.setcbreak(descriptor)
         attributes = termios.tcgetattr(descriptor)
-        attributes[0] &= ~termios.ICRNL
+        attributes[0] &= ~(termios.ICRNL | termios.IXON)
         attributes[3] &= ~termios.ISIG
         termios.tcsetattr(descriptor, termios.TCSADRAIN, attributes)
         set_mouse_reporting(True)
@@ -272,7 +296,7 @@ def read_event(decoder: InputDecoder, timeout: float) -> InputEvent | None:
     if decoder.buffer:
         delay = decoder.pacing_remaining()
         if delay > 0:
-            time.sleep(min(timeout, delay))
+            time.sleep(max(0.001, min(timeout, delay)))
             return decoder.next()
         if not decoder.awaiting_paste and not decoder.buffer.startswith("\x1b"):
             return None
