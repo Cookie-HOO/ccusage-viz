@@ -421,7 +421,7 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                     ("i", "interval"),
                     ("b/B", "grouping"),
                     ("+/-", "top"),
-                    ("d", "density"),
+                    ("d/D", "density"),
                     ("t/T", "theme"),
                     ("s/S", "style"),
                 )
@@ -604,7 +604,7 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                     )
             elif (
                 adjustment_page == "quick"
-                and key in {"d", "s", "S", "t", "T", "b", "B", "w", "g", "i", "+", "=", "-", "_"}
+                and key in {"d", "D", "s", "S", "t", "T", "b", "B", "w", "g", "i", "+", "=", "-", "_"}
                 or adjustment_page == "advanced"
                 and key == "l"
             ):

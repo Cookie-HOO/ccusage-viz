@@ -155,6 +155,8 @@ class CustomHistoricalComponent:
             self.candidate.kind != "ranking"
             or not has_complete_content(self.candidate.presentation.density)
             or self.candidate.date_range.fixed_bounds
+            or self.candidate.date_range.period == "all"
+            or self.candidate.ranking_comparison == "none"
         ):
             return None
         interval = ranking_comparison_interval(self.candidate.date_range)
@@ -208,6 +210,8 @@ class CustomHistoricalComponent:
         if capability == self.capability:
             return
         self.capability = capability
+        if self.candidate.kind == "ranking":
+            self.candidate = replace(self.candidate, ranking_comparison=capability.comparison)
         self.render_revision += 1
 
     def adjust(self, config: CustomChartConfig, *, data_affecting: bool) -> None:
@@ -231,6 +235,8 @@ class CustomHistoricalComponent:
             return True
         if completion.config != self.candidate:
             return False
+        if self.capability is not None:
+            self.candidate = replace(self.candidate, ranking_comparison=self.capability.comparison)
         self.accepted_config = self.candidate
         self.accepted_response = completion.response
         self.retrieval_top = completion.config.top
@@ -239,6 +245,12 @@ class CustomHistoricalComponent:
             {
                 dimension.id: dimension.label
                 for dimension in completion.response.capabilities.group_by
+            },
+            {filter.id: filter.label for filter in completion.response.capabilities.filters},
+            {
+                (filter.id, option.id): option.label
+                for filter in completion.response.capabilities.filters
+                for option in filter.options
             },
         )
         self.capability = completion.response.capabilities.charts.get(self.candidate.kind)
@@ -287,12 +299,15 @@ class CustomHistoricalComponent:
         descriptor: V2ProbeDescriptor | None = None
         runtime: V2Runtime | None = None
         if isinstance(payload, V2ChartResponse):
-            metric = next(item for item in payload.descriptor.metrics if item.id == payload.metric_id)
+            metric = next(
+                item for item in payload.descriptor.metrics if item.id == payload.metric_id
+            )
             capability = metric.capabilities.charts.get(self.candidate.kind)
             if not isinstance(capability, V2HistoricalChartCapability):
                 raise TypeError("v2 chart response does not describe the selected historical chart")
             descriptor = payload.descriptor
             runtime = payload.runtime
+            self.candidate = replace(self.candidate, ranking_comparison=capability.comparison)
             payload = CustomChartResponse(
                 CustomDataset(metric.title, metric.description, metric.unit),
                 CustomCapabilities(
@@ -304,6 +319,10 @@ class CustomHistoricalComponent:
                             capability.group_by,
                             tuple(item.id for item in payload.runtime.filters),
                             capability.max_items,
+                            capability.descriptions_default,
+                            comparison=capability.comparison,
+                            show_percentage=capability.show_percentage,
+                            refresh_interval_seconds=capability.refresh_interval_seconds,
                         )
                     },
                 ),
@@ -328,10 +347,9 @@ class CustomHistoricalComponent:
             self.comparison_error = error
             return True
         self.pending_generation = None
-        replacement_failed = (
-            self.accepted_config is not None
-            and _query_identity(self.accepted_config) != _query_identity(self.candidate)
-        )
+        replacement_failed = self.accepted_config is not None and _query_identity(
+            self.accepted_config
+        ) != _query_identity(self.candidate)
         if _invalidates_accepted_chart(error) or replacement_failed:
             self.model = None
             self.accepted_config = None

@@ -61,6 +61,14 @@ def _entry_value(entry: RankingEntry | ScalarRankingEntry) -> int | float:
     return entry.value if isinstance(entry, ScalarRankingEntry) else entry.usage.total
 
 
+def _is_fallback_project_entry(entry: RankingEntry) -> bool:
+    """Return whether a project row represents non-project attribution."""
+    return entry.key in {
+        ("project", "fixed", "unassigned"),
+        ("project", "fixed", "unverified"),
+    }
+
+
 def _compact_labels(labels: list[str], width: int) -> list[str]:
     if len(labels) < 2:
         return labels
@@ -129,7 +137,14 @@ def _historical_title(model: RankingModel, context: RenderContext) -> str:
     )
 
 
-def render_ranking(model: RankingModel, context: RenderContext) -> str:
+def render_ranking(
+    model: RankingModel,
+    context: RenderContext,
+    *,
+    search_query: str = "",
+    search_editing: bool = False,
+    show_visible_count: bool = False,
+) -> str:
     title = _historical_title(model, context)
     scope = model.observed_scope
     if scope is not None:
@@ -191,16 +206,22 @@ def render_ranking(model: RankingModel, context: RenderContext) -> str:
                     entry.comparison_ready,
                     entry.is_other,
                     entry.previous_rank,
+                    is_fallback=_is_fallback_project_entry(entry),
                 )
                 for entry in model.entries
             ),
             heading=heading,
             value_formatter=lambda value: format_tokens(round(value)),
-            delta_formatter=lambda value: f"{value:+,}",
+            delta_formatter=lambda value: (
+                f"{'+' if value > 0 else '-'}{format_tokens(round(abs(value)))}"
+            ),
             context=context,
             summary=summary,
             pending=pending,
             total=model.percentage_total.total,
+            search_query=search_query,
+            search_editing=search_editing,
+            show_visible_count=show_visible_count,
         )
 
     total = None if model.is_observed or pending else model.percentage_total.total

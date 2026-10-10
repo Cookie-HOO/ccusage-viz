@@ -12,8 +12,8 @@ from typing import cast
 
 import plotext as plt
 
-from ccusage_viz.custom_models import CustomPresentationDescriptor
-from ccusage_viz.formatting import center_text, clip_width
+from ccusage_viz.custom_models import CustomPresentationDescriptor, LocalizedText
+from ccusage_viz.formatting import center_text, clip_width, display_width
 from ccusage_viz.options import CustomChartConfig
 from ccusage_viz.processing.custom_historical import CustomChartProjection, CustomProjectedSeries
 from ccusage_viz.render.base import (
@@ -47,7 +47,49 @@ def _label(series: CustomProjectedSeries, context: RenderContext) -> str:
     if series.is_other:
         return context.translator.text("label.other")
     label = series.label
-    return label.zh_cn if context.translator.language == "zh" else label.en
+    return (label.zh_cn if context.translator.language == "zh" else label.en).replace("\n", "\\n")
+
+
+def _localized(value: LocalizedText, context: RenderContext) -> str:
+    return value.zh_cn if context.translator.language == "zh" else value.en
+
+
+def _filter_summary(
+    config: CustomChartConfig,
+    context: RenderContext,
+    descriptor: CustomPresentationDescriptor | None,
+) -> str:
+    if not config.filters:
+        return ""
+    filter_labels = descriptor.filter_labels if descriptor is not None else {}
+    filter_values = descriptor.filter_values if descriptor is not None else {}
+    selections = tuple(
+        (
+            _localized(filter_labels[filter_id], context)
+            if filter_id in filter_labels
+            else filter_id,
+            tuple(
+                _localized(filter_values[filter_id, value], context)
+                if (filter_id, value) in filter_values
+                else value
+                for value in values
+            ),
+        )
+        for filter_id, values in config.filters
+    )
+    candidates = (
+        " · ".join(f"{label} {', '.join(values)}" for label, values in selections),
+        " · ".join(
+            f"{label} {values[0]} +{len(values) - 1}" if len(values) > 1 else f"{label} {values[0]}"
+            for label, values in selections
+        ),
+        " · ".join(f"{label} {len(values)}" for label, values in selections),
+    )
+    for candidate in candidates:
+        summary = context.translator.text("filter.summary", filters=candidate)
+        if display_width(summary) <= max(1, context.width // 2):
+            return summary
+    return context.translator.text("filter.summary", filters=candidates[-1])
 
 
 def custom_heading(
@@ -69,6 +111,8 @@ def custom_heading(
             labels.append(group.zh_cn if context.translator.language == "zh" else group.en)
         else:
             labels.append(config.group_by)
+    if filters := _filter_summary(config, context, descriptor):
+        labels.append(filters)
     labels.append(context.translator.text(f"label.{config.kind}"))
     title = " · ".join(labels)
     heading = (
@@ -359,7 +403,18 @@ def render_custom_calendar(projection: CustomChartProjection, context: RenderCon
     return "\n".join(clip_width(line, context.width) for line in lines)
 
 
-def render_custom_ranking(projection: CustomChartProjection, context: RenderContext) -> str:
+def render_custom_ranking(
+    projection: CustomChartProjection,
+    context: RenderContext,
+    *,
+    descriptions_visible: bool = False,
+    search_query: str = "",
+    search_editing: bool = False,
+    show_visible_count: bool = False,
+    copied_entry_id: str | None = None,
+    entry_offset: int = 0,
+    entry_limit: int | None = None,
+) -> str:
     if not projection.series:
         return (
             render_custom_empty(projection.config, context, projection.presentation)
@@ -368,19 +423,44 @@ def render_custom_ranking(projection: CustomChartProjection, context: RenderCont
                 (_heading(projection, context), context.translator.text("message.custom_no_data"))
             )
         )
-    return render_historical_ranking(
-        tuple(
-            RankingPresentationEntry(
-                entry.id,
-                _label(entry, context),
-                entry.total,
-                entry.previous_total,
-                entry.comparison_ready,
-                entry.is_other,
-                entry.previous_rank,
-            )
+    matching = (
+        projection.series
+        if not search_query
+        else tuple(
+            entry
             for entry in projection.series
-        ),
+            if search_query.casefold()
+            in f"{_label(entry, context)} {_localized(entry.description, context) if entry.description else ''}".casefold()
+        )
+    )
+    visible = (
+        matching[entry_offset:]
+        if entry_limit is None
+        else matching[entry_offset : entry_offset + max(0, entry_limit)]
+    )
+    presentation_entries = tuple(
+        RankingPresentationEntry(
+            entry.id,
+            _label(entry, context),
+            entry.total,
+            entry.previous_total,
+            entry.comparison_ready,
+            entry.is_other,
+            entry.previous_rank,
+            None if entry.description is None or entry.is_other else _localized(entry.description, context),
+            None if entry.display is None or entry.is_other else _localized(entry.display, context),
+            comparison_display=(
+                None
+                if entry.comparison_display is None or entry.is_other
+                else _localized(entry.comparison_display, context)
+            ),
+            copy_marker=None if entry.is_other else "✓" if entry.id == copied_entry_id else "⊞",
+            project_link=None if entry.is_other else entry.link,
+        )
+        for entry in visible
+    )
+    return render_historical_ranking(
+        presentation_entries,
         heading=_heading(projection, context).strip(),
         value_formatter=lambda value: _value(cast(Decimal, value), projection, context),
         delta_formatter=lambda value: (
@@ -388,14 +468,53 @@ def render_custom_ranking(projection: CustomChartProjection, context: RenderCont
         ),
         context=context,
         summary=_summary(projection, context),
+        descriptions_visible=descriptions_visible,
+        search_query=search_query,
+        search_editing=search_editing,
+        show_visible_count=show_visible_count,
+        comparison_mode=projection.config.ranking_comparison
+        if projection.config is not None
+        else "full",
+        comparison_available=projection.comparison_available,
+        show_new_entries=True,
+        compact_labels=False,
+        label_max_width=48,
+        entry_offset=0,
+        entry_limit=None,
+        total_entry_count=len(matching),
+        rank_offset=entry_offset,
+        total=sum((entry.total for entry in matching), start=Decimal()),
+        maximum=max((entry.total for entry in matching), default=Decimal()),
+        show_percentage=projection.show_percentage,
     )
 
 
-def render_custom_projection(projection: CustomChartProjection, context: RenderContext) -> str:
+def render_custom_projection(
+    projection: CustomChartProjection,
+    context: RenderContext,
+    *,
+    descriptions_visible: bool = False,
+    search_query: str = "",
+    search_editing: bool = False,
+    show_visible_count: bool = False,
+    copied_entry_id: str | None = None,
+    entry_offset: int = 0,
+    entry_limit: int | None = None,
+) -> str:
     if projection.kind == "timeline":
         return render_custom_timeline(projection, context)
     if projection.kind == "stack":
         return render_custom_stack(projection, context)
     if projection.kind == "calendar":
         return render_custom_calendar(projection, context)
-    return render_custom_ranking(projection, context)
+    return render_custom_ranking(
+        projection,
+        context,
+        descriptions_visible=descriptions_visible,
+        search_query=search_query,
+        search_editing=search_editing,
+        show_visible_count=show_visible_count,
+        copied_entry_id=copied_entry_id,
+        entry_offset=entry_offset,
+        entry_limit=entry_limit,
+    )

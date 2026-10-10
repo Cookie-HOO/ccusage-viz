@@ -93,6 +93,17 @@ more entries when needed for an honest `Other` row. A `null` query value means
 no requested Top bound. ccuv retains user selections above `max_items`, but
 reports the source limit rather than issuing a request that cannot add entries.
 
+For compatibility with older Dataset descriptors, a Ranking capability may
+still declare `descriptions_default: "expanded" | "collapsed"`; ccuv accepts
+but ignores the field. Entry-description visibility is controlled only by
+Ranking density: `full` and `detailed` show descriptions, while `minimal`,
+`compact`, and `normal` hide them.
+
+A Ranking capability may declare `comparison: "full" | "rank" | "none"`;
+the default is `"full"`. `"rank"` still asks for the prior equal-duration
+range and displays rank movement, but hides the absolute-growth column.
+`"none"` suppresses the prior-range request and all Ranking comparison columns.
+
 For a Custom Monitor, `window` is ccuv's local display horizon (`5m` through
 `24h`), not the source business window. The fixed request interval remains
 `capabilities.charts.monitor.window_seconds`.
@@ -185,7 +196,7 @@ ccuv dashboard --empty --grid 2x2 \
 
 Dashboard presets begin with built-in token-consumption templates, and the
 Dashboard preset manager can also save complete user configurations. In browse
-mode, press `s` to save and `p` to manage saved presets. Presets retain installed
+mode, press `Ctrl-S` to save and `Ctrl-P` to manage saved presets. Presets retain installed
 Dataset identities, local-command Dataset argv, and command-driven overlays.
 They are trusted user-local automation: loading a preset can execute its commands,
 so only load presets you trust. Presets never contain environment variables,
@@ -255,6 +266,42 @@ Every successful chart result remains self-describing: it carries the effective
 capability manifest, localized dataset metadata, and data. Summary facts arrive
 through a separate request. The command must be stateless; a result must not
 depend on a previous command process.
+
+For a non-fixed Ranking at `full` or `detailed` density, unless its Ranking
+capability declares `comparison: "none"`, ccuv first requests
+the selected range and then requests the contiguous prior range with the same
+duration. A Dataset returns ordinary dated series points for both ranges. ccuv
+matches stable `data.series[].id` values and derives displayed absolute growth
+and rank movement locally; no delta, previous-total, or previous-rank fields
+belong in the protocol. A failed or unavailable prior-range response leaves the
+current Ranking visible without comparison markers. `comparison: "rank"` uses
+that response only for rank movement. Fixed date-range and `all` Rankings do
+not request a prior range.
+
+For a Ranking query only, a `data.series` item may include optional bilingual
+`description`, `display`, `comparison_display`, and `link` fields. The first
+three use the same
+`{ "en": "...", "zh-CN": "..." }` shape as a label. `description` renders as a
+muted, indented explanation below the Ranking item at `full` and `detailed`
+density, wrapping to at most two terminal rows. `display` is the Dataset-owned formatted total shown in
+the Ranking value column. `comparison_display` is the Dataset-owned formatted
+absolute-change text shown in the prior-period comparison column when ccuv has
+calculated a non-zero comparison. Its numeric `points[].value` facts remain the
+source for ranking, shares, comparisons, colours, and rank movement. When either
+display field is omitted, ccuv formats that value from the declared unit. A description may contain `[label](https://URL)` links,
+`**bold text**`, and `*italic text*`; ccuv renders only `label` as a clickable
+terminal hyperlink. Star emphasis is also allowed inside a link label. Underscore
+emphasis and other Markdown,
+HTML, malformed links, unsupported URL schemes, and terminal control sequences
+remain plain safe text. Ranking search matches both labels and link URLs; a
+URL-only match appends a clickable highlighted `↗` marker. Timeline, Stack, and
+Calendar responses must not include these fields; ccuv rejects them there. The
+locally composed `Other` row never receives any of these fields. `link` is one
+absolute `https://` URL for the concrete Ranking project. ccuv renders it as a
+clickable `↗` in the project's action group (`Project | ⊞ ↗`) and
+includes the URL after the project label and description in the copied content.
+Missing links show no icon. Timeline, Stack, and Calendar responses must not
+include it, and unsafe or malformed URLs are rejected.
 
 A `probe` is a metadata-only request for Dataset registration and explicit
 refresh. It has no timezone, range, query, or summary fields. It must not read

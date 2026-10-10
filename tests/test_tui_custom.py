@@ -48,18 +48,24 @@ from ccusage_viz.custom_protocol import (
     V2SummaryRequest,
 )
 from ccusage_viz.errors import QueryError
+from ccusage_viz.formatting import display_width
 from ccusage_viz.i18n import load_translator
 from ccusage_viz.lifecycle import FixedIntervalScheduler, LifecycleOperation, LifecycleTrigger
 from ccusage_viz.options import (
+    ChartPresentation,
     CustomChartConfig,
     CustomCommandSource,
     adjust_custom_chart,
 )
+from ccusage_viz.render import RenderContext
+from ccusage_viz.render.custom_monitor import render_custom_monitor
+from ccusage_viz.render.ranking import render_ranking
 from ccusage_viz.render.surfaces import dashboard_pane_surface
 from ccusage_viz.terminal import Terminal, compose_frame
 from ccusage_viz.tui import (
     _choose_custom_pane_config,
     _custom_capability_for_component,
+    _custom_ranking_clipboard_text,
     _local_pane_content,
     _new_pane,
     _pane_render,
@@ -84,6 +90,19 @@ def custom_summary_response(
             )
         )
     )
+
+
+def test_custom_ranking_project_copy_appends_the_project_link() -> None:
+    assert _custom_ranking_clipboard_text(
+        "Project",
+        "Read [documentation](https://example.com/docs)",
+        "https://example.com/projects/project",
+    ) == (
+        "Project\n"
+        "Read documentation https://example.com/docs\n"
+        "https://example.com/projects/project"
+    )
+    assert _custom_ranking_clipboard_text("Project", None, None) == "Project"
 
 
 def test_custom_standalone_timeline_keeps_x_axis_labels_inside_frame() -> None:
@@ -137,6 +156,68 @@ def test_custom_standalone_timeline_keeps_x_axis_labels_inside_frame() -> None:
     assert "09-02" in "\n".join(frame.rows)
     assert frame.rows[0] == "refresh every 60s"
     assert frame.rows[-1] == "controls"
+
+
+@pytest.mark.parametrize(
+    ("density", "visible"),
+    (
+        ("minimal", False),
+        ("compact", False),
+        ("normal", False),
+        ("full", True),
+        ("detailed", True),
+    ),
+)
+def test_custom_ranking_description_visibility_follows_density(density: str, visible: bool) -> None:
+    chart = CustomChartConfig(
+        "ranking",
+        CustomCommandSource("reading", ("reader", "ccuv")),
+        DateRange(date(2026, 9, 1), date(2026, 9, 2)),
+        group_by="book",
+        presentation=replace(ChartPresentation(), density=density),
+    )
+    text = LocalizedText("Reading", "阅读")
+    unit = CustomUnit("page", text, "suffix", 0)
+    component = CustomHistoricalComponent(chart)
+    response = CustomChartResponse(
+        CustomDataset(text, text, unit),
+        CustomCapabilities(
+            (CustomDimension("book", text),),
+            (),
+            {
+                "ranking": CustomChartCapability(
+                    ("day",), ("book",), (), descriptions_default="expanded"
+                )
+            },
+        ),
+        CustomData(
+            (
+                CustomSeries(
+                    "book-1",
+                    text,
+                    (CustomPoint(date(2026, 9, 1), Decimal("1")),),
+                    LocalizedText("Release validation", "发布验证"),
+                ),
+            )
+        ),
+    )
+    assert component.accept_response(response)
+
+    rendered = tui_module._render_custom_projection(
+        component.model,
+        chart,
+        load_translator("en"),
+        Terminal(80, 24, color=False, ascii=True),
+        accepted_at=None,
+        interval=None,
+        pending=False,
+        surface=dashboard_pane_surface("ranking"),
+    )
+    assert ("Release validation" in rendered.chart) is visible
+    assert "D" not in {
+        action.key
+        for action in tui_module._custom_standalone_actions(component, load_translator("en"))
+    }
 
 
 def test_custom_standalone_renders_accepted_dataset_summary() -> None:
@@ -440,6 +521,27 @@ def test_custom_monitor_renders_source_owned_monitor_presentations_without_share
     assert "real_model · tokens · view 1h · data window 1m" in bars
 
 
+def test_custom_monitor_ranking_and_list_keep_native_row_geometry() -> None:
+    component = _custom_monitor_component()
+    translator = load_translator("en")
+
+    for style in ("ranking", "list"):
+        config = replace(
+            component.candidate, presentation=replace(component.candidate.presentation, style=style)
+        )
+        component.configure(config, data_affecting=False)
+        context = RenderContext(80, 16, translator, color=False, ascii=True, style=style)
+
+        native_rows = render_ranking(component.ranking_model(language="en"), context).splitlines()[
+            1:
+        ]
+        custom_rows = render_custom_monitor(component, context).splitlines()[1:]
+
+        assert custom_rows == native_rows
+        assert all(display_width(row) <= context.width for row in custom_rows)
+        assert "%" not in "\n".join(custom_rows)
+
+
 def test_custom_monitor_cycles_only_native_compatible_presentations() -> None:
     chart = _custom_monitor_component().candidate
     styles = []
@@ -450,11 +552,15 @@ def test_custom_monitor_cycles_only_native_compatible_presentations() -> None:
     assert styles == ["step", "points", "line-points", "ranking"]
 
 
-def test_custom_monitor_dashboard_context_hides_upper_right_axes_and_stabilizes_zero_values() -> None:
+def test_custom_monitor_dashboard_context_hides_upper_right_axes_and_stabilizes_zero_values() -> (
+    None
+):
     component = _custom_monitor_component(total="0")
     terminal = Terminal(80, 16, color=False, ascii=False)
 
-    rendered = tui_module._render_custom_monitor(component, load_translator("en"), terminal, interval=10)
+    rendered = tui_module._render_custom_monitor(
+        component, load_translator("en"), terminal, interval=10
+    )
 
     assert "plotext.figure" not in rendered.chart
     assert "┐" not in rendered.chart
@@ -506,7 +612,9 @@ def test_custom_ranking_adjustment_state_exposes_top_and_other_projection() -> N
         component,
         FixedIntervalScheduler(10, now=0),
         LifecycleOperation("custom-ranking-state"),
-        _to_options(build_parser(load_translator("en")).parse_args(["dashboard", "--empty"])).process,
+        _to_options(
+            build_parser(load_translator("en")).parse_args(["dashboard", "--empty"])
+        ).process,
     )
 
     quick = tui_module._custom_pane_adjustment_state(pane, "quick", load_translator("en"))
@@ -514,7 +622,56 @@ def test_custom_ranking_adjustment_state_exposes_top_and_other_projection() -> N
 
     assert "Group book" in quick
     assert "Top 10" in quick
+    assert (
+        "+/- Top"
+        in tui_module._custom_adjustment_footer(
+            pane, "quick", load_translator("en"), 160, color=False
+        )[1]
+    )
     assert "Other show" in advanced
+
+
+def test_custom_ranking_viewport_preserves_renderer_column_padding() -> None:
+    chart = "    Centered ranking\n 1     API       ···● 10  60%\n 2     Longer API ·●··  5  40%"
+
+    content, offset, line_count, visible_rows = _local_pane_content(
+        chart,
+        (),
+        width=40,
+        height=3,
+        scrollable=True,
+        preserve_layout=True,
+        return_metadata=True,
+    )
+
+    assert content.splitlines() == chart.splitlines()
+    assert (offset, line_count, visible_rows) == (0, 3, 3)
+
+
+def test_custom_ranking_viewport_keeps_heading_search_and_columns_fixed() -> None:
+    chart = "Ranking\nShowing 3 item(s)\nRank Project Current\n 1 A 10\n 2 B 8\n 3 C 5"
+    fixed_rows = tui_module._ranking_fixed_rows(chart)
+
+    content, offset, line_count, visible_rows = _local_pane_content(
+        chart,
+        (),
+        width=40,
+        height=5,
+        offset=1,
+        scrollable=True,
+        preserve_layout=True,
+        fixed_rows=fixed_rows,
+        return_metadata=True,
+    )
+
+    assert content.splitlines() == [
+        "Ranking",
+        "Showing 3 item(s)",
+        "Rank Project Current",
+        " 2 B 8",
+        " 3 C 5",
+    ]
+    assert (offset, line_count, visible_rows) == (1, 3, 2)
 
 
 def test_v2_ranking_top_refreshes_only_when_it_outgrows_retrieved_coverage() -> None:
@@ -531,9 +688,7 @@ def test_v2_ranking_top_refreshes_only_when_it_outgrows_retrieved_coverage() -> 
     component.set_capability(CustomChartCapability(("day",), ("project",), (), max_items=50))
     component.retrieval_top = 10
 
-    assert tui_module._custom_top_refresh_required(
-        component, replace(component.candidate, top=11)
-    )
+    assert tui_module._custom_top_refresh_required(component, replace(component.candidate, top=11))
     assert not tui_module._custom_top_refresh_required(
         component, replace(component.candidate, top=10)
     )
@@ -616,7 +771,9 @@ def test_v2_ranking_source_limit_is_a_pane_local_notice() -> None:
         component,
         FixedIntervalScheduler(10, now=0),
         LifecycleOperation("custom-ranking-limit"),
-        _to_options(build_parser(load_translator("en")).parse_args(["dashboard", "--empty"])).process,
+        _to_options(
+            build_parser(load_translator("en")).parse_args(["dashboard", "--empty"])
+        ).process,
     )
 
     assert tui_module._custom_top_limit_notice(pane, load_translator("en")) == (

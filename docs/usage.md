@@ -141,7 +141,7 @@ later tables.
 | `--query-timeout SECONDS` | Positive finite number | `30` | All | Maximum live-query time. This advanced supported option is deliberately hidden from normal `--help`. |
 | `--ascii` | Flag | off | All | Prefer ASCII-safe rendering. Cannot be combined with an explicitly supplied `--theme`. |
 | `--theme THEME` | `classic`, `vivid`, `contrast`, `dracula`, `catppuccin`, `solarized`, `gruvbox`, `nord`, `github`, `mono`, `no-color` | `classic` | All | Chart color scheme; `no-color` disables chart color. |
-| `--density DENSITY` | `minimal`, `compact`, `full`, `detailed` | `detailed` | All standalone charts | Amount of chart detail and decoration. |
+| `--density DENSITY` | `minimal`, `compact`, `full`, `detailed` | `detailed` (`full` for Ranking) | All standalone charts | Amount of chart detail and decoration. |
 | `--style STYLE` | Route-specific; see chart tables | Route-specific | All | Rendering style for the selected chart. |
 | `--legend POSITION` | Timeline: `below-title`, `inside`, `hidden`; Stack: `below-title`, `hidden`; Monitor: `below-title`, `inside`, `hidden`, `values` | `below-title` | Timeline, Stack, Monitor | Legend placement/content. |
 
@@ -410,6 +410,7 @@ Dashboard is the multi-pane host. With no positional preset, a bare invocation s
 
 ```bash
 ccuv dashboard
+ccuv dashboard single
 ccuv dashboard wide-clock
 ccuv dashboard wide
 ccuv dashboard --demo small
@@ -462,6 +463,7 @@ deletes an empty pane and compacts the rest without adding a placeholder.
 
 | Preset | Pane composition | Grid/layout | Dashboard style |
 | --- | --- | --- | --- |
+| `single` | Analog Clock only, without a text overlay or Dashboard frame | `1x1` | `minimal` |
 | `wide` | Timeline, Stack, Ranking, Monitor grouped by model | `2x2` | `framed` |
 | `wide-clock` | Analog Clock, then the standard wide Timeline, Stack, Ranking, and model Monitor panes | `2x2` with `spotlight-wide` and a short first row | `framed` |
 | `spotlight-wide` | Timeline, Stack, Ranking | `2x2` with `spotlight-wide` | `framed` |
@@ -471,8 +473,9 @@ deletes an empty pane and compacts the rest without adding a placeholder.
 | `all` | Two Timelines, Calendar, Ranking, two Stacks, and four Monitor variants | `5x2` | `split` |
 
 The default `wide` panes use compact density and deliberately use separate
-chart themes/styles. `wide-clock` and `narrow-clock` are the clock presets:
-their clock is a complete animation Pane, not a Dashboard header: `wide-clock` uses Analog Clock and `narrow-clock` uses Digital Clock.
+chart themes/styles. `single`, `wide-clock`, and `narrow-clock` are the clock
+presets: their clock is a complete animation Pane, not a Dashboard header.
+`single` and `wide-clock` use Analog Clock; `narrow-clock` uses Digital Clock.
 `spotlight-wide` gives its first pane the leading wide area; `spotlight-wide2`
 gives the first two panes consecutive wide rows.
 
@@ -528,7 +531,7 @@ ccuv dashboard --empty --grid 1x1 \
 
 | Option | Values/default | Host-owned behavior |
 | --- | --- | --- |
-| `[PRESET]` (positional, optional) | `wide`, `wide-clock`, `narrow`, `narrow-clock`, `all`, `spotlight-wide`, `spotlight-wide2`; omitted defaults to `wide-clock` | Selects the startup template. It cannot be combined with `--grid` or `--layout`. |
+| `[PRESET]` (positional, optional) | `single`, `wide`, `wide-clock`, `narrow`, `narrow-clock`, `all`, `spotlight-wide`, `spotlight-wide2`; omitted defaults to `wide-clock` | Selects the startup template. It cannot be combined with `--grid` or `--layout`. |
 | `--demo [SIZE]`, `--lang`, `--ccusage-bin`, `--query-timeout` | Same semantics as standalone; all demo forms are live, invocation-varied asynchronous simulations, and bare demo is `medium`; timeout default `30` | Provider/process/input configuration for all panes. `--query-timeout` is hidden advanced configuration. |
 | `--ascii` | off | ASCII rendering for the host and panes. It conflicts with an explicit Pane `--theme`. |
 | `--theme THEME` | `classic` | Dashboard shell theme, distinct from each Pane chart theme. |
@@ -716,8 +719,8 @@ Dashboard has separate navigation and ownership rules. In browse mode:
 | Key | Behavior |
 | --- | --- |
 | `r` | In chart browse mode, refresh all panes; it has no action in the full-command view. |
-| `s` | Save the current Dashboard as a named preset. |
-| `p` | Open the full-screen Dashboard preset manager. |
+| `Ctrl-S` | Save the current Dashboard as a named preset. |
+| `Ctrl-P` | Open the full-screen Dashboard preset manager. |
 | Mouse click | Adjust the clicked pane. |
 | `d` | Open global Dashboard adjustment. |
 | `h` | Open contextual Help. In the full-command view, lowercase `h` goes to the first line. |

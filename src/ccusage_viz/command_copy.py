@@ -108,7 +108,8 @@ def _chart_args(config: StandaloneLaunch, *, full: bool, pane: bool = False) -> 
     default_style = compatible_styles(chart.kind, by)[0]
     if full or chart.presentation.style != default_style:
         args.extend(("--style", chart.presentation.style))
-    if full or chart.presentation.density != "detailed":
+    default_density = "full" if chart.kind == "ranking" else "detailed"
+    if full or chart.presentation.density != default_density:
         args.extend(("--density", chart.presentation.density))
     if chart.kind in {"timeline", "stack", "monitor"} and (
         full or chart.presentation.legend != "below-title"
@@ -161,7 +162,8 @@ def _custom_chart_args(options: StandaloneLaunch, *, full: bool) -> list[str]:
     default_style = compatible_styles(chart.kind, chart.group_by)[0]
     if full or chart.presentation.style != default_style:
         args.extend(("--style", chart.presentation.style))
-    if full or chart.presentation.density != "detailed":
+    default_density = "full" if chart.kind == "ranking" else "detailed"
+    if full or chart.presentation.density != default_density:
         args.extend(("--density", chart.presentation.density))
     if chart.kind in {"timeline", "stack"} and (full or chart.presentation.legend != "below-title"):
         args.extend(("--legend", chart.presentation.legend))
@@ -247,7 +249,8 @@ def format_full_dashboard_command(
                 fragment_args.extend(("--weekdays", chart.weekdays))
             if chart.presentation.style != compatible_styles(chart.kind, chart.group_by)[0]:
                 fragment_args.extend(("--style", chart.presentation.style))
-            if chart.presentation.density != "compact":
+            default_density = "full" if chart.kind == "ranking" else "compact"
+            if chart.presentation.density != default_density:
                 fragment_args.extend(("--density", chart.presentation.density))
             if chart.kind in {"timeline", "stack"} and chart.presentation.legend != "below-title":
                 fragment_args.extend(("--legend", chart.presentation.legend))

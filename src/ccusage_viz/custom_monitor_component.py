@@ -399,12 +399,7 @@ class CustomMonitorComponent:
             metric=MetricDescriptor("tokens"),
             observed_scope=self._scope(),
             y_axis_max=custom_monitor_y_axis_max(
-                [
-                    float(value)
-                    for item in series
-                    for value in item.values
-                    if value is not None
-                ]
+                [float(value) for item in series for value in item.values if value is not None]
             ),
             observed_current=tuple(
                 ScalarRankingEntry(
@@ -776,11 +771,17 @@ def resolve_metric(config: CustomChartConfig, descriptor: V2ProbeDescriptor) -> 
             if isinstance(chart_capability, V2HistoricalChartCapability)
             else ()
         )
+        comparison = (
+            chart_capability.comparison
+            if isinstance(chart_capability, V2HistoricalChartCapability)
+            else "full"
+        )
         return replace(
             config,
             metric_summary=metric.summary,
             metric_periods=periods,
             metric_titles=(metric.title.en, metric.title.zh_cn),
+            ranking_comparison=comparison,
         )
     selected = descriptor.default_metric_id
     if selected is None and len(descriptor.metrics) == 1:
@@ -794,12 +795,18 @@ def resolve_metric(config: CustomChartConfig, descriptor: V2ProbeDescriptor) -> 
         if isinstance(chart_capability, V2HistoricalChartCapability)
         else ()
     )
+    comparison = (
+        chart_capability.comparison
+        if isinstance(chart_capability, V2HistoricalChartCapability)
+        else "full"
+    )
     return replace(
         config,
         metric_id=selected,
         metric_summary=metric.summary,
         metric_periods=periods,
         metric_titles=(metric.title.en, metric.title.zh_cn),
+        ranking_comparison=comparison,
     )
 
 

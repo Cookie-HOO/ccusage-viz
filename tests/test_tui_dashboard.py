@@ -52,8 +52,14 @@ from ccusage_viz.options import (
     EmptyPaneConfig,
     Filters,
     MonitorConfig,
+    ProcessConfig,
+    RankingConfig,
+    StandaloneHostConfig,
+    StandaloneLaunch,
     TimelineConfig,
+    adjust_standalone,
 )
+from ccusage_viz.processing.projection import build_ranking
 from ccusage_viz.query.models import DataResolution, ProviderResult, QueryTrigger
 from ccusage_viz.terminal import Terminal
 from ccusage_viz.tui import (
@@ -66,6 +72,7 @@ from ccusage_viz.tui import (
     _append_monitor_attachment,
     _choose_pane_type,
     _custom_dashboard_sources,
+    _finish_ranking_search_editing,
     _frame,
     _header_options,
     _local_pane_content,
@@ -93,6 +100,21 @@ def test_empty_dashboard_pane_renders_localized_placeholder() -> None:
     assert _pane_render(pane, load_translator("zh"), Terminal(40, 8, False, True)).chart == (
         "空白子图\n双击选中，然后按 r 选择类型"
     )
+
+
+def test_dashboard_ranking_search_timeout_finishes_editing_without_clearing_query() -> None:
+    options = _to_options(
+        build_parser(load_translator("en")).parse_args(["dashboard", "--pane", "ranking"])
+    )
+    pane = _new_pane(options, options.panes[0])
+    assert isinstance(pane, tui_module.TuiChartPane)
+    pane.ranking_search.query = "claude"
+    pane.ranking_search.editing = True
+
+    _finish_ranking_search_editing(pane)
+
+    assert pane.ranking_search.query == "claude"
+    assert pane.ranking_search.editing is False
 
 
 def test_dashboard_preset_shortcuts_open_the_manager_and_do_not_adjust_dashboard(
@@ -155,7 +177,17 @@ def test_dashboard_preset_shortcuts_open_the_manager_and_do_not_adjust_dashboard
         def finish(self) -> None:
             pass
 
-    events = iter((KeyEvent("p"), KeyEvent("s"), KeyEvent("\x1b"), KeyEvent("\x03")))
+    events = iter(
+        (
+            KeyEvent("p"),
+            KeyEvent("s"),
+            KeyEvent("\x10"),
+            KeyEvent("\x1b"),
+            KeyEvent("\x13"),
+            KeyEvent("\x1b"),
+            KeyEvent("\x03"),
+        )
+    )
     monkeypatch.setattr(tui_module, "build_query_runtime", Runtime)
     monkeypatch.setattr(tui_module, "build_chart_registry", lambda: object())
     monkeypatch.setattr(tui_module, "HistoricalChartComponent", Component)
@@ -588,11 +620,12 @@ def test_dashboard_pane_copy_actions_follow_body_view() -> None:
         )
 
 
-def test_dashboard_pane_density_defaults_to_compact_and_preserves_explicit_values() -> None:
+def test_dashboard_pane_density_defaults_to_compact_except_for_ranking_and_preserves_explicit_values() -> None:
     parser = build_parser(load_translator("en"))
     base = _to_options(parser.parse_args(["dashboard"]))
 
     assert parse_dashboard_pane("timeline", host=base).chart.presentation.density == "compact"
+    assert parse_dashboard_pane("ranking", host=base).chart.presentation.density == "full"
     assert (
         parse_dashboard_pane("timeline --density full", host=base).chart.presentation.density
         == "full"
@@ -1128,7 +1161,7 @@ def test_dashboard_help_explains_each_mode_without_repeating_footer(
         for action in (
             "p/P period",
             "g/G granularity",
-            "d density",
+            "d/D density",
             "t/T theme",
             "s/S style",
             "o Other",
@@ -2481,6 +2514,7 @@ def test_historical_project_adjustments_are_not_exposed_in_dashboard(command: st
 def test_dashboard_pane_adjustment_page_resolves_unambiguous_shortcuts() -> None:
     chart = TimelineConfig("timeline", DateRange(date(2026, 1, 1), date(2026, 1, 14)))
     project_chart = replace(chart, by="project")
+    ranking_chart = RankingConfig("ranking", DateRange(date(2026, 1, 1), date(2026, 1, 14)))
 
     assert _adjustment_target_page("timeline", "quick", "k", chart=chart) == "advanced"
     assert _adjustment_target_page("timeline", "advanced", "g", chart=chart) == "quick"
@@ -2489,6 +2523,56 @@ def test_dashboard_pane_adjustment_page_resolves_unambiguous_shortcuts() -> None
     assert _adjustment_target_page("timeline", "quick", "P", chart=project_chart) == "quick"
     assert _adjustment_target_page("timeline", "advanced", "P", chart=project_chart) == "quick"
     assert _adjustment_target_page("timeline", "advanced", "P", chart=chart) == "quick"
+    assert _adjustment_target_page("ranking", "quick", "+", chart=ranking_chart) == "quick"
+    assert _adjustment_target_page("ranking", "advanced", "-", chart=ranking_chart) == "quick"
+    assert _adjustment_key_supported("ranking", "quick", "+", chart=ranking_chart)
+    assert _adjustment_key_supported("ranking", "quick", "-", chart=ranking_chart)
+
+
+def test_dashboard_ranking_top_adjustments_change_the_display_count() -> None:
+    chart = RankingConfig(
+        "ranking", DateRange(date(2026, 1, 1), date(2026, 1, 14)), top=10
+    )
+    options = StandaloneLaunch(ProcessConfig(), StandaloneHostConfig(), chart)
+
+    increased = adjust_standalone(options, "+")
+    decreased = adjust_standalone(increased, "-")
+
+    assert increased.chart.top == 11
+    assert decreased.chart.top == 10
+
+
+def test_dashboard_ranking_state_shows_the_current_grouping_and_top() -> None:
+    options = _to_options(
+        build_parser(load_translator("en")).parse_args(
+            ["dashboard", "--pane", "ranking --by project --top 11"]
+        )
+    )
+    pane = _new_pane(
+        standalone_from_chart_pane(options, options.panes[0]), "pane:ranking:top"
+    )
+
+    assert "Group project · Top 11" in _pane_adjustment_state(
+        pane, "quick", load_translator("en")
+    )
+
+
+def test_ranking_top_above_available_projects_keeps_all_available_projects() -> None:
+    period = DateRange(date(2026, 1, 1), date(2026, 1, 1))
+    records = tuple(
+        UsageRecord(
+            period.since,
+            f"agent-{index}",
+            TokenUsage.from_parts(total=index, input=index),
+            SourceKind.UNIFIED_DAILY,
+        )
+        for index in range(1, 10)
+    )
+
+    model = build_ranking(records, period, by="agent", top=11, show_other=True)
+
+    assert len(model.entries) == 9
+    assert all(not entry.is_other for entry in model.entries)
 
 
 def test_dashboard_monitor_page_resolution_keeps_attachment_shortcuts_current() -> None:

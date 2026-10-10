@@ -2,7 +2,7 @@ from dataclasses import replace
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from types import SimpleNamespace
-from typing import cast
+from typing import Literal, cast
 
 import pytest
 
@@ -35,7 +35,7 @@ from ccusage_viz.custom_protocol import (
     CustomSummaryResponse,
 )
 from ccusage_viz.errors import QueryError, UsageError
-from ccusage_viz.formatting import display_width
+from ccusage_viz.formatting import display_width, strip_ansi
 from ccusage_viz.i18n import load_translator
 from ccusage_viz.options import (
     ChartPresentation,
@@ -51,6 +51,7 @@ from ccusage_viz.render import custom
 from ccusage_viz.render.base import RenderContext
 from ccusage_viz.render.custom import render_custom_projection
 from ccusage_viz.render.palette import categorical_color
+from ccusage_viz.render.ranking_presentation import copyable_description_text
 from ccusage_viz.render.summary import format_custom_value, render_custom_summary
 from ccusage_viz.render.timeline_presentation import TimelinePlot
 
@@ -136,6 +137,94 @@ def test_custom_ranking_derives_decimal_comparison_facts_from_raw_responses() ->
     assert api.comparison_ready
     assert app.previous_total == Decimal("2")
     assert app.previous_rank == 2
+
+
+def test_custom_ranking_distinguishes_missing_comparison_response_from_new_series() -> None:
+    current = response((("api", "3"), ("app", "2"), ("batch", "1")))
+    current_config = config(
+        kind="ranking",
+        group_by=None,
+        top=2,
+        presentation=ChartPresentation(density="detailed", style="dot"),
+    )
+    previous = response((("api", "1"),), point_date=date(2026, 8, 30))
+    comparison_config = replace(
+        current_config,
+        date_range=DateRange(date(2026, 8, 30), date(2026, 8, 31)),
+    )
+
+    unavailable = process_custom_historical(current, current_config)
+    partial = process_custom_historical(
+        current,
+        current_config,
+        comparison_response=previous,
+        comparison_config=comparison_config,
+    )
+
+    assert not unavailable.comparison_available
+    assert all(not series.comparison_ready for series in unavailable.series)
+    assert partial.comparison_available
+    api, app, other = partial.series
+    assert api.comparison_ready and api.previous_total == Decimal("1")
+    assert not app.comparison_ready and app.previous_total is None
+    assert not other.comparison_ready and other.previous_total is None
+
+
+def test_custom_ranking_hides_unavailable_comparison_columns_and_labels_new_entries() -> None:
+    current = response((("api", "3"), ("app", "2"), ("batch", "1")))
+    current_config = config(
+        kind="ranking",
+        group_by=None,
+        top=2,
+        presentation=ChartPresentation(density="detailed", style="dot"),
+    )
+    previous = response((("api", "1"),), point_date=date(2026, 8, 30))
+    comparison_config = replace(
+        current_config,
+        date_range=DateRange(date(2026, 8, 30), date(2026, 8, 31)),
+    )
+    context = RenderContext(
+        110,
+        20,
+        load_translator("en"),
+        color=False,
+        density="detailed",
+        style="dot",
+        period="14d",
+    )
+
+    unavailable = render_custom_projection(
+        process_custom_historical(current, current_config), context
+    )
+    partial = render_custom_projection(
+        process_custom_historical(
+            current,
+            current_config,
+            comparison_response=previous,
+            comparison_config=comparison_config,
+        ),
+        context,
+    )
+
+    assert "vs prior" not in unavailable
+    assert "Rank Δ" not in unavailable
+    assert "vs prior 14d" in partial
+    assert "New" in next(line for line in partial.splitlines() if "app" in line)
+    assert "New in ranking" in next(line for line in partial.splitlines() if "app" in line)
+    assert "New" not in next(line for line in partial.splitlines() if "Other" in line)
+
+    chinese = render_custom_projection(
+        process_custom_historical(
+            current,
+            current_config,
+            comparison_response=previous,
+            comparison_config=comparison_config,
+        ),
+        replace(context, translator=load_translator("zh")),
+    )
+    app_line = next(line for line in chinese.splitlines() if "app" in line)
+    assert "新增" in app_line
+    assert "新上榜" in app_line
 
 
 def test_top_n_and_other_are_local_decimal_operations() -> None:
@@ -418,6 +507,36 @@ def test_ranking_comparison_request_uses_complete_content_densities(
         assert request.date_range.fixed_bounds
 
 
+def test_ranking_all_period_never_requests_a_prior_range() -> None:
+    component = CustomHistoricalComponent(
+        replace(
+            config(kind="ranking", presentation=ChartPresentation(density="detailed")),
+            date_range=DateRange(
+                date(1971, 1, 1), date(2026, 10, 9), relative_until=True, period="all"
+            ),
+        )
+    )
+
+    assert component.comparison_request_config() is None
+
+
+@pytest.mark.parametrize(
+    ("comparison", "expected"),
+    (("full", True), ("rank", True), ("none", False)),
+)
+def test_ranking_comparison_capability_controls_prior_range_requests(
+    comparison: str, expected: bool
+) -> None:
+    component = CustomHistoricalComponent(
+        replace(
+            config(kind="ranking", presentation=ChartPresentation(density="detailed")),
+            ranking_comparison=cast(Literal["full", "rank", "none"], comparison),
+        )
+    )
+
+    assert (component.comparison_request_config() is not None) is expected
+
+
 def test_component_reprojects_only_display_local_configuration() -> None:
     component = CustomHistoricalComponent(config())
     assert component.accept_response(response())
@@ -518,6 +637,59 @@ def test_custom_ranking_heading_is_centered_once() -> None:
         len(heading) - len(heading.lstrip())
         == (context.width - display_width(heading.lstrip())) // 2
     )
+
+
+def test_custom_ranking_renders_localized_descriptions_only_when_visible() -> None:
+    source = response((("api", "10"),))
+    described = replace(
+        source,
+        data=CustomData(
+            (
+                CustomSeries(
+                    "api",
+                    LocalizedText("API", "接口"),
+                    (CustomPoint(date(2026, 9, 1), Decimal("10")),),
+                    LocalizedText(
+                        "Release validation and regression testing account for most activity.",
+                        "发布验证和回归测试构成了大部分活动。",
+                    ),
+                ),
+            )
+        ),
+    )
+    projection = process_custom_historical(described, config(kind="ranking"))
+    context = RenderContext(34, 20, load_translator("zh"), color=False, style="dot")
+
+    collapsed = render_custom_projection(projection, context)
+    expanded = render_custom_projection(projection, context, descriptions_visible=True)
+
+    assert "发布验证" not in collapsed
+    assert "发布验证" in expanded
+    assert len(expanded.splitlines()) <= len(collapsed.splitlines()) + 2
+    description_rows = [line for line in expanded.splitlines() if "发布" in line or "测试" in line]
+    assert description_rows
+    assert all(display_width(line) <= context.width for line in description_rows)
+
+
+def test_custom_descriptions_are_rejected_outside_ranking() -> None:
+    source = response((("api", "10"),))
+    described = replace(
+        source,
+        data=CustomData(
+            (
+                CustomSeries(
+                    "api",
+                    LocalizedText("API", "接口"),
+                    (CustomPoint(date(2026, 9, 1), Decimal("10")),),
+                    LocalizedText("Release validation", "发布验证"),
+                    LocalizedText("10 requests", "10 个请求"),
+                ),
+            )
+        ),
+    )
+
+    with pytest.raises(CustomProjectionError, match="only by ranking"):
+        process_custom_historical(described, config(kind="timeline"))
 
 
 def test_custom_calendar_preserves_decimal_values_for_shared_grid(
@@ -667,6 +839,249 @@ def test_custom_timeline_places_prefix_unit_before_heading() -> None:
 
     assert "$ · Reading · Timeline · 2026-09-01–2026-09-02" in output
     assert "$0.00" not in output
+
+
+def test_custom_ranking_prefers_dataset_owned_localized_display() -> None:
+    source = response((("book", "10"),))
+    source = replace(
+        source,
+        data=replace(
+            source.data,
+            series=(
+                replace(
+                    source.data.series[0],
+                    display=LocalizedText("10 chapters", "10 章"),
+                ),
+            ),
+        ),
+    )
+    projection = process_custom_historical(
+        source,
+        config(
+            kind="ranking", group_by=None, top=None, presentation=ChartPresentation(style="dot")
+        ),
+    )
+
+    english = render_custom_projection(
+        projection, RenderContext(80, 20, load_translator("en"), color=False, style="dot")
+    )
+    chinese = render_custom_projection(
+        projection, RenderContext(80, 20, load_translator("zh"), color=False, style="dot")
+    )
+
+    assert "10 chapters" in english
+    assert "10 章" in chinese
+    assert "10.00 pages" not in english
+
+
+def test_custom_ranking_shows_copy_marker_and_clipboard_description_text() -> None:
+    source = response((("book", "10"),))
+    source = replace(
+        source,
+        data=replace(
+            source.data,
+            series=(
+                replace(
+                    source.data.series[0],
+                    description=LocalizedText(
+                        "Read [GitHub](https://github.com/example/book)",
+                        "阅读 [GitHub](https://github.com/example/book)",
+                    ),
+                ),
+            ),
+        ),
+    )
+    projection = process_custom_historical(
+        source,
+        config(
+            kind="ranking", group_by=None, top=None, presentation=ChartPresentation(style="dot")
+        ),
+    )
+
+    regular = render_custom_projection(
+        projection, RenderContext(80, 20, load_translator("en"), color=False, style="dot")
+    )
+    copied = render_custom_projection(
+        projection,
+        RenderContext(80, 20, load_translator("en"), color=False, style="dot"),
+        copied_entry_id="book",
+    )
+
+    assert "book | ⊞" in regular
+    assert "book | ✓" in copied
+    assert (
+        copyable_description_text(source.data.series[0].description.en)
+        == "Read GitHub https://github.com/example/book"
+    )
+
+
+def test_custom_ranking_renders_project_link_after_copy_marker() -> None:
+    source = response((("book", "10"),))
+    source = replace(
+        source,
+        data=replace(
+            source.data,
+            series=(
+                replace(source.data.series[0], link="https://example.com/books/book"),
+            ),
+        ),
+    )
+    projection = process_custom_historical(
+        source,
+        config(
+            kind="ranking", group_by=None, top=None, presentation=ChartPresentation(style="dot")
+        ),
+    )
+
+    output = render_custom_projection(
+        projection, RenderContext(80, 20, load_translator("en"), color=False, style="dot")
+    )
+
+    assert "book | ⊞ · →" in strip_ansi(output)
+    assert output.count("\x1b]8;;https://example.com/books/book\x1b\\") == 1
+    assert projection.series[0].link == "https://example.com/books/book"
+
+
+def test_non_ranking_custom_projection_rejects_project_links() -> None:
+    source = response((("book", "10"),))
+    source = replace(
+        source,
+        data=replace(
+            source.data,
+            series=(
+                replace(source.data.series[0], link="https://example.com/books/book"),
+            ),
+        ),
+    )
+
+    with pytest.raises(CustomProjectionError, match="presentation fields"):
+        process_custom_historical(source, config(kind="timeline", group_by=None, top=None))
+
+
+def test_custom_ranking_other_never_inherits_a_project_link() -> None:
+    source = response((("first", "10"), ("second", "5")))
+    source = replace(
+        source,
+        data=replace(
+            source.data,
+            series=(
+                replace(source.data.series[0], link="https://example.com/projects/first"),
+                replace(source.data.series[1], link="https://example.com/projects/second"),
+            ),
+        ),
+    )
+    projection = process_custom_historical(
+        source,
+        config(kind="ranking", group_by=None, top=1, other="show"),
+    )
+
+    first, other = projection.series
+    assert first.link == "https://example.com/projects/first"
+    assert other.is_other and other.link is None
+
+
+def test_custom_ranking_title_includes_selected_dataset_filters() -> None:
+    source = response((("book", "10"),))
+    projection = process_custom_historical(
+        source,
+        replace(
+            config(
+                kind="ranking", group_by=None, top=None, presentation=ChartPresentation(style="dot")
+            ),
+            filters=(("genre", ("fiction",)),),
+        ),
+    )
+
+    output = render_custom_projection(
+        projection, RenderContext(100, 20, load_translator("en"), color=False, style="dot")
+    )
+
+    assert "Filters: Genre Fiction" in output
+
+
+def test_custom_timeline_title_includes_selected_dataset_filters() -> None:
+    source = response((("book", "10"),))
+    projection = process_custom_historical(
+        source,
+        replace(config(kind="timeline"), filters=(("genre", ("fiction",)),)),
+    )
+
+    output = render_custom_projection(
+        projection, RenderContext(100, 20, load_translator("en"), color=False, style="points")
+    )
+
+    assert "Filters: Genre Fiction" in output
+
+
+def test_custom_ranking_preserves_long_dataset_labels_without_prefix_compaction() -> None:
+    source = response((("doctor", "10"), ("doctor-sandbox", "5")))
+    source = replace(
+        source,
+        data=replace(
+            source.data,
+            series=(
+                replace(
+                    source.data.series[0], label=LocalizedText("project-doctor", "项目-doctor")
+                ),
+                replace(
+                    source.data.series[1],
+                    label=LocalizedText("project-doctor-sandbox", "项目-doctor-sandbox"),
+                ),
+            ),
+        ),
+    )
+    projection = process_custom_historical(
+        source,
+        config(
+            kind="ranking", group_by=None, top=None, presentation=ChartPresentation(style="dot")
+        ),
+    )
+
+    output = render_custom_projection(
+        projection, RenderContext(110, 20, load_translator("en"), color=False, style="dot")
+    )
+
+    assert "project-doctor" in output
+    assert "project-doctor-sandbox" in output
+    assert "…doctor" not in output
+
+
+def test_custom_ranking_prefers_dataset_owned_localized_comparison_display() -> None:
+    current = response((("book", "10"),))
+    previous = response((("book", "3"),), point_date=date(2026, 8, 30))
+    current = replace(
+        current,
+        data=replace(
+            current.data,
+            series=(
+                replace(
+                    current.data.series[0],
+                    comparison_display=LocalizedText("+7 chapters", "+7 章"),
+                ),
+            ),
+        ),
+    )
+    projection = process_custom_historical(
+        current,
+        config(
+            kind="ranking", group_by=None, top=None, presentation=ChartPresentation(style="dot")
+        ),
+        comparison_response=previous,
+        comparison_config=replace(
+            config(kind="ranking", group_by=None, top=None),
+            date_range=DateRange(date(2026, 8, 30), date(2026, 8, 31)),
+        ),
+    )
+
+    english = render_custom_projection(
+        projection, RenderContext(100, 20, load_translator("en"), color=False, style="dot")
+    )
+    chinese = render_custom_projection(
+        projection, RenderContext(100, 20, load_translator("zh"), color=False, style="dot")
+    )
+
+    assert "+7 chapters" in english
+    assert "+7 章" in chinese
 
 
 def test_custom_timeline_uses_native_area_validation() -> None:

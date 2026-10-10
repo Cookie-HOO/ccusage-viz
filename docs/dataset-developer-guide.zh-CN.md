@@ -172,7 +172,7 @@ Probe 只能返回元数据：不能获取收费业务数据、校验 secret、�
 
 所有人类文本必须同时有 `en` 和 `zh-CN`。所有度量值都必须是十进制**字符串**，如 `"42"`、`"1.25"`，不能是 JSON number、科学记数、NaN 或无穷。
 
-历史 capability 声明 `granularities`、`group_by` 与可选有序 `periods`；若 Ranking 的源端永远无法提供更多原始排行项目，还可声明正整数 `max_items`。`group_by` 中的 JSON `null` 表示允许未分组总计。filter 不属于 Probe 的静态能力，而是在每一次成功查询的 `runtime.filters` 中声明。Monitor 必须声明固定正数 `window_seconds`，它定义每条 observation 的业务事实窗口；`refresh_interval_seconds` 只是建议采样频率。
+历史 capability 声明 `granularities`、`group_by` 与可选有序 `periods`；若 Ranking 的源端永远无法提供更多原始排行项目，还可声明正整数 `max_items`。Ranking 可选 `comparison: "full" | "rank" | "none"`，默认 `full`；`rank` 保留前一等长周期请求与排名变化，但隐藏绝对增长；`none` 不请求前期且隐藏所有对比列。为兼容旧版 Descriptor，Ranking 也可使用 `descriptions_default: "expanded" | "collapsed"`，但 ccuv 会忽略该字段。说明由密度决定：`full` 和 `detailed` 显示，`minimal`、`compact` 和 `normal` 隐藏。`group_by` 中的 JSON `null` 表示允许未分组总计。filter 不属于 Probe 的静态能力，而是在每一次成功查询的 `runtime.filters` 中声明。Monitor 必须声明固定正数 `window_seconds`，它定义每条 observation 的业务事实窗口；`refresh_interval_seconds` 只是建议采样频率。
 
 ## 每种查询如何处理
 
@@ -182,7 +182,7 @@ Probe 只能返回元数据：不能获取收费业务数据、校验 secret、�
 
 请求给出时区、含首尾的 `range.start_date/end_date`、可选 `period`，以及 `query.filters/group_by/granularity/top`。日期范围权威且包含两端；`period` 仅是滚动范围上下文。`query.top` 可选，它统一表示用户希望显示的 Top N 与请求的原始排行覆盖量；若为诚实计算 `Other` 需要更多原始项目，Dataset 可以返回更多。`null` 表示不限制 Top。只接受自己 capability 声明过的选择。
 
-成功响应包含完整 `descriptor`、`runtime:{"filters":[...]}` 和 `data.series`。每个 point 的 `date` 是 `YYYY-MM-DD`，`value` 是十进制字符串。有效范围没有事实时返回空 series，不要把未知事实伪造成零。
+成功响应包含完整 `descriptor`、`runtime:{"filters":[...]}` 和 `data.series`。每个 point 的 `date` 是 `YYYY-MM-DD`，`value` 是十进制字符串。Ranking series 还可使用与 `label` 相同的双语结构提供可选 `description` 与 `display`；ccuv 在 `full` 和 `detailed` 密度下将前者展示为最多两行、弱化颜色并带缩进的说明。description 支持 `[label](https://URL)`、`**粗体文字**` 与 `*斜体文字*`；链接显示为可点击的 `label`，其文字内也可使用星号格式。下划线格式、其他 Markdown 和不安全终端内容均按纯文本处理。`display` 是显示在数值列、由 Dataset 决定的总量文本；ccuv 仍根据十进制 point 计算排序、占比和比较。每个具体 Ranking 项还可提供一个可选 `link`，它必须是绝对 `https://` URL；ccuv 会在项目名后的操作区显示可点击的 `↗`（`项目 | ⊞ ↗`），并在复制该项目时附带 URL。对于非固定范围的 `full` / `detailed` Ranking，ccuv 会额外发起一次紧邻且等长的上一范围普通 chart 请求。请保持两次响应的 series ID 稳定，ccuv 据此自行计算绝对增长与排名变化；不要返回 delta 或前值字段。Timeline、Stack、Calendar 不得返回 `description`、`display` 或 `link`。有效范围没有事实时返回空 series，不要把未知事实伪造成零。
 
 ### `summary`
 

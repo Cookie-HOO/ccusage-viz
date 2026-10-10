@@ -18,6 +18,8 @@
 
 V2 指标可声明 `summary: "comparisons" | "total" | "none"`。`comparisons` 是默认值，允许普通的当前值、环比和同比摘要；`total` 只允许显示一个总数；`none` 不发起 Dataset 摘要请求。每种历史图 capability 都可声明支持的有序 `periods`；声明后 ccuv 会将 `p/P` 限制为该列表。`all` 仅用于 Ranking：ccuv 发送 `period: "all"`，并使用 `1971-01-01` 到今天的锚定范围。权威语义是 marker，不是锚定日期；Dataset 必须按照自身全量数据口径处理。若不支持某个周期，继续使用现有 `unsupported_query`，字段为 `range.period`。
 
+Ranking capability 还可声明 `comparison: "full" | "rank" | "none"`，默认是 `full`。`rank` 仍请求前一等长周期并显示排名变化，但隐藏绝对增长列；`none` 不请求前期，也不显示任何 Ranking 对比列。
+
 每个图表的 `group_by` 同样是允许发送的有序查询值集合；使用 JSON `null` 明确表示允许未分组总计，维度 ID 仍是字符串，因此名为 `total` 的维度并不冲突。任一已声明列表阻止切换时，ccuv 会保持当前查询并短暂提示，不会发送不支持的请求。不声明 `periods` 时，ccuv 保持原有周期循环，并由 Dataset 动态解释每个请求。
 
 ### V2 图表默认值
@@ -42,6 +44,8 @@ V2 指标可声明 `summary: "comparisons" | "total" | "none"`。`comparisons` �
 所有字段都可省略。`period`、`granularity`、`group_by` 必须受当前图 capability 支持；`top` 需要最终有效的分组；style 必须与最终分组兼容。`other` 只能是 `"show"` 或 `"hide"`；`theme` 和 `style` 使用 ccuv 正常 CLI 值。filter 没有静态 default；其 ID 与 option 由响应的 `runtime.filters` 提供。
 
 `defaults.top` 只表示首屏 Top N 建议。历史 Ranking 可在 `capabilities.charts.ranking.max_items` 声明一个正整数，表示数据源最多能可信返回多少原始排行项目；它不是显示默认值。ccuv 会将当前 Top 写入可选 `query.top`，它同时表示用户希望显示的 Top N 和请求的原始排行覆盖量；在需要诚实计算 `Other` 时，Dataset 可以返回更多项目。请求值为 `null` 表示不限制 Top。用户将 Top 调到超过 `max_items` 时，ccuv 会保留选择并提示数据源上限，而不会发送不可能增加项目的请求。
+
+为兼容旧版 Dataset descriptor，Ranking capability 仍可声明 `descriptions_default: "expanded" | "collapsed"`；ccuv 会接受但忽略该字段。条目说明完全由 Ranking 密度决定：`full` 和 `detailed` 显示，`minimal`、`compact` 和 `normal` 隐藏。
 
 对于 Custom Monitor，`window` 是 ccuv 本地显示范围（`5m` 到 `24h`），不是数据源业务窗口。固定请求窗口始终是 `capabilities.charts.monitor.window_seconds`。
 
@@ -99,7 +103,7 @@ ccuv dashboard --empty --grid 2x2 \
   --pane 'animate --style rain'
 ```
 
-Dashboard 预设以内置 token 消耗统计模板为基础，Dashboard 预设管理器也可以保存完整的用户配置。在浏览模式中按 `s` 保存，按 `p` 管理已保存的预设。预设会保留已安装 Dataset 引用、本地命令 Dataset Pane 的 argv 和命令驱动的 Overlay。它们是可信的用户本地自动化配置：加载预设会执行其中包含的命令，因此只能加载你信任的预设。预设绝不包含环境变量、凭据、结果或运行时/UI 状态。
+Dashboard 预设以内置 token 消耗统计模板为基础，Dashboard 预设管理器也可以保存完整的用户配置。在浏览模式中按 `Ctrl-S` 保存，按 `Ctrl-P` 管理已保存的预设。预设会保留已安装 Dataset 引用、本地命令 Dataset Pane 的 argv 和命令驱动的 Overlay。它们是可信的用户本地自动化配置：加载预设会执行其中包含的命令，因此只能加载你信任的预设。预设绝不包含环境变量、凭据、结果或运行时/UI 状态。
 
 用户预设名必须匹配 `^[a-z][a-z0-9-]*$`。用户预设可以覆盖同名内置预设：按用户优先的规则加载用户记录；删除用户覆盖后会重新显示同名内置预设。管理器在覆盖已有用户预设或删除用户预设前都会要求确认。可用 `ccuv dashboard <name>` 启动具名预设；这一封闭形式只接受 `--demo`、`--lang`、`--empty` 和 `--ccusage-bin` 作为附加选项。缺少已安装 Dataset 不会使预设变为不可用；只有预设存储不可读、格式错误或版本不支持时才显示为不可用，并阻止写入。
 
@@ -129,6 +133,10 @@ Dashboard 预设以内置 token 消耗统计模板为基础，Dashboard 预设�
 协议标识为 `ccuv.custom/v1`。ccuv 为每次物理执行生成 `request_id`。等价的 Dashboard 进行中请求可能合并，因此该 ID 代表一次共享执行，而不是 Pane 生命周期。
 
 每次成功 Chart 响应仍必须自描述，携带该查询有效的 capability、本地化数据集元数据和数据；汇总事实通过独立请求返回。命令必须是无状态的：不能依赖此前的命令进程响应。
+
+对于非固定范围且密度为 `full` 或 `detailed` 的 Ranking，ccuv 会先请求当前范围，再请求紧邻且等长的上一范围。Dataset 对两次请求都返回普通的按日期分组 series points。ccuv 通过稳定的 `data.series[].id` 对齐，自己推导展示的绝对增长量和排名变化；协议不应提供 delta、previous-total 或 previous-rank 字段。上一范围请求失败或不可用时，当前 Ranking 仍会显示，只是不带比较标记。固定日期范围 Ranking 不会请求上一范围。
+
+仅在 Ranking 查询中，`data.series` 的每项可以提供可选 `description`、`display`、`comparison_display` 和 `link` 字段；前三者使用与 label 相同的 `{ "en": "...", "zh-CN": "..." }` 双语结构。在 `full` 和 `detailed` 密度下，ccuv 将 `description` 渲染在 Ranking 项下方，采用弱化颜色和缩进，最多换行为两行。`display` 是由 Dataset 决定、显示在 Ranking 数值列的格式化总量；数值 `points[].value` 仍是排名、占比和比较的事实来源。省略 `display` 时 ccuv 根据声明的 unit 格式化总量。description 可使用 `[label](https://URL)` 链接、`**粗体文字**` 与 `*斜体文字*`；ccuv 只显示 `label` 并将其作为可点击终端链接，也允许在链接文字中使用星号格式。下划线格式及其他 Markdown、HTML、格式错误链接、不支持的 URL 协议和终端控制序列都会作为安全纯文本处理。Ranking 搜索会匹配链接文字和 URL；仅 URL 命中时会追加可点击的高亮 `↗` 标记。`link` 是项目的一个绝对 `https://` URL；ccuv 在项目名后的操作区显示可点击 `↗`（`项目 | ⊞ ↗`），并在复制内容的项目名称和说明后附带该 URL。未提供 link 时不显示图标。Timeline、Stack、Calendar response 不得携带这些字段，ccuv 会拒绝；本地合成的 `Other` 项永远不带这些字段。
 
 `probe` 是 Dataset 注册和显式刷新使用的仅元数据请求，不携带 timezone、range、query 或 summary。它不得读取业务数据、校验凭据、修改状态，或创建业务数据网关。它返回稳定 descriptor，包括声明的环境变量和图表默认值；后续 Chart 响应仍是特定查询的权威结果。
 

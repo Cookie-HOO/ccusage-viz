@@ -232,7 +232,14 @@ and again before a live custom Monitor starts.
 
 For historical charts, a Metric capability has `granularities`, `group_by`,
 and optionally ordered `periods`. A Ranking may also declare positive
-`max_items` when the source can never provide more raw ranking entries. Use
+`max_items` when the source can never provide more raw ranking entries, plus
+legacy `descriptions_default: "expanded" | "collapsed"`, which ccuv accepts
+but ignores. Entry descriptions are visible at `full` and `detailed` density,
+and hidden at `minimal`, `compact`, and `normal`. Use
+`comparison: "full" | "rank" | "none"` to control Ranking comparison facts:
+`rank` keeps the prior-range request and rank movement but hides absolute
+growth; `none` suppresses both the request and all comparison columns. The
+default is `full`.
 `null` in `group_by` to permit an ungrouped total. For Monitor, declare fixed
 positive `window_seconds`; this is the business semantics of every observation.
 `refresh_interval_seconds` is advisory and ccuv warns when its actual sampling
@@ -263,7 +270,26 @@ return additional raw rows when it needs them to form an honest `Other` row;
 `null` means no requested Top bound. Return a `chart` success with the complete
 Probe-shaped `descriptor`, `runtime: {"filters": [...]}`, and dated `data.series` points. Every point uses ISO
 `YYYY-MM-DD`; return an empty series list when the requested valid range has no
-facts. Do not invent zeros unless zero is a true source fact.
+facts. A Ranking series may additionally provide an optional bilingual
+`description` with the same shape as `label`; ccuv renders it as at most two
+muted, indented rows at `full` and `detailed` density. Its supported markup is
+`[label](https://URL)`, `**bold text**`, and `*italic text*`; links render as
+clickable labels and may contain star emphasis. Underscore emphasis, all other
+Markdown, and unsafe terminal content stays plain text. A Ranking
+series may also provide optional localized `display`, which is the exact total
+string shown in its value column, and `comparison_display`, which is the exact
+absolute-change string shown in its prior-period comparison column. ccuv
+continues to calculate ordering, shares, comparison availability, colours, and
+rank movement from the decimal points. At `full` and `detailed`, a non-fixed
+Ranking also receives a second ordinary chart request for the contiguous,
+equal-duration prior range. Keep series IDs stable between those responses:
+ccuv uses them to calculate absolute growth and rank movement locally. Do not
+return delta or previous-value fields. A concrete Ranking series may also provide
+an optional `link` as one absolute `https://` URL. ccuv renders its clickable
+`↗` in the whole-project action group (`Project | ⊞ ↗`) and appends the URL when the project is
+copied. Do not return `description`, `display`, or `link` for Timeline, Stack,
+or Calendar. Do not invent zeros unless zero is a
+true source fact.
 
 ### Summary request and response
 

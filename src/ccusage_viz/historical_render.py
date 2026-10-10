@@ -149,6 +149,9 @@ def render_historical_component(
     ranking_rank_deltas: Mapping[Hashable, int] | None = None,
     interval: float | None = None,
     refreshing: bool = False,
+    ranking_search_query: str = "",
+    ranking_search_editing: bool = False,
+    ranking_show_visible_count: bool = False,
 ) -> RenderedChart:
     accepted_options = component.accepted_options
     model = component.model
@@ -193,7 +196,18 @@ def render_historical_component(
         refreshing=refreshing,
         component=component,
     )
-    rendered = component.definition.renderer(model, context)
+    if isinstance(chart, RankingConfig) and (ranking_search_query or ranking_show_visible_count):
+        from ccusage_viz.render.ranking import render_ranking
+
+        rendered = render_ranking(
+            model,
+            context,
+            search_query=ranking_search_query,
+            search_editing=ranking_search_editing,
+            show_visible_count=ranking_show_visible_count,
+        )  # type: ignore[arg-type]
+    else:
+        rendered = component.definition.renderer(model, context)
     audit = render_audit(context)
     if audit:
         rendered = rendered.rstrip("\n") + "\n" + audit

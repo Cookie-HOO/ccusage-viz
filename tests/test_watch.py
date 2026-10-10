@@ -43,6 +43,7 @@ from ccusage_viz.query.coordinator import QueryHandle
 from ccusage_viz.render.surfaces import SurfaceControls
 from ccusage_viz.terminal import FramePainter, Terminal
 from ccusage_viz.terminal_ui import controls_line, notice_lines
+from ccusage_viz.tui_input import KeyEvent
 from ccusage_viz.watch import (
     RefreshResult,
     RuntimeAdjustmentResult,
@@ -243,8 +244,11 @@ def test_historical_space_does_not_interrupt_refresh_and_manual_refresh_remains_
     monkeypatch.setattr("ccusage_viz.watch.build_chart_registry", lambda: object())
     monkeypatch.setattr("ccusage_viz.watch.HistoricalChartComponent", Component)
     monkeypatch.setattr("ccusage_viz.watch.FramePainter", Screen)
-    monkeypatch.setattr("ccusage_viz.watch.input_mode", nullcontext)
-    monkeypatch.setattr("ccusage_viz.watch.read_key", lambda _timeout: next(keys))
+    monkeypatch.setattr("ccusage_viz.watch.tui_input_mode", nullcontext)
+    monkeypatch.setattr(
+        "ccusage_viz.watch.read_event",
+        lambda _decoder, _timeout: KeyEvent(key) if (key := next(keys, None)) is not None else None,
+    )
     monkeypatch.setattr("ccusage_viz.watch.get_terminal_size", lambda: os.terminal_size((100, 30)))
     monkeypatch.setattr(
         "ccusage_viz.watch.inspect_terminal",
@@ -384,8 +388,11 @@ def test_historical_primary_completion_queues_supplement_without_moving_cadence(
     monkeypatch.setattr("ccusage_viz.watch.HistoricalChartComponent", Component)
     monkeypatch.setattr("ccusage_viz.watch.FixedIntervalScheduler", Scheduler)
     monkeypatch.setattr("ccusage_viz.watch.FramePainter", Screen)
-    monkeypatch.setattr("ccusage_viz.watch.input_mode", nullcontext)
-    monkeypatch.setattr("ccusage_viz.watch.read_key", lambda _timeout: next(keys))
+    monkeypatch.setattr("ccusage_viz.watch.tui_input_mode", nullcontext)
+    monkeypatch.setattr(
+        "ccusage_viz.watch.read_event",
+        lambda _decoder, _timeout: KeyEvent(key) if (key := next(keys, None)) is not None else None,
+    )
     monkeypatch.setattr("ccusage_viz.watch.get_terminal_size", lambda: os.terminal_size((100, 30)))
     monkeypatch.setattr(
         "ccusage_viz.watch.inspect_terminal",
@@ -497,8 +504,11 @@ def test_historical_filter_commit_increments_generation_once_and_refreshes_once(
     monkeypatch.setattr("ccusage_viz.watch.build_chart_registry", lambda: object())
     monkeypatch.setattr("ccusage_viz.watch.HistoricalChartComponent", Component)
     monkeypatch.setattr("ccusage_viz.watch.FramePainter", Screen)
-    monkeypatch.setattr("ccusage_viz.watch.input_mode", nullcontext)
-    monkeypatch.setattr("ccusage_viz.watch.read_key", lambda _timeout: next(keys))
+    monkeypatch.setattr("ccusage_viz.watch.tui_input_mode", nullcontext)
+    monkeypatch.setattr(
+        "ccusage_viz.watch.read_event",
+        lambda _decoder, _timeout: KeyEvent(key) if (key := next(keys, None)) is not None else None,
+    )
     monkeypatch.setattr("ccusage_viz.watch.get_terminal_size", lambda: os.terminal_size((100, 30)))
     monkeypatch.setattr(
         "ccusage_viz.watch.inspect_terminal",
@@ -512,6 +522,8 @@ def test_historical_filter_commit_increments_generation_once_and_refreshes_once(
         "ccusage_viz.watch.run_filter_editor",
         lambda *_args, **_kwargs: Filters(agents=("Claude Code",)),
     )
+    monkeypatch.setattr("ccusage_viz.watch.input_mode", nullcontext)
+    monkeypatch.setattr("ccusage_viz.watch.read_key", lambda _timeout: next(keys))
 
     assert run_watch(launch, load_translator("en")) == 0
     assert [event for event in events if event[0] == "configure"][-1:] == [("configure", True, 1)]

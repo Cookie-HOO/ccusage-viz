@@ -206,7 +206,7 @@ def _add_presentation(parser: argparse.ArgumentParser, tr: Translator, command: 
     parser.add_argument(
         "--density",
         choices=DENSITIES,
-        default="detailed",
+        default="full" if command == "ranking" else "detailed",
         help=tr.text("help.density"),
     )
     if command in {"timeline", "monitor", "stack"}:
@@ -560,7 +560,10 @@ def _chart_from_namespace(namespace: argparse.Namespace, *, timezone: str | None
         theme=namespace.color_scheme,
         style=style,
         legend=getattr(namespace, "legend", "below-title"),
-        density=cast(Density, getattr(namespace, "density", "detailed")),
+        density=cast(
+            Density,
+            getattr(namespace, "density", "full" if command == "ranking" else "detailed"),
+        ),
     )
     top = getattr(namespace, "top", None)
     if command in {"timeline", "monitor"} and namespace.by is not None and top is None:
@@ -701,7 +704,7 @@ def _custom_chart_from_namespace(
             theme=namespace.color_scheme,
             style=style,
             legend=getattr(namespace, "legend", "below-title"),
-            density=cast(Density, namespace.density),
+            density=cast(Density, namespace.density or ("full" if kind == "ranking" else "detailed")),
         ),
         group_by=group_by,
         top=top,
@@ -791,7 +794,13 @@ def parse_pane_fragment(
                 explicit=explicit,
             )
             if "density" not in explicit:
-                chart = replace(chart, presentation=replace(chart.presentation, density="compact"))
+                chart = replace(
+                    chart,
+                    presentation=replace(
+                        chart.presentation,
+                        density="full" if chart.kind == "ranking" else "compact",
+                    ),
+                )
             if host is not None and host.host.ascii and "color_scheme" in explicit:
                 raise UsageError(
                     "error.arguments",
@@ -870,7 +879,10 @@ def parse_pane_fragment(
         if "density" not in explicit:
             chart = replace(
                 chart,
-                presentation=replace(chart.presentation, density="compact"),
+                presentation=replace(
+                    chart.presentation,
+                    density="full" if chart.kind == "ranking" else "compact",
+                ),
             )
         if host is not None and host.host.ascii and "color_scheme" in explicit:
             raise UsageError(
@@ -1137,7 +1149,11 @@ def _to_options(
                 else namespace.sampling_interval
             ),
             header_style=namespace.header_style,
-            header_summary=namespace.header_summary,
+            header_summary=(
+                preset.header_summary
+                if preset is not None and "header_summary" not in explicit
+                else namespace.header_summary
+            ),
             header_interval=namespace.header_interval,
             theme=namespace.color_scheme,
             style=(

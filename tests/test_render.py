@@ -71,6 +71,10 @@ from ccusage_viz.render.palette import (
     get_color_scheme,
 )
 from ccusage_viz.render.ranking import render_ranking
+from ccusage_viz.render.ranking_presentation import (
+    RankingPresentationEntry,
+    render_historical_ranking,
+)
 from ccusage_viz.render.stack import render_stack
 from ccusage_viz.render.summary import SummaryBlock, layout_summary_blocks, render_summary
 from ccusage_viz.render.surfaces import (
@@ -662,10 +666,103 @@ def test_historical_ranking_derives_comparison_markers_from_entry_facts() -> Non
 
     output = render_ranking(model, context(True))
 
+    header = next(line for line in output.splitlines() if "Rank Δ" in line)
     api_line = next(line for line in output.splitlines() if "api" in line)
     app_line = next(line for line in output.splitlines() if "app" in line)
-    assert "^ +200 · ^" in api_line
-    assert "v -100 · v" in app_line
+    assert "vs prior" in header
+    assert "+200" in api_line
+    assert "^" in api_line
+    assert "-100" in app_line
+    assert "v" in app_line
+
+
+def test_historical_ranking_full_uses_labeled_value_delta_without_rank_comparison() -> None:
+    entries = (
+        RankingPresentationEntry(
+            "api", "api", 300, previous=100, comparison_ready=True, previous_rank=2
+        ),
+        RankingPresentationEntry(
+            "app", "app", 100, previous=200, comparison_ready=True, previous_rank=1
+        ),
+        RankingPresentationEntry("other", "Other", 20, is_other=True),
+    )
+    output = render_historical_ranking(
+        entries,
+        heading="Ranking",
+        value_formatter=str,
+        delta_formatter=lambda value: f"{value:+}",
+        context=RenderContext(
+            100, 24, load_translator("en"), color=False, ascii=True, density="full"
+        ),
+        total=420,
+    )
+    header, api, app, other = output.splitlines()[1:]
+
+    assert "Rank" in header and "Current" in header and "vs prior" in header
+    assert "Rank Δ" not in header
+    assert "+200" in api and "^" not in api
+    assert "-100" in app and "v" not in app
+    assert "—" in other
+    assert all(display_width(row) <= 100 for row in output.splitlines())
+
+
+def test_historical_ranking_all_period_omits_comparison_columns_and_uses_available_width() -> None:
+    context = RenderContext(
+        120, 24, load_translator("en"), color=False, style="dot", density="detailed", period="all"
+    )
+    output = render_historical_ranking(
+        (
+            RankingPresentationEntry("a", "Alpha", 100),
+            RankingPresentationEntry("b", "Beta", 50),
+        ),
+        heading="Ranking",
+        value_formatter=str,
+        context=context,
+    )
+    _heading, *rows = output.splitlines()
+
+    assert all("vs prior" not in row and "Rank Δ" not in row for row in rows)
+    assert all(display_width(row) == context.width for row in rows)
+
+
+def test_historical_ranking_rank_comparison_hides_growth_but_retains_rank_delta() -> None:
+    output = render_historical_ranking(
+        (
+            RankingPresentationEntry(
+                "api", "API", 300, previous=100, comparison_ready=True, previous_rank=2
+            ),
+            RankingPresentationEntry(
+                "app", "App", 100, previous=200, comparison_ready=True, previous_rank=1
+            ),
+        ),
+        heading="Ranking",
+        value_formatter=str,
+        delta_formatter=lambda value: f"{value:+}",
+        context=RenderContext(
+            100, 24, load_translator("en"), color=False, ascii=True, density="detailed"
+        ),
+        total=400,
+        comparison_mode="rank",
+    )
+
+    header, api, app = output.splitlines()[1:]
+    assert "vs prior" not in header
+    assert "Rank Δ" in header
+    assert "+200" not in api and "-100" not in app
+    assert "^" in api and "v" in app
+
+
+def test_historical_ranking_none_comparison_hides_all_comparison_columns() -> None:
+    output = render_historical_ranking(
+        (RankingPresentationEntry("api", "API", 300, previous=100, comparison_ready=True),),
+        heading="Ranking",
+        value_formatter=str,
+        context=RenderContext(100, 24, load_translator("en"), color=False, density="detailed"),
+        comparison_mode="none",
+    )
+
+    assert "vs prior" not in output
+    assert "Rank Δ" not in output
 
 
 def test_historical_ranking_shows_refresh_activity_and_rank_changes() -> None:
@@ -691,8 +788,8 @@ def test_historical_ranking_shows_refresh_activity_and_rank_changes() -> None:
         ),
     )
 
-    assert "^" not in static
-    assert "v" not in static
+    assert "^" not in static.splitlines()[-1]
+    assert "v" not in static.splitlines()[-1]
     app_line = next(line for line in live.splitlines() if "app" in line)
     api_line = next(line for line in live.splitlines() if "api" in line)
     assert "1 ^ * app" in app_line
@@ -1841,9 +1938,334 @@ def test_ranking_dots_style_repeats_marks_to_the_scaled_value() -> None:
     )
 
     lines = output.splitlines()
-    assert lines[1].count("●") > 1
-    assert lines[2].count("●") > 1
-    assert "·" in lines[2]
+    rows = lines[2:]
+    assert rows[0].count("●") > 1
+    assert rows[1].count("●") > 1
+    assert "·" in rows[1]
+
+
+def test_historical_ranking_search_filters_casefolded_fields_and_reports_visible_count() -> None:
+    context = RenderContext(
+        80, 20, load_translator("en"), color=False, style="dot", density="normal"
+    )
+    entries = (
+        RankingPresentationEntry("a", "Alpha", 12),
+        RankingPresentationEntry("b", "Claude worker", 8, description="Release validation"),
+    )
+    output = render_historical_ranking(
+        entries,
+        heading="Ranking",
+        value_formatter=str,
+        context=context,
+        search_query="claude",
+        show_visible_count=True,
+    )
+    assert "Search: claude" in output
+    assert "Showing 1/2 item(s)" in output
+    assert "Alpha" not in output
+    assert any(line.lstrip().startswith("2 ") for line in output.splitlines())
+
+    description = render_historical_ranking(
+        entries,
+        heading="Ranking",
+        value_formatter=str,
+        context=context,
+        descriptions_visible=True,
+        search_query="VALIDATION",
+        show_visible_count=True,
+    )
+    assert "Claude worker" in description
+    assert "Release validation" in description
+
+    empty = render_historical_ranking(
+        entries,
+        heading="Ranking",
+        value_formatter=str,
+        context=context,
+        search_query="missing",
+        show_visible_count=True,
+    )
+    assert 'No ranking entries match "missing".' in empty
+
+    minimal = render_historical_ranking(
+        entries,
+        heading="Ranking",
+        value_formatter=str,
+        context=replace(context, density="minimal"),
+        show_visible_count=True,
+    )
+    assert "Showing" not in minimal
+
+
+def test_historical_ranking_descriptions_are_muted_wrapped_and_density_aware() -> None:
+    context = RenderContext(36, 24, load_translator("en"), color=False, style="dot")
+    output = render_historical_ranking(
+        (
+            RankingPresentationEntry(
+                "api",
+                "API",
+                10,
+                description="Release validation and regression testing account for most activity.",
+            ),
+        ),
+        heading="Ranking",
+        value_formatter=str,
+        context=context,
+        descriptions_visible=True,
+    )
+
+    rows = output.splitlines()
+    description_rows = rows[-2:]
+    assert len(description_rows) == 2
+    assert all(row.startswith(" " * 7) for row in description_rows)
+    assert all(display_width(row) <= context.width for row in description_rows)
+    assert description_rows[-1].endswith("…")
+
+    minimal = render_historical_ranking(
+        (RankingPresentationEntry("api", "API", 10, description="Release validation"),),
+        heading="Ranking",
+        value_formatter=str,
+        context=replace(context, density="minimal"),
+        descriptions_visible=True,
+    )
+    assert "Release validation" not in minimal
+
+
+def test_historical_ranking_wraps_plain_description_before_styling() -> None:
+    context = RenderContext(
+        50, 24, load_translator("en"), color=True, style="dot", density="detailed"
+    )
+    description = "The remarkable Paper Pro drinks your ink and answers in a flowing hand"
+    output = render_historical_ranking(
+        (RankingPresentationEntry("paper-pro", "Paper Pro", 10, description=description),),
+        heading="Ranking",
+        value_formatter=str,
+        context=context,
+        descriptions_visible=True,
+    )
+
+    rows = [row for row in output.splitlines() if "remarkable" in row or "flowing" in row]
+    assert len(rows) == 2
+    assert all(display_width(row) <= context.width for row in rows)
+    assert all("\x1b" in row for row in rows)
+
+
+def test_historical_ranking_description_links_are_clickable_and_searchable() -> None:
+    context = RenderContext(80, 24, load_translator("en"), color=False, style="dot")
+    entry = RankingPresentationEntry(
+        "api",
+        "API",
+        10,
+        description="Read [release notes](https://example.com/openai/release) now.",
+    )
+    escaped_link = "\x1b]8;;https://example.com/openai/release\x1b\\"
+
+    plain = render_historical_ranking(
+        (entry,), heading="Ranking", value_formatter=str, context=context, descriptions_visible=True
+    )
+    assert "release notes" in strip_ansi(plain)
+    assert "https://example.com/openai/release" not in strip_ansi(plain)
+    assert plain.count(escaped_link) == 2
+    assert all(display_width(row) <= context.width for row in plain.splitlines())
+
+    linked = render_historical_ranking(
+        (entry,),
+        heading="Ranking",
+        value_formatter=str,
+        context=replace(context, color=True),
+        descriptions_visible=True,
+    )
+    assert "\x1b[38;5;245m\x1b[2;4mrelease notes\x1b[0m" in linked
+    assert "release notes ↗" in strip_ansi(linked)
+
+    label_match = render_historical_ranking(
+        (entry,),
+        heading="Ranking",
+        value_formatter=str,
+        context=replace(context, color=True),
+        descriptions_visible=True,
+        search_query="notes",
+    )
+    assert "\x1b]8;;https://example.com/openai/release\x1b\\" in label_match
+    assert "\x1b]8;;\x1b\\" in label_match
+    assert "\x1b[38;5;245m\x1b[2;4mrelease notes\x1b[0m" in label_match
+    assert "release notes ↗" in strip_ansi(label_match)
+
+    target_match = render_historical_ranking(
+        (entry,),
+        heading="Ranking",
+        value_formatter=str,
+        context=replace(context, color=True),
+        descriptions_visible=True,
+        search_query="openai",
+    )
+    assert "release notes ↗" in strip_ansi(target_match)
+    assert target_match.count(escaped_link) == 2
+
+
+def test_historical_ranking_description_links_reject_unsafe_markup_and_controls() -> None:
+    context = RenderContext(80, 24, load_translator("en"), color=False, style="dot")
+    entry = RankingPresentationEntry(
+        "api",
+        "API",
+        10,
+        description="[local](file:///secret) [broken](https://) \x1b[2Jsafe",
+    )
+    output = render_historical_ranking(
+        (entry,), heading="Ranking", value_formatter=str, context=context, descriptions_visible=True
+    )
+
+    assert "[local](file:///secret) [broken](https://) safe" in strip_ansi(output)
+    assert "\x1b]8;;" not in output
+    assert "\x1b[2J" not in output
+
+
+def test_historical_ranking_description_supports_star_emphasis_only() -> None:
+    context = RenderContext(80, 24, load_translator("en"), color=True, style="dot")
+    entry = RankingPresentationEntry(
+        "api",
+        "API",
+        10,
+        description=(
+            "Use **important steps** and *carefully review* "
+            "[*release notes*](https://example.com/release)."
+        ),
+    )
+    output = render_historical_ranking(
+        (entry,), heading="Ranking", value_formatter=str, context=context, descriptions_visible=True
+    )
+
+    visible = strip_ansi(output)
+    assert "Use important steps and carefully review release notes ↗." in visible
+    assert "**" not in visible and "*release notes*" not in visible
+    assert "\x1b[2;1mimportant steps\x1b[0m" in output
+    assert "\x1b[2;3mcarefully review\x1b[0m" in output
+    assert "\x1b[4;2;3mrelease notes\x1b[0m" in output
+    assert output.count("\x1b]8;;https://example.com/release\x1b\\") == 2
+    assert all(display_width(row) <= context.width for row in output.splitlines())
+
+
+def test_historical_ranking_description_keeps_unsupported_star_markup_literal() -> None:
+    context = RenderContext(100, 24, load_translator("en"), color=False, style="dot")
+    entry = RankingPresentationEntry(
+        "api",
+        "API",
+        10,
+        description="__underlined__ **nested *stars*** * unclosed ** ** **",
+    )
+    output = render_historical_ranking(
+        (entry,), heading="Ranking", value_formatter=str, context=context, descriptions_visible=True
+    )
+
+    assert "__underlined__ **nested *stars*** * unclosed ** ** **" in strip_ansi(output)
+
+
+def test_historical_ranking_project_link_follows_the_copy_marker() -> None:
+    context = RenderContext(80, 24, load_translator("en"), color=False, style="dot")
+    linked = RankingPresentationEntry(
+        "api",
+        "API",
+        10,
+        copy_marker="⊞",
+        project_link="https://example.com/projects/api",
+    )
+    output = render_historical_ranking(
+        (linked,), heading="Ranking", value_formatter=str, context=context
+    )
+
+    assert "API | ⊞ · →" in strip_ansi(output)
+    assert output.count("\x1b]8;;https://example.com/projects/api\x1b\\") == 1
+    assert all(display_width(row) <= context.width for row in output.splitlines())
+
+
+@pytest.mark.parametrize("style", ("dot", "dots", "bars"))
+def test_historical_ranking_aligns_tracks_and_right_value_column(style: str) -> None:
+    context = RenderContext(80, 24, load_translator("en"), color=False, style=style)
+    output = render_historical_ranking(
+        (
+            RankingPresentationEntry("a", "A", 10),
+            RankingPresentationEntry("b", "A much longer project name", 5, display="five units"),
+        ),
+        heading="Ranking",
+        value_formatter=str,
+        context=context,
+        summary="Today Units 15",
+    )
+    summary, heading, header, *rows = output.splitlines()
+
+    track_marks = {"dot": ("●", "·"), "dots": ("●", "·"), "bars": ("█", "░")}[style]
+    track_starts = [min(row.index(mark) for mark in track_marks if mark in row) for row in rows]
+    assert summary == "Today Units 15"
+    assert heading.strip() == "Ranking"
+    assert "Current" in header
+    assert "vs prior" in header
+    assert len(heading) - len(heading.lstrip()) == (context.width - display_width("Ranking")) // 2
+    assert track_starts[0] == track_starts[1]
+    assert "10" in rows[0] and "—" in rows[0] and rows[0].endswith("66.7%")
+    assert "five units" in rows[1] and "—" in rows[1] and rows[1].endswith("33.3%")
+
+
+def test_historical_ranking_deemphasizes_fixed_project_buckets_like_other() -> None:
+    scheme = get_color_scheme("classic")
+    model = RankingModel(
+        (
+            RankingEntry(("project", "real"), "real-project", usage(100)),
+            RankingEntry(("project", "fixed", "unassigned"), "Unassigned", usage(50)),
+            RankingEntry(("other",), "Other", usage(25), is_other=True),
+        ),
+        period(),
+    )
+
+    output = render_ranking(
+        model, RenderContext(80, 24, load_translator("en"), color=True, style="dot")
+    )
+
+    rows = output.splitlines()[2:]
+    assert f"\x1b[38;5;{scheme.highlight}m●" in rows[0]
+    assert f"\x1b[38;5;{scheme.other}m●" in rows[1]
+    assert f"\x1b[38;5;{scheme.other}m●" in rows[2]
+
+
+def test_historical_ranking_list_keeps_label_and_value_columns_aligned() -> None:
+    context = RenderContext(80, 24, load_translator("en"), color=False, style="list")
+    output = render_historical_ranking(
+        (
+            RankingPresentationEntry("a", "A", 10),
+            RankingPresentationEntry("b", "A much longer project name", 5, display="five units"),
+        ),
+        heading="Ranking",
+        value_formatter=str,
+        context=context,
+        summary="Today Units 15",
+    )
+    summary, heading, header, *rows = output.splitlines()
+
+    assert summary == "Today Units 15"
+    assert heading.strip() == "Ranking"
+    assert "Current" in header
+    assert "A" in rows[0]
+    assert "A much longer" in rows[1]
+    assert rows[0].endswith("66.7%")
+    assert rows[1].endswith("33.3%")
+    assert display_width(rows[0]) == display_width(rows[1])
+
+
+def test_historical_ranking_description_starts_with_its_label_column() -> None:
+    context = RenderContext(80, 24, load_translator("en"), color=False, style="dot")
+    output = render_historical_ranking(
+        (
+            RankingPresentationEntry("a", "A", 10, description="First item description."),
+            RankingPresentationEntry("b", "Longer label", 5),
+        ),
+        heading="Ranking",
+        value_formatter=str,
+        context=context,
+        descriptions_visible=True,
+    )
+    _heading, _columns, primary, description, *_rest = output.splitlines()
+
+    label_start = primary.index("A")
+    assert description.index("First item description.") == label_start
 
 
 def test_ranking_compacts_common_opaque_prefixes() -> None:

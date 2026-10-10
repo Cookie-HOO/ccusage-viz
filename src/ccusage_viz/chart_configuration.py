@@ -76,7 +76,7 @@ def add_presentation(parser: argparse.ArgumentParser, tr: Translator, command: s
     parser.add_argument(
         "--density",
         choices=DENSITIES,
-        default="detailed",
+        default="full" if command == "ranking" else "detailed",
         help=tr.text("help.density"),
     )
     if command in {"timeline", "monitor", "stack"}:
@@ -219,7 +219,10 @@ def chart_from_namespace(namespace: argparse.Namespace, *, timezone: str | None 
         theme=namespace.color_scheme,
         style=style,
         legend=getattr(namespace, "legend", "below-title"),
-        density=cast(Density, getattr(namespace, "density", "detailed")),
+        density=cast(
+            Density,
+            getattr(namespace, "density", "full" if command == "ranking" else "detailed"),
+        ),
     )
     top = getattr(namespace, "top", None)
     if command in {"timeline", "monitor"} and namespace.by is not None and top is None:

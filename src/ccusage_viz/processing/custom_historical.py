@@ -7,7 +7,7 @@ custom protocol describes arbitrary additive measurements, so its values stay
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, timedelta
 from decimal import Decimal
 from typing import Literal
@@ -32,10 +32,18 @@ class CustomProjectedSeries:
     previous_total: Decimal | None = None
     comparison_ready: bool = False
     previous_rank: int | None = None
+    description: LocalizedText | None = None
+    display: LocalizedText | None = None
+    comparison_display: LocalizedText | None = None
+    link: str | None = None
+    total_value: Decimal = field(init=False)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "total_value", sum(self.values, start=Decimal()))
 
     @property
     def total(self) -> Decimal:
-        return sum(self.values, start=Decimal())
+        return self.total_value
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,6 +56,8 @@ class CustomChartProjection:
     granularity: str
     config: CustomChartConfig | None = None
     presentation: CustomPresentationDescriptor | None = None
+    comparison_available: bool = False
+    show_percentage: bool = True
 
     @property
     def total(self) -> Decimal:
@@ -63,6 +73,13 @@ def process_custom_historical(
 ) -> CustomChartProjection:
     """Apply local Decimal projection and optional raw ranking comparison facts."""
     _validate_capability(response, config)
+    if config.kind != "ranking" and any(
+        source.description is not None or source.display is not None or source.link is not None
+        for source in response.data.series
+    ):
+        raise CustomProjectionError(
+            "custom series presentation fields are supported only by ranking"
+        )
     if config.kind == "calendar":
         _validate_calendar(response, config)
     if comparison_response is not None:
@@ -83,7 +100,17 @@ def process_custom_historical(
                     "custom response contains a point outside the requested range"
                 )
             values[indexes[bucket]] += point.value
-        candidates.append(CustomProjectedSeries(source.id, source.label, tuple(values)))
+        candidates.append(
+            CustomProjectedSeries(
+                source.id,
+                source.label,
+                tuple(values),
+                description=source.description,
+                display=source.display,
+                comparison_display=source.comparison_display,
+                link=source.link,
+            )
+        )
 
     previous_totals: dict[str, Decimal] = {}
     previous_ranks: dict[str, int] = {}
@@ -103,9 +130,13 @@ def process_custom_historical(
                 series.id,
                 series.label,
                 series.values,
-                previous_total=previous_totals.get(series.id, Decimal()),
-                comparison_ready=True,
+                previous_total=previous_totals.get(series.id),
+                comparison_ready=series.id in previous_totals,
                 previous_rank=previous_ranks.get(series.id),
+                description=series.description,
+                display=series.display,
+                comparison_display=series.comparison_display,
+                link=series.link,
             )
             for series in candidates
         ]
@@ -126,7 +157,17 @@ def process_custom_historical(
         CustomPresentationDescriptor(
             response.dataset,
             {dimension.id: dimension.label for dimension in response.capabilities.group_by},
+            {filter.id: filter.label for filter in response.capabilities.filters},
+            {
+                (filter.id, option.id): option.label
+                for filter in response.capabilities.filters
+                for option in filter.options
+            },
         ),
+        comparison_response is not None,
+        response.capabilities.charts[config.kind].show_percentage
+        if config.kind == "ranking"
+        else True,
     )
 
 
@@ -202,4 +243,6 @@ def _other(series: list[CustomProjectedSeries], count: int) -> CustomProjectedSe
     values = tuple(
         sum((item.values[index] for item in series), start=Decimal()) for index in range(count)
     )
-    return CustomProjectedSeries("other", LocalizedText("Other", "其他"), values, is_other=True)
+    return CustomProjectedSeries(
+        "other", LocalizedText("Other", "其他"), values, is_other=True
+    )

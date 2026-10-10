@@ -350,7 +350,9 @@ def test_all_commands_accept_exactly_four_density_values() -> None:
     for command in ("timeline", "calendar", "stack", "ranking", "monitor"):
         for density in ("minimal", "compact", "full", "detailed"):
             assert parser.parse_args(["chart", command, "--density", density]).density == density
-        assert parser.parse_args(["chart", command]).density == "detailed"
+        assert parser.parse_args(["chart", command]).density == (
+            "full" if command == "ranking" else "detailed"
+        )
     with pytest.raises(UsageError) as caught:
         parser.parse_args(["chart", "timeline", "--density", "standard"])
     assert caught.value.key == "error.arguments"
@@ -1043,6 +1045,24 @@ def test_dashboard_wide_clock_reuses_wide_panes_below_analog_clock_row() -> None
     assert wide_clock.host.layout == "spotlight-wide"
     assert wide_clock.host.row_weights == (9, 13, 12)
     assert wide_clock.host.style == "framed"
+
+
+def test_dashboard_single_keeps_only_the_wide_clock_analog_pane() -> None:
+    parser = build_parser(load_translator("en"))
+
+    single = _to_options(parser.parse_args(["dashboard", "single"]))
+    wide_clock = _to_options(parser.parse_args(["dashboard", "wide-clock"]))
+
+    assert isinstance(single.panes[0], AnimationPaneConfig)
+    assert single.panes[0].animation.style == "analog-clock"
+    assert single.panes[0].overlay.text is None
+    assert single.panes[0].overlay.command is None
+    assert wide_clock.panes[0].overlay.command is not None
+    assert single.host.grid == "1x1"
+    assert single.host.layout is None
+    assert single.host.row_weights is None
+    assert single.host.style == "minimal"
+    assert single.host.header_summary == "none"
 
 
 def test_dashboard_narrow_and_all_presets_expand_to_concrete_state() -> None:

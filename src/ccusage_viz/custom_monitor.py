@@ -121,13 +121,14 @@ def _adjust(component: CustomMonitorComponent, key: str) -> bool:
         )
         component.configure(updated, data_affecting=False)
         return updated != chart
-    if key == "d":
-        densities = ("minimal", "compact", "detailed")
+    if key in {"d", "D"}:
+        densities = ("minimal", "compact", "full", "detailed")
         index = densities.index(chart.presentation.density)
         updated = replace(
             chart,
             presentation=replace(
-                chart.presentation, density=densities[(index + 1) % len(densities)]
+                chart.presentation,
+                density=densities[(index + (1 if key == "d" else -1)) % len(densities)],
             ),
         )
         component.configure(updated, data_affecting=False)
@@ -197,7 +198,7 @@ def _custom_monitor_actions(
         actions.append(("b/B", "grouping"))
     if component.candidate.group_by is not None:
         actions.append(("+/-", "top"))
-    actions.extend((("d", "density"), ("t/T", "theme"), ("s/S", "style")))
+    actions.extend((("d/D", "density"), ("t/T", "theme"), ("s/S", "style")))
     return tuple(actions)
 
 
@@ -380,6 +381,7 @@ def run_custom_monitor(options: StandaloneLaunch, translator: Translator) -> int
                             component.runtime.filters,
                             translator,
                             width=terminal.width,
+                            height=max(0, terminal.height - 2),
                             paint=paint_filter_editor,
                             read_key=lambda: read_key(5),
                         )

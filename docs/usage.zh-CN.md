@@ -119,7 +119,7 @@ Monitor-eligible 效果；随后 `s`/`S` 会循环 term-animate 声明的所有�
 | `--query-timeout SECONDS` | 正且有限的数字 | `30` | 全部 | 实时查询最长时间。该高级受支持参数刻意不显示在常规 `--help` 中。 |
 | `--ascii` | 标志 | 关闭 | 全部 | 使用 ASCII 兼容渲染。不能和显式提供的 `--theme` 同用。 |
 | `--theme THEME` | `classic`、`vivid`、`contrast`、`dracula`、`catppuccin`、`solarized`、`gruvbox`、`nord`、`github`、`mono`、`no-color` | `classic` | 全部 | 图表配色；`no-color` 关闭图表颜色。 |
-| `--density DENSITY` | `minimal`、`compact`、`full`、`detailed` | `detailed` | 全部独立图表 | 图表细节与装饰的数量。 |
+| `--density DENSITY` | `minimal`、`compact`、`full`、`detailed` | `detailed`（Ranking 为 `full`） | 全部独立图表 | 图表细节与装饰的数量。 |
 | `--style STYLE` | 命令专属，见图表表格 | 命令专属 | 全部 | 所选图表的渲染样式。 |
 | `--legend POSITION` | Timeline：`below-title`、`inside`、`hidden`；Stack：`below-title`、`hidden`；Monitor：`below-title`、`inside`、`hidden`、`values` | `below-title` | Timeline、Stack、Monitor | 图例位置/内容。 |
 
@@ -344,6 +344,7 @@ Dashboard 是多 Pane Host。未提供位置预设时，裸调用启动 `wide-cl
 
 ```bash
 ccuv dashboard
+ccuv dashboard single
 ccuv dashboard wide-clock
 ccuv dashboard wide
 ccuv dashboard --demo small
@@ -367,6 +368,7 @@ ccuv dashboard --empty --grid 2x2 \
 
 | 预设 | Pane 组成 | 网格/布局 | Dashboard 样式 |
 | --- | --- | --- | --- |
+| `single` | 仅模拟时钟，无文字叠层和 Dashboard 边框 | `1x1` | `minimal` |
 | `wide` | Timeline、Stack、Ranking、按模型分组的 Monitor | `2x2` | `framed` |
 | `wide-clock` | 模拟时钟，然后是标准 wide 的 Timeline、Stack、Ranking 和模型 Monitor Pane | 带短首行的 `spotlight-wide` `2x2` | `framed` |
 | `spotlight-wide` | Timeline、Stack、Ranking | 带 `spotlight-wide` 的 `2x2` | `framed` |
@@ -375,8 +377,8 @@ ccuv dashboard --empty --grid 2x2 \
 | `narrow-clock` | 数字时钟，然后是 narrow 的 Timeline、项目 Ranking 和模型 Monitor Pane | 带短首行的 `4x1` | `framed` |
 | `all` | 两个 Timeline、Calendar、Ranking、两个 Stack 与四个 Monitor 变体 | `5x2` | `split` |
 
-默认 `wide` Pane 使用 `compact` 密度，并刻意采用不同图表主题/样式。`wide-clock` 与 `narrow-clock`
-是时钟预设：它们的时钟都是完整的动画 Pane，而不是 Dashboard Header；`wide-clock` 使用模拟时钟，`narrow-clock` 使用数字时钟。`spotlight-wide` 让第一个 Pane
+默认 `wide` Pane 使用 `compact` 密度，并刻意采用不同图表主题/样式。`single`、`wide-clock` 与 `narrow-clock`
+是时钟预设：它们的时钟都是完整的动画 Pane，而不是 Dashboard Header；`single` 与 `wide-clock` 使用模拟时钟，`narrow-clock` 使用数字时钟。`spotlight-wide` 让第一个 Pane
 占据前导宽区域；`spotlight-wide2` 让前两个 Pane 占据连续的宽行。
 
 内置预设仍是启动模板，不是 `--grid` 的取值。在普通未具名启动组合中，重复 `--pane` 会追加到内置模板 Pane 后；需要时 Host 会扩展其网格以容纳所有 Pane。以 `ccuv dashboard <name>` 启动的具名内置或用户预设则是封闭的：它们拒绝 `--pane` 以及除 `--demo`、`--lang`、`--empty` 和 `--ccusage-bin` 外的所有配置覆盖。
@@ -418,7 +420,7 @@ ccuv dashboard --empty --grid 1x1 \
 
 | 参数 | 值/默认值 | Host 所有的行为 |
 | --- | --- | --- |
-| `[PRESET]`（可选位置参数） | `wide`、`wide-clock`、`narrow`、`narrow-clock`、`all`、`spotlight-wide`、`spotlight-wide2`；省略时默认 `wide-clock` | 选择启动模板；不能和 `--grid` 或 `--layout` 同用。 |
+| `[PRESET]`（可选位置参数） | `single`、`wide`、`wide-clock`、`narrow`、`narrow-clock`、`all`、`spotlight-wide`、`spotlight-wide2`；省略时默认 `wide-clock` | 选择启动模板；不能和 `--grid` 或 `--layout` 同用。 |
 | `--demo [SIZE]`、`--lang`、`--ccusage-bin`、`--query-timeout` | 与独立图表语义相同；所有 Demo 形式都是实时、每次调用活动会变化的异步模拟，裸 Demo 为 `medium`；timeout 默认 `30` | 所有 Pane 的 Provider/进程/输入配置；`--query-timeout` 是隐藏高级配置。 |
 | `--ascii` | 关闭 | Host 和 Pane 的 ASCII 渲染；与显式 Pane `--theme` 冲突。 |
 | `--theme THEME` | `classic` | Dashboard 外壳主题，区别于每个 Pane 的图表主题。 |
@@ -565,8 +567,8 @@ Dashboard 有独立的导航和归属规则。浏览模式中：
 | 按键 | 行为 |
 | --- | --- |
 | `r` | 仅在图表浏览模式刷新全部 Pane；完整命令视图中无操作。 |
-| `s` | 将当前 Dashboard 保存为具名预设。 |
-| `p` | 打开全屏 Dashboard 预设管理器。 |
+| `Ctrl-S` | 将当前 Dashboard 保存为具名预设。 |
+| `Ctrl-P` | 打开全屏 Dashboard 预设管理器。 |
 | 鼠标点击 | 调整被点击的 Pane。 |
 | `d` | 打开全局 Dashboard 调整。 |
 | `h` | 打开与当前界面对应的帮助；完整命令视图中小写 `h` 跳到首行。 |

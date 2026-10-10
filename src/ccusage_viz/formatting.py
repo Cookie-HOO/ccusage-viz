@@ -4,6 +4,8 @@ import re
 import unicodedata
 
 _ANSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+_OSC8 = re.compile(r"\x1b]8;;[^\x1b\x07]*(?:\x1b\\|\x07)")
+_TERMINAL_CONTROL = re.compile(r"(?:\x1b\[[0-?]*[ -/]*[@-~]|\x1b]8;;[^\x1b\x07]*(?:\x1b\\|\x07))")
 
 
 def format_tokens(value: int) -> str:
@@ -35,7 +37,7 @@ def format_percent(part: int, whole: int) -> str:
 
 
 def strip_ansi(value: str) -> str:
-    return _ANSI.sub("", value)
+    return _TERMINAL_CONTROL.sub("", value)
 
 
 def char_width(char: str) -> int:
@@ -55,30 +57,49 @@ def center_text(value: str, width: int) -> str:
 
 
 def wrap_width(value: str, width: int) -> tuple[str, ...]:
-    """Wrap plain text at whitespace without splitting wide characters."""
+    """Wrap text while filling available cells without splitting wide characters.
+
+    Whitespace remains the preferred English break point. A long whitespace-free
+    unit (such as Chinese prose, a URL, or an identifier) fills the remainder
+    of the current line before continuing, rather than wasting that space.
+    Explicit source newlines remain paragraph boundaries.
+    """
     if width <= 0:
         return ()
-    words = value.split()
-    if not words:
-        return ("",)
     rows: list[str] = []
-    row = ""
-    for word in words:
-        candidate = word if not row else f"{row} {word}"
-        if row and display_width(candidate) > width:
+    for source_row in value.splitlines() or [""]:
+        words = source_row.split()
+        if not words:
+            rows.append("")
+            continue
+        row = ""
+        for word in words:
+            separator = "" if not row else " "
+            candidate = f"{row}{separator}{word}"
+            if row and display_width(candidate) > width:
+                remaining = width - display_width(row)
+                if remaining > display_width(separator):
+                    part = ""
+                    for char in word:
+                        if display_width(separator + part + char) > remaining:
+                            break
+                        part += char
+                    if part:
+                        row = f"{row}{separator}{part}"
+                        word = word[len(part) :]
+                rows.append(row)
+                row = ""
+            while display_width(word) > width:
+                part = ""
+                for char in word:
+                    if display_width(part + char) > width:
+                        break
+                    part += char
+                rows.append(part)
+                word = word[len(part) :]
+            row = word if not row else f"{row} {word}"
+        if row:
             rows.append(row)
-            row = ""
-        while display_width(word) > width:
-            part = ""
-            for char in word:
-                if display_width(part + char) > width:
-                    break
-                part += char
-            rows.append(part)
-            word = word[len(part) :]
-        row = word if not row else f"{row} {word}"
-    if row:
-        rows.append(row)
     return tuple(rows)
 
 
@@ -89,7 +110,7 @@ def clip_width(value: str, width: int) -> str:
     position = 0
     styled = False
     while position < len(value):
-        match = _ANSI.match(value, position)
+        match = _TERMINAL_CONTROL.match(value, position)
         if match:
             sequence = match.group()
             output.append(sequence)
@@ -121,7 +142,7 @@ def slice_width(value: str, start: int, width: int) -> str:
     active_sgr = ""
     emitted = False
     while position < len(value):
-        match = _ANSI.match(value, position)
+        match = _TERMINAL_CONTROL.match(value, position)
         if match:
             sequence = match.group()
             active_sgr = "" if sequence == "\x1b[0m" else sequence
@@ -158,7 +179,7 @@ def replace_width(value: str, start: int, replacement: str, *, width: int) -> st
     suffix_sgr = ""
     inserted = False
     while position < len(value) and used < width:
-        match = _ANSI.match(value, position)
+        match = _TERMINAL_CONTROL.match(value, position)
         if match:
             sequence = match.group()
             active_sgr = "" if sequence == "\x1b[0m" else sequence
