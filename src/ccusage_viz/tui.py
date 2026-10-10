@@ -7560,8 +7560,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         if controls_hidden:
             return ()
         context = grid_error or translator.text(
-            f"status.tui_{body_view.replace('-', '_')}_controls",
-            action=translator.text("status.hide_controls"),
+            f"status.tui_{body_view.replace('-', '_')}_controls"
         )
         return (clip_width(context, width), preset_operations(width), global_operations(width))
 

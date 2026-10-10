@@ -38,11 +38,11 @@ def test_catalogs_have_the_same_keys_and_placeholders() -> None:
     assert "p/P 摘要周期" in ZH_MESSAGES["status.tui_global_quick_controls"]
     assert (
         EN_MESSAGES["status.tui_global_operations"]
-        == "Global operations: u undo · U redo · h open help"
+        == "Global operations: c show or hide controls · u undo · U redo · h open help"
     )
     assert (
         ZH_MESSAGES["status.tui_global_operations"]
-        == "全局操作：u 撤销 · U 重做 · h 打开帮助"
+        == "全局操作：c 显示或隐藏控制栏 · u 撤销 · U 重做 · h 打开帮助"
     )
     assert (
         EN_MESSAGES["status.tui_preset_operations"]
@@ -53,9 +53,9 @@ def test_catalogs_have_the_same_keys_and_placeholders() -> None:
         == "Ctrl-S 保存为新预设 · Ctrl-P 管理预设"
     )
     assert " d adjust dashboard " in EN_MESSAGES["status.tui_chart_controls"]
-    assert "c {action}" in EN_MESSAGES["status.tui_chart_controls"]
+    assert "c {action}" not in EN_MESSAGES["status.tui_chart_controls"]
     assert " d 调整仪表盘 " in ZH_MESSAGES["status.tui_chart_controls"]
-    assert "c {action}" in ZH_MESSAGES["status.tui_chart_controls"]
+    assert "c {action}" not in ZH_MESSAGES["status.tui_chart_controls"]
     assert EN_MESSAGES["status.tui_pane_management_divider"] == "━━ Dashboard Pane Management ━━"
     assert ZH_MESSAGES["status.tui_pane_management_divider"] == "━━ Dashboard 子图管理 ━━"
     assert EN_MESSAGES["label.adjust_replace"] == "replace"
