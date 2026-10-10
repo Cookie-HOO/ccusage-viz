@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from ccusage_viz.datasets.archive import extract_dataset_archive, sha256_bytes
+from ccusage_viz.datasets.models import CUSTOM_V2_PROTOCOL, DatasetManifest
 from ccusage_viz.errors import UsageError
 
 
@@ -58,6 +59,25 @@ def extract(archive: bytes, destination: Path) -> None:
         host_os="darwin",
         host_arch="arm64",
     )
+
+
+def test_checked_in_weread_archive_is_a_v2_static_probe_fixture() -> None:
+    fixture = Path("dist/datasets/ccuv-dataset-weread-darwin-arm64.tar.gz")
+    with tarfile.open(fixture, "r:gz") as archive:
+        manifest_member = archive.getmember("manifest.json")
+        document = archive.extractfile(manifest_member)
+        assert document is not None
+        payload = json.loads(document.read())
+
+    manifest = DatasetManifest.parse(payload)
+
+    assert manifest.protocol == CUSTOM_V2_PROTOCOL
+    assert manifest.id == "weread"
+    assert manifest.descriptor is not None
+    assert {metric.id for metric in manifest.descriptor.metrics} == {
+        "reading_time",
+        "total_notes",
+    }
 
 
 def test_extract_dataset_archive_accepts_exact_two_file_bundle(tmp_path: Path) -> None:
