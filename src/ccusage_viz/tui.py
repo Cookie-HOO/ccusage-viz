@@ -241,14 +241,17 @@ from ccusage_viz.render.base import (
     styled_text,
 )
 from ccusage_viz.render.custom import (
+    custom_heading,
     render_custom_failure,
     render_custom_pending,
     render_custom_projection,
 )
 from ccusage_viz.render.custom_monitor import render_custom_monitor
+from ccusage_viz.render.custom_ranking_viewport import render_custom_ranking_viewport
 from ccusage_viz.render.filters import active_filter_summary
 from ccusage_viz.render.palette import COLOR_SCHEMES, get_color_scheme
 from ccusage_viz.render.ranking_presentation import copyable_description_text
+from ccusage_viz.render.ranking_viewport import RankingViewport
 from ccusage_viz.render.summary import render_custom_metrics, render_summary
 from ccusage_viz.render.surfaces import (
     EMPTY_SURFACE_CONTROLS,
@@ -290,6 +293,7 @@ from ccusage_viz.tui_input import (
     KeyEvent,
     MouseEvent,
     PasteEvent,
+    WheelEvent,
     read_event,
     tui_input_mode,
 )
@@ -429,6 +433,7 @@ class TuiCustomPane:
     copied_ranking_until: float = 0.0
     ranking_search: RankingSearchState = field(default_factory=RankingSearchState)
     ranking_item_spacing: str = "compact"
+    ranking_viewport: RankingViewport = field(default_factory=RankingViewport)
 
     @property
     def interval(self) -> float:
@@ -1809,6 +1814,7 @@ def _render_custom_projection(
     item_spacing: str = "compact",
     entry_offset: int = 0,
     entry_limit: int | None = None,
+    ranking_viewport: RankingViewport | None = None,
 ) -> PaneRender:
     context = _custom_render_context(
         config,
@@ -1853,6 +1859,35 @@ def _render_custom_projection(
                 controls=controls,
                 reserved_summary_rows=len(summary_render.splitlines()),
             )
+    if ranking_viewport is not None:
+        audit = render_audit(context)
+        summary_rows = len(summary_render.splitlines())
+        context = replace(
+            context,
+            height=max(
+                0,
+                terminal.height - summary_rows - len(audit.splitlines())
+                - ranking_viewport.reserved_rows,
+            ),
+        )
+        rendered = render_custom_ranking_viewport(
+            replace(projection, config=config),
+            context,
+            ranking_viewport,
+            heading=custom_heading(config, context, projection.presentation).strip(),
+            descriptions_visible=config.presentation.density in {"full", "detailed"},
+            search_query=search_query,
+            search_editing=search_editing,
+            show_visible_count=True,
+            copied_entry_id=copied_entry_id,
+            item_spacing=item_spacing,
+        )
+        ranking_viewport.hits = {
+            row + summary_rows: hit for row, hit in ranking_viewport.hits.items()
+        }
+        rows = rendered.splitlines()
+        rows.extend("" for _ in range(context.height - len(rows)))
+        return PaneRender("\n".join((*summary_render.splitlines(), *rows, *audit.splitlines())))
     rendered = render_custom_projection(
         replace(projection, config=config, presentation=projection.presentation),
         context,
@@ -1893,6 +1928,14 @@ def _pane_render(
         )
     if isinstance(pane, TuiCustomPane):
         component = pane.component
+        pane.ranking_viewport.active = False
+        pane.ranking_viewport.hits.clear()
+        pane.ranking_copy_rows.clear()
+        if (
+            not isinstance(component, CustomHistoricalComponent)
+            or component.candidate.kind != "ranking"
+        ):
+            pane.ranking_viewport.clear()
         if (
             pane.body_view in {"command", "full-command", "data-table", "data-json"}
             and dashboard is None
@@ -1990,11 +2033,17 @@ def _pane_render(
             item_spacing=pane.ranking_item_spacing,
             entry_offset=ranking_entry_offset,
             entry_limit=ranking_entry_limit,
+            ranking_viewport=(
+                pane.ranking_viewport
+                if dashboard is not None and component.candidate.kind == "ranking"
+                else None
+            ),
         )
         if (
             component.candidate.kind == "ranking"
             and pane.body_view == "chart"
             and pane.ranking_item_spacing != "compact"
+            and not pane.ranking_viewport.active
         ):
             rendered = PaneRender(
                 _apply_custom_ranking_spacing(
@@ -5426,7 +5475,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             timeout = min(timeout, remaining)
         if help_overlay is not None:
             event = read_event(decoder, timeout)
-            if isinstance(event, (KeyEvent, MouseEvent)) and not (
+            if isinstance(event, (KeyEvent, MouseEvent, WheelEvent)) and not (
                 isinstance(event, KeyEvent) and event.value == "\x03"
             ):
                 help_overlay.timer.record_input()
@@ -5436,7 +5485,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         if adjustment_timer is None:
             return read_event(decoder, timeout)
         event = read_event(decoder, min(timeout, adjustment_timer.remaining()))
-        if isinstance(event, (KeyEvent, MouseEvent)):
+        if isinstance(event, (KeyEvent, MouseEvent, WheelEvent)):
             adjustment_timer.record_input()
         elif event is None:
             adjustment_timer.check()
@@ -7610,6 +7659,37 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
 
         return record_mutation(("layout", "row-weight", slot.row), adjust_row)
 
+    displayed_layout: ResolvedPaneLayout | None = None
+    displayed_header_rows = 0
+
+    def handle_ranking_wheel(event: WheelEvent) -> None:
+        if (
+            displayed_layout is None
+            or body_view != "chart"
+            or help_overlay is not None
+            or preset_manager is not None
+            or dataset_modal is not None
+            or chooser_overlay is not None
+            or overlay_editor is not None
+            or overlay_history is not None
+            or custom_logs_pane is not None
+        ):
+            return
+        selected = layout_pane_at(
+            displayed_layout, event.x - 1, event.y - displayed_header_rows - 1
+        )
+        if selected is None:
+            return
+        pane = panes[selected]
+        if (
+            isinstance(pane, TuiCustomPane)
+            and isinstance(pane.component, CustomHistoricalComponent)
+            and pane.component.candidate.kind == "ranking"
+            and pane.body_view == "chart"
+            and pane.ranking_viewport.active
+        ):
+            pane.ranking_viewport.scroll(event.delta)
+
     def handle_pane_mouse(event: MouseEvent) -> bool:
         """Handle pane focus clicks before pane-local modal input consumes them."""
 
@@ -7692,11 +7772,22 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         copy_hit = target[1] - 2 <= interior_column <= target[1] + 2
         if not copy_hit and not link_hit:
             return False
-        entries = _custom_ranking_copyable_entries(pane, translator)
-        entry = next((item for item in entries if item[1] == target[0]), None)
-        if entry is None:
-            return False
-        _, entry_id, label, description, project_link = entry
+        if pane.ranking_viewport.active:
+            prepared_entry = pane.ranking_viewport.by_id.get(target[0])
+            if prepared_entry is None:
+                return False
+            entry_id = str(prepared_entry.key)
+            label, description, project_link = (
+                prepared_entry.label,
+                prepared_entry.description,
+                prepared_entry.project_link,
+            )
+        else:
+            entries = _custom_ranking_copyable_entries(pane, translator)
+            entry = next((item for item in entries if item[1] == target[0]), None)
+            if entry is None:
+                return False
+            _, entry_id, label, description, project_link = entry
         if link_hit and project_link is not None:
             opened = webbrowser.open(project_link)
             copy_feedback.show(
@@ -7724,6 +7815,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         """Map rendered copy markers to pane-local rows for the next mouse hit."""
         del fixed_rows, framed
         pane.ranking_copy_rows.clear()
+        if pane.ranking_viewport.active:
+            pane.ranking_copy_rows.update(pane.ranking_viewport.hits)
+            return
         entries_by_rank = {
             rank: (entry_id, label, description, link)
             for rank, entry_id, label, description, link in _custom_ranking_copyable_entries(
@@ -7791,6 +7885,8 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
     def paint(*, force: bool = False) -> None:
         nonlocal help_was_active, last_size, dashboard_text_offset, dashboard_text_line_count
         nonlocal dashboard_text_visible_rows, chooser_overlay
+        nonlocal displayed_layout, displayed_header_rows
+        displayed_layout = None
         if dataset_modal is None:
             chooser_overlay = None
         else:
@@ -8020,6 +8116,11 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     translator=translator,
                     color_scheme=color_scheme,
                 )
+                if isinstance(pane, TuiCustomPane) and pane.ranking_viewport.active:
+                    reserved = min(len(local_notices), max(0, interior_height - 3))
+                    if reserved != pane.ranking_viewport.reserved_rows:
+                        pane.ranking_viewport.reserved_rows = reserved
+                        rendered = _pane_render(pane, translator, terminal, dashboard=options)
                 chart = (
                     _append_monitor_attachment(
                         pane,
@@ -8084,6 +8185,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
 
         layout = grid_geometry(size.columns, size.lines, len(header_lines), int(status is not None))
         pane_renders, dashboard_overlays = render_panes(layout)
+        displayed_layout, displayed_header_rows = layout, len(header_lines)
         grid = _compose_resolved_panes(
             pane_renders,
             layout,
@@ -8876,6 +8978,18 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     _finish_ranking_search_editing(panes[focused] if focused is not None else None)
                     end_adjustment()
                     paint()
+                    continue
+                if isinstance(event, WheelEvent):
+                    scrolling = tuple(
+                        pane.ranking_viewport for pane in panes if isinstance(pane, TuiCustomPane)
+                    )
+                    before = tuple(viewport.offset for viewport in scrolling)
+                    handle_ranking_wheel(event)
+                    if isinstance(decoder, InputDecoder):
+                        for buffered in decoder.drain_wheel():
+                            handle_ranking_wheel(buffered)
+                    if before != tuple(viewport.offset for viewport in scrolling):
+                        paint()
                     continue
                 if help_overlay is not None:
                     process_help_event(event)
