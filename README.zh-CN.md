@@ -4,7 +4,7 @@
 
 [![PyPI](https://img.shields.io/pypi/v/ccusage-viz.svg)](https://pypi.org/project/ccusage-viz/) [![Python](https://img.shields.io/pypi/pyversions/ccusage-viz.svg)](https://pypi.org/project/ccusage-viz/) [![License: GPL v3](https://img.shields.io/badge/License-GPL%20v3-blue.svg)](LICENSE) [![CI](https://github.com/Cookie-HOO/ccusage-viz/actions/workflows/ci.yml/badge.svg)](https://github.com/Cookie-HOO/ccusage-viz/actions/workflows/ci.yml)
 
-> **Alpha · 0.2.2** — 在 1.0 前接口仍可能变化。当前方向请见[路线图](ROADMAP.md)。
+> **Alpha · 0.2.2** — 在 1.0 前接口仍可能变化。当前方向请见[路线图](docs/roadmap.zh-CN.md)。
 
 `ccusage-viz` 是面向 [`ccusage`](https://github.com/ryoppippi/ccusage) Token
 数据的独立、非官方终端可视化工具。它把 `ccusage` 命令输出转换为交互式终端图表，
@@ -203,7 +203,7 @@ npm 不可用时，请手动安装 [`ccusage`](https://github.com/ryoppippi/ccus
 | [Dataset 使用者指南](docs/dataset-user-guide.zh-CN.md) | 如何安装、管理、选择和使用本地、官方或 GitHub Dataset？ |
 | [设计哲学](docs/design-philosophy.zh-CN.md) | 哪些产品边界、配置归属和呈现原则是刻意的设计？ |
 | [架构](docs/architecture.zh-CN.md) | 为维护者说明 CLI 路由、Host、Pane、Provider、处理和渲染如何组织。 |
-| [路线图（英文）](ROADMAP.md) | 计划、延后事项和反馈方向是什么？ |
+| [路线图](docs/roadmap.zh-CN.md) | 计划、延后事项和反馈方向是什么？ |
 | [已知问题](docs/known-issues.zh-CN.md) | 已识别哪些间歇性 `ccusage` 问题，以及如何安全恢复？ |
 
 可通过[Bug 报告表单](https://github.com/Cookie-HOO/ccusage-viz/issues/new?template=bug_report.yml)提交可复现问题，或通过[功能请求表单](https://github.com/Cookie-HOO/ccusage-viz/issues/new?template=feature_request.yml)提出改进建议。

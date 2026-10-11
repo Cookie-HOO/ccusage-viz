@@ -1,5 +1,7 @@
 # Roadmap
 
+[简体中文](roadmap.zh-CN.md)
+
 `ccusage-viz` is currently at **0.2.2**. This roadmap describes public product
 contracts and the prioritized requirement pool, not private implementation
 plans.

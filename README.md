@@ -4,7 +4,7 @@
 
 [![PyPI](https://img.shields.io/pypi/v/ccusage-viz.svg)](https://pypi.org/project/ccusage-viz/) [![Python](https://img.shields.io/pypi/pyversions/ccusage-viz.svg)](https://pypi.org/project/ccusage-viz/) [![License: GPL v3](https://img.shields.io/badge/License-GPL%20v3-blue.svg)](LICENSE) [![CI](https://github.com/Cookie-HOO/ccusage-viz/actions/workflows/ci.yml/badge.svg)](https://github.com/Cookie-HOO/ccusage-viz/actions/workflows/ci.yml)
 
-> **Alpha · 0.2.2** — interfaces may change before 1.0. See the [roadmap](ROADMAP.md) for current direction.
+> **Alpha · 0.2.2** — interfaces may change before 1.0. See the [roadmap](docs/roadmap.md) for current direction.
 
 `ccusage-viz` is an independent, unofficial terminal visualizer for
 [`ccusage`](https://github.com/ryoppippi/ccusage) token data. It turns
@@ -254,7 +254,7 @@ These documents answer the deeper questions:
 | [Dataset user guide](docs/dataset-user-guide.md) | How do I install, manage, select, and use local, official, or GitHub Datasets? |
 | [Design philosophy](docs/design-philosophy.md) | Which product boundaries, ownership rules, and presentation principles are intentional? |
 | [Architecture](docs/architecture.md) | How do CLI routes, hosts, panes, providers, processing, and renderers fit together for maintainers? |
-| [Roadmap](ROADMAP.md) | What is planned, deferred, or open for feedback? |
+| [Roadmap](docs/roadmap.md) | What is planned, deferred, or open for feedback? |
 | [Known issues](docs/known-issues.md) | Which intermittent `ccusage` problems are recognized, and how can I recover safely? |
 
 Report reproducible problems with the [bug report form](https://github.com/Cookie-HOO/ccusage-viz/issues/new?template=bug_report.yml), or propose improvements through the [feature request form](https://github.com/Cookie-HOO/ccusage-viz/issues/new?template=feature_request.yml).
