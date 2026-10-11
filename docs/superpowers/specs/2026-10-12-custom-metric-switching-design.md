@@ -62,22 +62,45 @@ All V2 Custom chart kinds support in-place switching: Timeline, Stack, Calendar,
 - The regular help always lists `m` / `M` as next / previous related Metric; it does not state the candidate count.
 - If no alternate candidate exists, a press leaves the chart unchanged and shows a three-second notice that there is no related Metric to switch to.
 
-## Fast Compatibility Check and Query Behavior
+## Dataset-Driven Switch Normalization and Query Behavior
 
-Metric switching preserves the pane's current query and presentation state. It does not apply target Metric defaults and does not silently reset values. Relevant state includes date range / period, fixed-range state, grouping, granularity, filters, Top / Other behavior, and chart-local presentation state.
+Metric switching initially preserves the pane's complete query and presentation
+state: date range / period, fixed-range state, grouping, granularity, filters,
+Top / Other behavior, and chart-local presentation state. ccuv does not perform
+static capability compatibility rejection before that first target request.
 
-Before sending a query, ccuv performs only cheap static checks from the target Metric declaration:
+The Dataset is the authority for Metric-specific compatibility. A normal target
+request may accept the preserved state, or return its existing structured
+`unsupported_query` error with `unsupported.field`. Only an `m/M`-initiated
+Metric switch may normalize and retry that target request:
 
-- target supports the active chart kind;
-- if target declares `periods`, it includes the selected period;
-- if target declares `group_by`, it includes the selected grouping;
-- if target declares granularities, it includes the selected granularity.
+| Dataset `unsupported.field` | Target Metric normalization |
+| --- | --- |
+| `range.period` | Replace the period with `defaults.<kind>.period`. |
+| `query.group_by` | Replace grouping with `defaults.<kind>.group_by`. |
+| `query.granularity` | Replace granularity with `defaults.<kind>.granularity`. |
+| `query.filters` or `query.filters.*` | Replace the entire filters state with `defaults.<kind>.filters`; use empty filters when no default exists. |
+| `query.top` | Replace Top with `defaults.<kind>.top`. |
 
-A static mismatch rejects the switch, leaves the current Metric and facts unchanged, and shows a three-second warning identifying the incompatible field.
+The Dataset reports one currently invalid field at a time. ccuv applies only
+that field's target-Metric default and issues another ordinary target request.
+It does not normalize `other`, style, theme, or any host-only presentation
+property. A repeated unsupported category, an unknown field, a missing default,
+or a default that would not change the request stops normalization and leaves
+the current Metric selected.
 
-ccuv does not pre-query, Probe, or locally reproduce Dataset business rules. Filters, option validity, cross-field capability rules, data availability, and all Dataset-specific conditions are resolved by the ordinary target request.
+Normalization is deliberately unavailable for direct user adjustments (`p/P`,
+`b/B`, `g/G`, `f`, `+/-`): those retain their strict existing rejection
+semantics. It is also unavailable for V1 Datasets and source replacement.
 
-For historical Custom charts, the switch is transactional: until the target request succeeds, the current Metric remains selected, rendered, and persisted. A target failure or `unsupported_query` leaves the old Metric and facts untouched and shows the normal failure feedback. On a successful target response, ccuv atomically replaces the selected `metric_id` with the target. The old Metric's facts, transient selection state, and any historical-query cache are discarded; it does not continue refreshing in the background. The accepted target response supplies its own title, label, unit, display, descriptions, summaries, and capabilities.
+For historical Custom charts, switching remains transactional: until a target
+request ultimately succeeds, the current Metric remains selected, rendered, and
+persisted. A non-normalizable failure leaves old facts untouched and displays
+the normal Dataset error. On success, ccuv atomically commits the target
+`metric_id` and normalized configuration. The old Metric's facts, transient
+selection state, and historical-query cache are discarded; it does not continue
+refreshing in the background. The accepted target response supplies its own
+title, label, unit, display, descriptions, summaries, and capabilities.
 
 ## Custom Monitor State
 
@@ -90,7 +113,7 @@ Custom Monitor follows the same transactional switch semantics as historical Cus
 - Returning to a previously used Metric starts a fresh Monitor stream and baseline; it does not restore or prefetch old Metric history.
 - Observation history, baselines, intervals, and comparison facts never cross Metric boundaries.
 
-The shared pane display window, focus, and local presentation settings persist through a switch, subject to the static compatibility checks above. Each Monitor pane retains its existing single lifecycle and scheduler.
+The shared pane display window, focus, and local presentation settings persist through a switch. Monitor uses the same Dataset-driven normalization retries before committing the target, and retains its existing single lifecycle and scheduler.
 
 ### Future optimization: resumable Monitor Metrics
 
@@ -99,7 +122,8 @@ Out of scope for this implementation: retain an independently scheduled sampling
 ## Feedback and Persistence
 
 - A successful switch briefly reports the target's localized label in the status area.
-- Single-candidate and static-rejection notices expire after three seconds.
+- A single-candidate notice expires after three seconds.
+- A successful normalized switch reports the target localized label and the fields reset to target defaults (for example, period changed to `all` or filters reset).
 - A target request failure leaves the old chart or Monitor selected and visible; it uses normal failure feedback without committing the target.
 - Dashboard presets persist only a successfully committed target `metric_id`; a pending or failed switch saves the old Metric.
 - No new pane, CLI, or preset persistence field is needed.
@@ -121,13 +145,14 @@ Out of scope for this implementation: retain an independently scheduled sampling
 
 3. **Historical Custom charts**
    - Preserve all current state and replace only `metric_id` on a successful requested switch.
-   - Reject declared period, group, or granularity mismatches before a request, retaining old data and configuration.
-   - Send normal V2 target requests after static validation.
-   - Keep the old Metric selected and rendered when a target request fails; discard old historical facts only after a successful target response.
+   - Send the preserved complete configuration as the first target request, even where target static capability declarations differ.
+   - Normalize one Dataset-reported unsupported field at a time to the target Metric default, including full-filter reset for every `query.filters` field.
+   - Stop safely for unknown, repeated, unchanged, or default-less unsupported fields and keep old facts selected.
+   - Keep the old Metric selected and rendered when target normalization ultimately fails; discard old historical facts only after a successful target response.
    - Cover Ranking with independently rendered values, ordering, and descriptions for related Metrics.
 
 4. **Custom Monitor**
-   - Keep the old selected observations and baseline while a target Metric request is pending or fails.
+   - Keep the old selected observations and baseline while target requests or normalization retries are pending or ultimately fail.
    - Commit the target only after its first accepted observation, then discard all prior Metric sampling state.
    - Verify returning to a previously used Metric starts a fresh stream.
    - Prove observations and comparison facts never cross Metric boundaries.
