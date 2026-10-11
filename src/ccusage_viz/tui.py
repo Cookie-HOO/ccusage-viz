@@ -2711,7 +2711,7 @@ def _custom_pane_adjustment_bindings(pane: TuiCustomPane, page: str) -> tuple[tu
             actions.extend((("t/T", "animation_theme"), ("s/S", "animation_style")))
         return tuple(actions)
     if page == "quick":
-        actions: list[tuple[str, str]] = [("p/P", "period")]
+        actions: list[tuple[str, str]] = [("m/M", "metric"), ("p/P", "period")]
         if chart.kind == "ranking":
             actions.append(("g/G", "spacing"))
         if capability is not None:
@@ -5700,7 +5700,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         config = (
             pane.component.comparison_request_config()
             if purpose == "comparison"
-            else pane.component.candidate
+            else pane.component.request_config
         )
         if config is None:
             raise RuntimeError("custom comparison request is no longer required")
@@ -9651,7 +9651,43 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                 summary_affecting=mutation in {"granularity", "filters", "source"},
                             )
 
-                        if key == "L":
+                        if key in {"m", "M"} and isinstance(component, CustomHistoricalComponent):
+                            descriptor = component.v2_descriptor
+                            metric_id = component.candidate.metric_id
+                            if descriptor is None or metric_id is None:
+                                copy_feedback.show(translator.text("status.custom_metric_no_alternative"))
+                                continue
+                            from ccusage_viz.custom_metric_switching import (
+                                cycle_switch_metric,
+                                validate_metric_switch,
+                            )
+
+                            target = cycle_switch_metric(
+                                descriptor,
+                                current_metric_id=metric_id,
+                                kind=base.kind,
+                                step=1 if key == "m" else -1,
+                            )
+                            if target is None:
+                                copy_feedback.show(translator.text("status.custom_metric_no_alternative"))
+                                continue
+                            rejection = validate_metric_switch(base, target)
+                            if rejection is not None:
+                                copy_feedback.show(
+                                    translator.text(
+                                        "status.custom_metric_switch_rejected",
+                                        field=rejection.field,
+                                        value=rejection.value or "—",
+                                    )
+                                )
+                                continue
+                            component.begin_metric_switch(replace(base, metric_id=target.id))
+                            refresh(
+                                focused_index,
+                                trigger=LifecycleTrigger.CONFIGURATION,
+                                data_affecting=False,
+                            )
+                        elif key == "L":
                             custom_logs_pane = focused_index
                         elif (
                             isinstance(component, CustomMonitorComponent)
