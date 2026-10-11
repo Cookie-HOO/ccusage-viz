@@ -75,6 +75,7 @@ class CustomChartCapability:
     comparison: Literal["full", "rank", "none"] = "full"
     show_percentage: bool = True
     refresh_interval_seconds: int | None = None
+    sort_direction: Literal["ascending", "descending"] = "descending"
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,6 +146,7 @@ class V2HistoricalChartCapability:
     comparison: Literal["full", "rank", "none"] = "full"
     show_percentage: bool = True
     refresh_interval_seconds: int | None = None
+    sort_direction: Literal["ascending", "descending"] = "descending"
 
 
 @dataclass(frozen=True, slots=True)

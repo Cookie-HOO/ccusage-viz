@@ -260,7 +260,12 @@ and hidden at `minimal`, `compact`, and `normal`. Use
 `comparison: "full" | "rank" | "none"` to control Ranking comparison facts:
 `rank` keeps the prior-range request and rank movement but hides absolute
 growth; `none` suppresses both the request and all comparison columns. The
-default is `full`.
+default is `full`. Declare `sort_direction: "ascending" | "descending"` on a
+Ranking capability when Metric meaning requires it; omission is descending.
+ccuv applies it to Ranking order, Top N, Other, and rank comparison, with no
+host-side user override. Use ascending for values where smaller is better to
+see first, such as days since last update; use descending for Stars, growth,
+ratings, or counts.
 `null` in `group_by` to permit an ungrouped total. For Monitor, declare fixed
 positive `window_seconds`; this is the business semantics of every observation.
 `refresh_interval_seconds` is advisory and ccuv warns when its actual sampling

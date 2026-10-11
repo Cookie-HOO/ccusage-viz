@@ -42,6 +42,8 @@ V2 指标可声明 `summary: "comparisons" | "total" | "none"`。`comparisons` �
 
 Ranking capability 还可声明 `comparison: "full" | "rank" | "none"`，默认是 `full`。`rank` 仍请求前一等长周期并显示排名变化，但隐藏绝对增长列；`none` 不请求前期，也不显示任何 Ranking 对比列。
 
+Ranking capability 还可声明 `sort_direction: "ascending" | "descending"`；省略时默认 `"descending"`。它是 Dataset 拥有的 Metric 语义，不是宿主偏好：ccuv 会在 Ranking 排序、Top N、Other 和排名对比推导前应用它。它不改变 point 的数值事实、单位、Dataset 的 `display` 或对比事实。CLI、Dashboard 和键盘均不提供覆盖项；Metric 切换后直接采用目标 Metric 声明的方向。像“距上次更新天数”这样数值越小越应排前的事实使用 `"ascending"`；Star、增长、评分或数量这类数值越大越应排前的事实使用 `"descending"`。
+
 每个图表的 `group_by` 同样是允许发送的有序查询值集合；使用 JSON `null` 明确表示允许未分组总计，维度 ID 仍是字符串，因此名为 `total` 的维度并不冲突。任一已声明列表阻止切换时，ccuv 会保持当前查询并短暂提示，不会发送不支持的请求。不声明 `periods` 时，ccuv 保持原有周期循环，并由 Dataset 动态解释每个请求。
 
 ### V2 图表默认值

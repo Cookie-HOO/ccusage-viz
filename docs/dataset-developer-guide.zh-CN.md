@@ -177,7 +177,7 @@ Probe 只能返回元数据：不能获取收费业务数据、校验 secret、�
 
 按用户语义而不是传输便利性选择 Filter mode。对于互斥模式和可理解的范围，应优先使用 `single_select`，例如“7 天以内”“30 天以内”“不限”：同时组合多个范围既有歧义又不便展示。只有用户确实需要组合独立离散值时才用 `multi_select`，例如语言、分类、标签、作者或书架标签。只有确实想使用兼容的 `multi_select` 默认值时才省略 `mode`。ccuv 中 `single_select` 可以为空；若必须选择，Dataset 应在查询时校验并返回可操作的本地化错误，不要猜测一个值。
 
-历史 capability 声明 `granularities`、`group_by` 与可选有序 `periods`；若 Ranking 的源端永远无法提供更多原始排行项目，还可声明正整数 `max_items`。Ranking 可选 `comparison: "full" | "rank" | "none"`，默认 `full`；`rank` 保留前一等长周期请求与排名变化，但隐藏绝对增长；`none` 不请求前期且隐藏所有对比列。为兼容旧版 Descriptor，Ranking 也可使用 `descriptions_default: "expanded" | "collapsed"`，但 ccuv 会忽略该字段。说明由密度决定：`full` 和 `detailed` 显示，`minimal`、`compact` 和 `normal` 隐藏。`group_by` 中的 JSON `null` 表示允许未分组总计。filter 不属于 Probe 的静态能力，而是在每一次成功查询的 `runtime.filters` 中声明。Monitor 必须声明固定正数 `window_seconds`，它定义每条 observation 的业务事实窗口；`refresh_interval_seconds` 只是建议采样频率。
+历史 capability 声明 `granularities`、`group_by` 与可选有序 `periods`；若 Ranking 的源端永远无法提供更多原始排行项目，还可声明正整数 `max_items`。Ranking 可选 `comparison: "full" | "rank" | "none"`，默认 `full`；`rank` 保留前一等长周期请求与排名变化，但隐藏绝对增长；`none` 不请求前期且隐藏所有对比列。Metric 语义需要时，在 Ranking capability 声明 `sort_direction: "ascending" | "descending"`；省略即为降序。ccuv 用它处理 Ranking 顺序、Top N、Other 和排名对比，不提供宿主侧用户覆盖。数值越小越应先看的指标（如距上次更新天数）使用升序；Star、增长、评分或数量使用降序。为兼容旧版 Descriptor，Ranking 也可使用 `descriptions_default: "expanded" | "collapsed"`，但 ccuv 会忽略该字段。说明由密度决定：`full` 和 `detailed` 显示，`minimal`、`compact` 和 `normal` 隐藏。`group_by` 中的 JSON `null` 表示允许未分组总计。filter 不属于 Probe 的静态能力，而是在每一次成功查询的 `runtime.filters` 中声明。Monitor 必须声明固定正数 `window_seconds`，它定义每条 observation 的业务事实窗口；`refresh_interval_seconds` 只是建议采样频率。
 
 ## 每种查询如何处理
 

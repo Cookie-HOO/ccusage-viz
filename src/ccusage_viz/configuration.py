@@ -187,6 +187,7 @@ def v2_metric_probe_descriptor(
                 capability.comparison,
                 capability.show_percentage,
                 capability.refresh_interval_seconds,
+                capability.sort_direction,
             )
     return CustomProbeDescriptor(
         descriptor.revision,

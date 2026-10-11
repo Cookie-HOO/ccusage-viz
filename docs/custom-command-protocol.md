@@ -145,6 +145,16 @@ the default is `"full"`. `"rank"` still asks for the prior equal-duration
 range and displays rank movement, but hides the absolute-growth column.
 `"none"` suppresses the prior-range request and all Ranking comparison columns.
 
+A Ranking capability may also declare `sort_direction: "ascending" |
+"descending"`; omission defaults to `"descending"`. It is Dataset-owned Metric
+semantics, not a host preference: ccuv applies it before Ranking order, Top N,
+Other, and rank-comparison derivation. It does not change numeric point values,
+units, Dataset `display`, or comparison facts. There is no CLI, Dashboard, or
+keyboard override; switching Metrics applies the target Metric's declared
+direction. Use `"ascending"` for a fact such as days since last update when
+smaller values should appear first, and `"descending"` for Stars, growth,
+ratings, or counts when larger values should appear first.
+
 For a Custom Monitor, `window` is ccuv's local display horizon (`5m` through
 `24h`), not the source business window. The fixed request interval remains
 `capabilities.charts.monitor.window_seconds`.

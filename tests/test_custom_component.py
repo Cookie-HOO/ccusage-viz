@@ -144,6 +144,30 @@ def test_historical_metric_switch_failure_retains_old_facts_and_metric() -> None
     assert component.model is old_model
 
 
+def test_custom_ranking_uses_capability_sort_direction_for_entries_and_prior_ranks() -> None:
+    current = response((("older", "8"), ("recent", "2")))
+    previous = response((("older", "1"), ("recent", "9")), point_date=date(2026, 8, 30))
+    ascending = replace(
+        current,
+        capabilities=replace(
+            current.capabilities,
+            charts={
+                **current.capabilities.charts,
+                "ranking": replace(current.capabilities.charts["ranking"], sort_direction="ascending"),
+            },
+        ),
+    )
+    chart = config(kind="ranking")
+    comparison_chart = replace(chart, date_range=DateRange(date(2026, 8, 30), date(2026, 8, 30)))
+
+    projection = process_custom_historical(
+        ascending, chart, comparison_response=previous, comparison_config=comparison_chart
+    )
+
+    assert [series.id for series in projection.series] == ["recent", "older"]
+    assert [series.previous_rank for series in projection.series] == [2, 1]
+
+
 def test_custom_ranking_derives_decimal_comparison_facts_from_raw_responses() -> None:
     current = response((("api", "3"), ("app", "1")))
     previous = response((("api", "1"), ("app", "2"), ("batch", "4")), point_date=date(2026, 8, 30))

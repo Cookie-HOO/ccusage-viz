@@ -112,6 +112,12 @@ def process_custom_historical(
             )
         )
 
+    sort_direction = response.capabilities.charts[config.kind].sort_direction
+    ranking_key = (
+        (lambda item: (item.total, item.id))
+        if sort_direction == "ascending"
+        else (lambda item: (-item.total, item.id))
+    )
     previous_totals: dict[str, Decimal] = {}
     previous_ranks: dict[str, int] = {}
     if comparison_response is not None:
@@ -122,7 +128,15 @@ def process_custom_historical(
         previous_ranks = {
             series_id: rank
             for rank, (series_id, _) in enumerate(
-                sorted(previous_totals.items(), key=lambda item: (-item[1], item[0])), start=1
+                sorted(
+                    previous_totals.items(),
+                    key=(
+                        (lambda item: (item[1], item[0]))
+                        if sort_direction == "ascending"
+                        else (lambda item: (-item[1], item[0]))
+                    ),
+                ),
+                start=1,
             )
         }
         candidates = [
@@ -142,7 +156,7 @@ def process_custom_historical(
         ]
 
     # Stable deterministic ranking by requested-range sum, with ID as tiebreaker.
-    candidates.sort(key=lambda item: (-item.total, item.id))
+    candidates.sort(key=ranking_key)
     selected, discarded = _select_top(candidates, config.top)
     if discarded and config.other == "show":
         selected.append(_other(discarded, len(days)))

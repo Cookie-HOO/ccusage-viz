@@ -352,6 +352,7 @@ class CustomHistoricalComponent:
                             comparison=capability.comparison,
                             show_percentage=capability.show_percentage,
                             refresh_interval_seconds=capability.refresh_interval_seconds,
+                            sort_direction=capability.sort_direction,
                         )
                     },
                 ),

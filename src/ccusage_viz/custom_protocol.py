@@ -684,6 +684,8 @@ def _parse_capabilities(value: object) -> CustomCapabilities:
             or not isinstance(show_percentage, bool)
         ):
             raise CustomProtocolError("ranking show_percentage must be a boolean")
+        if "sort_direction" in chart:
+            raise CustomProtocolError("sort_direction is supported only by v2 ranking capabilities")
         refresh_interval_seconds = chart.get("refresh_interval_seconds")
         if refresh_interval_seconds is not None and (
             not isinstance(refresh_interval_seconds, int)
@@ -933,6 +935,14 @@ def _parse_v2_capabilities(value: object) -> V2MetricCapabilities:
                 or not isinstance(show_percentage, bool)
             ):
                 raise CustomProtocolError("v2 ranking show_percentage must be a boolean")
+            sort_direction = chart.get("sort_direction", "descending")
+            if (kind != "ranking" and "sort_direction" in chart) or sort_direction not in {
+                "ascending",
+                "descending",
+            }:
+                raise CustomProtocolError(
+                    "v2 ranking sort_direction must be ascending or descending"
+                )
             refresh_interval_seconds = chart.get("refresh_interval_seconds")
             if refresh_interval_seconds is not None and (
                 not isinstance(refresh_interval_seconds, int)
@@ -952,6 +962,7 @@ def _parse_v2_capabilities(value: object) -> V2MetricCapabilities:
                 comparison,  # type: ignore[arg-type]
                 show_percentage,
                 refresh_interval_seconds,
+                sort_direction,  # type: ignore[arg-type]
             )
         else:
             raise CustomProtocolError(f"unsupported v2 chart capability: {kind}")
@@ -1167,6 +1178,11 @@ def v2_probe_descriptor_to_wire(descriptor: V2ProbeDescriptor) -> dict[str, obje
             ),
             **({"comparison": value.comparison} if value.comparison != "full" else {}),
             **({"show_percentage": False} if not value.show_percentage else {}),
+            **(
+                {"sort_direction": value.sort_direction}
+                if value.sort_direction != "descending"
+                else {}
+            ),
             **(
                 {"refresh_interval_seconds": value.refresh_interval_seconds}
                 if value.refresh_interval_seconds is not None

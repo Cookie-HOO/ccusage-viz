@@ -217,6 +217,29 @@ def test_runtime_filter_rejects_unknown_selection_mode() -> None:
         )
 
 
+def test_v2_ranking_sort_direction_parses_and_round_trips() -> None:
+    value = v2_probe_descriptor()
+    value["metrics"][0]["capabilities"]["charts"] = {
+        "ranking": {"granularities": ["day"], "group_by": [None], "sort_direction": "ascending"}
+    }
+
+    descriptor = parse_v2_probe_descriptor(value)
+    ranking = descriptor.metrics[0].capabilities.charts["ranking"]
+
+    assert ranking.sort_direction == "ascending"  # type: ignore[union-attr]
+    assert v2_probe_descriptor_to_wire(descriptor)["metrics"][0]["capabilities"]["charts"]["ranking"]["sort_direction"] == "ascending"  # type: ignore[index]
+
+
+def test_v2_ranking_rejects_invalid_sort_direction() -> None:
+    value = v2_probe_descriptor()
+    value["metrics"][0]["capabilities"]["charts"] = {
+        "ranking": {"granularities": ["day"], "group_by": [None], "sort_direction": "sideways"}
+    }
+
+    with pytest.raises(CustomProtocolError, match="sort_direction"):
+        parse_v2_probe_descriptor(value)
+
+
 def test_v2_metric_groups_and_references_round_trip() -> None:
     value = v2_probe_descriptor()
     value["metric_groups"] = [
