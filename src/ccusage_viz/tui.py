@@ -6358,6 +6358,43 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     if not pane.lifecycle.accepts(operation, generation=outcome.generation):
                         pane.lifecycle.abandon(operation)
                     elif outcome.error is not None:
+                        failure = (
+                            outcome.error.values.get("custom_failure")
+                            if isinstance(outcome.error, QueryError)
+                            else None
+                        )
+                        retry = False
+                        if (
+                            isinstance(failure, CustomProtocolFailure)
+                            and failure.code == "unsupported_query"
+                            and failure.unsupported is not None
+                            and isinstance(pane.component, (CustomHistoricalComponent, CustomMonitorComponent))
+                            and pane.component.switch_target_config is not None
+                            and pane.component.v2_descriptor is not None
+                        ):
+                            target = next(
+                                (
+                                    metric
+                                    for metric in pane.component.v2_descriptor.metrics
+                                    if metric.id == pane.component.request_config.metric_id
+                                ),
+                                None,
+                            )
+                            field = failure.unsupported.get("field")
+                            retry = (
+                                target is not None
+                                and field is not None
+                                and pane.component.retry_metric_switch(field, target)
+                            )
+                        if retry:
+                            pane.lifecycle.complete(operation, generation=outcome.generation)
+                            refresh(
+                                index,
+                                trigger=LifecycleTrigger.CONFIGURATION,
+                                data_affecting=False,
+                            )
+                            changed = True
+                            continue
                         failed = (
                             pane.component.fail(outcome.error, generation=outcome.generation)
                             if isinstance(pane.component, CustomMonitorComponent)
@@ -9661,10 +9698,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                             if descriptor is None or metric_id is None:
                                 copy_feedback.show(translator.text("status.custom_metric_no_alternative"))
                                 continue
-                            from ccusage_viz.custom_metric_switching import (
-                                cycle_switch_metric,
-                                validate_metric_switch,
-                            )
+                            from ccusage_viz.custom_metric_switching import cycle_switch_metric
 
                             target = cycle_switch_metric(
                                 descriptor,
@@ -9674,16 +9708,6 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                             )
                             if target is None:
                                 copy_feedback.show(translator.text("status.custom_metric_no_alternative"))
-                                continue
-                            rejection = validate_metric_switch(base, target)
-                            if rejection is not None:
-                                copy_feedback.show(
-                                    translator.text(
-                                        "status.custom_metric_switch_rejected",
-                                        field=rejection.field,
-                                        value=rejection.value or "—",
-                                    )
-                                )
                                 continue
                             component.begin_metric_switch(replace(base, metric_id=target.id))
                             refresh(
