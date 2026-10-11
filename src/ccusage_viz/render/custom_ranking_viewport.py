@@ -8,12 +8,13 @@ from typing import cast
 
 from ccusage_viz.custom_models import LocalizedText
 from ccusage_viz.formatting import center_text, clip_width, display_width, pad_width
-from ccusage_viz.processing.custom_historical import CustomChartProjection
+from ccusage_viz.processing.custom_historical import CustomChartProjection, CustomProjectedSeries
 from ccusage_viz.render.base import RenderContext, styled_text
 from ccusage_viz.render.palette import get_color_scheme
 from ccusage_viz.render.ranking_presentation import (
     RankingPresentationEntry,
     filter_ranking_entries,
+    measure_ranking_columns,
     render_historical_ranking,
 )
 from ccusage_viz.render.ranking_viewport import RankingColumns, RankingViewport
@@ -55,7 +56,7 @@ def render_custom_ranking_viewport(
     comparison = config.ranking_comparison if config else "full"
     # Entry facts are stable across presentation changes. The source identity
     # plus locale and query define the localized, filtered entry projection.
-    data_key = (context.translator.language, search_query)
+    data_key = (context.translator.language, projection.unit, search_query)
     rebuild_data = viewport.source is not projection.series or viewport.data_key != data_key
     # These facts can alter column widths, chrome height, wrapping, or row
     # spacing. Styles and themes intentionally do not: they only change marks.
@@ -118,8 +119,23 @@ def render_custom_ranking_viewport(
         def localized(text: LocalizedText) -> str:
             return text.zh_cn if context.translator.language == "zh" else text.en
 
-        entries = tuple(
-            RankingPresentationEntry(
+        def prepare_entry(entry: CustomProjectedSeries) -> RankingPresentationEntry:
+            display = (
+                localized(entry.display)
+                if entry.display and not entry.is_other
+                else value(entry.total)
+            )
+            comparison_display = (
+                localized(entry.comparison_display)
+                if entry.comparison_display and not entry.is_other
+                else (
+                    f"{'+' if entry.total > entry.previous_total else '-'}"
+                    f"{value(abs(entry.total - entry.previous_total))}"
+                    if entry.previous_total is not None and entry.total != entry.previous_total
+                    else None
+                )
+            )
+            return RankingPresentationEntry(
                 entry.id,
                 context.translator.text("label.other")
                 if entry.is_other
@@ -132,15 +148,17 @@ def render_custom_ranking_viewport(
                 description=localized(entry.description)
                 if entry.description and not entry.is_other
                 else None,
-                display=localized(entry.display) if entry.display and not entry.is_other else None,
-                comparison_display=localized(entry.comparison_display)
-                if entry.comparison_display and not entry.is_other
-                else None,
+                display=display,
+                comparison_display=comparison_display,
                 copy_marker=None if entry.is_other else "⊞",
                 project_link=None if entry.is_other else entry.link,
+                display_width=display_width(display),
+                comparison_display_width=(
+                    display_width(comparison_display) if comparison_display is not None else None
+                ),
             )
-            for entry in projection.series
-        )
+
+        entries = tuple(prepare_entry(entry) for entry in projection.series)
         entries = filter_ranking_entries(entries, search_query)
         prior = {
             entry.key: rank
@@ -170,7 +188,17 @@ def render_custom_ranking_viewport(
     if rebuild_geometry:
         viewport.columns = RankingColumns()
         if viewport.entries:
-            render(viewport.entries, 0, measure=True)
+            measure_ranking_columns(
+                viewport.entries,
+                context=context,
+                total=viewport.total,
+                show_percentage=projection.show_percentage,
+                comparison_mode=comparison,
+                comparison_available=projection.comparison_available,
+                show_new_entries=True,
+                total_entry_count=len(viewport.entries),
+                columns=viewport.columns,
+            )
         viewport.prepare_lines(descriptions=descriptions_visible, spacing=item_spacing)
         # Geometry changes retain the display-line position whenever it remains
         # valid; render() performs a second clamp once chrome height is known.

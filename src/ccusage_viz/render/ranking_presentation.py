@@ -158,6 +158,10 @@ class RankingPresentationEntry:
     comparison_display: str | None = None
     copy_marker: str | None = None
     project_link: str | None = None
+    # Stable, unstyled scalar facts prepared with the entry data.  Viewport
+    # geometry may inspect every entry, so it must never need its formatter.
+    display_width: int | None = None
+    comparison_display_width: int | None = None
 
 
 def _refresh_markers(
@@ -349,6 +353,118 @@ def _comparison_heading(context: RenderContext) -> str:
         if period
         else context.translator.text("label.ranking_previous")
     )
+
+
+def measure_ranking_columns(
+    entries: Sequence[RankingPresentationEntry],
+    *,
+    context: RenderContext,
+    total: RankingNumber | None,
+    show_percentage: bool,
+    comparison_mode: str,
+    comparison_available: bool,
+    show_new_entries: bool,
+    total_entry_count: int,
+    columns: RankingColumns,
+) -> None:
+    """Measure shared layout widths without formatting rows or refresh markers.
+
+    This deliberately performs only scalar text and wrap-width facts so a
+    presentation change can retain an exact scrollbar range without rendering
+    the complete stable entry sequence.
+    """
+    rank_width = max(2, display_width(str(total_entry_count)))
+    comparison_visible = (
+        context.density in {"full", "detailed"}
+        and context.width >= 58
+        and context.period != "all"
+        and comparison_mode != "none"
+        and comparison_available
+    )
+    if not comparison_visible:
+        desired_right_width = 1
+        for entry in entries:
+            value_width = entry.display_width
+            if value_width is None:
+                value_width = display_width(entry.display or "")
+            desired_right_width = max(
+                desired_right_width,
+                value_width
+                + (display_width(f"{entry.current / total:>5.1%}") if show_percentage and total else 0)
+                + 3,
+            )
+        columns.width("right", desired_right_width)
+        columns.description_width = max(1, context.width - min(context.width, rank_width + 5))
+        return
+
+    growth_visible = comparison_mode == "full"
+    rank_comparison_visible = context.density == "detailed" and context.width >= 75
+    delta_heading = _comparison_heading(context)
+    rank_change_heading = context.translator.text("label.ranking_column_rank_change")
+    current_heading = context.translator.text("label.ranking_column_current")
+    share_heading = context.translator.text("label.ranking_column_share") if show_percentage else ""
+    previous_entries = tuple(
+        item for item in entries if item.previous is not None and not item.is_other
+    )
+    prior_rank = {
+        entry.key: rank
+        for rank, entry in enumerate(
+            sorted(previous_entries, key=lambda item: (-cast(RankingNumber, item.previous), str(item.key))),
+            start=1,
+        )
+    }
+    delta_width = display_width(delta_heading) if growth_visible else 0
+    current_width = display_width(current_heading)
+    share_width = display_width(share_heading) if show_percentage else 0
+    rank_change_width = display_width(rank_change_heading) if rank_comparison_visible else 0
+    for rank, entry in enumerate(entries, start=1):
+        value_width = entry.display_width
+        if value_width is None:
+            value_width = display_width(entry.display or "")
+        current_width = max(current_width, value_width + 2)
+        if show_percentage and total:
+            share_width = max(share_width, display_width(f"{entry.current / total:>5.1%}"))
+        if not (entry.comparison_ready and entry.previous is not None and not entry.is_other):
+            if growth_visible:
+                delta = context.translator.text("label.ranking_new") if show_new_entries and not entry.is_other else "—"
+                delta_width = max(delta_width, display_width(delta))
+            if rank_comparison_visible:
+                rank_change_width = max(
+                    rank_change_width,
+                    display_width(
+                        context.translator.text("label.ranking_new_rank")
+                        if show_new_entries and not entry.is_other
+                        else "—"
+                    ),
+                )
+            continue
+        value_delta = entry.current - entry.previous
+        if growth_visible:
+            delta = (
+                "0"
+                if value_delta == 0
+                else entry.comparison_display
+                if entry.comparison_display is not None
+                else f"{value_delta:+}"
+            )
+            delta_width = max(
+                delta_width,
+                entry.comparison_display_width
+                if entry.comparison_display_width is not None and value_delta != 0
+                else display_width(delta),
+            )
+        if rank_comparison_visible:
+            rank_delta = (entry.previous_rank or prior_rank.get(entry.key, rank)) - rank
+            rank_change_width = max(
+                rank_change_width,
+                display_width("·" if rank_delta == 0 else trend_glyph(rank_delta, ascii=context.ascii)),
+            )
+    columns.width("delta", delta_width)
+    columns.width("current", current_width)
+    columns.width("share", share_width)
+    columns.width("rank_change", rank_change_width)
+    rank_column_width = max(rank_width + 4, display_width(context.translator.text("label.ranking_column_rank")))
+    columns.description_width = max(1, context.width - min(context.width, rank_column_width + 1))
 
 
 def render_historical_ranking(

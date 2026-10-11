@@ -275,6 +275,73 @@ def test_warm_large_ranking_only_formats_visible_entries(monkeypatch):
     assert len(viewport.hits) <= viewport.visible_rows
 
 
+@pytest.mark.parametrize("changed", ("style", "density"))
+def test_presentation_change_renders_only_current_window(
+    monkeypatch: pytest.MonkeyPatch, changed: str
+) -> None:
+    import ccusage_viz.render.custom_ranking_viewport as module
+
+    viewport = RankingViewport()
+    model = projection(10_000, descriptions=True, comparison=True)
+    initial = context(height=24, density="detailed")
+    render(model, viewport, initial)
+    viewport.offset = 8_000
+    calls: list[int] = []
+    formatted: list[object] = []
+    original_render = module.render_historical_ranking
+    original_format = module.format_custom_value
+
+    def record(entries, *args, **kwargs):
+        calls.append(len(entries))
+        return original_render(entries, *args, **kwargs)
+
+    def record_format(*args, **kwargs):
+        formatted.append(args[0])
+        return original_format(*args, **kwargs)
+
+    monkeypatch.setattr(module, "render_historical_ranking", record)
+    monkeypatch.setattr(module, "format_custom_value", record_format)
+    changed_context = (
+        replace(initial, style="list")
+        if changed == "style"
+        else replace(initial, density="minimal")
+    )
+    render(model, viewport, changed_context)
+
+    # Chrome measures one entry; all other rendering is the display window.
+    # Density geometry consumes scalar facts prepared with the stable entries.
+    assert calls
+    assert max(calls) <= viewport.visible_rows + 2
+    assert sum(calls) <= viewport.visible_rows + 3
+    assert not formatted
+    assert viewport.offset > 0
+
+
+def test_density_rebuild_preserves_window_body_scrollbar_and_hits():
+    model = projection(30, descriptions=True, comparison=True)
+    viewport = RankingViewport()
+    detailed = context(height=14, density="detailed")
+    render(model, viewport, detailed, spacing="line", scrollbar=True)
+    viewport.offset = 7
+
+    minimal = replace(detailed, density="minimal")
+    actual = render(model, viewport, minimal, spacing="line", scrollbar=True).splitlines()
+    expected = render_custom_ranking(
+        model, replace(minimal, width=minimal.width - 1),
+        descriptions_visible=False,
+        show_visible_count=True,
+    ).splitlines()
+
+    # The viewport caller owns its shorter title; the remaining chrome and
+    # density-specific geometry match the unwindowed Custom Ranking.
+    assert actual[1 : viewport.body_top] == expected[1 : viewport.body_top]
+    assert viewport.scrollbar is not None
+    for row, (entry_id, copy_column, link_column) in viewport.hits.items():
+        assert f"Project {entry_id}" in strip_ansi(actual[row])
+        assert strip_ansi(actual[row])[copy_column] == "⊞"
+        assert link_column is not None and strip_ansi(actual[row])[link_column] == "→"
+
+
 def test_zero_values_do_not_divide_by_zero():
     model = projection(1)
     model = replace(model, series=(replace(model.series[0], values=(Decimal(0),)),))
