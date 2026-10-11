@@ -61,7 +61,7 @@ class CustomFilter:
     id: str
     label: LocalizedText
     options: tuple[CustomFilterOption, ...]
-    mode: Literal["multi_select"] = "multi_select"
+    mode: Literal["multi_select", "single_select"] = "multi_select"
 
 
 @dataclass(frozen=True, slots=True)

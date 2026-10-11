@@ -1288,8 +1288,9 @@ def _parse_dimension(value: object, name: str) -> CustomDimension:
 
 def _parse_filter(value: object) -> CustomFilter:
     source = _mapping(value, "filter")
-    if source.get("mode") != "multi_select":
-        raise CustomProtocolError("custom filters must use multi_select mode")
+    mode = source.get("mode", "multi_select")
+    if mode not in {"multi_select", "single_select"}:
+        raise CustomProtocolError("custom filter mode must be multi_select or single_select")
     options = tuple(
         _parse_dimension(item, "filter option")
         for item in _sequence(source.get("options"), "filter options")
@@ -1299,6 +1300,7 @@ def _parse_filter(value: object) -> CustomFilter:
         _string(source.get("id"), "filter ID"),
         _parse_localized(source.get("label"), "filter label"),
         tuple(CustomFilterOption(item.id, item.label) for item in options),
+        mode,  # type: ignore[arg-type]
     )
 
 

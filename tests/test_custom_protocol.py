@@ -21,6 +21,7 @@ from ccusage_viz.custom_protocol import (
     V2ProbeResponse,
     V2SummaryRequest,
     V2SummaryResponse,
+    _parse_filter,
     canonical_custom_request_key,
     parse_custom_response,
     parse_v2_probe_descriptor,
@@ -185,6 +186,35 @@ def test_v2_probe_descriptor_parses_multiple_metrics_and_monitor_capabilities() 
     assert monitor.refresh_interval_seconds == 10
     assert descriptor.metrics[2].aggregation == "value"
     assert descriptor.metrics[2].capabilities.charts["monitor"].refresh_interval_seconds is None
+
+
+def test_runtime_filter_defaults_to_multi_select_and_accepts_single_select() -> None:
+    defaulted = _parse_filter(
+        {"id": "seed_book", "label": text("Based on book", "基于图书"), "options": []}
+    )
+    single = _parse_filter(
+        {
+            "id": "seed_book",
+            "label": text("Based on book", "基于图书"),
+            "mode": "single_select",
+            "options": [],
+        }
+    )
+
+    assert defaulted.mode == "multi_select"
+    assert single.mode == "single_select"
+
+
+def test_runtime_filter_rejects_unknown_selection_mode() -> None:
+    with pytest.raises(CustomProtocolError, match="filter mode"):
+        _parse_filter(
+            {
+                "id": "seed_book",
+                "label": text("Based on book", "基于图书"),
+                "mode": "range",
+                "options": [],
+            }
+        )
 
 
 def test_v2_metric_groups_and_references_round_trip() -> None:
