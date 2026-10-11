@@ -10,24 +10,42 @@ The Dataset remains the authority over metric semantics, query interpretation, d
 
 ## Protocol
 
-Add an optional `switch_group` to each V2 Metric descriptor:
+Add optional Dataset-level `metric_groups` resources and an optional `group_id` reference on each V2 Metric:
 
 ```json
 {
-  "id": "stars",
-  "label": {"en": "Stars", "zh-CN": "Star 数"},
-  "switch_group": "github-tools-ranking",
-  "capabilities": {"...": "..."}
+  "metric_groups": [
+    {
+      "id": "github-tools",
+      "title": {"en": "GitHub tools", "zh-CN": "GitHub 工具"}
+    }
+  ],
+  "metrics": [
+    {
+      "id": "stars",
+      "group_id": "github-tools",
+      "title": {"en": "Stars", "zh-CN": "Star 数"},
+      "capabilities": {"...": "..."}
+    },
+    {
+      "id": "updated_days_ago",
+      "group_id": "github-tools",
+      "title": {"en": "Days since update", "zh-CN": "距上次更新天数"},
+      "capabilities": {"...": "..."}
+    }
+  ]
 }
 ```
 
-- `switch_group` is a stable Dataset-local ID using the existing ID validation rules.
-- Metrics with equal non-null `switch_group` are related candidates for in-place switching.
-- Omitted `switch_group` means the Metric is not available through in-chart switching.
-- A Metric belongs to at most one switch group. A group can contain one member to support incremental Dataset evolution.
+- `metric_groups` is an optional ordered Dataset-level resource list. Every group has a unique stable ID and a required localized title.
+- `Metric.group_id` is optional. When present, it must reference a declared Metric Group; a Metric belongs to at most one group.
+- Metrics referencing the same Group are related candidates for in-place switching. A group may have one or zero members to support incremental Dataset evolution.
+- A Dataset that omits `metric_groups` remains completely compatible: its Metric chooser is flat and `m/M` does not provide related-Metric switching.
+- A Metric without `group_id` remains a normal flat chooser entry, after declared groups, and does not participate in `m/M`.
+- A Group title such as `Unspecified` / `未声明` is ordinary Dataset-provided localized text. It is not a reserved representation of a missing `group_id` and behaves as every other Group.
 - This is an additive V2 descriptor field. No protocol version, request field, or new sub-metric / Ranking-view type is introduced.
 - A switch sends an ordinary V2 request using the target's existing `metric_id`.
-- Existing explicit CLI and pane configuration retain `metric_id`; the group does not affect source selection semantics.
+- Existing explicit CLI and pane configuration retain `metric_id`; the Group does not affect source selection semantics.
 
 This deliberately reuses the established V2 multiple-Metric model. A Dataset author decides whether values are genuinely separate Metrics. If they are, their units, default settings, capabilities, summaries, presentation metadata, and runtime behavior remain independently owned.
 
@@ -37,9 +55,10 @@ All V2 Custom chart kinds support in-place switching: Timeline, Stack, Calendar,
 
 - `m` cycles forward and `M` cycles backward.
 - Candidate order is exactly the declaration order in `descriptor.metrics`.
-- A candidate must be in the current Metric's non-null `switch_group` and declare support for the active chart kind.
+- A candidate must reference the current Metric's declared `group_id` and declare support for the active chart kind.
 - The current Metric is included in the cycle, so one candidate means no effective destination.
-- V1 Datasets never participate.
+- V1 Datasets, ungrouped Metrics, and Datasets that omit `metric_groups` never participate.
+- The Dataset-and-Metric chooser remains flat when `metric_groups` is omitted. When Groups are declared, it renders nonempty Groups in `metric_groups[]` order, displays each localized Group title, and indents members in `metrics[]` order below it. Metrics without `group_id` are then rendered as ordinary flat entries, with no host-generated heading. Empty Groups are not rendered.
 - The regular help always lists `m` / `M` as next / previous related Metric; it does not state the candidate count.
 - If no alternate candidate exists, a press leaves the chart unchanged and shows a three-second notice that there is no related Metric to switch to.
 
@@ -83,18 +102,19 @@ The shared pane display window, focus, and local presentation settings persist t
 - A historical target request failure leaves the old chart selected and visible; it uses normal failure feedback without committing the target. Monitor failure does not discard retained per-Metric state.
 - Dashboard presets persist only a successfully committed target `metric_id`; a pending or failed historical switch saves the old Metric.
 - No new pane, CLI, or preset persistence field is needed.
-- Existing V2 Datasets without `switch_group`, and all V1 Datasets, retain current behavior.
+- Existing V2 Datasets without `metric_groups`, and all V1 Datasets, retain current behavior.
 
 ## Testing
 
 1. **Protocol parsing and serialization**
-   - Parse omitted and valid `switch_group` values.
-   - Reject non-string, empty, and malformed IDs.
-   - Preserve it through descriptor serialization / round-trip behavior.
+   - Parse omitted and valid `metric_groups` resources and Metric `group_id` references.
+   - Reject duplicate, non-string, empty, malformed, or unresolvable Group IDs.
+   - Preserve groups and references through descriptor serialization / round-trip behavior.
 
 2. **Candidate and input behavior**
    - Cycle forward and backward in descriptor order.
-   - Exclude ungrouped Metrics, other groups, and Metrics that lack the active chart capability.
+   - Exclude ungrouped Metrics, other Groups, and Metrics that lack the active chart capability.
+   - Cover flat legacy chooser rendering, grouped chooser ordering and indentation, omitted `group_id` flat entries, and invisible empty Groups.
    - Verify a single candidate causes a notice without starting a request.
    - Keep `m/M` visible in help without a candidate count.
 
