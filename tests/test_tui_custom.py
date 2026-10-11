@@ -30,6 +30,7 @@ from ccusage_viz.custom_models import (
     V2Dataset,
     V2MetricCapabilities,
     V2MetricDescriptor,
+    V2MetricGroup,
     V2MetricValue,
     V2MonitorCapability,
     V2MonitorObservation,
@@ -827,6 +828,59 @@ def test_custom_monitor_attachment_activity_uses_dataset_observation_total() -> 
         translator=load_translator("en"),
     )
     assert not attachment.playback_requested
+
+
+def test_dataset_metric_chooser_groups_declared_metrics_and_keeps_ungrouped_flat() -> None:
+    text = LocalizedText("Dataset", "数据集")
+    unit = CustomUnit("count", text, "suffix", 0)
+
+    def metric(identifier: str, group_id: str | None = None) -> V2MetricDescriptor:
+        return V2MetricDescriptor(
+            identifier,
+            LocalizedText(identifier, identifier),
+            text,
+            unit,
+            "sum",
+            V2MetricCapabilities((), (), {"ranking": tui_module.V2HistoricalChartCapability(("day",), (None,), ())}),
+            {},
+            group_id=group_id,
+        )
+
+    descriptor = V2ProbeDescriptor(
+        "revision",
+        "1",
+        V2Dataset(text, text),
+        (metric("stars", "github"), metric("updated", "github"), metric("legacy")),
+        (),
+        metric_groups=(
+            V2MetricGroup("github", LocalizedText("GitHub tools", "GitHub 工具")),
+            V2MetricGroup("empty", LocalizedText("Empty", "空")),
+        ),
+    )
+
+    assert tui_module._dataset_metric_chooser_rows(descriptor, load_translator("en")) == (
+        ("GitHub tools", None),
+        ("  stars", 0),
+        ("  updated", 1),
+        ("legacy", 2),
+    )
+
+
+def test_dataset_metric_chooser_keeps_legacy_descriptor_flat() -> None:
+    text = LocalizedText("Dataset", "数据集")
+    unit = CustomUnit("count", text, "suffix", 0)
+    metric = V2MetricDescriptor(
+        "stars",
+        LocalizedText("Stars", "Star"),
+        text,
+        unit,
+        "sum",
+        V2MetricCapabilities((), (), {"ranking": tui_module.V2HistoricalChartCapability(("day",), (None,), ())}),
+        {},
+    )
+    descriptor = V2ProbeDescriptor("revision", "1", V2Dataset(text, text), (metric,), ())
+
+    assert tui_module._dataset_metric_chooser_rows(descriptor, load_translator("en")) == (("Stars", 0),)
 
 
 def test_dataset_metric_chooser_titles_the_selected_dataset() -> None:
