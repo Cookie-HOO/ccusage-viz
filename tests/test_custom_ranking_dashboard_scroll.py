@@ -114,6 +114,76 @@ def dashboard(monkeypatch):
     return run, panes, frames, focuses, geometries, decoder, copied, opened, size
 
 
+def test_copy_all_uses_every_filtered_entry_without_focus_or_query_work(dashboard):
+    run, panes, frames, focuses, layouts, decoder, copied, opened, _ = dashboard
+
+    def click_all():
+        hit = panes[0].ranking_viewport.copy_all_hit
+        assert hit is not None
+        row, column = hit
+        rect = layouts[-1].pane(0)
+        return MouseEvent(0, rect.left + column + 1, rect.top + row + 1, True, 0)
+
+    def verify_all():
+        assert copied == [
+            "\n\n".join(
+                f"Project {index}\nhttps://example.com/{index}" for index in range(100)
+            )
+        ]
+        assert focuses[-1] == -1
+        assert opened == []
+        assert panes[0].copied_ranking_entry_id is None
+        assert panes[0].copied_ranking_all_until > 0
+        assert "✓" in "\n".join(frames[-1].rows)
+        return KeyEvent("\x03")
+
+    run([click_all, verify_all])
+
+
+def test_copy_all_failure_does_not_show_success(dashboard):
+    run, panes, frames, focuses, layouts, decoder, copied, *_ = dashboard
+    run.monkeypatch.setattr(tui, "copy_command", lambda text: False)
+
+    def click_all():
+        hit = panes[0].ranking_viewport.copy_all_hit
+        assert hit is not None
+        row, column = hit
+        rect = layouts[-1].pane(0)
+        return MouseEvent(0, rect.left + column + 1, rect.top + row + 1, True, 0)
+
+    def verify_failure():
+        assert panes[0].copied_ranking_all_until == 0
+        assert "✓" not in "\n".join(frames[-1].rows)
+        return KeyEvent("\x03")
+
+    run([click_all, verify_failure])
+
+
+def test_copy_all_respects_search_and_includes_offscreen_matches(dashboard):
+    run, panes, frames, focuses, layouts, decoder, copied, *_ = dashboard
+    pane = panes[0]
+    pane.ranking_search.query = "Project 9"
+
+    def click_all():
+        hit = pane.ranking_viewport.copy_all_hit
+        assert hit is not None
+        row, column = hit
+        rect = layouts[-1].pane(0)
+        return MouseEvent(0, rect.left + column + 1, rect.top + row + 1, True, 0)
+
+    def verify_search():
+        matches = (9, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99)
+        assert copied == [
+            "\n\n".join(
+                f"Project {index}\nhttps://example.com/{index}" for index in matches
+            )
+        ]
+        assert len(pane.ranking_viewport.entries) == len(matches)
+        return KeyEvent("\x03")
+
+    run([click_all, verify_search])
+
+
 def test_pointed_unfocused_pane_batches_wheel_without_queries_or_focus_change(dashboard):
     run, panes, frames, focuses, layouts, decoder, *_ = dashboard
 
@@ -126,7 +196,7 @@ def test_pointed_unfocused_pane_batches_wheel_without_queries_or_focus_change(da
     before = [0]
 
     def check():
-        assert panes[0].ranking_viewport.offset == 30
+        assert panes[0].ranking_viewport.offset == 10
         assert panes[1].ranking_viewport.offset == 0
         assert len(frames) == before[0] + 1
         assert focuses[-1] == 1
@@ -144,7 +214,7 @@ def test_two_panes_edges_outside_coordinates_and_no_idle_motion(dashboard):
         return WheelEvent(1, rect.left + rect.width, rect.top + 1)
 
     def after_idle():
-        assert [p.ranking_viewport.offset for p in panes] == [3, 3]
+        assert [p.ranking_viewport.offset for p in panes] == [1, 1]
         assert focuses[-1] == -1
         return KeyEvent("\x03")
 
@@ -174,7 +244,7 @@ def test_help_owns_wheel_and_reverse_leaves_bottom_immediately(dashboard):
 
     def check_bottom():
         viewport = panes[0].ranking_viewport
-        assert viewport.offset == viewport.total_rows - viewport.visible_rows - 3
+        assert viewport.offset == viewport.total_rows - viewport.visible_rows - 1
         before[0] = viewport.offset
         return KeyEvent("h")
 
@@ -209,13 +279,13 @@ def test_scroll_copy_link_and_search_use_visible_stable_id(dashboard):
         )
 
     def check_copy():
-        assert target_id[0] == "3"
-        assert copied == ["Project 3\nhttps://example.com/3"]
-        assert panes[0].copied_ranking_entry_id == "3"
+        assert target_id[0] == "1"
+        assert copied == ["Project 1\nhttps://example.com/1"]
+        assert panes[0].copied_ranking_entry_id == "1"
         return click_visible(link=True)
 
     def check_link():
-        assert opened == ["https://example.com/3"]
+        assert opened == ["https://example.com/1"]
         return KeyEvent("\x03")
 
     run([WheelEvent(1, 2, 3), click_visible, check_copy, check_link])
@@ -225,12 +295,12 @@ def test_text_view_pending_and_nonranking_panes_do_not_scroll(dashboard):
     run, panes, frames, focuses, layouts, decoder, *_ = dashboard
 
     def hide_chart():
-        assert panes[0].ranking_viewport.offset == 3
+        assert panes[0].ranking_viewport.offset == 1
         panes[0].body_view = "command"
         return WheelEvent(1, 2, 3)
 
     def pending():
-        assert panes[0].ranking_viewport.offset == 3
+        assert panes[0].ranking_viewport.offset == 1
         panes[0].body_view = "chart"
         panes[0].component.pending_generation = panes[0].component.generation
         # Resize forces an actual pending paint on the next loop.
@@ -240,7 +310,7 @@ def test_text_view_pending_and_nonranking_panes_do_not_scroll(dashboard):
     def check():
         assert not panes[0].ranking_viewport.active
         assert not panes[0].ranking_copy_rows
-        assert panes[0].ranking_viewport.offset == 3
+        assert panes[0].ranking_viewport.offset == 1
         return KeyEvent("\x03")
 
     run([WheelEvent(1, 2, 3), hide_chart, pending, WheelEvent(1, 2, 3), check])
@@ -252,13 +322,13 @@ def test_scrolling_uses_displayed_header_and_resized_geometry(dashboard):
     run.monkeypatch.setattr(tui, "_header_lines", lambda *args: ["header", "summary", "divider"])
 
     def resize():
-        assert panes[0].ranking_viewport.offset == 3
+        assert panes[0].ranking_viewport.offset == 1
         size[:] = [100, 16]
         return None
 
     def check():
-        assert panes[0].ranking_viewport.offset == 3
-        assert panes[1].ranking_viewport.offset == 3
+        assert panes[0].ranking_viewport.offset == 1
+        assert panes[1].ranking_viewport.offset == 1
         assert layouts[-1].width == 100
         return KeyEvent("\x03")
 
@@ -396,3 +466,150 @@ def test_opposite_wheels_with_unchanged_final_offset_do_not_paint(dashboard):
     run([batch, KeyEvent("\x03")])
     assert panes[0].ranking_viewport.offset == 0
     assert len(frames) == 1
+
+
+def test_scrollbar_drag_moves_body_and_releases_capture(dashboard):
+    run, panes, frames, focuses, layouts, decoder, *_ = dashboard
+
+    captured: dict[str, object] = {}
+
+    def prime():
+        # One wheel step forces the scrollbar to materialize for hit testing.
+        return WheelEvent(1, 2, 3)
+
+    def grab_thumb():
+        pane = panes[0]
+        bar = pane.ranking_viewport.scrollbar
+        assert bar is not None
+        rect = layouts[-1].pane(0)
+        framed = 0  # Unfocused dashboard panes render without a frame.
+        captured["bar"] = bar
+        captured["rect"] = rect
+        captured["framed"] = framed
+        captured["start"] = pane.ranking_viewport.offset
+        x = rect.left + framed + bar.column + 1
+        y = rect.top + framed + bar.thumb_top + 1
+        return MouseEvent(0, x, y, True, 0)
+
+    def drag_down():
+        bar = captured["bar"]
+        rect = captured["rect"]
+        framed = captured["framed"]
+        # A held-button motion report (motion modifier bit set) rides to the
+        # bottom of the track.
+        x = rect.left + framed + bar.column + 1
+        y = rect.top + framed + (bar.top + bar.travel) + 1
+        return MouseEvent(0, x, y, True, 0b100000)
+
+    def check_dragged():
+        pane = panes[0]
+        assert pane.ranking_viewport.offset > captured["start"]
+        assert pane.ranking_viewport.offset == pane.ranking_viewport.scrollbar.maximum_offset
+        # The second pane never moves from a drag over the first.
+        assert panes[1].ranking_viewport.offset == 0
+        return MouseEvent(0, 1, 1, False, 0)
+
+    def check_released():
+        # After release a stray motion no longer scrolls the body.
+        bar = captured["bar"]
+        rect = captured["rect"]
+        framed = captured["framed"]
+        return MouseEvent(
+            0,
+            rect.left + framed + bar.column + 1,
+            rect.top + framed + bar.top + 1,
+            True,
+            0b100000,
+        )
+
+    def check_inert():
+        assert panes[0].ranking_viewport.offset == panes[0].ranking_viewport.scrollbar.maximum_offset
+        return KeyEvent("\x03")
+
+    run([prime, grab_thumb, drag_down, check_dragged, check_released, check_inert])
+
+
+def test_scrollbar_track_click_pages_without_starting_drag(dashboard):
+    run, panes, frames, focuses, layouts, decoder, *_ = dashboard
+
+    captured: dict[str, object] = {}
+
+    def prime():
+        return WheelEvent(1, 2, 3)
+
+    def click_below_thumb():
+        pane = panes[0]
+        bar = pane.ranking_viewport.scrollbar
+        assert bar is not None
+        rect = layouts[-1].pane(0)
+        captured["before"] = pane.ranking_viewport.offset
+        captured["bar"] = bar
+        captured["rect"] = rect
+        # Click one row past the thumb bottom, inside the track.
+        y = rect.top + (bar.thumb_top + bar.thumb_size) + 1
+        return MouseEvent(0, rect.left + bar.column + 1, y, True, 0)
+
+    def check_paged():
+        pane = panes[0]
+        assert pane.ranking_viewport.offset == captured["before"] + pane.ranking_viewport.visible_rows
+        # A page click starts no drag: a later stray motion is inert.
+        bar = captured["bar"]
+        rect = captured["rect"]
+        return MouseEvent(0, rect.left + bar.column + 1, rect.top + bar.top + 1, True, 0b100000)
+
+    def check_no_drag():
+        pane = panes[0]
+        assert pane.ranking_viewport.offset == captured["before"] + pane.ranking_viewport.visible_rows
+        return KeyEvent("\x03")
+
+    run([prime, click_below_thumb, check_paged, check_no_drag])
+
+
+def test_scrollbar_stationary_grab_and_release_cancel_do_not_move(dashboard):
+    run, panes, frames, focuses, layouts, decoder, *_ = dashboard
+
+    captured: dict[str, object] = {}
+
+    def prime():
+        return WheelEvent(1, 2, 3)
+
+    def grab_thumb():
+        pane = panes[0]
+        bar = pane.ranking_viewport.scrollbar
+        rect = layouts[-1].pane(0)
+        captured["bar"] = bar
+        captured["rect"] = rect
+        row = bar.thumb_top
+        # The offset the implementation settles on for a stationary grab.
+        captured["settled"] = bar.offset_at(row, bar.grab_at(row))
+        return MouseEvent(0, rect.left + bar.column + 1, rect.top + row + 1, True, 0)
+
+    def stationary_motion():
+        # A motion to the same row keeps the settled offset unchanged (no jump).
+        bar = captured["bar"]
+        rect = captured["rect"]
+        return MouseEvent(
+            0, rect.left + bar.column + 1, rect.top + bar.thumb_top + 1, True, 0b100000
+        )
+
+    def cancel_with_release():
+        assert panes[0].ranking_viewport.offset == captured["settled"]
+        return MouseEvent(0, 1, 1, False, 0)
+
+    def check_cancelled():
+        # After release ends capture, a stray motion no longer scrolls.
+        bar = captured["bar"]
+        rect = captured["rect"]
+        return MouseEvent(
+            0,
+            rect.left + bar.column + 1,
+            rect.top + bar.top + bar.travel + 1,
+            True,
+            0b100000,
+        )
+
+    def check_inert():
+        assert panes[0].ranking_viewport.offset == captured["settled"]
+        return KeyEvent("\x03")
+
+    run([prime, grab_thumb, stationary_motion, cancel_with_release, check_cancelled, check_inert])

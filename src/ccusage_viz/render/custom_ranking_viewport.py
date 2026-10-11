@@ -7,9 +7,10 @@ from decimal import Decimal
 from typing import cast
 
 from ccusage_viz.custom_models import LocalizedText
-from ccusage_viz.formatting import center_text
+from ccusage_viz.formatting import center_text, clip_width, display_width, pad_width
 from ccusage_viz.processing.custom_historical import CustomChartProjection
-from ccusage_viz.render.base import RenderContext
+from ccusage_viz.render.base import RenderContext, styled_text
+from ccusage_viz.render.palette import get_color_scheme
 from ccusage_viz.render.ranking_presentation import (
     RankingPresentationEntry,
     filter_ranking_entries,
@@ -17,6 +18,7 @@ from ccusage_viz.render.ranking_presentation import (
 )
 from ccusage_viz.render.ranking_viewport import RankingColumns, RankingViewport
 from ccusage_viz.render.summary import format_custom_value
+from ccusage_viz.scrollbar import Scrollbar
 
 
 def render_custom_ranking_viewport(
@@ -31,7 +33,15 @@ def render_custom_ranking_viewport(
     show_visible_count: bool,
     copied_entry_id: str | None,
     item_spacing: str,
+    scrollbar: bool = False,
+    copy_all_action: bool = False,
+    copied_all: bool = False,
 ) -> str:
+    viewport.scrollbar = None
+    viewport.copy_all_hit = None
+    gutter = scrollbar and context.width > 1
+    if gutter:
+        context = replace(context, width=context.width - 1)
     config = projection.config
     reset_key = (
         (config.source, config.metric_id, config.group_by, config.filters, config.date_range)
@@ -167,9 +177,41 @@ def render_custom_ranking_viewport(
                 context.translator.text("message.custom_no_data"),
             )[: max(0, context.height)]
         )
-    return viewport.render(
+    rendered = viewport.render(
         render,
         render_chrome=lambda: render(viewport.entries[:1], 0, measure=True),
         context=context,
         spacing=item_spacing,
     )
+    if (
+        copy_all_action
+        and any(not entry.is_other for entry in viewport.entries)
+        and viewport.body_top > 0
+    ):
+        rows = rendered.splitlines()
+        marker = "✓" if copied_all else "⊞"
+        row = 0
+        if row < len(rows):
+            prefix_width = max(0, context.width - 4)
+            prefix = pad_width(clip_width(rows[row], prefix_width), prefix_width)
+            column = display_width(prefix) + 3
+            rows[row] = f"{prefix} | {marker}"
+            viewport.copy_all_hit = (row, column)
+            rendered = "\n".join(rows)
+    if gutter and viewport.visible_rows > 0 and viewport.total_rows > viewport.visible_rows:
+        bar = Scrollbar(
+            context.width, viewport.body_top, viewport.visible_rows,
+            viewport.total_rows, viewport.visible_rows, viewport.offset,
+        )
+        viewport.scrollbar = bar
+        scheme = get_color_scheme(context.color_scheme)
+        rows = rendered.splitlines()
+        rows.extend("" for _ in range(context.height - len(rows)))
+        for row in range(bar.top, bar.top + bar.height):
+            thumb = bar.on_thumb(row)
+            mark = ("#" if context.ascii else "█") if thumb else ("|" if context.ascii else "│")
+            rows[row] = pad_width(clip_width(rows[row], context.width), context.width) + styled_text(
+                mark, scheme.highlight if thumb else scheme.muted, context, bold=thumb,
+            )
+        rendered = "\n".join(rows)
+    return rendered

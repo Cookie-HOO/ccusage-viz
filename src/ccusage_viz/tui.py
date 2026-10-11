@@ -5,7 +5,7 @@ import shlex
 import sys
 import time
 import webbrowser
-from collections.abc import Callable, Hashable
+from collections.abc import Callable, Hashable, Iterable
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta
@@ -431,6 +431,7 @@ class TuiCustomPane:
     ranking_copy_rows: dict[int, tuple[str, int, int | None]] = field(default_factory=dict)
     copied_ranking_entry_id: str | None = None
     copied_ranking_until: float = 0.0
+    copied_ranking_all_until: float = 0.0
     ranking_search: RankingSearchState = field(default_factory=RankingSearchState)
     ranking_item_spacing: str = "compact"
     ranking_viewport: RankingViewport = field(default_factory=RankingViewport)
@@ -488,6 +489,20 @@ class TuiAnimationPane:
 
 
 TuiPane = TuiChartPane | TuiAnimationPane | TuiCustomPane | TuiEmptyPane
+
+
+def _pane_animation_deadline(pane: TuiPane) -> float | None:
+    if isinstance(pane, TuiAnimationPane) and pane.body_view == "chart":
+        deadlines = (pane.session.next_deadline, pane.overlay.next_due)
+    elif (
+        isinstance(pane, (TuiChartPane, TuiCustomPane))
+        and pane.body_view == "chart"
+        and pane.attachment is not None
+    ):
+        deadlines = (pane.attachment.next_deadline,)
+    else:
+        deadlines = ()
+    return min((deadline for deadline in deadlines if deadline is not None), default=None)
 
 
 @dataclass(slots=True)
@@ -1370,7 +1385,10 @@ def _new_pane(
                 if pane_config.chart.kind == "monitor"
                 else options.host.refresh_interval
             )
-            if isinstance(component, CustomHistoricalComponent) and component.capability is not None:
+            if (
+                isinstance(component, CustomHistoricalComponent)
+                and component.capability is not None
+            ):
                 interval = component.capability.refresh_interval_seconds or interval
             pane = TuiCustomPane(
                 component,
@@ -1811,6 +1829,7 @@ def _render_custom_projection(
     search_query: str = "",
     search_editing: bool = False,
     copied_entry_id: str | None = None,
+    copied_all: bool = False,
     item_spacing: str = "compact",
     entry_offset: int = 0,
     entry_limit: int | None = None,
@@ -1866,7 +1885,9 @@ def _render_custom_projection(
             context,
             height=max(
                 0,
-                terminal.height - summary_rows - len(audit.splitlines())
+                terminal.height
+                - summary_rows
+                - len(audit.splitlines())
                 - ranking_viewport.reserved_rows,
             ),
         )
@@ -1881,10 +1902,20 @@ def _render_custom_projection(
             show_visible_count=True,
             copied_entry_id=copied_entry_id,
             item_spacing=item_spacing,
+            scrollbar=True,
+            copy_all_action=True,
+            copied_all=copied_all,
         )
         ranking_viewport.hits = {
             row + summary_rows: hit for row, hit in ranking_viewport.hits.items()
         }
+        if ranking_viewport.copy_all_hit is not None:
+            row, column = ranking_viewport.copy_all_hit
+            ranking_viewport.copy_all_hit = (row + summary_rows, column)
+        if ranking_viewport.scrollbar is not None:
+            ranking_viewport.scrollbar = replace(
+                ranking_viewport.scrollbar, top=ranking_viewport.scrollbar.top + summary_rows
+            )
         rows = rendered.splitlines()
         rows.extend("" for _ in range(context.height - len(rows)))
         return PaneRender("\n".join((*summary_render.splitlines(), *rows, *audit.splitlines())))
@@ -1929,6 +1960,8 @@ def _pane_render(
     if isinstance(pane, TuiCustomPane):
         component = pane.component
         pane.ranking_viewport.active = False
+        pane.ranking_viewport.scrollbar = None
+        pane.ranking_viewport.copy_all_hit = None
         pane.ranking_viewport.hits.clear()
         pane.ranking_copy_rows.clear()
         if (
@@ -2030,6 +2063,7 @@ def _pane_render(
                 if pane.copied_ranking_until > time.monotonic()
                 else None
             ),
+            copied_all=pane.copied_ranking_all_until > time.monotonic(),
             item_spacing=pane.ranking_item_spacing,
             entry_offset=ranking_entry_offset,
             entry_limit=ranking_entry_limit,
@@ -2404,9 +2438,17 @@ def _custom_ranking_clipboard_text(
 ) -> str:
     """Build one project copy payload, preserving every user-visible link target."""
     return "\n".join(
-        part
-        for part in (label, copyable_description_text(description or ""), project_link)
-        if part
+        part for part in (label, copyable_description_text(description or ""), project_link) if part
+    )
+
+
+def _custom_ranking_clipboard_all_text(
+    entries: Iterable[tuple[str, str | None, str | None]],
+) -> str:
+    """Build a copy payload from every displayed concrete Ranking entry."""
+    return "\n\n".join(
+        _custom_ranking_clipboard_text(label, description, project_link)
+        for label, description, project_link in entries
     )
 
 
@@ -4555,6 +4597,7 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
     logs: list[CustomLogRecord] = []
     copy_feedback = TransientFeedback()
     last_size: tuple[int, int] | None = None
+
     def record(status: str, detail: str) -> None:
         logs.append(CustomLogRecord(datetime.now().astimezone(), status, detail))
         logs[:] = logs[-20:]
@@ -5250,12 +5293,16 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
     help_overlay: HelpOverlayState | None = None
     help_was_active = False
     last_click: tuple[int, float] | None = None
+    scrollbar_drag: tuple[int, int] | None = None
     copy_feedback = TransientFeedback()
     manual_refresh_operations: set[OperationToken] = set()
     displayed_custom_warnings: set[tuple[str, str]] = set()
 
     last_successful_update: datetime | None = None
     last_size: tuple[int, int] | None = None
+    pane_render_cache: dict[
+        int, tuple[tuple[object, ...], str, tuple[DashboardOverlayPlacement, ...]]
+    ] = {}
     screen = FramePainter(sys.stdout)
 
     def set_screen_cursor_visible(visible: bool) -> None:
@@ -6371,7 +6418,10 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                             )
                         if isinstance(pane.component, CustomHistoricalComponent):
                             capability = pane.component.capability
-                            if capability is not None and capability.refresh_interval_seconds is not None:
+                            if (
+                                capability is not None
+                                and capability.refresh_interval_seconds is not None
+                            ):
                                 pane.scheduler.rebuild(
                                     capability.refresh_interval_seconds, now=observed_at
                                 )
@@ -6590,25 +6640,14 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         return changed
 
     def animation_deadline() -> float | None:
-        deadlines = (
-            deadline
-            for pane in panes
-            for deadline in (
-                (pane.session.next_deadline, pane.overlay.next_due)
-                if isinstance(pane, TuiAnimationPane) and pane.body_view == "chart"
-                else (pane.attachment.next_deadline,)
-                if isinstance(pane, TuiChartPane)
-                and pane.body_view == "chart"
-                and pane.attachment is not None
-                else (pane.attachment.next_deadline,)
-                if isinstance(pane, TuiCustomPane)
-                and pane.body_view == "chart"
-                and pane.attachment is not None
-                else ()
-            )
-            if deadline is not None
+        return min(
+            (
+                deadline
+                for pane in panes
+                if (deadline := _pane_animation_deadline(pane)) is not None
+            ),
+            default=None,
         )
-        return min(deadlines, default=None)
 
     def capture_dashboard_state() -> DashboardState:
         pane_states: list[DashboardPaneState] = []
@@ -7690,6 +7729,72 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         ):
             pane.ranking_viewport.scroll(event.delta)
 
+    def handle_scrollbar_drag(event: MouseEvent) -> bool:
+        """Let a press, drag, or track click on a Ranking scrollbar move its body."""
+        nonlocal scrollbar_drag
+        blocked = (
+            body_view != "chart"
+            or displayed_layout is None
+            or help_overlay is not None
+            or preset_manager is not None
+            or dataset_modal is not None
+            or chooser_overlay is not None
+            or overlay_editor is not None
+            or overlay_history is not None
+            or custom_logs_pane is not None
+        )
+        if blocked:
+            scrollbar_drag = None
+            return False
+        # A release ends any capture without consuming other mouse handling.
+        if not event.pressed:
+            released = scrollbar_drag is not None
+            scrollbar_drag = None
+            return released
+        assert displayed_layout is not None
+        motion = bool(event.modifiers & 0b100000)
+        grid_x = event.x - 1
+        grid_y = event.y - displayed_header_rows - 1
+        # While a drag is captured, follow the pointer's vertical position even
+        # if the report arrives as held-button motion or a plain press.
+        if scrollbar_drag is not None and (motion or event.button == 0):
+            pane_index, grab = scrollbar_drag
+            pane = panes[pane_index]
+            bar = pane.ranking_viewport.scrollbar if isinstance(pane, TuiCustomPane) else None
+            if bar is None:
+                scrollbar_drag = None
+                return False
+            rect = displayed_layout.pane(pane_index)
+            framed = frame_style != "none" or pane_index == focused
+            interior_row = grid_y - rect.top - int(framed)
+            pane.ranking_viewport.offset = bar.offset_at(interior_row, grab)
+            pane.ranking_viewport.clamp()
+            return True
+        # A fresh capture only begins on a stationary primary-button press.
+        if motion or event.button != 0:
+            return False
+        selected = layout_pane_at(displayed_layout, grid_x, grid_y)
+        if selected is None:
+            return False
+        pane = panes[selected]
+        bar = pane.ranking_viewport.scrollbar if isinstance(pane, TuiCustomPane) else None
+        if bar is None or not pane.ranking_viewport.active:
+            return False
+        rect = displayed_layout.pane(selected)
+        framed = frame_style != "none" or selected == focused
+        interior_row = grid_y - rect.top - int(framed)
+        interior_column = grid_x - rect.left - int(framed)
+        if not bar.contains(interior_column, interior_row):
+            return False
+        if bar.on_thumb(interior_row):
+            # Capture the thumb; a stationary press must not move the offset.
+            scrollbar_drag = (selected, bar.grab_at(interior_row))
+        else:
+            # A track click moves one visible page and does not begin a drag.
+            pane.ranking_viewport.offset = bar.page_offset(interior_row)
+            pane.ranking_viewport.clamp()
+        return True
+
     def handle_pane_mouse(event: MouseEvent) -> bool:
         """Handle pane focus clicks before pane-local modal input consumes them."""
 
@@ -7724,18 +7829,16 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             and now - last_click[1] <= _DOUBLE_CLICK_SECONDS
         )
         last_click = (selected, now) if selected is not None else None
-        if (
-            selected is not None
-            and isinstance(pane := panes[selected], TuiCustomPane)
-            and _copy_custom_ranking_entry_at(
-                pane,
-                row=grid_y - layout.pane(selected).top,
-                column=grid_x - layout.pane(selected).left,
-                framed=frame_style != "none" or selected == focused,
-                now=now,
-            )
-        ):
-            return True
+        if selected is not None and isinstance(pane := panes[selected], TuiCustomPane):
+            local_row = grid_y - layout.pane(selected).top
+            local_column = grid_x - layout.pane(selected).left
+            framed = frame_style != "none" or selected == focused
+            if _copy_custom_ranking_all_at(
+                pane, row=local_row, column=local_column, framed=framed, now=now
+            ) or _copy_custom_ranking_entry_at(
+                pane, row=local_row, column=local_column, framed=framed, now=now
+            ):
+                return True
         if adjustment_mode == "pane":
             if selected != focused and double_click and selected is not None:
                 overlay_editor = None
@@ -7752,6 +7855,46 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             adjustment_mode = "pane"
             adjustment_page = "quick"
             adjustment_timer = AdjustmentIdleTimer()
+        return True
+
+    def _copy_custom_ranking_all_at(
+        pane: TuiCustomPane,
+        *,
+        row: int,
+        column: int,
+        framed: bool,
+        now: float,
+    ) -> bool:
+        """Copy all filtered Dataset Ranking entries from the fixed marker."""
+        hit = pane.ranking_viewport.copy_all_hit
+        if hit is None:
+            return False
+        interior_row = row - int(framed)
+        interior_column = column - int(framed)
+        if interior_row != hit[0] or not hit[1] - 2 <= interior_column <= hit[1] + 2:
+            return False
+        if pane.ranking_viewport.active:
+            entries = tuple(
+                (entry.label, entry.description, entry.project_link)
+                for entry in pane.ranking_viewport.entries
+                if not entry.is_other
+            )
+        else:
+            entries = tuple(
+                (label, description, link)
+                for _, _, label, description, link in _custom_ranking_copyable_entries(
+                    pane, translator
+                )
+            )
+        if not entries:
+            return False
+        copied = copy_command(_custom_ranking_clipboard_all_text(entries))
+        if copied:
+            pane.copied_ranking_all_until = now + 1.5
+        copy_feedback.show(
+            translator.text("status.data_copied" if copied else "status.command_copy_failed"),
+            now=now,
+        )
         return True
 
     def _copy_custom_ranking_entry_at(
@@ -7882,7 +8025,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             pane_options.host.ascii,
         )
 
-    def paint(*, force: bool = False) -> None:
+    def paint(*, force: bool = False, animation_only: bool = False) -> None:
         nonlocal help_was_active, last_size, dashboard_text_offset, dashboard_text_line_count
         nonlocal dashboard_text_visible_rows, chooser_overlay
         nonlocal displayed_layout, displayed_header_rows
@@ -7892,6 +8035,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         else:
             _paint_dataset_modal()
         size = get_terminal_size()
+        if force or not animation_only or (size.columns, size.lines) != last_size:
+            pane_render_cache.clear()
+        paint_now = time.monotonic()
         if preset_manager is not None:
             frame = render_preset_manager(
                 preset_manager,
@@ -8066,6 +8212,18 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         )
                     )
                     continue
+                cache_key = (id(pane), rect, terminal, framed)
+                cached = pane_render_cache.get(index)
+                deadline = _pane_animation_deadline(pane)
+                if (
+                    cached is not None
+                    and cached[0] == cache_key
+                    and (deadline is None or deadline > paint_now)
+                ):
+                    rendered_panes.append(cached[1])
+                    overlays.extend(cached[2])
+                    continue
+                overlay_start = len(overlays)
                 if isinstance(pane, TuiAnimationPane):
                     try:
                         rendered = _pane_render(
@@ -8171,9 +8329,11 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         text_pane.text_offsets[text_pane.body_view] = offset
                         text_pane.text_line_counts[text_pane.body_view] = line_count
                         text_pane.text_visible_rows[text_pane.body_view] = visible_rows
-                if isinstance(text_pane, TuiCustomPane) and isinstance(
-                    text_pane.component, CustomHistoricalComponent
-                ) and text_pane.component.candidate.kind == "ranking":
+                if (
+                    isinstance(text_pane, TuiCustomPane)
+                    and isinstance(text_pane.component, CustomHistoricalComponent)
+                    and text_pane.component.candidate.kind == "ranking"
+                ):
                     capture_custom_ranking_copy_rows(
                         text_pane,
                         content,
@@ -8181,6 +8341,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         framed=framed,
                     )
                 rendered_panes.append(content)
+                pane_render_cache[index] = (cache_key, content, tuple(overlays[overlay_start:]))
             return rendered_panes, tuple(overlays)
 
         layout = grid_geometry(size.columns, size.lines, len(header_lines), int(status is not None))
@@ -8935,13 +9096,16 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 if dataset_modal is not None:
                     changed = collect_dataset_modal() or changed
                 now = time.monotonic()
+                refresh_requested = False
                 if header_style != "hidden" and header.scheduler.due(now=now):
+                    refresh_requested = True
                     refresh_header(trigger=LifecycleTrigger.PERIODIC)
                     refresh_custom_summaries(trigger=LifecycleTrigger.PERIODIC)
                 for index, pane in enumerate(panes):
                     if isinstance(pane, (TuiChartPane, TuiCustomPane)) and pane.scheduler.due(
                         now=now
                     ):
+                        refresh_requested = True
                         refresh(index, trigger=LifecycleTrigger.PERIODIC)
                 deadline = animation_deadline()
                 feedback_expired = (
@@ -8949,27 +9113,46 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 )
                 copied_ranking_icon_expired = any(
                     isinstance(pane, TuiCustomPane)
-                    and pane.copied_ranking_entry_id is not None
-                    and now >= pane.copied_ranking_until
+                    and (
+                        pane.copied_ranking_entry_id is not None
+                        and now >= pane.copied_ranking_until
+                        or pane.copied_ranking_all_until > 0
+                        and now >= pane.copied_ranking_all_until
+                    )
                     for pane in panes
                 )
                 if copied_ranking_icon_expired:
                     for pane in panes:
+                        if not isinstance(pane, TuiCustomPane):
+                            continue
                         if (
-                            isinstance(pane, TuiCustomPane)
-                            and pane.copied_ranking_entry_id is not None
+                            pane.copied_ranking_entry_id is not None
                             and now >= pane.copied_ranking_until
                         ):
                             pane.copied_ranking_entry_id = None
+                        if (
+                            pane.copied_ranking_all_until > 0
+                            and now >= pane.copied_ranking_all_until
+                        ):
+                            pane.copied_ranking_all_until = 0.0
                 cursor_tick = overlay_editor is not None and int(now * 2) != int((now - 0.1) * 2)
                 if (
                     changed
+                    or refresh_requested
                     or feedback_expired
                     or copied_ranking_icon_expired
                     or cursor_tick
                     or (deadline is not None and now >= deadline)
                 ):
-                    paint()
+                    paint(
+                        animation_only=not (
+                            changed
+                            or refresh_requested
+                            or feedback_expired
+                            or copied_ranking_icon_expired
+                            or cursor_tick
+                        )
+                    )
                 try:
                     event = raise_if_interrupt(read_adjustment_event(decoder))
                 except AdjustmentTimeout:
@@ -9013,6 +9196,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     paint()
                     continue
                 if isinstance(event, MouseEvent):
+                    if handle_scrollbar_drag(event):
+                        paint()
+                        continue
                     if handle_pane_mouse(event):
                         paint()
                     continue
@@ -9559,7 +9745,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                     )
                                 )
 
-                            def read_custom_filter_key() -> KeyEvent | MouseEvent | PasteEvent | None:
+                            def read_custom_filter_key() -> (
+                                KeyEvent | MouseEvent | PasteEvent | None
+                            ):
                                 editor_event = raise_if_interrupt(read_adjustment_event(decoder))
                                 if isinstance(editor_event, MouseEvent):
                                     # The filter body begins below compose_frame's title row.

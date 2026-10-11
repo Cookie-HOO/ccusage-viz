@@ -13,6 +13,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from ccusage_viz.formatting import display_width, strip_ansi, wrap_width
+from ccusage_viz.scrollbar import Scrollbar
 
 if TYPE_CHECKING:
     from ccusage_viz.render.base import RenderContext
@@ -36,6 +37,9 @@ class RankingViewport:
     total_rows: int = 0
     visible_rows: int = 0
     reserved_rows: int = 0
+    body_top: int = 0
+    scrollbar: Scrollbar | None = None
+    copy_all_hit: tuple[int, int] | None = None
     active: bool = False
     source: object | None = None
     key: object = None
@@ -65,6 +69,9 @@ class RankingViewport:
     def clear(self) -> None:
         self.offset = self.total_rows = self.visible_rows = self.reserved_rows = 0
         self.total, self.maximum = 0, 1
+        self.body_top = 0
+        self.scrollbar = None
+        self.copy_all_hit = None
         self.active = False
         self.source = self.key = self.reset_key = None
         self.entries = ()
@@ -107,11 +114,13 @@ class RankingViewport:
     ) -> str:
         """Render chrome plus the window; collect hits only on visible primary rows."""
         self.hits.clear()
+        self.body_top = 0
         self.active = True
         if not self.entries:
             self.offset = self.total_rows = self.visible_rows = 0
             return "\n".join(render_entries((), 0).splitlines()[: max(0, context.height)])
         chrome = render_chrome().splitlines()
+        self.body_top = len(chrome)
         self.visible_rows = max(0, context.height - len(chrome))
         self.clamp()
         if not self.visible_rows:

@@ -16,28 +16,56 @@ from ccusage_viz.render.custom_ranking_viewport import render_custom_ranking_vie
 from ccusage_viz.render.ranking_viewport import RankingViewport
 
 
-def test_direct_wheel_steps_and_bounds() -> None:
-    viewport = RankingViewport(total_rows=100, visible_rows=10)
+@pytest.mark.parametrize("visible_rows", (1, 2, 10, 30))
+def test_direct_wheel_steps_and_bounds(visible_rows: int) -> None:
+    viewport = RankingViewport(total_rows=100, visible_rows=visible_rows)
     assert viewport.scroll(1)
-    assert viewport.offset == 3
+    assert viewport.offset == 1
     assert viewport.scroll(-1)
     assert viewport.offset == 0
     assert not viewport.scroll(-1)
-    viewport.offset = 89
+    maximum = viewport.total_rows - viewport.visible_rows
+    viewport.offset = maximum - 1
     assert viewport.scroll(1)
-    assert viewport.offset == 90
+    assert viewport.offset == maximum
     assert not viewport.scroll(1)
     assert viewport.scroll(-1)
-    assert viewport.offset == 87
+    assert viewport.offset == maximum - 1
+    assert not viewport.scroll(0)
 
 
 def test_small_and_zero_height_viewports() -> None:
     viewport = RankingViewport(total_rows=100, visible_rows=2)
     assert viewport.scroll(1)
-    assert viewport.offset == 2
+    assert viewport.offset == 1
     viewport.visible_rows = 0
     assert not viewport.scroll(1)
-    assert viewport.offset == 2
+    assert viewport.offset == 1
+
+
+@pytest.mark.parametrize("spacing", ("compact", "space", "line", "dashed"))
+@pytest.mark.parametrize("descriptions", (False, True))
+def test_isolated_wheel_moves_tracked_entry_one_screen_row(spacing, descriptions):
+    model = projection(30, descriptions=descriptions)
+    viewport = RankingViewport()
+    ctx = context(height=24, density="detailed" if descriptions else "normal")
+    render(model, viewport, ctx, spacing=spacing)
+    prepared = viewport.starts
+
+    def tracked_row():
+        return next(row for row, hit in viewport.hits.items() if hit[0] == "4")
+
+    before = tracked_row()
+    # Separate reports must remain one-line moves, without burst acceleration.
+    for expected_offset in (1, 2, 3):
+        assert viewport.scroll(1)
+        render(model, viewport, ctx, spacing=spacing)
+        assert viewport.offset == expected_offset
+        assert tracked_row() == before - expected_offset
+        assert viewport.starts is prepared
+    assert viewport.scroll(-1)
+    render(model, viewport, ctx, spacing=spacing)
+    assert tracked_row() == before - 2
 
 
 def projection(count=100, *, descriptions=False, comparison=False):
@@ -79,7 +107,18 @@ def context(*, height=12, width=100, density="normal", color=False):
     )
 
 
-def render(model, viewport, ctx=None, *, search="", spacing="compact", copied=None):
+def render(
+    model,
+    viewport,
+    ctx=None,
+    *,
+    search="",
+    spacing="compact",
+    copied=None,
+    scrollbar=False,
+    copy_all_action=False,
+    copied_all=False,
+):
     ctx = ctx or context()
     return render_custom_ranking_viewport(
         model,
@@ -92,7 +131,32 @@ def render(model, viewport, ctx=None, *, search="", spacing="compact", copied=No
         show_visible_count=True,
         copied_entry_id=copied,
         item_spacing=spacing,
+        scrollbar=scrollbar,
+        copy_all_action=copy_all_action,
+        copied_all=copied_all,
     )
+
+
+def test_copy_all_marker_is_fixed_tracks_success_and_hides_without_matches():
+    model = projection(100)
+    viewport = RankingViewport()
+    initial = render(model, viewport, copy_all_action=True)
+    hit = viewport.copy_all_hit
+    assert hit is not None
+    row, column = hit
+    assert initial.splitlines()[row][column] == "⊞"
+
+    viewport.scroll(10)
+    moved = render(model, viewport, copy_all_action=True)
+    assert viewport.copy_all_hit == hit
+    assert moved.splitlines()[row][column] == "⊞"
+    copied = render(model, viewport, copy_all_action=True, copied_all=True)
+    assert copied.splitlines()[row][column] == "✓"
+
+    render(model, viewport, search="missing", copy_all_action=True)
+    assert viewport.copy_all_hit is None
+    render(projection(0), viewport, copy_all_action=True)
+    assert viewport.copy_all_hit is None
 
 
 @pytest.mark.parametrize("spacing", ("compact", "space", "line", "dashed"))
@@ -268,6 +332,73 @@ def test_visible_copy_marker_wins_over_checkmark_in_label():
     output = render(model, viewport).splitlines()
     row, (_, column, _) = next(iter(viewport.hits.items()))
     assert strip_ansi(output[row])[column] == "⊞"
+
+
+@pytest.mark.parametrize("ascii", (False, True))
+def test_scrollbar_persists_on_overflow_and_tracks_wheel_offset(ascii):
+    model = projection(100)
+    viewport = RankingViewport()
+    ctx = replace(context(height=22), ascii=ascii)
+    initial = render(model, viewport, ctx, scrollbar=True)
+    bar = viewport.scrollbar
+    assert bar is not None
+    assert bar.column == ctx.width - 1
+    assert bar.top == viewport.body_top
+    assert initial == render(model, viewport, ctx, scrollbar=True)
+    assert viewport.scrollbar == bar  # Idle repaint does not hide it.
+    for _ in range(40):
+        viewport.scroll(1)
+    moved = render(model, viewport, ctx, scrollbar=True)
+    assert viewport.scrollbar.thumb_top > bar.thumb_top
+    rows = moved.splitlines()
+    for row in range(bar.top, bar.top + bar.height):
+        expected = ("#" if ascii else "█") if viewport.scrollbar.on_thumb(row) else ("|" if ascii else "│")
+        assert strip_ansi(rows[row])[-1] == expected
+    assert rows[:bar.top] == initial.splitlines()[:bar.top]
+    viewport.offset = 9999
+    render(model, viewport, ctx, scrollbar=True)
+    bar = viewport.scrollbar
+    assert bar.thumb_top + bar.thumb_size == bar.top + bar.height
+
+
+@pytest.mark.parametrize("spacing", ("compact", "space", "line", "dashed"))
+def test_scrollbar_visibility_counts_descriptions_and_spacing(spacing):
+    model = projection(5, descriptions=True)
+    viewport = RankingViewport()
+    ctx = context(height=100, density="detailed")
+    render(model, viewport, ctx, spacing=spacing, scrollbar=True)
+    assert viewport.scrollbar is None
+    exact_height = viewport.body_top + viewport.total_rows
+    render(model, viewport, replace(ctx, height=exact_height), spacing=spacing, scrollbar=True)
+    assert viewport.scrollbar is None
+    render(model, viewport, replace(ctx, height=exact_height - 1), spacing=spacing, scrollbar=True)
+    assert viewport.scrollbar is not None
+    render(model, viewport, ctx, search="missing", scrollbar=True)
+    assert viewport.scrollbar is None
+    render(projection(0), viewport, ctx, scrollbar=True)
+    assert viewport.scrollbar is None
+
+
+def test_scrollbar_gutter_reuses_warm_layout_and_does_not_overlap_hits(monkeypatch):
+    viewport = RankingViewport()
+    model = projection(10_000)
+    ctx = context(width=80)
+    render(model, viewport, ctx, scrollbar=True)
+    prepared = viewport.entries
+    monkeypatch.setattr(RankingViewport, "prepare_lines", lambda **kw: pytest.fail("layout rebuilt"))
+    viewport.offset = 9990
+    render(model, viewport, ctx, scrollbar=True)
+    assert viewport.entries is prepared
+    for _, copy_column, link_column in viewport.hits.values():
+        assert copy_column < 79
+        assert link_column is None or link_column < 79
+
+
+@pytest.mark.parametrize("height,width", ((0, 80), (1, 80), (24, 1)))
+def test_scrollbar_not_drawn_when_no_room(height, width):
+    viewport = RankingViewport()
+    render(projection(100), viewport, context(height=height, width=width), scrollbar=True)
+    assert viewport.scrollbar is None
 
 
 @pytest.mark.parametrize("width", (1, 3, 8, 20, 60))

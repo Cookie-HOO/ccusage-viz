@@ -3,7 +3,13 @@ from io import StringIO
 import pytest
 
 import ccusage_viz.tui_input as tui_input_module
-from ccusage_viz.tui_input import InputDecoder, KeyEvent, MouseEvent, PasteEvent, WheelEvent
+from ccusage_viz.tui_input import (
+    InputDecoder,
+    KeyEvent,
+    MouseEvent,
+    PasteEvent,
+    WheelEvent,
+)
 
 
 def test_tui_input_decodes_keys_and_fragmented_mouse_press() -> None:

@@ -43,8 +43,8 @@ class PasteEvent:
 
 InputEvent = KeyEvent | MouseEvent | PasteEvent | WheelEvent
 
-_MOUSE_ENABLE = "\x1b[?1000h\x1b[?1006h\x1b[?2004h"
-_MOUSE_DISABLE = "\x1b[?1000l\x1b[?1006l\x1b[?2004l"
+_MOUSE_ENABLE = "\x1b[?1000h\x1b[?1002h\x1b[?1006h\x1b[?2004h"
+_MOUSE_DISABLE = "\x1b[?1000l\x1b[?1002l\x1b[?1006l\x1b[?2004l"
 _MOUSE_BUTTON_MASK = 0b11
 _MOUSE_MOTION = 0b100000
 _MOUSE_WHEEL = 0b1000000
