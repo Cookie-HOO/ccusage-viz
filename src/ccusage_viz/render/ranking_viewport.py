@@ -54,10 +54,11 @@ class RankingViewport:
         self.offset = min(max(0, self.offset), max(0, self.total_rows - self.visible_rows))
 
     def scroll(self, delta: int) -> bool:
+        """Move one display line per wheel report, independent of pane height."""
         if self.visible_rows <= 0:
             return False
         before = self.offset
-        self.offset += delta * min(3, self.visible_rows)
+        self.offset += delta
         self.clamp()
         return self.offset != before
 

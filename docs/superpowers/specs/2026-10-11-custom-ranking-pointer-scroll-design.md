@@ -20,7 +20,11 @@ Source reviewed during design:
 
 Use their direct, bounded viewport movement rather than application-generated acceleration or inertia. Terminal mouse reports are discrete; they do not expose reliable physical trackpad distances. An operating system or terminal may continue generating reports after a physical gesture ends; the application must not add its own continuation.
 
-## Current implementation
+### Approved single-line refinement
+
+After trying the initial three-line step, the user reported that it made a fixed entry difficult to track visually and approved reducing each wheel report to one display line. Keep direct input, batched repainting, and no inertia. A burst may still move multiple lines in a single frame; this change controls the distance per report, not the rendering frame rate.
+
+## Pre-implementation baseline
 
 - `src/ccusage_viz/tui_input.py` discards SGR wheel reports.
 - Dashboard in `src/ccusage_viz/tui.py` does not retain a Ranking scroll offset and calls Custom pane rendering without a window limit.
@@ -33,7 +37,7 @@ Use their direct, bounded viewport movement rather than application-generated ac
 1. Use each wheel report's terminal coordinates to select the displayed pane. No preceding click or motion report is necessary.
 2. The complete pane rectangle, including its border, accepts scrolling. Dashboard header, footer, gaps, and other panes do not redirect wheel input to the focused pane.
 3. Wheel input never changes focus, selection, adjustment mode, or search editing state.
-4. Each vertical report changes the offset by `direction * min(3, visible_rows)` display lines. A zero-height viewport cannot scroll. Clamp the offset to `[0, max(0, total_rows - visible_rows)]` after each report.
+4. Each vertical report changes the offset by `direction` (one display line up or down), independent of pane height. A zero-height viewport cannot scroll. Clamp the offset to `[0, max(0, total_rows - visible_rows)]` after each report.
 5. Up/down reversal acts immediately. There is no velocity, acceleration, target offset, animation timer, or overscroll.
 6. The list scrolls independently of its fixed chrome: summary/title, search line, count, and column headings above; audit/footer and notices below. Preserve existing space allocation for these elements.
 7. Descriptions and item-spacing rows are part of the scrollable content. A viewport may start in a description or separator. Preserve the existing description truncation policy; this feature does not expand descriptions beyond their current two-line limit.
@@ -111,7 +115,7 @@ Add deterministic tests for:
 
 - Vertical SGR up/down, modifiers, fragmented reports, ignored releases/horizontal reports, malformed recovery, and existing click/paste behavior.
 - Ordered batch consumption, bounded work, preservation of intervening non-wheel events, immediate reversal, and no movement without a new report.
-- Three-line steps, small/zero-height panes, top/bottom clamping, and no repaint at a boundary.
+- Single-line steps, small/zero-height panes, top/bottom clamping, and no repaint at a boundary. A tracked visible row moves by one screen row for an isolated report; descriptions and separators are not skipped as whole entries.
 - Pointer targeting of an unfocused Custom historical Ranking, independent offsets in two panes, pane borders, header/footer/gaps, changed geometry, and modal ownership.
 - Explicit exclusion of native Ranking, Custom Monitor, standalone, text views, and other charts.
 - Fixed chrome; partial descriptions/separators at viewport edges; all existing spacing modes; search reset; refreshed data shrinkage; resize and density changes.

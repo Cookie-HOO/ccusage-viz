@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Scroll only Dashboard Custom historical Ranking panes under the pointer, with immediate three-line steps and bounded visible rendering.
+**Goal:** Scroll only Dashboard Custom historical Ranking panes under the pointer, with immediate single-line steps and bounded visible rendering.
 
 **Architecture:** Decode wheel reports separately and batch consecutive buffered reports without reordering input. A pane-local viewport retains prepared presentation/layout facts and a display-line offset. The existing Ranking renderer gains an opt-in prepared window path; Dashboard routes pointer events and consumes visible hit geometry without changing data lifecycles.
 
@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - Only Dashboard Custom historical Ranking is scrollable; native/monitor/standalone paths retain their behavior.
-- Each event moves `min(3, visible_rows)` display lines, clamped after each event. No acceleration, inertia, scroll timer, or configuration mutation.
+- Each event moves one display line when `visible_rows > 0`, clamped after each event. No acceleration, inertia, scroll timer, or configuration mutation.
 - Fixed chrome stays fixed; descriptions and separators count as display lines.
 - Preparation may scan the data once. Warm scrolling must not scan/format the full list or rebuild full-list hit lookups.
 - Preserve keyboard/click/paste semantics, decoder safety limits, and unrelated user changes.
@@ -55,7 +55,7 @@ for event in decoder.drain_wheel():
 ```python
 viewport = RankingViewport(offset=0, total_rows=100, visible_rows=10)
 assert viewport.scroll(1)
-assert viewport.offset == 3
+assert viewport.offset == 1
 assert viewport.scroll(-1)
 assert viewport.offset == 0
 assert not viewport.scroll(-1)
@@ -109,7 +109,37 @@ if isinstance(event, WheelEvent):
 
 All spec sections map to Tasks 1–3 and verification in Task 4. Public names match across tasks. No background workers, package changes, keyboard features, or broad Dashboard refactor are included. Execute inline in the current session as requested; no subagent tool is available.
 
-## Execution record — 2026-10-11
+## Single-line refinement (user approved)
+
+**Files:** `src/ccusage_viz/render/ranking_viewport.py`, `tests/test_custom_ranking_scroll.py`, `tests/test_custom_ranking_dashboard_scroll.py`, and this plan/spec.
+
+**Interface:** Keep `RankingViewport.scroll(delta: int) -> bool`; change only its per-report distance. Do not change decoder batching, host routing, frame scheduling, or unrelated chart types.
+
+- [x] Update offset and visible copy/link expectations for one-line movement. Add repeated isolated-report tracking through descriptions and separators, plus step/boundary checks at several pane heights.
+
+```python
+viewport = RankingViewport(total_rows=100, visible_rows=10)
+assert viewport.scroll(1)
+assert viewport.offset == 1
+assert viewport.scroll(-1)
+assert viewport.offset == 0
+```
+
+- [x] Run `uv run pytest -o addopts='' tests/test_custom_ranking_scroll.py tests/test_custom_ranking_dashboard_scroll.py -q`; the old three-line code failed 18 assertions/tests (37 passed).
+- [x] Replace the displacement with the signed input, leaving zero-height rejection and clamping intact:
+
+```python
+before = self.offset
+self.offset += delta
+self.clamp()
+return self.offset != before
+```
+
+- [x] Run the updated viewport/host tests, input/renderer regressions, Ruff and `git diff --check`; run the full suite and compare known baseline failures. Code remains uncommitted for review.
+
+**Refinement verification:** 330 focused tests passed; full suite: 1538 passed, the same 6 baseline failures listed below. Ruff and whitespace checks passed. New tests cover one-line movement at heights 1/2/10/30, repeated tracked-row movement with all spacing modes and descriptions, and updated Dashboard batch/copy/link/boundary expectations. Only `RankingViewport.scroll` changed in production code; physical-device feel still needs user validation.
+
+## Initial implementation execution record — 2026-10-11
 
 - [x] Task 1: distinct wheel events, ordered buffer-only draining, safety and input-order tests. New decoder tests failed before implementation and pass afterward.
 - [x] Task 2: direct display-line viewport, prepared columns/heights/aggregates, binary-search windows, stable-ID hits, invalidation and 10,000-entry work-count tests. New viewport tests failed before implementation and pass afterward.
