@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Let users cycle Dataset-declared, related V2 Metrics in a Custom pane while keeping historical switching transactional and Monitor sampling independent per visited Metric.
+**Goal:** Let users cycle Dataset-declared, related V2 Metrics in a Custom pane while applying the same transactional switching semantics to historical charts and Monitor.
 
-**Architecture:** Extend V2 Dataset descriptors with optional ordered `metric_groups` resources and Metric `group_id` references, then use the accepted descriptor to derive same-Group candidates for an active chart kind. Historical panes create a pending target request without committing the selected Metric until it succeeds. Custom Monitor owns a small per-Metric runtime registry, allowing visited Metrics to continue sampling independently while only the selected runtime is rendered.
+**Architecture:** Extend V2 Dataset descriptors with optional ordered `metric_groups` resources and Metric `group_id` references, then use the accepted descriptor to derive same-Group candidates for an active chart kind. Historical charts and Custom Monitor create a pending target request without committing the selected Metric until it succeeds; a successful Monitor switch discards its old sampling stream.
 
 **Tech Stack:** Python 3.12+, dataclasses, pytest, existing Custom V2 protocol/provider, Dashboard TUI lifecycle scheduler, English and Simplified-Chinese locale dictionaries.
 
@@ -17,8 +17,7 @@
 - `m/M` must be present in Custom-pane help regardless of candidate count.
 - Candidates must have the active chart capability and reference the current Metric's declared Group; Metric declaration order is the cycle order.
 - Static rejection checks only chart kind, declared periods, declared group-by values, and declared granularities; no preflight command or Probe.
-- Historical switches commit only after successful target data; failed target requests leave old selected facts and persisted `metric_id` untouched, and old historical data must not refresh after successful commit.
-- Monitor keeps independent visited-Metric sampling and history alive in the background; never mix observations, baselines, or failures across Metrics.
+- Historical and Monitor switches commit only after successful target data; failed target requests leave old selected facts and persisted `metric_id` untouched. A successful switch discards old historical facts or Monitor sampling state; no inactive Metric refreshes in the background.
 - Never modify or commit the pre-existing unrelated changes in `src/ccusage_viz/render/custom_ranking_viewport.py` and `tests/test_custom_ranking_scroll.py`.
 
 ---
@@ -29,14 +28,14 @@
 - `src/ccusage_viz/custom_protocol.py`: V2 descriptor parsing and local registration wire serialization.
 - `src/ccusage_viz/custom_metric_switching.py` (new): pure candidate selection and static compatibility helpers, shared by Dashboard and tests.
 - `src/ccusage_viz/custom_component.py`: transactional historical target-switch state and successful commit behavior.
-- `src/ccusage_viz/custom_monitor_component.py`: isolated runtime snapshots / operations per visited Monitor Metric.
-- `src/ccusage_viz/tui.py`: Dataset Metric chooser grouping, key handling, notices, target request wiring, and scheduling each visited Monitor runtime.
+- `src/ccusage_viz/custom_monitor_component.py`: transactional pending target state for Custom Monitor Metric switching.
+- `src/ccusage_viz/tui.py`: Dataset Metric chooser grouping, key handling, notices, and target request wiring.
 - `src/ccusage_viz/locales/en.py`, `src/ccusage_viz/locales/zh.py`: localized control and notice strings.
 - `docs/custom-command-protocol.md`, `docs/custom-command-protocol.zh-CN.md`, `docs/dataset-developer-guide.md`, `docs/dataset-developer-guide.zh-CN.md`: public schema and authoring guidance.
 - `tests/test_custom_protocol.py`: descriptor schema tests.
 - `tests/test_custom_metric_switching.py` (new): pure eligibility and static validation tests.
 - `tests/test_custom_component.py`: transactional historical component tests.
-- `tests/test_custom_monitor_component.py`: independent Monitor Metric runtime tests.
+- `tests/test_custom_monitor_component.py`: transactional Custom Monitor Metric switch tests.
 - `tests/test_tui_custom.py`, `tests/test_tui_dashboard.py`: Dashboard key, request, help, notice, and scheduling integration tests.
 
 ## Interfaces
@@ -267,66 +266,68 @@ git add src/ccusage_viz/custom_component.py tests/test_custom_component.py
 git commit -m "feat: commit custom metric switches after historical success"
 ```
 
-### Task 4: Refactor Custom Monitor into independent visited-Metric runtimes
+### Task 4: Make Custom Monitor Metric switching transactional
 
 **Files:**
 - Modify: `src/ccusage_viz/custom_monitor_component.py:CustomMonitorComponent`
 - Modify: `tests/test_custom_monitor_component.py`
 
 **Interfaces:**
-- Produces: `CustomMonitorComponent.switch_metric(config: CustomChartConfig) -> None` and `metric_components: Mapping[str, CustomMonitorMetricState]` (internal state type may remain module-private).
-- Each `CustomMonitorMetricState` owns `config`, `generation`, accepted response/config/time, history, error, runtime, descriptor-derived presentation and capability.
-- The existing public properties (`candidate`, `history`, `accepted_response`, `monitor_capability`, render methods) project the selected Metric state so render callers remain simple.
+- Produces: `CustomMonitorComponent.begin_metric_switch(config: CustomChartConfig) -> None` and a `request_config` property.
+- Invariant: the selected `candidate`, observations, baseline, and persisted `metric_id` remain old until a target's first accepted observation commits the switch.
 
-- [ ] **Step 1: Write failing retained-sampling tests**
+- [ ] **Step 1: Write failing transactional Monitor tests**
 
 ```python
-def test_monitor_keeps_visited_metric_history_while_another_metric_is_selected() -> None:
+def test_monitor_metric_switch_commits_only_after_target_observation() -> None:
     component = component_with_accepted_metric("stars", total="10")
-    component.switch_metric(config(metric_id="updated_days"))
-    component.accept(completion_for("updated_days", total="2"), accepted_at=NOW)
-    component.accept(completion_for("stars", total="11"), accepted_at=NOW_PLUS_MINUTE)
+    old_history = component.history
 
-    component.switch_metric(config(metric_id="stars"))
+    component.begin_metric_switch(config(metric_id="updated_days"))
 
-    assert [item.observation.total for item in component.history] == [Decimal("10"), Decimal("11")]
-    assert component.accepted_response.observation.total == Decimal("11")
-
-
-def test_monitor_failure_for_hidden_metric_does_not_affect_selected_metric() -> None:
-    component = component_with_two_visited_metrics(selected="updated_days")
-    component.fail(RuntimeError("stars unavailable"), generation=generation_for(component, "stars"), metric_id="stars")
-
+    assert component.candidate.metric_id == "stars"
+    assert component.request_config.metric_id == "updated_days"
+    assert component.history is old_history
+    assert component.accept(completion_for("updated_days", total="2"), accepted_at=NOW)
     assert component.candidate.metric_id == "updated_days"
-    assert component.error is None
+    assert [item.observation.total for item in component.history] == [Decimal("2")]
+
+
+def test_monitor_metric_switch_failure_retains_old_sampling_state() -> None:
+    component = component_with_accepted_metric("stars", total="10")
+    old_history = component.history
+    component.begin_metric_switch(config(metric_id="updated_days"))
+
+    assert component.fail(RuntimeError("unavailable"), generation=component.generation)
+    assert component.candidate.metric_id == "stars"
+    assert component.request_config.metric_id == "stars"
+    assert component.history is old_history
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `pytest tests/test_custom_monitor_component.py -k 'keeps_visited or hidden_metric' -v`
+Run: `pytest tests/test_custom_monitor_component.py -k 'metric_switch_commits or metric_switch_failure' -v`
 
-Expected: FAIL because one component has one history / generation.
+Expected: FAIL because no transactional Monitor switch API exists.
 
-- [ ] **Step 3: Introduce a private per-Metric state object and preserve existing render API**
+- [ ] **Step 3: Implement pending target state using the existing single sampling stream**
 
-Move the currently singular fields that represent a source sampling stream (`candidate`, accepted fields, generation, history, error, runtime, descriptor/presentation/capability) into a private dataclass keyed by `metric_id`. Keep pane-wide `display_window_seconds`, timezone, distribution window, and render revision shared.
-
-`switch_metric` selects or creates a state without clearing an existing state. `accept` and `fail` must route by explicit completion Metric ID / state generation. The selected state's properties remain exposed through the existing component API, so `render_custom_monitor` continues to render only the selected Metric. Add a method returning each visited state that needs a periodic submission; do not create state for unvisited candidates.
+Add a private pending target config and a `request_config` property. `begin_metric_switch` increments generation but does not clear or replace accepted observations. Make query identity and response validation use `request_config`. On the first accepted target observation, atomically commit target config, clear old history and source-specific state, then append only the target response. On target failure, clear the pending target and retain the old selected stream. Keep ordinary Monitor configuration changes unchanged.
 
 - [ ] **Step 4: Run Monitor component tests**
 
 Run: `pytest tests/test_custom_monitor_component.py -v`
 
-Expected: PASS, including existing tests after adapting direct-field setup helpers to select a state explicitly.
+Expected: PASS.
 
-- [ ] **Step 5: Commit isolated Monitor state**
+- [ ] **Step 5: Commit transactional Monitor state**
 
 ```bash
 git add src/ccusage_viz/custom_monitor_component.py tests/test_custom_monitor_component.py
-git commit -m "feat: retain sampling for switched custom monitor metrics"
+git commit -m "feat: commit custom monitor metric switches transactionally"
 ```
 
-### Task 5: Wire `m/M`, localized feedback, historical requests, and Monitor background scheduling
+### Task 5: Wire `m/M` for Monitor and finish Custom-pane integration
 
 **Files:**
 - Modify: `src/ccusage_viz/tui.py:TuiCustomPane`, `_custom_pane_adjustment_bindings`, Dashboard key dispatch, `refresh`, `collect`, periodic loop
@@ -336,8 +337,8 @@ git commit -m "feat: retain sampling for switched custom monitor metrics"
 - Modify: `tests/test_tui_dashboard.py`
 
 **Interfaces:**
-- Consumes: Task 2 helper APIs, Task 3 `request_config` / switch APIs, Task 4 visited-Metric state API.
-- Produces: `m/M` behavior in Custom panes and background scheduling for every visited Custom Monitor Metric.
+- Consumes: Task 2 helper APIs and transactional `request_config` / switch APIs from Tasks 3 and 4.
+- Produces: `m/M` behavior in all Custom panes using each pane's existing single lifecycle.
 
 - [ ] **Step 1: Write failing Dataset Metric chooser grouping tests**
 
@@ -417,20 +418,20 @@ def test_single_related_metric_shows_three_second_notice_and_help_still_lists_m(
     assert "m/M" in dashboard.help_text()
 
 
-def test_monitor_samples_hidden_visited_metric_on_periodic_refresh(dashboard) -> None:
-    pane = custom_monitor_with_two_grouped_metrics(dashboard)
-    dashboard.switch_metric("updated_days")
-    dashboard.advance_to_periodic_refresh()
+def test_monitor_m_commits_target_only_after_first_observation(dashboard) -> None:
+    pane = custom_monitor_with_two_grouped_metrics(dashboard, current="stars")
+    dashboard.press("m")
 
-    assert set(sent_metric_ids(dashboard)) >= {"stars", "updated_days"}
-    assert rendered_metric_id(pane) == "updated_days"
+    assert pane.component.candidate.metric_id == "stars"
+    dashboard.complete_custom_monitor(metric_id="updated_days")
+    assert pane.component.candidate.metric_id == "updated_days"
 ```
 
 - [ ] **Step 6: Run the focused switching tests to verify they fail**
 
-Run: `pytest tests/test_tui_custom.py tests/test_tui_dashboard.py -k 'metric_switch or hidden_visited_metric or one_group_member' -v`
+Run: `pytest tests/test_tui_custom.py tests/test_tui_dashboard.py -k 'metric_switch or one_group_member' -v`
 
-Expected: FAIL because no key dispatch or multiple Monitor scheduling exists.
+Expected: FAIL because Monitor has no transactional `m/M` dispatch.
 
 - [ ] **Step 7: Add localizations and always-visible Custom control**
 
@@ -452,27 +453,21 @@ In the existing Custom-pane key branch, resolve the active descriptor from the a
 
 For historical panes, call `begin_metric_switch(replace(base, metric_id=target.id))` and submit a normal configuration request built from `component.request_config`; only present the success feedback after completion commits.
 
-For Monitor panes, call `switch_metric` and immediately start target sampling if first visited; retain existing state. Update summary selection only when selected Metric changes, without applying Metric defaults.
+For Monitor panes, call `begin_metric_switch(replace(base, metric_id=target.id))` and submit one normal request using `component.request_config`; commit only after its first accepted target observation. Do not apply Metric defaults or start background requests for inactive Metrics.
 
-- [ ] **Step 9: Make dashboard submission identity Metric-aware for Monitor**
+- [ ] **Step 9: Run focused TUI tests**
 
-Refactor `TuiCustomPane` to own per-Metric monitor lifecycle/scheduler entries (or a keyed operation registry) rather than one lifecycle submission that can represent only the selected Metric. `start_custom_submission` must accept the state/config it is executing, and `collect` must route completion and failure back to that Metric state. On each periodic tick, iterate `component.visited_metric_configs()` and request refresh for each; do not schedule never-visited Metrics. Continue rendering only the selected state. Cancel all keyed operations when the pane is retired.
-
-Keep historical panes on their existing single lifecycle path; historical old Metrics must never receive periodic requests after a successful target commit.
-
-- [ ] **Step 10: Run focused TUI tests**
-
-Run: `pytest tests/test_tui_custom.py tests/test_tui_dashboard.py -k 'metric_switch or hidden_visited_metric or one_group_member' -v`
+Run: `pytest tests/test_tui_custom.py tests/test_tui_dashboard.py -k 'metric_switch or one_group_member' -v`
 
 Expected: PASS.
 
-- [ ] **Step 11: Run the full Custom TUI regression set**
+- [ ] **Step 10: Run the full Custom TUI regression set**
 
 Run: `pytest tests/test_tui_custom.py tests/test_tui_dashboard.py tests/test_custom_monitor_component.py tests/test_custom_component.py -v`
 
 Expected: PASS.
 
-- [ ] **Step 12: Commit the Dashboard feature**
+- [ ] **Step 11: Commit the Dashboard feature**
 
 ```bash
 git add src/ccusage_viz/tui.py src/ccusage_viz/locales/en.py src/ccusage_viz/locales/zh.py tests/test_tui_custom.py tests/test_tui_dashboard.py
@@ -512,7 +507,7 @@ In the developer guides, explain that authors should use separate Metrics when v
 
 - [ ] **Step 3: Document historical versus Monitor retention**
 
-State precisely: historical Custom chart changes commit only after successful target data, then discard the prior Metric state; Custom Monitor keeps already visited Metrics sampling in the background and restores their independent history when users switch back. Never promise prefetching unvisited Metrics.
+State precisely: historical Custom charts and Custom Monitor commit only after successful target data, then discard the prior Metric state. A failed target leaves the old state selected. Never promise prefetching or background refresh of inactive Metrics.
 
 - [ ] **Step 4: Verify documentation links and working tree**
 

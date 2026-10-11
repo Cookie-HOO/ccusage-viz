@@ -81,26 +81,23 @@ For historical Custom charts, the switch is transactional: until the target requ
 
 ## Custom Monitor State
 
-Custom Monitor must preserve sampling state per visited Metric rather than treating a switch as a reset.
+Custom Monitor follows the same transactional switch semantics as historical Custom charts. It does not retain or background-refresh Metrics after a successful switch.
 
-Within a Monitor pane, maintain isolated runtime state by `metric_id`, including the component or equivalent accepted observations, comparison baseline, refresh scheduling, and capability-specific rendering state.
-
-- The currently selected Metric is what the pane displays.
-- First switching to a Metric creates its sampling state and establishes its baseline from its own observations.
-- A Metric that has been visited continues sampling while another related Metric is displayed.
-- Switching back restores that Metric's retained display history and ongoing sampling stream, as if it had never been hidden.
+- The currently selected Metric is what the pane displays and samples.
+- Until the target Metric returns a successful first observation, the prior Metric remains selected, rendered, sampled, and persisted.
+- A target failure leaves the prior Metric's observations, baseline, error-free state, and persisted `metric_id` untouched.
+- On a successful target observation, ccuv atomically commits the target Metric and discards the prior Metric's observations, baseline, error state, and sampling state.
+- Returning to a previously used Metric starts a fresh Monitor stream and baseline; it does not restore or prefetch old Metric history.
 - Observation history, baselines, intervals, and comparison facts never cross Metric boundaries.
-- Candidate Metrics that have never been visited are not prefetched or sampled, avoiding unexpected command execution.
-- Target failure does not discard any retained state for previously visited Metrics.
 
-The shared pane display window, focus, and local presentation settings persist through a switch, subject to the static compatibility checks above.
+The shared pane display window, focus, and local presentation settings persist through a switch, subject to the static compatibility checks above. Each Monitor pane retains its existing single lifecycle and scheduler.
 
 ## Feedback and Persistence
 
 - A successful switch briefly reports the target's localized label in the status area.
 - Single-candidate and static-rejection notices expire after three seconds.
-- A historical target request failure leaves the old chart selected and visible; it uses normal failure feedback without committing the target. Monitor failure does not discard retained per-Metric state.
-- Dashboard presets persist only a successfully committed target `metric_id`; a pending or failed historical switch saves the old Metric.
+- A target request failure leaves the old chart or Monitor selected and visible; it uses normal failure feedback without committing the target.
+- Dashboard presets persist only a successfully committed target `metric_id`; a pending or failed switch saves the old Metric.
 - No new pane, CLI, or preset persistence field is needed.
 - Existing V2 Datasets without `metric_groups`, and all V1 Datasets, retain current behavior.
 
@@ -126,9 +123,7 @@ The shared pane display window, focus, and local presentation settings persist t
    - Cover Ranking with independently rendered values, ordering, and descriptions for related Metrics.
 
 4. **Custom Monitor**
-   - Create state for a first-visited target Metric.
-   - Keep visited Metric sampling alive while a different Metric is displayed.
-   - Restore retained observations and baseline after switching back.
-   - Prove observations and comparison facts do not mix between Metrics.
-   - Ensure failed target queries do not damage retained state of other Metrics.
-   - Verify a hidden, previously visited Metric keeps refreshing and resumes with continuous history when selected again.
+   - Keep the old selected observations and baseline while a target Metric request is pending or fails.
+   - Commit the target only after its first accepted observation, then discard all prior Metric sampling state.
+   - Verify returning to a previously used Metric starts a fresh stream.
+   - Prove observations and comparison facts never cross Metric boundaries.
