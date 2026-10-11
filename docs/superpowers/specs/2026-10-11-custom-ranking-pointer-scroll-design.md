@@ -1,7 +1,7 @@
 # Custom Ranking Pointer Scroll Design
 
 **Date:** 2026-10-11
-**Status:** Recommended approach approved; written specification awaiting review.
+**Status:** Approved by the user; implemented and automatically verified on 2026-10-11. Physical mouse/trackpad validation remains manual.
 
 ## Scope and decision
 
