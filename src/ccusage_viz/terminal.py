@@ -8,6 +8,7 @@ from typing import TextIO
 
 from ccusage_viz.errors import UsageError
 from ccusage_viz.options import MINIMUM_SIZES
+from ccusage_viz.terminal_diff import row_updates
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,8 +84,10 @@ class FramePainter:
         else:
             updates = []
             for index, row in enumerate(frame.rows):
-                if index >= len(self._frame.rows) or self._frame.rows[index] != row:
+                if index >= len(self._frame.rows):
                     updates.append(f"\x1b[{index + 1};1H\x1b[2K{row}")
+                elif self._frame.rows[index] != row:
+                    updates.append(row_updates(self._frame.rows[index], row, index + 1))
             for index in range(len(frame.rows), len(self._frame.rows)):
                 updates.append(f"\x1b[{index + 1};1H\x1b[2K")
             output = "".join(updates)

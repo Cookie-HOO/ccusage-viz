@@ -102,7 +102,7 @@ def test_frame_painter_force_repaints_and_preserves_incremental_updates() -> Non
     stream.seek(0)
     stream.truncate(0)
     painter.paint(compose_frame("updated", "status", "controls", height=4))
-    assert stream.getvalue() == "\x1b[2;1H\x1b[2Kupdated"
+    assert stream.getvalue() == "\x1b[2;1Hupda\x1b[2;6Hed"
 
 
 def test_frame_painter_updates_only_changed_animation_rows() -> None:
@@ -114,7 +114,7 @@ def test_frame_painter_updates_only_changed_animation_rows() -> None:
     stream.truncate(0)
     painter.paint(compose_frame("active\nscene", "status", "controls", height=5))
 
-    assert stream.getvalue() == "\x1b[2;1H\x1b[2Kactive"
+    assert stream.getvalue() == "\x1b[2;1Hactive"
 
 
 def test_frame_painter_can_wrap_differential_paint_atomically() -> None:
@@ -126,7 +126,7 @@ def test_frame_painter_can_wrap_differential_paint_atomically() -> None:
     stream.truncate(0)
     painter.paint(compose_frame("active", "status", "controls", height=4), atomic=True)
 
-    assert stream.getvalue() == "\x1b[?2026h\x1b[?7l\x1b[2;1H\x1b[2Kactive\x1b[?7h\x1b[?2026l"
+    assert stream.getvalue() == "\x1b[?2026h\x1b[?7l\x1b[2;1Hactive\x1b[?7h\x1b[?2026l"
     assert "\x1b[2J" not in stream.getvalue()
 
 
@@ -139,7 +139,7 @@ def test_frame_painter_disables_autowrap_for_atomic_full_width_updates() -> None
     stream.truncate(0)
     painter.paint(compose_frame("abc!", "status", "controls", height=4), atomic=True)
 
-    assert stream.getvalue() == "\x1b[?2026h\x1b[?7l\x1b[2;1H\x1b[2Kabc!\x1b[?7h\x1b[?2026l"
+    assert stream.getvalue() == "\x1b[?2026h\x1b[?7l\x1b[2;4H!\x1b[?7h\x1b[?2026l"
 
 
 def test_compose_frame_can_omit_status_row() -> None:
