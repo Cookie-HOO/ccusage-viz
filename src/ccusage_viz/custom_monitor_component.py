@@ -19,6 +19,7 @@ from ccusage_viz.chart_models import (
     TimeOfDayDistributionModel,
     TimeOfDaySeries,
 )
+from ccusage_viz.custom_metric_switching import normalization_category, normalize_switch_config
 from ccusage_viz.custom_models import (
     CustomUnit,
     LocalizedText,
@@ -141,6 +142,7 @@ class CustomMonitorComponent:
         "presentation",
         "render_revision",
         "runtime",
+        "switch_normalizations",
         "switch_target_config",
         "v2_descriptor",
     )
@@ -165,6 +167,7 @@ class CustomMonitorComponent:
         self.render_revision = 0
         self.runtime: V2Runtime | None = None
         self.switch_target_config: CustomChartConfig | None = None
+        self.switch_normalizations: frozenset[str] = frozenset()
         self.v2_descriptor: V2ProbeDescriptor | None = None
 
     @property
@@ -197,9 +200,26 @@ class CustomMonitorComponent:
         if config == self.candidate:
             return
         self.switch_target_config = config
+        self.switch_normalizations = frozenset()
         self.generation += 1
         self.error = None
         self.render_revision += 1
+
+    def retry_metric_switch(self, field: str, target: V2MetricDescriptor) -> bool:
+        """Normalize one pending target request without discarding current observations."""
+
+        category = normalization_category(field)
+        if self.switch_target_config is None or category is None or category in self.switch_normalizations:
+            return False
+        updated = normalize_switch_config(self.switch_target_config, target, category)
+        if updated is None:
+            return False
+        self.switch_target_config = updated
+        self.switch_normalizations = self.switch_normalizations | {category}
+        self.generation += 1
+        self.error = None
+        self.render_revision += 1
+        return True
 
     def configure(self, config: CustomChartConfig, *, data_affecting: bool) -> None:
         if config.kind != "monitor":
@@ -297,6 +317,7 @@ class CustomMonitorComponent:
         if self.switch_target_config is not None:
             self.candidate = self.switch_target_config
             self.switch_target_config = None
+            self.switch_normalizations = frozenset()
             self.accepted_config = None
             self.accepted_response = None
             self.accepted_at = None
@@ -334,6 +355,7 @@ class CustomMonitorComponent:
             return False
         if self.switch_target_config is not None:
             self.switch_target_config = None
+            self.switch_normalizations = frozenset()
             self.error = None
             self.render_revision += 1
             return True

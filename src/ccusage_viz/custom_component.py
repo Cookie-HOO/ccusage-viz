@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Any, Literal
 
 from ccusage_viz.core.time import DateRange
+from ccusage_viz.custom_metric_switching import normalization_category, normalize_switch_config
 from ccusage_viz.custom_models import (
     CustomCapabilities,
     CustomChartCapability,
@@ -14,6 +15,7 @@ from ccusage_viz.custom_models import (
     CustomPresentationDescriptor,
     CustomProtocolFailure,
     V2HistoricalChartCapability,
+    V2MetricDescriptor,
     V2ProbeDescriptor,
     V2Runtime,
 )
@@ -118,6 +120,7 @@ class CustomHistoricalComponent:
         "render_revision",
         "retrieval_top",
         "runtime",
+        "switch_normalizations",
         "switch_target_config",
         "v2_descriptor",
     )
@@ -141,6 +144,7 @@ class CustomHistoricalComponent:
         self.retrieval_top: int | None = None
         self.runtime: V2Runtime | None = None
         self.switch_target_config: CustomChartConfig | None = None
+        self.switch_normalizations: frozenset[str] = frozenset()
         self.v2_descriptor: V2ProbeDescriptor | None = None
 
     @property
@@ -195,10 +199,31 @@ class CustomHistoricalComponent:
         if config == self.candidate:
             return
         self.switch_target_config = config
+        self.switch_normalizations = frozenset()
         self.generation += 1
         self.pending_generation = self.generation
         self.error = None
         self.render_revision += 1
+
+    def retry_metric_switch(self, field: str, target: V2MetricDescriptor) -> bool:
+        """Normalize one Dataset-reported target field and retry without committing it."""
+
+        category = normalization_category(field)
+        if self.switch_target_config is None or category is None or category in self.switch_normalizations:
+            return False
+        updated = normalize_switch_config(self.switch_target_config, target, category)
+        if updated is None:
+            return False
+        self.switch_target_config = updated
+        self.switch_normalizations = self.switch_normalizations | {category}
+        self.generation += 1
+        self.pending_generation = self.generation
+        self.comparison_config = None
+        self.comparison_response = None
+        self.comparison_pending_generation = None
+        self.error = None
+        self.render_revision += 1
+        return True
 
     def configure(self, config: CustomChartConfig, *, data_affecting: bool) -> None:
         if config == self.candidate:
@@ -258,6 +283,7 @@ class CustomHistoricalComponent:
         if self.switch_target_config is not None:
             self.candidate = self.switch_target_config
             self.switch_target_config = None
+            self.switch_normalizations = frozenset()
         if self.capability is not None:
             self.candidate = replace(self.candidate, ranking_comparison=self.capability.comparison)
         self.accepted_config = self.candidate
@@ -379,6 +405,7 @@ class CustomHistoricalComponent:
         self.pending_generation = None
         if self.switch_target_config is not None:
             self.switch_target_config = None
+            self.switch_normalizations = frozenset()
             self.error = error
             self.render_revision += 1
             return True

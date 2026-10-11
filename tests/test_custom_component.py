@@ -16,6 +16,7 @@ from ccusage_viz.custom_component import (
 from ccusage_viz.custom_models import (
     CustomCapabilities,
     CustomChartCapability,
+    CustomChartDefaults,
     CustomComparison,
     CustomData,
     CustomDataset,
@@ -28,6 +29,9 @@ from ccusage_viz.custom_models import (
     CustomSeries,
     CustomUnit,
     LocalizedText,
+    V2HistoricalChartCapability,
+    V2MetricCapabilities,
+    V2MetricDescriptor,
 )
 from ccusage_viz.custom_protocol import (
     CustomChartResponse,
@@ -142,6 +146,26 @@ def test_historical_metric_switch_failure_retains_old_facts_and_metric() -> None
     assert component.candidate.metric_id == "stars"
     assert component.request_config.metric_id == "stars"
     assert component.model is old_model
+
+
+def test_historical_metric_switch_retries_unsupported_period_with_target_default() -> None:
+    component = CustomHistoricalComponent(config(metric_id="stars"))
+    assert component.accept_response(response())
+    target = V2MetricDescriptor(
+        "updated_days",
+        LocalizedText("Updated", "更新"),
+        LocalizedText("Updated", "更新"),
+        UNIT,
+        "sum",
+        V2MetricCapabilities((), (), {"timeline": V2HistoricalChartCapability(("day",), ("book",), (), ("30d",))}),
+        {"timeline": CustomChartDefaults("30d", "book", None)},
+    )
+    component.begin_metric_switch(replace(config(metric_id="updated_days"), date_range=DateRange(date(2026, 9, 1), date(2026, 9, 2), period="7d")))
+
+    assert component.retry_metric_switch("range.period", target)
+    assert component.candidate.metric_id == "stars"
+    assert component.request_config.date_range.period == "30d"
+    assert not component.retry_metric_switch("range.period", target)
 
 
 def test_custom_ranking_uses_capability_sort_direction_for_entries_and_prior_ranks() -> None:

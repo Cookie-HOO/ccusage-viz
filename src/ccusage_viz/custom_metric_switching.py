@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import date
 from typing import Literal
 
 from ccusage_viz.custom_models import V2MetricDescriptor, V2ProbeDescriptor
+
+from ccusage_viz.core.time import DateRange
 from ccusage_viz.options import CustomChartConfig, resolve_date_range
 
 SwitchNormalization = Literal["period", "group_by", "granularity", "filters", "top"]
@@ -70,10 +73,12 @@ def normalize_switch_config(
     elif category == "period" and defaults.period is not None:
         if config.date_range.period == defaults.period:
             return None
-        updated = replace(
-            config,
-            date_range=resolve_date_range(config.kind, period=defaults.period, since=None, until=None),
+        date_range = (
+            DateRange(date(1971, 1, 1), config.date_range.until, period="all")
+            if defaults.period == "all" and config.kind == "ranking"
+            else resolve_date_range(config.kind, period=defaults.period, since=None, until=None)
         )
+        updated = replace(config, date_range=date_range)
     elif category == "group_by":
         updated = replace(config, group_by=defaults.group_by)
     elif category == "granularity" and defaults.granularity is not None:
