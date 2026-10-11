@@ -59,16 +59,19 @@ class CustomFilterDraft:
     def selected(self, filter_id: str) -> tuple[str, ...]:
         return dict(self.filters).get(filter_id, ())
 
-    def toggle(self, filter_id: str, option_id: str) -> CustomFilterDraft:
-        selected = self.selected(filter_id)
-        updated = tuple(value for value in selected if value != option_id)
-        if len(updated) == len(selected):
+    def toggle(self, choice: CustomFilter, option_id: str) -> CustomFilterDraft:
+        selected = self.selected(choice.id)
+        if option_id in selected:
+            updated = tuple(value for value in selected if value != option_id)
+        elif choice.mode == "single_select":
+            updated = (option_id,)
+        else:
             updated = (*selected, option_id)
         values = dict(self.filters)
         if updated:
-            values[filter_id] = updated
+            values[choice.id] = updated
         else:
-            values.pop(filter_id, None)
+            values.pop(choice.id, None)
         return replace(self, filters=tuple(sorted(values.items())))
 
     def clear(self, filter_id: str) -> CustomFilterDraft:
@@ -115,7 +118,7 @@ def run_custom_filter_editor(
                 options = _matching_options(current, draft.query, translator)
                 option_index = _option_index_at(event, draft, options, width, height)
                 if current is not None and option_index is not None:
-                    draft = draft.toggle(current.id, options[option_index].id)
+                    draft = draft.toggle(current, options[option_index].id)
                     draft = replace(draft, option_index=option_index)
             continue
         key = event.value if isinstance(event, (KeyEvent, PasteEvent)) else event
@@ -161,7 +164,7 @@ def run_custom_filter_editor(
             options = _matching_options(current, draft.query, translator) if current is not None else ()
             if current is not None and options:
                 option = options[draft.option_index % len(options)]
-                draft = draft.toggle(current.id, option.id)
+                draft = draft.toggle(current, option.id)
 
 
 def _localized(value: object, translator: Translator) -> str:
@@ -188,6 +191,21 @@ def _matching_options(
         for option in _display_options(choice)
         if not needle or needle in _localized(option.label, translator).casefold()
     )
+
+
+def filter_tab_counts(
+    accepted: CustomFilters, choices: tuple[CustomFilter, ...]
+) -> tuple[tuple[int, int], ...]:
+    """Return accepted visible selections and visible-option totals for each tab."""
+
+    accepted_values = dict(accepted)
+    counts: list[tuple[int, int]] = []
+    for choice in choices:
+        options = _display_options(choice)
+        visible_ids = {option.id for option in options}
+        selected = set(accepted_values.get(choice.id, ()))
+        counts.append((len(selected & visible_ids), len(options)))
+    return tuple(counts)
 
 
 def _grid_rows(option_count: int, columns: int) -> int:

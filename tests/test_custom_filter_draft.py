@@ -2,6 +2,7 @@ from ccusage_viz.custom_filter_draft import (
     CustomFilterDraft,
     _matching_options,
     _render_custom_filter_draft,
+    filter_tab_counts,
     run_custom_filter_editor,
 )
 from ccusage_viz.custom_models import CustomFilter, CustomFilterOption, LocalizedText
@@ -23,6 +24,38 @@ CHOICES = (
         (CustomFilterOption("app", LocalizedText("App", "应用")),),
     ),
 )
+
+
+def test_single_select_replaces_then_clears_the_draft_value() -> None:
+    choice = CustomFilter(
+        "seed_book",
+        LocalizedText("Based on book", "基于图书"),
+        (
+            CustomFilterOption("a", LocalizedText("A", "甲")),
+            CustomFilterOption("b", LocalizedText("B", "乙")),
+        ),
+        "single_select",
+    )
+    draft = CustomFilterDraft((("seed_book", ("a",)),))
+
+    assert draft.toggle(choice, "b").filters == (("seed_book", ("b",)),)
+    assert draft.toggle(choice, "b").toggle(choice, "b").filters == ()
+
+
+def test_multi_select_preserves_existing_toggle_behavior() -> None:
+    choice = CHOICES[0]
+    draft = CustomFilterDraft((("category", ("fiction",)),))
+
+    assert draft.toggle(choice, "history").filters == (("category", ("fiction", "history")),)
+
+
+def test_tab_counts_describe_accepted_filters_not_draft_filters() -> None:
+    choice = CHOICES[0]
+    accepted = (("category", ("fiction",)),)
+    draft = CustomFilterDraft(accepted).toggle(choice, "history")
+
+    assert filter_tab_counts(accepted, (choice,)) == ((1, 2),)
+    assert draft.selected("category") == ("fiction", "history")
 
 
 def test_custom_filter_editor_toggles_declared_option_ids_and_drops_empty_filters() -> None:
