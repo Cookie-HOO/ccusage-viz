@@ -291,6 +291,133 @@ def test_scroll_copy_link_and_search_use_visible_stable_id(dashboard):
     run([WheelEvent(1, 2, 3), click_visible, check_copy, check_link])
 
 
+def test_presentation_adjustments_retain_scrolled_ranking_interactions_without_work(dashboard):
+    run, panes, frames, focuses, layouts, decoder, copied, opened, _ = dashboard
+    del frames, decoder
+    pane = panes[0]
+    # Start from a valid non-detailed density.  The native `d` adjustment must
+    # establish detailed mode rather than a fixture assignment doing so.
+    initial_config = replace(
+        pane.component.candidate,
+        presentation=replace(pane.component.candidate.presentation, density="full"),
+    )
+    pane.component.candidate = pane.component.accepted_config = initial_config
+    pane.component.model = replace(pane.component.model, config=initial_config)
+    initial_offset = 10
+    states: list[tuple[object, tuple[int, tuple[float, float, float, bool], int, tuple[object | None, ...]]]] = []
+
+    def state() -> tuple[int, tuple[float, float, float, bool], int, tuple[object | None, ...]]:
+        scheduler = pane.scheduler
+        return (
+            pane.component.generation,
+            (scheduler.baseline, scheduler.interval, scheduler.next_opportunity, scheduler.stopping),
+            len(requests),
+            tuple(current.lifecycle.active for current in panes),
+        )
+
+    # The fixture's startup-only request assertion ensures that a presentation
+    # adjustment cannot silently submit query work.
+    requests = []
+    original_request = LifecycleOperation.request
+
+    def record_request(self, trigger, **kwargs):
+        requests.append(trigger)
+        return original_request(self, trigger, **kwargs)
+
+    run.monkeypatch.setattr(LifecycleOperation, "request", record_request)
+
+    def enter_adjustment():
+        assert pane.ranking_viewport.offset == initial_offset
+        return KeyEvent("m")
+
+    def adjust(key: str, field: str, expected: str):
+        def event():
+            presentation = pane.component.candidate.presentation
+            states.append((presentation, state()))
+            assert getattr(presentation, field) != expected
+            return KeyEvent(key)
+
+        return event
+
+    def check_adjustment(field: str, expected: str):
+        presentation, (generation, scheduler, request_count, active) = states[-1]
+        viewport = pane.ranking_viewport
+        assert getattr(pane.component.candidate.presentation, field) == expected
+        assert pane.component.candidate.presentation == replace(presentation, **{field: expected})
+        assert pane.component.generation == generation
+        assert (
+            pane.scheduler.baseline,
+            pane.scheduler.interval,
+            pane.scheduler.next_opportunity,
+            pane.scheduler.stopping,
+        ) == scheduler
+        assert len(requests) == request_count
+        assert active == (None,) * len(panes)
+        assert tuple(current.lifecycle.active for current in panes) == active
+        expected_offset = min(initial_offset, max(0, viewport.total_rows - viewport.visible_rows))
+        assert expected_offset > 0
+        assert viewport.offset == expected_offset
+        assert viewport.scrollbar is not None
+        assert viewport.hits
+
+    def after_density():
+        check_adjustment("density", "detailed")
+        return adjust("t", "theme", tui.COLOR_SCHEMES[1])()
+
+    def after_theme():
+        check_adjustment("theme", tui.COLOR_SCHEMES[1])
+        return adjust("s", "style", "bar")()
+
+    def click_visible(*, link: bool = False):
+        # This hit map is freshly captured from the current rendered viewport.
+        assert pane.ranking_copy_rows == pane.ranking_viewport.hits
+        row, (entry_id, column, link_column) = next(
+            (row, hit)
+            for row, hit in pane.ranking_copy_rows.items()
+            if hit[2] is not None
+        )
+        target.append(entry_id)
+        rect = layouts[-1].pane(0)
+        framed = focuses[-1] == 0
+        return MouseEvent(
+            0,
+            rect.left + (link_column if link else column) + 1 + framed,
+            rect.top + row + 1 + framed,
+            True,
+            0,
+        )
+
+    target: list[str] = []
+
+    def after_style():
+        check_adjustment("style", "bar")
+        return click_visible()
+
+    def check_copy():
+        entry = pane.ranking_viewport.by_id[target[0]]
+        assert copied == [f"{entry.label}\n{entry.project_link}"]
+        assert target[0] in {entry_id for entry_id, *_ in pane.ranking_copy_rows.values()}
+        return click_visible(link=True)
+
+    def check_link():
+        entry = pane.ranking_viewport.by_id[target[-1]]
+        assert opened == [entry.project_link]
+        return KeyEvent("\x03")
+
+    run(
+        [
+            *(WheelEvent(1, 2, 3) for _ in range(initial_offset)),
+            enter_adjustment,
+            adjust("d", "density", "detailed"),
+            after_density,
+            after_theme,
+            after_style,
+            check_copy,
+            check_link,
+        ]
+    )
+
+
 def test_text_view_pending_and_nonranking_panes_do_not_scroll(dashboard):
     run, panes, frames, focuses, layouts, decoder, *_ = dashboard
 
