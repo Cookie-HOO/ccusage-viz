@@ -118,6 +118,7 @@ class CustomHistoricalComponent:
         "render_revision",
         "retrieval_top",
         "runtime",
+        "switch_target_config",
         "v2_descriptor",
     )
 
@@ -139,6 +140,7 @@ class CustomHistoricalComponent:
         self.render_revision = 0
         self.retrieval_top: int | None = None
         self.runtime: V2Runtime | None = None
+        self.switch_target_config: CustomChartConfig | None = None
         self.v2_descriptor: V2ProbeDescriptor | None = None
 
     @property
@@ -146,22 +148,29 @@ class CustomHistoricalComponent:
         return self.pending_generation == self.generation
 
     @property
+    def request_config(self) -> CustomChartConfig:
+        """Return the pending switch target without committing it to the pane."""
+
+        return self.switch_target_config or self.candidate
+
+    @property
     def comparison_is_pending(self) -> bool:
         return self.comparison_pending_generation == self.generation
 
     def comparison_request_config(self) -> CustomChartConfig | None:
         """Return the ordinary prior-range request required by complete-content Ranking."""
+        config = self.request_config
         if (
-            self.candidate.kind != "ranking"
-            or not has_complete_content(self.candidate.presentation.density)
-            or self.candidate.date_range.fixed_bounds
-            or self.candidate.date_range.period == "all"
-            or self.candidate.ranking_comparison == "none"
+            config.kind != "ranking"
+            or not has_complete_content(config.presentation.density)
+            or config.date_range.fixed_bounds
+            or config.date_range.period == "all"
+            or config.ranking_comparison == "none"
         ):
             return None
-        interval = ranking_comparison_interval(self.candidate.date_range)
+        interval = ranking_comparison_interval(config.date_range)
         return replace(
-            self.candidate,
+            config,
             date_range=DateRange(interval.since, interval.until, fixed_bounds=True),
         )
 
@@ -179,6 +188,17 @@ class CustomHistoricalComponent:
             comparison_response=comparison,
             comparison_config=self.comparison_config if comparison is not None else None,
         )
+
+    def begin_metric_switch(self, config: CustomChartConfig) -> None:
+        """Request a related Metric without replacing accepted historical facts yet."""
+
+        if config == self.candidate:
+            return
+        self.switch_target_config = config
+        self.generation += 1
+        self.pending_generation = self.generation
+        self.error = None
+        self.render_revision += 1
 
     def configure(self, config: CustomChartConfig, *, data_affecting: bool) -> None:
         if config == self.candidate:
@@ -233,8 +253,11 @@ class CustomHistoricalComponent:
             self._reproject()
             self.render_revision += 1
             return True
-        if completion.config != self.candidate:
+        if completion.config != self.request_config:
             return False
+        if self.switch_target_config is not None:
+            self.candidate = self.switch_target_config
+            self.switch_target_config = None
         if self.capability is not None:
             self.candidate = replace(self.candidate, ranking_comparison=self.capability.comparison)
         self.accepted_config = self.candidate
@@ -271,7 +294,7 @@ class CustomHistoricalComponent:
         purpose: CustomPurpose = "primary",
         accepted_at: datetime | None = None,
     ) -> bool:
-        config = self.candidate if purpose == "primary" else self.comparison_request_config()
+        config = self.request_config if purpose == "primary" else self.comparison_request_config()
         if config is None:
             return False
         return self.apply_result(
@@ -302,19 +325,25 @@ class CustomHistoricalComponent:
             metric = next(
                 item for item in payload.descriptor.metrics if item.id == payload.metric_id
             )
-            capability = metric.capabilities.charts.get(self.candidate.kind)
+            capability = metric.capabilities.charts.get(self.request_config.kind)
             if not isinstance(capability, V2HistoricalChartCapability):
                 raise TypeError("v2 chart response does not describe the selected historical chart")
             descriptor = payload.descriptor
             runtime = payload.runtime
-            self.candidate = replace(self.candidate, ranking_comparison=capability.comparison)
+            request_config = replace(
+                self.request_config, ranking_comparison=capability.comparison
+            )
+            if self.switch_target_config is not None:
+                self.switch_target_config = request_config
+            else:
+                self.candidate = request_config
             payload = CustomChartResponse(
                 CustomDataset(metric.title, metric.description, metric.unit),
                 CustomCapabilities(
                     metric.capabilities.group_by,
                     payload.runtime.filters,
                     {
-                        self.candidate.kind: CustomChartCapability(
+                        request_config.kind: CustomChartCapability(
                             capability.granularities,
                             capability.group_by,
                             tuple(item.id for item in payload.runtime.filters),
@@ -347,6 +376,11 @@ class CustomHistoricalComponent:
             self.comparison_error = error
             return True
         self.pending_generation = None
+        if self.switch_target_config is not None:
+            self.switch_target_config = None
+            self.error = error
+            self.render_revision += 1
+            return True
         replacement_failed = self.accepted_config is not None and _query_identity(
             self.accepted_config
         ) != _query_identity(self.candidate)

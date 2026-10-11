@@ -116,6 +116,34 @@ def response(
     )
 
 
+def test_historical_metric_switch_commits_only_after_target_response() -> None:
+    component = CustomHistoricalComponent(config(metric_id="stars"))
+    assert component.accept_response(response())
+    old_model = component.model
+
+    component.begin_metric_switch(config(metric_id="updated_days"))
+
+    assert component.candidate.metric_id == "stars"
+    assert component.request_config.metric_id == "updated_days"
+    assert component.model is old_model
+    assert component.accept_response(response())
+    assert component.candidate.metric_id == "updated_days"
+    assert component.request_config.metric_id == "updated_days"
+
+
+def test_historical_metric_switch_failure_retains_old_facts_and_metric() -> None:
+    component = CustomHistoricalComponent(config(metric_id="stars"))
+    assert component.accept_response(response())
+    old_model = component.model
+
+    component.begin_metric_switch(config(metric_id="updated_days"))
+
+    assert component.fail(RuntimeError("unavailable"), generation=component.generation)
+    assert component.candidate.metric_id == "stars"
+    assert component.request_config.metric_id == "stars"
+    assert component.model is old_model
+
+
 def test_custom_ranking_derives_decimal_comparison_facts_from_raw_responses() -> None:
     current = response((("api", "3"), ("app", "1")))
     previous = response((("api", "1"), ("app", "2"), ("batch", "4")), point_date=date(2026, 8, 30))
