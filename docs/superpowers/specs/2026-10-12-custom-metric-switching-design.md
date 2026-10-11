@@ -92,6 +92,10 @@ Custom Monitor follows the same transactional switch semantics as historical Cus
 
 The shared pane display window, focus, and local presentation settings persist through a switch, subject to the static compatibility checks above. Each Monitor pane retains its existing single lifecycle and scheduler.
 
+### Future optimization: resumable Monitor Metrics
+
+Out of scope for this implementation: retain an independently scheduled sampling stream for each visited Metric after it is hidden, then restore its observations and baseline when users switch back. This would make a return switch appear uninterrupted, but requires per-Metric component state, concurrent per-pane lifecycles, cancellation/retirement rules, and explicit resource limits. It must never mix observations or comparison facts across Metrics. The current transactional design deliberately discards the old stream after a successful switch.
+
 ## Feedback and Persistence
 
 - A successful switch briefly reports the target's localized label in the status area.
