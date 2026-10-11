@@ -170,6 +170,12 @@ class V2MetricCapabilities:
 
 
 @dataclass(frozen=True, slots=True)
+class V2MetricGroup:
+    id: str
+    title: LocalizedText
+
+
+@dataclass(frozen=True, slots=True)
 class V2MetricDescriptor:
     id: str
     title: LocalizedText
@@ -179,6 +185,7 @@ class V2MetricDescriptor:
     capabilities: V2MetricCapabilities
     defaults: Mapping[str, CustomChartDefaults]
     summary: Literal["comparisons", "total", "none"] = "comparisons"
+    group_id: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "defaults", MappingProxyType(dict(self.defaults)))
@@ -193,6 +200,7 @@ class V2ProbeDescriptor:
     environment: tuple[CustomEnvironmentDeclaration, ...]
     source_timezone: str | None = None
     default_metric_id: str | None = None
+    metric_groups: tuple[V2MetricGroup, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

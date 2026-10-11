@@ -36,6 +36,7 @@ from ccusage_viz.custom_models import (
     V2HistoricalChartCapability,
     V2MetricCapabilities,
     V2MetricDescriptor,
+    V2MetricGroup,
     V2MetricValue,
     V2MonitorCapability,
     V2MonitorObservation,
@@ -772,6 +773,12 @@ def parse_v2_probe_descriptor(value: object) -> V2ProbeDescriptor:
         source_timezone = _string(source_timezone, "v2 probe descriptor source_timezone")
         _validate_timezone(source_timezone)
     dataset = _mapping(source.get("dataset"), "v2 dataset")
+    metric_groups = tuple(
+        _parse_v2_metric_group(item)
+        for item in _sequence(source.get("metric_groups", []), "v2 metric_groups")
+    )
+    if len({group.id for group in metric_groups}) != len(metric_groups):
+        raise CustomProtocolError("v2 metric group IDs must be unique")
     metrics = tuple(
         _parse_v2_metric(item) for item in _sequence(source.get("metrics"), "v2 metrics")
     )
@@ -779,6 +786,10 @@ def parse_v2_probe_descriptor(value: object) -> V2ProbeDescriptor:
         raise CustomProtocolError("v2 metrics must not be empty")
     if len({metric.id for metric in metrics}) != len(metrics):
         raise CustomProtocolError("v2 metric IDs must be unique")
+    group_ids = {group.id for group in metric_groups}
+    for metric in metrics:
+        if metric.group_id is not None and metric.group_id not in group_ids:
+            raise CustomProtocolError("v2 metric group_id must reference a declared metric group")
     default_metric_id = source.get("default_metric_id")
     if default_metric_id is not None:
         default_metric_id = _string(default_metric_id, "v2 default_metric_id")
@@ -801,7 +812,18 @@ def parse_v2_probe_descriptor(value: object) -> V2ProbeDescriptor:
         environment,
         source_timezone,
         default_metric_id,
+        metric_groups,
     )
+
+
+def _parse_v2_metric_group(value: object) -> V2MetricGroup:
+    source = _mapping(value, "v2 metric group")
+    identifier = _string(source.get("id"), "v2 metric group ID")
+    try:
+        _require_id(identifier, "v2 metric group ID")
+    except ValueError as error:
+        raise CustomProtocolError(str(error)) from error
+    return V2MetricGroup(identifier, _parse_localized(source.get("title"), "v2 metric group title"))
 
 
 def _parse_v2_metric(value: object) -> V2MetricDescriptor:
@@ -812,6 +834,13 @@ def _parse_v2_metric(value: object) -> V2MetricDescriptor:
     summary = source.get("summary", "comparisons")
     if summary not in {"comparisons", "total", "none"}:
         raise CustomProtocolError("v2 metric summary must be comparisons, total, or none")
+    group_id = source.get("group_id")
+    if group_id is not None:
+        group_id = _string(group_id, "v2 metric group_id")
+        try:
+            _require_id(group_id, "v2 metric group_id")
+        except ValueError as error:
+            raise CustomProtocolError(str(error)) from error
     return V2MetricDescriptor(
         _string(source.get("id"), "v2 metric ID"),
         _parse_localized(source.get("title"), "v2 metric title"),
@@ -821,6 +850,7 @@ def _parse_v2_metric(value: object) -> V2MetricDescriptor:
         _parse_v2_capabilities(source.get("capabilities")),
         _parse_v2_defaults(source.get("defaults")),
         summary,  # type: ignore[arg-type]
+        group_id,
     )
 
 
@@ -1152,6 +1182,16 @@ def v2_probe_descriptor_to_wire(descriptor: V2ProbeDescriptor) -> dict[str, obje
             "title": localized(descriptor.dataset.title),
             "description": localized(descriptor.dataset.description),
         },
+        **(
+            {
+                "metric_groups": [
+                    {"id": group.id, "title": localized(group.title)}
+                    for group in descriptor.metric_groups
+                ]
+            }
+            if descriptor.metric_groups
+            else {}
+        ),
         "metrics": [
             {
                 "id": metric.id,
@@ -1172,6 +1212,7 @@ def v2_probe_descriptor_to_wire(descriptor: V2ProbeDescriptor) -> dict[str, obje
                     kind: _defaults_to_wire(item) for kind, item in metric.defaults.items()
                 },
                 "summary": metric.summary,
+                **({"group_id": metric.group_id} if metric.group_id is not None else {}),
             }
             for metric in descriptor.metrics
         ],

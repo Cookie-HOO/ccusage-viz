@@ -24,6 +24,7 @@ from ccusage_viz.custom_protocol import (
     canonical_custom_request_key,
     parse_custom_response,
     parse_v2_probe_descriptor,
+    v2_probe_descriptor_to_wire,
 )
 
 
@@ -184,6 +185,29 @@ def test_v2_probe_descriptor_parses_multiple_metrics_and_monitor_capabilities() 
     assert monitor.refresh_interval_seconds == 10
     assert descriptor.metrics[2].aggregation == "value"
     assert descriptor.metrics[2].capabilities.charts["monitor"].refresh_interval_seconds is None
+
+
+def test_v2_metric_groups_and_references_round_trip() -> None:
+    value = v2_probe_descriptor()
+    value["metric_groups"] = [
+        {"id": "router-throughput", "title": text("Throughput", "吞吐量")}
+    ]
+    value["metrics"][0]["group_id"] = "router-throughput"
+
+    descriptor = parse_v2_probe_descriptor(value)
+
+    assert descriptor.metric_groups[0].id == "router-throughput"
+    assert descriptor.metrics[0].group_id == "router-throughput"
+    assert v2_probe_descriptor_to_wire(descriptor)["metric_groups"] == value["metric_groups"]
+    assert v2_probe_descriptor_to_wire(descriptor)["metrics"][0]["group_id"] == "router-throughput"
+
+
+def test_v2_metric_rejects_unknown_group_id() -> None:
+    value = v2_probe_descriptor()
+    value["metrics"][0]["group_id"] = "missing"
+
+    with pytest.raises(CustomProtocolError, match="group_id"):
+        parse_v2_probe_descriptor(value)
 
 
 def test_v2_probe_and_monitor_wire_round_trip() -> None:
