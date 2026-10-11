@@ -185,15 +185,18 @@ def render_custom_ranking_viewport(
     )
     if (
         copy_all_action
+        and context.density != "minimal"
         and any(not entry.is_other for entry in viewport.entries)
         and viewport.body_top > 0
     ):
         rows = rendered.splitlines()
         marker = "✓" if copied_all else "⊞"
-        row = 0
-        if row < len(rows):
-            prefix_width = max(0, context.width - 4)
-            prefix = pad_width(clip_width(rows[row], prefix_width), prefix_width)
+        # Historical Ranking chrome is heading, optional search prompt, then
+        # the visible-count row. Keep copy-all attached to that count rather
+        # than to the heading or the scrollable table.
+        row = 1 + int(bool(search_query or search_editing))
+        if row < viewport.body_top and row < len(rows):
+            prefix = clip_width(rows[row].rstrip(), max(0, context.width - 4))
             column = display_width(prefix) + 3
             rows[row] = f"{prefix} | {marker}"
             viewport.copy_all_hit = (row, column)

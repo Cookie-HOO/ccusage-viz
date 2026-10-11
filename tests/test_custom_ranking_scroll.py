@@ -137,13 +137,14 @@ def render(
     )
 
 
-def test_copy_all_marker_is_fixed_tracks_success_and_hides_without_matches():
+def test_copy_all_marker_follows_count_row_and_hides_without_it():
     model = projection(100)
     viewport = RankingViewport()
     initial = render(model, viewport, copy_all_action=True)
     hit = viewport.copy_all_hit
     assert hit is not None
     row, column = hit
+    assert initial.splitlines()[row] == "100 item(s) total | ⊞"
     assert initial.splitlines()[row][column] == "⊞"
 
     viewport.scroll(10)
@@ -153,6 +154,14 @@ def test_copy_all_marker_is_fixed_tracks_success_and_hides_without_matches():
     copied = render(model, viewport, copy_all_action=True, copied_all=True)
     assert copied.splitlines()[row][column] == "✓"
 
+    searched = render(model, viewport, search="Project 9", copy_all_action=True)
+    search_hit = viewport.copy_all_hit
+    assert search_hit is not None
+    assert search_hit[0] == row + 1
+    assert "Showing 11/11 item(s)" in searched.splitlines()[search_hit[0]]
+
+    render(model, viewport, context(density="minimal"), copy_all_action=True)
+    assert viewport.copy_all_hit is None
     render(model, viewport, search="missing", copy_all_action=True)
     assert viewport.copy_all_hit is None
     render(projection(0), viewport, copy_all_action=True)
