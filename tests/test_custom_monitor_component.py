@@ -47,6 +47,45 @@ def response(metric_id: str = "tokens") -> V2MonitorResponse:
     )
 
 
+def test_monitor_metric_switch_commits_only_after_target_observation() -> None:
+    component = CustomMonitorComponent(config(metric_id="stars"))
+    assert component.accept(
+        CustomMonitorCompletion(0, config(metric_id="stars"), response("stars")),
+        accepted_at=datetime.now(UTC),
+    )
+    old_history = component.history
+
+    component.begin_metric_switch(config(metric_id="updated_days"))
+
+    assert component.candidate.metric_id == "stars"
+    assert component.request_config.metric_id == "updated_days"
+    assert component.history is old_history
+    assert component.accept(
+        CustomMonitorCompletion(1, config(metric_id="updated_days"), response("updated_days")),
+        accepted_at=datetime.now(UTC),
+    )
+    assert component.candidate.metric_id == "updated_days"
+    assert [item.observation.total for item in component.history] == [Decimal("120")]
+    assert component.history is not old_history
+
+
+def test_monitor_metric_switch_failure_retains_old_sampling_state() -> None:
+    component = CustomMonitorComponent(config(metric_id="stars"))
+    assert component.accept(
+        CustomMonitorCompletion(0, config(metric_id="stars"), response("stars")),
+        accepted_at=datetime.now(UTC),
+    )
+    old_history = component.history
+
+    component.begin_metric_switch(config(metric_id="updated_days"))
+
+    assert component.fail(RuntimeError("unavailable"), generation=1)
+    assert component.candidate.metric_id == "stars"
+    assert component.request_config.metric_id == "stars"
+    assert component.history is old_history
+    assert component.error is None
+
+
 def test_accepts_one_source_owned_observation_without_locally_combining_it() -> None:
     component = CustomMonitorComponent(config())
 

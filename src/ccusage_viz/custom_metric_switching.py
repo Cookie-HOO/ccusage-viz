@@ -56,7 +56,7 @@ def validate_metric_switch(
     if capability is None:
         return MetricSwitchRejection("kind", config.kind)
     if isinstance(capability, V2MonitorCapability):
-        if config.group_by not in capability.group_by:
+        if config.group_by is not None and config.group_by not in capability.group_by:
             return MetricSwitchRejection("query.group_by", config.group_by)
         return None
     if not isinstance(capability, V2HistoricalChartCapability):

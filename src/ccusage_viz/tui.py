@@ -5683,7 +5683,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             if options.host.timezone is None:
                 raise RuntimeError("custom Dataset requests require a timezone")
             intent = custom_v2_monitor_query_intent(
-                pane.component.candidate,
+                pane.component.request_config,
                 timezone=options.host.timezone,
                 owner_id=operation.owner_id,
                 generation=operation.generation,
@@ -6478,7 +6478,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                             raise TypeError("custom monitor query did not return a V2 observation")
                         if pane.component.accept(
                             CustomMonitorCompletion(
-                                outcome.generation, pane.component.candidate, response
+                                outcome.generation, pane.component.request_config, response
                             ),
                             accepted_at=datetime.now().astimezone(),
                         ):
@@ -9651,7 +9651,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                 summary_affecting=mutation in {"granularity", "filters", "source"},
                             )
 
-                        if key in {"m", "M"} and isinstance(component, CustomHistoricalComponent):
+                        if key in {"m", "M"} and isinstance(
+                            component, (CustomHistoricalComponent, CustomMonitorComponent)
+                        ):
                             descriptor = component.v2_descriptor
                             metric_id = component.candidate.metric_id
                             if descriptor is None or metric_id is None:

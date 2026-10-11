@@ -141,6 +141,7 @@ class CustomMonitorComponent:
         "presentation",
         "render_revision",
         "runtime",
+        "switch_target_config",
         "v2_descriptor",
     )
 
@@ -163,11 +164,18 @@ class CustomMonitorComponent:
         self.monitor_started_at: datetime | None = None
         self.render_revision = 0
         self.runtime: V2Runtime | None = None
+        self.switch_target_config: CustomChartConfig | None = None
         self.v2_descriptor: V2ProbeDescriptor | None = None
 
     @property
+    def request_config(self) -> CustomChartConfig:
+        """Return a target Metric being sampled without committing it to the pane."""
+
+        return self.switch_target_config or self.candidate
+
+    @property
     def pending(self) -> bool:
-        return self.accepted_config != self.candidate
+        return self.accepted_config != self.request_config
 
     @property
     def accepted_activity_total(self) -> Decimal | None:
@@ -180,6 +188,18 @@ class CustomMonitorComponent:
     def monitor_capability(self) -> V2MonitorCapability | None:
         """Return the selected metric's Monitor declaration, if probe resolution completed."""
         return self.presentation.capability if self.presentation is not None else None
+
+    def begin_metric_switch(self, config: CustomChartConfig) -> None:
+        """Start sampling a related Metric while preserving current Monitor facts."""
+
+        if config.kind != "monitor":
+            raise ValueError("custom monitor component requires a monitor configuration")
+        if config == self.candidate:
+            return
+        self.switch_target_config = config
+        self.generation += 1
+        self.error = None
+        self.render_revision += 1
 
     def configure(self, config: CustomChartConfig, *, data_affecting: bool) -> None:
         if config.kind != "monitor":
@@ -267,13 +287,21 @@ class CustomMonitorComponent:
             self.render_revision += 1
 
     def accept(self, completion: CustomMonitorCompletion, *, accepted_at: datetime) -> bool:
-        if completion.generation != self.generation or completion.config != self.candidate:
+        if completion.generation != self.generation or completion.config != self.request_config:
             return False
         if (
-            self.candidate.metric_id is not None
-            and completion.response.metric_id != self.candidate.metric_id
+            self.request_config.metric_id is not None
+            and completion.response.metric_id != self.request_config.metric_id
         ):
             return False
+        if self.switch_target_config is not None:
+            self.candidate = self.switch_target_config
+            self.switch_target_config = None
+            self.accepted_config = None
+            self.accepted_response = None
+            self.accepted_at = None
+            self.history.clear()
+            self.monitor_started_at = None
         descriptor = completion.response.descriptor
         if descriptor is not None:
             metric = next(
@@ -304,6 +332,11 @@ class CustomMonitorComponent:
     def fail(self, error: BaseException, *, generation: int) -> bool:
         if generation != self.generation:
             return False
+        if self.switch_target_config is not None:
+            self.switch_target_config = None
+            self.error = None
+            self.render_revision += 1
+            return True
         self.error = error
         self.render_revision += 1
         return True
