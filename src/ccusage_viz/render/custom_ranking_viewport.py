@@ -1,0 +1,175 @@
+"""Prepare and window Custom Ranking facts without touching query lifecycles."""
+
+from __future__ import annotations
+
+from dataclasses import replace
+from decimal import Decimal
+from typing import cast
+
+from ccusage_viz.custom_models import LocalizedText
+from ccusage_viz.formatting import center_text
+from ccusage_viz.processing.custom_historical import CustomChartProjection
+from ccusage_viz.render.base import RenderContext
+from ccusage_viz.render.ranking_presentation import (
+    RankingPresentationEntry,
+    filter_ranking_entries,
+    render_historical_ranking,
+)
+from ccusage_viz.render.ranking_viewport import RankingColumns, RankingViewport
+from ccusage_viz.render.summary import format_custom_value
+
+
+def render_custom_ranking_viewport(
+    projection: CustomChartProjection,
+    context: RenderContext,
+    viewport: RankingViewport,
+    *,
+    heading: str,
+    descriptions_visible: bool,
+    search_query: str,
+    search_editing: bool,
+    show_visible_count: bool,
+    copied_entry_id: str | None,
+    item_spacing: str,
+) -> str:
+    config = projection.config
+    reset_key = (
+        (config.source, config.metric_id, config.group_by, config.filters, config.date_range)
+        if config
+        else None,
+        search_query,
+    )
+    if reset_key != viewport.reset_key:
+        viewport.offset = 0
+        viewport.reset_key = reset_key
+    comparison = config.ranking_comparison if config else "full"
+    key = (
+        context.width,
+        context.density,
+        context.style,
+        context.period,
+        context.pending,
+        context.translator.language,
+        projection.unit,
+        comparison,
+        projection.comparison_available,
+        projection.show_percentage,
+        descriptions_visible,
+        search_query,
+        item_spacing,
+    )
+    rebuild = viewport.source is not projection.series or viewport.key != key
+
+    def value(number: int | Decimal) -> str:
+        return format_custom_value(
+            Decimal(number), projection.unit, language=context.translator.language
+        )
+
+    def render(
+        entries: tuple[RankingPresentationEntry, ...], offset: int, *, measure: bool = False
+    ) -> str:
+        if copied_entry_id is not None and not measure:
+            entries = tuple(
+                replace(entry, copy_marker="✓") if entry.key == copied_entry_id else entry
+                for entry in entries
+            )
+        return render_historical_ranking(
+            entries,
+            heading=heading,
+            context=context,
+            value_formatter=value,
+            delta_formatter=lambda number: f"{'+' if number > 0 else '-'}{value(abs(number))}",
+            total=viewport.total,
+            maximum=viewport.maximum,
+            descriptions_visible=descriptions_visible,
+            search_query=search_query,
+            search_editing=search_editing,
+            show_visible_count=show_visible_count,
+            comparison_mode=comparison,
+            comparison_available=projection.comparison_available and bool(viewport.entries),
+            show_new_entries=True,
+            compact_labels=False,
+            label_max_width=48,
+            total_entry_count=len(viewport.entries),
+            matched_entry_count=len(viewport.entries),
+            rank_offset=offset,
+            show_percentage=projection.show_percentage,
+            columns=viewport.columns,
+            measure_only=measure,
+            entries_matched=True,
+        )
+
+    if rebuild:
+
+        def localized(text: LocalizedText) -> str:
+            return text.zh_cn if context.translator.language == "zh" else text.en
+
+        entries = tuple(
+            RankingPresentationEntry(
+                entry.id,
+                context.translator.text("label.other")
+                if entry.is_other
+                else localized(entry.label).replace("\n", "\\n"),
+                entry.total,
+                entry.previous_total,
+                entry.comparison_ready,
+                entry.is_other,
+                entry.previous_rank,
+                description=localized(entry.description)
+                if entry.description and not entry.is_other
+                else None,
+                display=localized(entry.display) if entry.display and not entry.is_other else None,
+                comparison_display=localized(entry.comparison_display)
+                if entry.comparison_display and not entry.is_other
+                else None,
+                copy_marker=None if entry.is_other else "⊞",
+                project_link=None if entry.is_other else entry.link,
+            )
+            for entry in projection.series
+        )
+        entries = filter_ranking_entries(entries, search_query)
+        prior = {
+            entry.key: rank
+            for rank, entry in enumerate(
+                sorted(
+                    (
+                        entry
+                        for entry in entries
+                        if entry.previous is not None and not entry.is_other
+                    ),
+                    key=lambda entry: (-cast(Decimal, entry.previous), str(entry.key)),
+                ),
+                1,
+            )
+        }
+        viewport.entries = tuple(
+            replace(entry, previous_rank=entry.previous_rank or prior.get(entry.key))
+            for entry in entries
+        )
+        viewport.by_id = {str(entry.key): entry for entry in viewport.entries}
+        viewport.total = sum((entry.current for entry in viewport.entries), Decimal())
+        viewport.maximum = (
+            max((entry.current for entry in viewport.entries), default=Decimal()) or 1
+        )
+        viewport.columns = RankingColumns()
+        if viewport.entries:
+            render(viewport.entries, 0, measure=True)
+        viewport.prepare_lines(descriptions=descriptions_visible, spacing=item_spacing)
+        viewport.source = projection.series
+        viewport.key = key
+    if not projection.series:
+        viewport.active = True
+        viewport.offset = viewport.total_rows = viewport.visible_rows = 0
+        viewport.hits.clear()
+        return "\n".join(
+            (
+                center_text(heading, context.width),
+                context.translator.text("message.custom_no_data"),
+            )[: max(0, context.height)]
+        )
+    return viewport.render(
+        render,
+        render_chrome=lambda: render(viewport.entries[:1], 0, measure=True),
+        context=context,
+        spacing=item_spacing,
+    )

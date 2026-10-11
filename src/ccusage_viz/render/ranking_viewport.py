@@ -1,0 +1,160 @@
+"""Session-local display-line windows for Dashboard Custom historical Rankings.
+
+Preparation retains scalar layout facts, not a full styled chart. Warm rendering
+uses binary search and formats only entries intersecting the visible window.
+"""
+
+from __future__ import annotations
+
+from bisect import bisect_left, bisect_right
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from decimal import Decimal
+from typing import TYPE_CHECKING
+
+from ccusage_viz.formatting import display_width, strip_ansi, wrap_width
+
+if TYPE_CHECKING:
+    from ccusage_viz.render.base import RenderContext
+    from ccusage_viz.render.ranking_presentation import RankingPresentationEntry
+
+
+@dataclass(slots=True)
+class RankingColumns:
+    """Widths measured once across the complete matching sequence."""
+
+    widths: dict[str, int] = field(default_factory=dict)
+    description_width: int = 1
+
+    def width(self, name: str, measured: int) -> int:
+        return self.widths.setdefault(name, measured)
+
+
+@dataclass(slots=True)
+class RankingViewport:
+    offset: int = 0
+    total_rows: int = 0
+    visible_rows: int = 0
+    reserved_rows: int = 0
+    active: bool = False
+    source: object | None = None
+    key: object = None
+    reset_key: object = None
+    entries: tuple[RankingPresentationEntry, ...] = ()
+    by_id: dict[str, RankingPresentationEntry] = field(default_factory=dict)
+    columns: RankingColumns = field(default_factory=RankingColumns)
+    starts: tuple[int, ...] = (0,)
+    # Heights omit the separator preceding each entry.
+    heights: tuple[int, ...] = ()
+    hits: dict[int, tuple[str, int, int | None]] = field(default_factory=dict)
+    total: int | Decimal = 0
+    maximum: int | Decimal = 1
+
+    def clamp(self) -> None:
+        self.offset = min(max(0, self.offset), max(0, self.total_rows - self.visible_rows))
+
+    def scroll(self, delta: int) -> bool:
+        if self.visible_rows <= 0:
+            return False
+        before = self.offset
+        self.offset += delta * min(3, self.visible_rows)
+        self.clamp()
+        return self.offset != before
+
+    def clear(self) -> None:
+        self.offset = self.total_rows = self.visible_rows = self.reserved_rows = 0
+        self.total, self.maximum = 0, 1
+        self.active = False
+        self.source = self.key = self.reset_key = None
+        self.entries = ()
+        self.by_id.clear()
+        self.hits.clear()
+        self.starts = (0,)
+        self.heights = ()
+        self.columns = RankingColumns()
+
+    def prepare_lines(self, *, descriptions: bool, spacing: str) -> None:
+        from ccusage_viz.render.ranking_presentation import _description_visible_text
+
+        heights = []
+        starts = [0]
+        for entry in self.entries:
+            height = 1
+            if descriptions and entry.description:
+                height += min(
+                    2,
+                    len(
+                        wrap_width(
+                            _description_visible_text(entry.description),
+                            self.columns.description_width,
+                        )
+                    ),
+                )
+            heights.append(height)
+            starts.append(starts[-1] + height + int(spacing != "compact"))
+        self.heights = tuple(heights)
+        self.starts = tuple(starts)
+        self.total_rows = starts[-1]
+
+    def render(
+        self,
+        render_entries: Callable[[tuple[RankingPresentationEntry, ...], int], str],
+        *,
+        render_chrome: Callable[[], str],
+        context: RenderContext,
+        spacing: str,
+    ) -> str:
+        """Render chrome plus the window; collect hits only on visible primary rows."""
+        self.hits.clear()
+        self.active = True
+        if not self.entries:
+            self.offset = self.total_rows = self.visible_rows = 0
+            return "\n".join(render_entries((), 0).splitlines()[: max(0, context.height)])
+        chrome = render_chrome().splitlines()
+        self.visible_rows = max(0, context.height - len(chrome))
+        self.clamp()
+        if not self.visible_rows:
+            return "\n".join(chrome[: context.height])
+        first = max(0, bisect_right(self.starts, self.offset) - 1)
+        stop = bisect_left(self.starts, self.offset + self.visible_rows)
+        entries = self.entries[first:stop]
+        rendered = render_entries(entries, first).splitlines()[len(chrome) :]
+        separator = (
+            " "
+            if spacing == "space"
+            else ("-" if context.ascii else "─") * context.width
+            if spacing == "line"
+            else ("- " * max(1, context.width // 2)).rstrip()
+        )
+        rows: list[str] = []
+        primary: list[tuple[int, RankingPresentationEntry]] = []
+        position = 0
+        for index, entry in enumerate(entries, first):
+            if spacing != "compact":
+                rows.append(separator)
+            primary.append((len(rows), entry))
+            height = self.heights[index]
+            rows.extend(rendered[position : position + height])
+            position += height
+        leading = self.offset - self.starts[first]
+        body = rows[leading : leading + self.visible_rows]
+        for row, entry in primary:
+            screen_row = row - leading
+            if entry.is_other or not 0 <= screen_row < len(body):
+                continue
+            line = strip_ansi(body[screen_row])
+            marker_index = max(line.rfind("✓"), line.rfind("⊞"))
+            if marker_index < 0:
+                continue
+            copy_column = display_width(line[:marker_index])
+            if copy_column >= context.width:
+                continue
+            link_column = (
+                display_width(line.rsplit("→", 1)[0])
+                if entry.project_link and "→" in line
+                else None
+            )
+            if link_column is not None and link_column >= context.width:
+                link_column = None
+            self.hits[len(chrome) + screen_row] = (str(entry.key), copy_column, link_column)
+        return "\n".join((*chrome, *body))

@@ -20,6 +20,7 @@ from ccusage_viz.formatting import (
 )
 from ccusage_viz.render.base import RenderContext, colored_mark, styled_text
 from ccusage_viz.render.palette import get_color_scheme
+from ccusage_viz.render.ranking_viewport import RankingColumns
 from ccusage_viz.trends import trend_glyph
 
 RankingNumber = int | Decimal
@@ -376,13 +377,18 @@ def render_historical_ranking(
     total_entry_count: int | None = None,
     rank_offset: int = 0,
     item_spacing: str = "compact",
+    columns: RankingColumns | None = None,
+    measure_only: bool = False,
+    entries_matched: bool = False,
+    matched_entry_count: int | None = None,
 ) -> str:
     """Render rows and ccuv-owned comparison markers from raw values only."""
     total_entry_count = len(entries) if total_entry_count is None else total_entry_count
     ranked_entries = tuple(enumerate(entries, start=rank_offset + entry_offset + 1))
-    ranked_entries = tuple(
-        (rank, entry) for rank, entry in ranked_entries if _matches_search(entry, search_query)
-    )
+    if not entries_matched:
+        ranked_entries = tuple(
+            (rank, entry) for rank, entry in ranked_entries if _matches_search(entry, search_query)
+        )
     ranked_entries = (
         ranked_entries[entry_offset:]
         if entry_limit is None
@@ -412,7 +418,12 @@ def render_historical_ranking(
     rank_width = max(2, display_width(str(total_entry_count)))
     maximum = maximum if maximum is not None else max(
         (entry.current for entry in entries), default=1
-    ) or 1
+    )
+    # Callers that precompute extrema can legitimately supply Decimal(0) when
+    # a growth window contains only unchanged projects. A zero scale still
+    # needs a harmless denominator so rendering shows empty tracks instead of
+    # raising decimal.DivisionUndefined.
+    maximum = maximum or 1
     total = total if total is not None else sum((entry.current for entry in entries), start=0)
     full, empty = ("#", ".") if context.ascii else ("█", "░")
     dot, track = ("o", ".") if context.ascii else ("●", "·")
@@ -462,9 +473,10 @@ def render_historical_ranking(
                 "label.ranking_search_visible_items"
                 if search_query
                 else "label.ranking_visible_items",
-                visible=len(entries),
+                visible=len(entries) if matched_entry_count is None else matched_entry_count,
                 total=total_entry_count,
-                count=total_entry_count if not search_query else len(entries),
+                count=(total_entry_count if not search_query else len(entries))
+                if matched_entry_count is None else matched_entry_count,
             )
         )
     if search_query and not entries:
@@ -485,11 +497,13 @@ def render_historical_ranking(
     )
     rows: list[tuple[int, RankingPresentationEntry, str, str, str, str, str, str, str, str]] = []
     for (rank, entry), label, value in zip(ranked_entries, labels, values, strict=True):
-        rank_marker, activity, value_marker = _refresh_markers(
-            entry,
-            context=context,
-            deltas=deltas,
-            rank_deltas=rank_deltas,
+        rank_marker, activity, value_marker = (
+            (" ", " ", " ") if measure_only else _refresh_markers(
+                entry,
+                context=context,
+                deltas=deltas,
+                rank_deltas=rank_deltas,
+            )
         )
         value_delta = None
         rank_delta = None
@@ -541,8 +555,10 @@ def render_historical_ranking(
             rank_comparison = "·"
         else:
             rank_color = scheme.trend_increase if rank_delta > 0 else scheme.trend_decrease
-            rank_comparison = styled_text(
-                trend_glyph(rank_delta, ascii=context.ascii), rank_color, context, bold=True
+            rank_comparison = (
+                trend_glyph(rank_delta, ascii=context.ascii) if measure_only else styled_text(
+                    trend_glyph(rank_delta, ascii=context.ascii), rank_color, context, bold=True
+                )
             )
         share = f"{entry.current / total:>5.1%}" if show_percentage and total and not pending else ""
         rows.append(
@@ -587,6 +603,11 @@ def render_historical_ranking(
             if rank_comparison_visible
             else 0
         )
+        if columns is not None:
+            delta_width = columns.width("delta", delta_width)
+            current_width = columns.width("current", current_width)
+            share_width = columns.width("share", share_width)
+            rank_change_width = columns.width("rank_change", rank_change_width)
         fixed_width = (
             rank_column_width
             + current_width
@@ -614,6 +635,10 @@ def render_historical_ranking(
         if show_percentage:
             header_fields.append(pad_width(share_heading, share_width, align="right"))
         lines.append(" ".join(header_fields))
+        if columns is not None:
+            columns.description_width = max(1, context.width - min(context.width, rank_column_width + 1))
+        if measure_only:
+            return "\n".join(lines)
         for (
             rank,
             entry,
@@ -681,6 +706,11 @@ def render_historical_ranking(
         ),
         default=1,
     )
+    if columns is not None:
+        desired_right_width = columns.width("right", desired_right_width)
+        columns.description_width = max(1, context.width - min(context.width, rank_width + 5))
+    if measure_only:
+        return "\n".join(lines)
     # Keep all three columns within even a narrow viewport. At practical widths
     # this retains the usual eight-cell label and track minimums; when space is
     # scarce it contracts the columns together instead of letting a long
