@@ -14,7 +14,9 @@
 
 本地 Dataset 注册会缓存成功的 Probe，用于资源发现、环境状态和非阻塞选择器。再次执行 `ccuv dataset add-local COMMAND` 时，若 Dataset ID 相同，会直接覆盖本地注册并刷新该缓存。Custom Monitor Pane 启动前仍会重新发起 runtime Probe；缓存元数据不作为最终能力权威。
 
-每次成功的 V2 `chart` 和 `monitor` 响应都是完整的 accepted snapshot：同时携带完整 Probe 形状的 `descriptor`、`runtime` 对象与本次 `data` 或 `observation`。首次 Probe 完成 Dataset/Metric 选择后，ccuv 从最近接受响应的 descriptor 读取静态控制能力。`runtime.filters` 为必填项（可以为空），并且是 ccuv 通过 `f` 展示的唯一 filter 目录；Probe descriptor 与静态 chart capability 不再声明 filter 或 option 值。
+每次成功的 V2 `chart` 和 `monitor` 响应都是完整的 accepted snapshot：同时携带完整 Probe 形状的 `descriptor`、`runtime` 对象与本次 `data` 或 `observation`。首次 Probe 完成 Dataset/Metric 选择后，ccuv 从最近接受响应的 descriptor 读取静态控制能力。`runtime.filters` 为必填项（可以为空），并且是 ccuv 通过 `f` 展示的唯一 filter 目录；Probe descriptor 与静态 chart capability 不再声明 filter 或 option 值。每个 runtime filter 的 `mode` 是 `"multi_select"` 或 `"single_select"`；省略时默认为 `"multi_select"`。两种模式继续使用现有的 option ID 数组查询格式，但 ccuv 对 `single_select` 最多发送一个 ID。空选择是否合法、是否必填仍由 Dataset 权威决定。
+
+Dataset 作者应优先把互斥的源端模式和清晰的范围写成 `single_select`，例如“7 天以内”“30 天以内”“不限”；同时选择多个此类范围既有歧义又不便展示。只有用户确实需要组合互相独立的离散值时才使用 `multi_select`，例如语言、分类、标签、作者或书架标签。
 
 ### V2 Metric Group
 

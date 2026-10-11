@@ -68,7 +68,17 @@ and its `data` or `observation`. After the initial Probe chooses the Dataset and
 Metric, ccuv reads static controls from the latest accepted response descriptor.
 `runtime.filters` is required (and may be empty); it is the only filter catalog
 that ccuv offers through `f`. Probe descriptors and static chart capabilities do
-not declare filters or option values.
+not declare filters or option values. Every runtime filter has `mode:
+"multi_select"` or `"single_select"`; omitted mode means `"multi_select"`.
+Both modes use the existing query array of option IDs, but ccuv sends at most
+one ID for a `single_select` filter. The Dataset remains authoritative for
+whether an empty selection is valid or required.
+
+Dataset authors should prefer `single_select` for mutually exclusive source
+modes and clear ranges, such as `Within 7 days`, `Within 30 days`, and `Any
+time`; combining those ranges is ambiguous and hard to present. Use
+`multi_select` only when users genuinely combine independent discrete values,
+such as languages, categories, tags, authors, or shelf labels.
 
 V2 metrics may declare `summary: "comparisons" | "total" | "none"`.
 `comparisons` is the default and permits the ordinary current/sequential/year-over-year

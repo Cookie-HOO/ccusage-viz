@@ -166,7 +166,7 @@ Probe 只能返回元数据：不能获取收费业务数据、校验 secret、�
 | `unit` | 稳定 ID、双语标签、前/后缀、精度 | 格式化图、表格和 summary 数值。 |
 | `aggregation` | `sum` 或 `value` | 决定 ccuv 是否能做本地历史投影、Top/Other。 |
 | `capabilities` | 维度与支持图类型 | 生成静态控制，并限制 ccuv 发出的请求。若历史 Ranking 的源端原始行数有固定上限，也可声明 `max_items`。 |
-| `runtime.filters` | 当前查询上下文的 filter 维度和 option | 仅随每次成功 chart/Monitor 响应返回；为该 accepted snapshot 启用 `f` filter 编辑器。 |
+| `runtime.filters` | 当前查询上下文的 filter 维度、option，以及 `multi_select` / `single_select` 模式 | 仅随每次成功 chart/Monitor 响应返回；为该 accepted snapshot 启用 `f` filter 编辑器。 |
 | `defaults` | 可选首屏建议 | 仅应用兼容字段；错误字段会忽略。 |
 | `summary` | `comparisons`、`total`、`none` | 决定是否发 summary 请求。 |
 | `environment` | 所需变量名、获取方法 | 显示配置状态，绝不保存变量值。 |
@@ -174,6 +174,8 @@ Probe 只能返回元数据：不能获取收费业务数据、校验 secret、�
 所有人类文本必须同时有 `en` 和 `zh-CN`。所有度量值都必须是十进制**字符串**，如 `"42"`、`"1.25"`，不能是 JSON number、科学记数、NaN 或无穷。
 
 只应为构成一个连贯用户切换集合的 Metric 声明同一个 Group，例如 GitHub 项目的累计 Star 与距上次更新天数。即使单位、aggregation、Ranking 排序、display、description、summary 或 capability 不同，它们仍应是独立 Metric；Group 不会让这些属性共享。在顶层 `metric_groups` 声明一次 Group，再为每个成员提供相同的 `group_id`。这两个字段都是可选的：完全省略 Group 保持旧版平铺选择器；没有 `group_id` 的 Metric 仍为平铺条目且不参与 `m/M`。Group 标题会展示给用户，必须提供双语；空 Group 合法但 ccuv 不显示。
+
+按用户语义而不是传输便利性选择 Filter mode。对于互斥模式和可理解的范围，应优先使用 `single_select`，例如“7 天以内”“30 天以内”“不限”：同时组合多个范围既有歧义又不便展示。只有用户确实需要组合独立离散值时才用 `multi_select`，例如语言、分类、标签、作者或书架标签。只有确实想使用兼容的 `multi_select` 默认值时才省略 `mode`。ccuv 中 `single_select` 可以为空；若必须选择，Dataset 应在查询时校验并返回可操作的本地化错误，不要猜测一个值。
 
 历史 capability 声明 `granularities`、`group_by` 与可选有序 `periods`；若 Ranking 的源端永远无法提供更多原始排行项目，还可声明正整数 `max_items`。Ranking 可选 `comparison: "full" | "rank" | "none"`，默认 `full`；`rank` 保留前一等长周期请求与排名变化，但隐藏绝对增长；`none` 不请求前期且隐藏所有对比列。为兼容旧版 Descriptor，Ranking 也可使用 `descriptions_default: "expanded" | "collapsed"`，但 ccuv 会忽略该字段。说明由密度决定：`full` 和 `detailed` 显示，`minimal`、`compact` 和 `normal` 隐藏。`group_by` 中的 JSON `null` 表示允许未分组总计。filter 不属于 Probe 的静态能力，而是在每一次成功查询的 `runtime.filters` 中声明。Monitor 必须声明固定正数 `window_seconds`，它定义每条 observation 的业务事实窗口；`refresh_interval_seconds` 只是建议采样频率。
 

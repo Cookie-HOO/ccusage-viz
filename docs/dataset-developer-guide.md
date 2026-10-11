@@ -226,7 +226,7 @@ and again before a live custom Monitor starts.
 | `unit` | Stable unit ID, bilingual label, prefix/suffix, precision | Formats chart, table, and summary values. |
 | `aggregation` | `sum` for additive facts; `value` for source-owned values | Controls whether ccuv can locally project Top/Other and history. |
 | `capabilities` | Dimensions and supported chart kinds | Gates static controls and validates requests ccuv sends. Historical Ranking may declare `max_items` when its source has a fixed raw-row limit. |
-| `runtime.filters` | Query-context filter dimensions and options | Returned only with each successful chart/Monitor response; enables the `f` filter editor for that accepted snapshot. |
+| `runtime.filters` | Query-context filter dimensions, options, and `multi_select` / `single_select` mode | Returned only with each successful chart/Monitor response; enables the `f` filter editor for that accepted snapshot. |
 | `defaults` | Optional initial chart suggestions | Applies only compatible fields; a bad suggestion is ignored. |
 | `summary` | `comparisons`, `total`, or `none` | Determines whether/how ccuv issues summary requests. |
 | `environment` | Required/optional variable names and setup instructions | Shows setup status only; ccuv never saves values. |
@@ -240,6 +240,16 @@ then give each member the same `group_id`. Both fields are optional: omitting
 all Groups preserves the flat legacy chooser, while a Metric without `group_id`
 remains a flat entry and is not eligible for `m/M`. Group titles are visible to
 users, so provide both languages. Empty Groups are valid but hidden by ccuv.
+
+Choose Filter modes for user meaning rather than transport convenience. Prefer
+`single_select` for mutually exclusive modes and understandable ranges, such as
+`Within 7 days`, `Within 30 days`, and `Any time`: combining several ranges is
+ambiguous and hard to present. Use `multi_select` only where users genuinely
+combine independent discrete values, such as languages, categories, tags,
+authors, or shelf labels. Omit `mode` only when you intend the compatible
+`multi_select` default. A `single_select` Filter may be empty in ccuv; validate
+any required selection in the Dataset query and return an actionable localized
+error rather than guessing a value.
 
 For historical charts, a Metric capability has `granularities`, `group_by`,
 and optionally ordered `periods`. A Ranking may also declare positive
