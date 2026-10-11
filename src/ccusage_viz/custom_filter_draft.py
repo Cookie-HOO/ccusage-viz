@@ -97,7 +97,7 @@ def run_custom_filter_editor(
     while True:
         draft = _normalise_draft(draft, choices, translator, height)
         paint(
-            _render_custom_filter_draft(draft, choices, translator, width, height),
+            _render_custom_filter_draft(draft, choices, translator, width, height, accepted=filters),
             translator.text("status.custom_filter_controls"),
         )
         event = read_key()
@@ -299,13 +299,18 @@ def _render_custom_filter_draft(
     translator: Translator,
     width: int,
     height: int = 24,
+    *,
+    accepted: CustomFilters | None = None,
 ) -> str:
     current = draft.current_filter(choices)
+    accepted = draft.filters if accepted is None else accepted
     tabs = " · ".join(
-        f"[{_localized(choice.label, translator)}]"
+        f"[{_localized(choice.label, translator)} {selected}/{total}]"
         if choice == current
-        else _localized(choice.label, translator)
-        for choice in choices
+        else f"{_localized(choice.label, translator)} {selected}/{total}"
+        for choice, (selected, total) in zip(
+            choices, filter_tab_counts(accepted, choices), strict=True
+        )
     )
     if current is None:
         return translator.text("status.custom_filter_unavailable")

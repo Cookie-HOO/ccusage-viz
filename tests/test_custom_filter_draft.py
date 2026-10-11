@@ -49,6 +49,19 @@ def test_multi_select_preserves_existing_toggle_behavior() -> None:
     assert draft.toggle(choice, "history").filters == (("category", ("fiction", "history")),)
 
 
+def test_tab_rows_render_accepted_counts_without_using_unsubmitted_draft() -> None:
+    choice = CHOICES[0]
+    accepted = (("category", ("fiction",)),)
+    draft = CustomFilterDraft(accepted).toggle(choice, "history")
+
+    rendered = _render_custom_filter_draft(
+        draft, (choice,), load_translator("en"), 80, accepted=accepted
+    )
+
+    assert "[Category 1/2]" in rendered
+    assert "Selected 2 / 2" in rendered
+
+
 def test_tab_counts_describe_accepted_filters_not_draft_filters() -> None:
     choice = CHOICES[0]
     accepted = (("category", ("fiction",)),)
@@ -87,7 +100,7 @@ def test_custom_filter_editor_renders_protocol_localized_labels() -> None:
     )
 
     assert result is None
-    assert "[分类]" in rendered[0]
+    assert "[分类 0/2]" in rendered[0]
     assert "小说" in rendered[0]
 
 
