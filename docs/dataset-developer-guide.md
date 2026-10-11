@@ -221,7 +221,8 @@ and again before a live custom Monitor starts.
 | --- | --- | --- |
 | `revision`, `version` | Dataset metadata revision and SemVer-like version | Shows it in Dataset UI and persists the safe Probe snapshot. |
 | `dataset` | Dataset title and description | Labels Dataset manager and chooser. |
-| `metrics` | One or more independent measurements | Lets users choose a Metric and prevents unsupported chart choices. |
+| `metric_groups` | Optional ordered Groups with stable IDs and bilingual titles | Organizes related Metrics in the chooser and defines the `m/M` quick-switch boundary. |
+| `metrics` | One or more independent measurements; each may reference one Group with `group_id` | Lets users choose a Metric and prevents unsupported chart choices. |
 | `unit` | Stable unit ID, bilingual label, prefix/suffix, precision | Formats chart, table, and summary values. |
 | `aggregation` | `sum` for additive facts; `value` for source-owned values | Controls whether ccuv can locally project Top/Other and history. |
 | `capabilities` | Dimensions and supported chart kinds | Gates static controls and validates requests ccuv sends. Historical Ranking may declare `max_items` when its source has a fixed raw-row limit. |
@@ -229,6 +230,16 @@ and again before a live custom Monitor starts.
 | `defaults` | Optional initial chart suggestions | Applies only compatible fields; a bad suggestion is ignored. |
 | `summary` | `comparisons`, `total`, or `none` | Determines whether/how ccuv issues summary requests. |
 | `environment` | Required/optional variable names and setup instructions | Shows setup status only; ccuv never saves values. |
+
+Use a Metric Group only for Metrics that form one coherent user-facing switch
+set, such as GitHub project cumulative Stars and days since the last update.
+Keep them separate Metrics when their units, aggregation, Ranking order,
+displays, descriptions, summaries, or capabilities differ; the Group does not
+make any of those properties shared. Declare the Group once in `metric_groups`,
+then give each member the same `group_id`. Both fields are optional: omitting
+all Groups preserves the flat legacy chooser, while a Metric without `group_id`
+remains a flat entry and is not eligible for `m/M`. Group titles are visible to
+users, so provide both languages. Empty Groups are valid but hidden by ccuv.
 
 For historical charts, a Metric capability has `granularities`, `group_by`,
 and optionally ordered `periods`. A Ranking may also declare positive

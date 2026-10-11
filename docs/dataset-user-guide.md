@@ -10,7 +10,8 @@ charts; each Dataset executable knows how to query its own source.
 
 A Dataset can add separately selectable Metrics with their own units, filters,
 groupings, summaries, historical chart support, and source-owned Monitor
-observations. This makes it suitable for external activity such as reading,
+observations. A Dataset may also put related Metrics in author-declared Metric
+Groups for clearer selection and quick switching. This makes it suitable for external activity such as reading,
 builds, requests, amounts, bytes, or a local service's status. ccuv still owns
 the terminal UI, Dashboard layout, refresh scheduling, and built-in `ccusage`
 token charts; a Dataset does not alter or merge into built-in token collection.
@@ -131,6 +132,19 @@ Use `ccuv dataset` details to see which chart kinds each Metric supports. A
 historical Metric may support Timeline, Calendar, Stack, and/or Ranking.
 Monitor is only available when that Metric declares Monitor capability.
 
+When a Dataset declares Metric Groups, the interactive Dataset picker shows a
+localized Group heading and indents its Metrics below it. Empty Groups are not
+shown. Metrics without a Group remain flat entries after all Groups. A Dataset
+that does not declare Groups keeps the original flat picker.
+
+In a selected Custom chart pane, `m` and `M` cycle forward and backward among
+Metrics in the current Group that support the active chart kind. ccuv keeps the
+current query choices; if the next Metric's declared chart capability cannot
+accept the current period, grouping, or granularity, it leaves the current
+Metric unchanged and shows a short warning. A successful switch replaces the
+selected Metric; a failed target request leaves the prior chart or Monitor
+selected.
+
 Dataset defaults can set an initial period, group, Top N, Other,
 style, theme, and Monitor display horizon. They are suggestions. Your explicit
 options override them:
@@ -159,7 +173,8 @@ ignores just that field and opens the chart with the normal standalone default.
    Dashboard.
 2. Focus an empty Pane and press `r` (or double-click it) to choose a type.
 3. Choose **Dataset**, select an Available registration, then select a Metric
-   if the Dataset has more than one.
+   if the Dataset has more than one. When it declares Metric Groups, Metrics
+   appear indented below their Group headings.
 4. Select one chart kind from the kinds that Metric declared.
 5. ccuv starts a fresh Probe, applies valid Dataset defaults, then queries the
    Pane. A setup or source failure appears in the Pane instead of replacing data

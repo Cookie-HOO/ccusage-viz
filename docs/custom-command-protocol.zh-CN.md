@@ -16,6 +16,26 @@
 
 每次成功的 V2 `chart` 和 `monitor` 响应都是完整的 accepted snapshot：同时携带完整 Probe 形状的 `descriptor`、`runtime` 对象与本次 `data` 或 `observation`。首次 Probe 完成 Dataset/Metric 选择后，ccuv 从最近接受响应的 descriptor 读取静态控制能力。`runtime.filters` 为必填项（可以为空），并且是 ccuv 通过 `f` 展示的唯一 filter 目录；Probe descriptor 与静态 chart capability 不再声明 filter 或 option 值。
 
+### V2 Metric Group
+
+V2 descriptor 可以在顶层声明有序的 `metric_groups` 数组。每个 Group 有稳定的 Dataset 内 `id` 和必填的双语 `title`。Metric 可通过可选 `group_id` 引用一个已声明 Group：
+
+```json
+{
+  "metric_groups": [
+    {"id": "github-tools", "title": {"en": "GitHub tools", "zh-CN": "GitHub 工具"}}
+  ],
+  "metrics": [
+    {"id": "stars", "group_id": "github-tools", "...": "..."},
+    {"id": "updated_days_ago", "group_id": "github-tools", "...": "..."}
+  ]
+}
+```
+
+Group ID 必须唯一，每个 `group_id` 必须引用已声明 Group。允许空 Group。完全省略 `metric_groups` 的 Dataset 与此前 V2 完全兼容：Metric 选择器保持平铺，且没有关联 Metric 快速切换关系。声明 Group 后，宿主按 Group 声明顺序渲染非空 Group，并按 Metric 声明顺序渲染其成员；未提供 `group_id` 的 Metric 保持为所有 Group 后的普通平铺条目。
+
+Group 定义连贯的快速切换边界，不表示共享 Metric 语义。每个 Metric 仍独立拥有单位、aggregation、capability、defaults、summary、数据、display 和源端校验。宿主可以用 `m/M` 在支持当前图表类型的同 Group Metric 间循环；它只发送带目标 `metric_id` 的普通请求，不新增请求字段。
+
 V2 指标可声明 `summary: "comparisons" | "total" | "none"`。`comparisons` 是默认值，允许普通的当前值、环比和同比摘要；`total` 只允许显示一个总数；`none` 不发起 Dataset 摘要请求。每种历史图 capability 都可声明支持的有序 `periods`；声明后 ccuv 会将 `p/P` 限制为该列表。`all` 仅用于 Ranking：ccuv 发送 `period: "all"`，并使用 `1971-01-01` 到今天的锚定范围。权威语义是 marker，不是锚定日期；Dataset 必须按照自身全量数据口径处理。若不支持某个周期，继续使用现有 `unsupported_query`，字段为 `range.period`。
 
 Ranking capability 还可声明 `comparison: "full" | "rank" | "none"`，默认是 `full`。`rank` 仍请求前一等长周期并显示排名变化，但隐藏绝对增长列；`none` 不请求前期，也不显示任何 Ranking 对比列。

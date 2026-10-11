@@ -6,7 +6,7 @@ Dataset 用于接入 `ccusage` 之外的指标，例如阅读、CI、构建、�
 
 ## Dataset 能做什么，不能做什么
 
-Dataset 可以增加可独立选择的 Metric，并分别声明单位、filter、分组、summary、历史图支持和数据源拥有的 Monitor observation。因此它适合接入阅读、构建、请求、金额、字节或本地服务活动等外部数据。ccuv 仍负责终端 UI、Dashboard 布局、刷新调度和内置 `ccusage` Token 图；Dataset 不会修改或并入内置 Token 采集。
+Dataset 可以增加可独立选择的 Metric，并分别声明单位、filter、分组、summary、历史图支持和数据源拥有的 Monitor observation。Dataset 也可以把语义关联的 Metric 放进作者声明的 Metric Group，便于选择和快速切换。因此它适合接入阅读、构建、请求、金额、字节或本地服务活动等外部数据。ccuv 仍负责终端 UI、Dashboard 布局、刷新调度和内置 `ccusage` Token 图；Dataset 不会修改或并入内置 Token 采集。
 
 目前每个 Dataset 都是 ccuv 在每次操作时启动的可执行命令：ccuv 向命令 stdin 写入一份 JSON 请求，从 stdout 读取一份 JSON 响应，然后命令退出。这不是插件系统、持久服务连接或文件导入功能。Dataset 内部可以访问自己的 API、文件、数据库或本地服务，但用户安装/注册的是可执行命令，而不是让 ccuv 直接连接 HTTP endpoint、socket、Python module 或数据文件。
 
@@ -83,6 +83,10 @@ ccuv chart monitor --dataset router --metric tokens
 
 通过 `ccuv dataset` 的详情查看每个 Metric 支持哪些图。历史 Metric 可以支持 Timeline、Calendar、Stack、Ranking 的任意组合；只有声明 Monitor capability 的 Metric 才能运行 Monitor。
 
+当 Dataset 声明 Metric Group 时，交互式 Dataset 选择器会显示本地化的 Group 标题，并把成员 Metric 缩进到标题下；空 Group 不显示。未加入 Group 的 Metric 仍在所有 Group 后平铺显示。未声明 Group 的 Dataset 保持原有平铺选择器。
+
+在已选中的 Custom 图 Pane 内，`m` 和 `M` 会在当前 Group 中支持当前图表类型的 Metric 间前后循环。ccuv 会保留当前查询选择；如果下一个 Metric 的声明 capability 不接受当前 period、group 或 granularity，则保持当前 Metric 并显示短暂警告。成功切换后替换已选 Metric；目标请求失败时保持此前的图或 Monitor 选中。
+
 Dataset 可建议初始 period、group、Top N、Other、style、theme 和 Monitor 本地显示范围，但只是建议。显式参数优先：
 
 ```bash
@@ -99,7 +103,7 @@ Custom Dataset 使用 `--group-by`，不是内置图的 `--by`；只有 Dataset 
 
 1. 用 `ccuv dashboard --empty` 启动干净布局，或打开普通 Dashboard。
 2. 聚焦 Empty Pane，按 `r`（或双击）选择类型。
-3. 选择 **Dataset**，选一个可使用的注册项；多 Metric 时选 Metric。
+3. 选择 **Dataset**，选一个可使用的注册项；多 Metric 时选 Metric。声明了 Metric Group 时，Metric 会缩进显示在对应 Group 标题下。
 4. 从该 Metric 支持的 chart kinds 中选一种。
 5. ccuv 重新 Probe、应用有效首屏建议、再查询 Pane。配置或源端错误会显示在 Pane，不会用零覆盖数据。
 

@@ -21,6 +21,37 @@ then a chart kind. A command may set `default_metric_id`; ccuv uses it only when
 the Dataset has exactly one metric.
 
 Each metric declares `aggregation: "sum"` or `aggregation: "value"`.
+
+### V2 Metric Groups
+
+A V2 descriptor may declare an ordered top-level `metric_groups` array. Each
+Group has a stable Dataset-local `id` and a required bilingual `title`. A Metric
+may optionally reference one declared Group through `group_id`:
+
+```json
+{
+  "metric_groups": [
+    {"id": "github-tools", "title": {"en": "GitHub tools", "zh-CN": "GitHub 工具"}}
+  ],
+  "metrics": [
+    {"id": "stars", "group_id": "github-tools", "...": "..."},
+    {"id": "updated_days_ago", "group_id": "github-tools", "...": "..."}
+  ]
+}
+```
+
+Group IDs must be unique, and every `group_id` must reference a declared Group.
+Groups may be empty. A Dataset that omits `metric_groups` is fully compatible
+with earlier V2 behavior: its Metric chooser is flat and it has no related-
+Metric quick-switch relation. When Groups are declared, hosts render nonempty
+Groups in declaration order and their members in Metric declaration order;
+Metrics without `group_id` remain ordinary flat entries after the Groups.
+
+A Group defines a coherent quick-switch boundary, not shared Metric semantics.
+Each Metric still independently owns its unit, aggregation, capabilities,
+defaults, summary, data, display, and source validation. Hosts may use `m/M`
+to cycle same-Group Metrics that support the active chart kind; this only sends
+a normal request with the target `metric_id` and adds no request field.
 `sum` permits ccuv to aggregate returned facts for historical projections.
 `value` is source-owned: ccuv displays only the exact query result and asks the
 Dataset again whenever range, grouping, granularity, filters, or chart changes.
