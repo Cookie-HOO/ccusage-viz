@@ -2,12 +2,13 @@ from datetime import date
 
 from ccusage_viz.core.time import DateRange
 from ccusage_viz.custom_metric_switching import (
-    MetricSwitchRejection,
     cycle_switch_metric,
+    normalization_category,
+    normalize_switch_config,
     switch_candidates,
-    validate_metric_switch,
 )
 from ccusage_viz.custom_models import (
+    CustomChartDefaults,
     CustomUnit,
     LocalizedText,
     V2Dataset,
@@ -102,21 +103,29 @@ def test_returns_none_when_group_has_no_alternate_metric() -> None:
     assert cycle_switch_metric(source, current_metric_id="stars", kind="ranking", step=1) is None
 
 
-def test_rejects_only_declared_period_group_and_granularity_mismatches() -> None:
-    target = metric(
+def test_normalizes_target_period_and_filter_fields_from_metric_defaults() -> None:
+    target = V2MetricDescriptor(
         "updated_days",
+        TEXT,
+        TEXT,
+        UNIT,
+        "sum",
+        V2MetricCapabilities((), (), {"ranking": capability()}),
+        {"ranking": CustomChartDefaults("all", None, None, filters=(("kind", ("tool",)),))},
         group_id="github",
-        charts={"ranking": capability(periods=("30d",), group_by=("repo",), granularities=("week",))},
+    )
+    current = config(filters=(("language", ("python",)),))
+
+    assert normalization_category("range.period") == "period"
+    assert normalize_switch_config(current, target, "period").date_range.period == "all"  # type: ignore[union-attr]
+    assert normalization_category("query.filters.language") == "filters"
+    assert normalize_switch_config(current, target, "filters").filters == (("kind", ("tool",)),)  # type: ignore[union-attr]
+
+
+def test_unknown_or_unchanged_default_does_not_normalize() -> None:
+    target = V2MetricDescriptor(
+        "updated_days", TEXT, TEXT, UNIT, "sum", V2MetricCapabilities((), (), {"ranking": capability()}), {"ranking": CustomChartDefaults("14d", None, None)}, group_id="github"
     )
 
-    assert validate_metric_switch(config(), target) == MetricSwitchRejection("range.period", "14d")
-    assert validate_metric_switch(config(date_range=date_range("30d")), target) == MetricSwitchRejection("query.group_by", None)
-    assert validate_metric_switch(
-        config(date_range=date_range("30d"), group_by="repo"), target
-    ) == MetricSwitchRejection("query.granularity", "day")
-
-
-def test_does_not_validate_runtime_filters_or_cross_field_rules() -> None:
-    target = metric("updated_days", group_id="github", charts={"ranking": capability()})
-
-    assert validate_metric_switch(config(filters=(("unknown", ("x",)),)), target) is None
+    assert normalization_category("query.combination") is None
+    assert normalize_switch_config(config(), target, "period") is None

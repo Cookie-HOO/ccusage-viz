@@ -1,23 +1,14 @@
-"""Pure V2 Metric Group switching rules shared by Custom chart hosts."""
+"""Pure V2 Metric Group switching and normalization rules."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import replace
 from typing import Literal
 
-from ccusage_viz.custom_models import (
-    V2HistoricalChartCapability,
-    V2MetricDescriptor,
-    V2MonitorCapability,
-    V2ProbeDescriptor,
-)
-from ccusage_viz.options import CustomChartConfig
+from ccusage_viz.custom_models import V2MetricDescriptor, V2ProbeDescriptor
+from ccusage_viz.options import CustomChartConfig, resolve_date_range
 
-
-@dataclass(frozen=True, slots=True)
-class MetricSwitchRejection:
-    field: Literal["kind", "range.period", "query.group_by", "query.granularity"]
-    value: str | None
+SwitchNormalization = Literal["period", "group_by", "granularity", "filters", "top"]
 
 
 def switch_candidates(
@@ -47,24 +38,48 @@ def cycle_switch_metric(
     return candidates[(current_index + (1 if step >= 0 else -1)) % len(candidates)]
 
 
-def validate_metric_switch(
-    config: CustomChartConfig, target: V2MetricDescriptor
-) -> MetricSwitchRejection | None:
-    """Return a cheap declaration-based rejection without querying the Dataset."""
+def normalization_category(field: str) -> SwitchNormalization | None:
+    """Map a Dataset unsupported field to its one switch-normalization category."""
 
-    capability = target.capabilities.charts.get(config.kind)
-    if capability is None:
-        return MetricSwitchRejection("kind", config.kind)
-    if isinstance(capability, V2MonitorCapability):
-        if config.group_by is not None and config.group_by not in capability.group_by:
-            return MetricSwitchRejection("query.group_by", config.group_by)
-        return None
-    if not isinstance(capability, V2HistoricalChartCapability):
-        return MetricSwitchRejection("kind", config.kind)
-    if capability.periods and config.date_range.period not in capability.periods:
-        return MetricSwitchRejection("range.period", config.date_range.period)
-    if config.group_by not in capability.group_by:
-        return MetricSwitchRejection("query.group_by", config.group_by)
-    if config.granularity not in capability.granularities:
-        return MetricSwitchRejection("query.granularity", config.granularity)
+    if field == "range.period":
+        return "period"
+    if field == "query.group_by":
+        return "group_by"
+    if field == "query.granularity":
+        return "granularity"
+    if field == "query.top":
+        return "top"
+    if field == "query.filters" or field.startswith("query.filters."):
+        return "filters"
     return None
+
+
+def normalize_switch_config(
+    config: CustomChartConfig,
+    target: V2MetricDescriptor,
+    category: SwitchNormalization,
+) -> CustomChartConfig | None:
+    """Apply one target-Metric default, or return ``None`` when it cannot change config."""
+
+    defaults = target.defaults.get(config.kind)
+    if category == "filters":
+        filters = () if defaults is None else defaults.filters
+        updated = config if filters == config.filters else replace(config, filters=filters)
+    elif defaults is None:
+        return None
+    elif category == "period" and defaults.period is not None:
+        if config.date_range.period == defaults.period:
+            return None
+        updated = replace(
+            config,
+            date_range=resolve_date_range(config.kind, period=defaults.period, since=None, until=None),
+        )
+    elif category == "group_by":
+        updated = replace(config, group_by=defaults.group_by)
+    elif category == "granularity" and defaults.granularity is not None:
+        updated = replace(config, granularity=defaults.granularity)
+    elif category == "top":
+        updated = replace(config, top=defaults.top)
+    else:
+        return None
+    return None if updated == config else updated
