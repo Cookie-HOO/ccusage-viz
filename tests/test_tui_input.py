@@ -3,7 +3,7 @@ from io import StringIO
 import pytest
 
 import ccusage_viz.tui_input as tui_input_module
-from ccusage_viz.tui_input import InputDecoder, KeyEvent, MouseEvent, PasteEvent
+from ccusage_viz.tui_input import InputDecoder, KeyEvent, MouseEvent, PasteEvent, WheelEvent
 
 
 def test_tui_input_decodes_keys_and_fragmented_mouse_press() -> None:
@@ -27,12 +27,48 @@ def test_tui_input_preserves_control_keys() -> None:
     assert decoder.next() == KeyEvent("\x19")
 
 
-def test_tui_input_ignores_trackpad_wheel_reports() -> None:
+def test_tui_input_decodes_trackpad_wheel_reports() -> None:
     decoder = InputDecoder()
     decoder.feed("\x1b[<64;20;5M\x1b[<65;20;5M")
 
-    assert decoder.next() is None
+    assert decoder.next() == WheelEvent(-1, 20, 5)
+    assert decoder.next() == WheelEvent(1, 20, 5)
     assert decoder.buffer == ""
+
+
+@pytest.mark.parametrize("button", (66, 67, 96, 97, 128, 129))
+def test_tui_input_does_not_scroll_horizontal_motion_or_extended_buttons(button: int) -> None:
+    decoder = InputDecoder()
+    decoder.feed(f"\x1b[<{button};20;5M")
+    assert not isinstance(decoder.next(), WheelEvent)
+
+
+def test_tui_input_wheel_fragment_modifiers_and_release() -> None:
+    decoder = InputDecoder()
+    decoder.feed("\x1b[<85;20;")
+    assert decoder.next(now=0) is None
+    decoder.feed("5M\x1b[<65;20;5m")
+    assert decoder.next(now=0.01) == WheelEvent(1, 20, 5, 20)
+    assert decoder.next(now=0.01) is None
+
+
+def test_tui_input_drains_wheels_without_pacing_or_consuming_click_key_or_paste() -> None:
+    for tail in ("q", "\x1b[<0;20;5M", "\x1b[200~paste\x1b[201~", "\x1b[<65;20;"):
+        decoder = InputDecoder()
+        decoder.feed("\x1b[<65;20;5M" * 100 + tail)
+        assert decoder.next(now=0) == WheelEvent(1, 20, 5)
+        assert list(decoder.drain_wheel()) == [WheelEvent(1, 20, 5)] * 99
+        assert decoder.buffer == tail
+
+
+def test_tui_input_preserves_wheel_direction_order() -> None:
+    decoder = InputDecoder()
+    decoder.feed("\x1b[<65;20;5M\x1b[<64;20;5M\x1b[<65;60;5M")
+    assert list(decoder.drain_wheel()) == [
+        WheelEvent(1, 20, 5),
+        WheelEvent(-1, 20, 5),
+        WheelEvent(1, 60, 5),
+    ]
 
 
 def test_tui_input_decodes_bracketed_paste_as_one_event() -> None:

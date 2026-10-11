@@ -25,13 +25,23 @@ class MouseEvent:
 
 
 @dataclass(frozen=True, slots=True)
+class WheelEvent:
+    """One vertical SGR wheel report; coordinates are terminal cells (1-based)."""
+
+    delta: int
+    x: int
+    y: int
+    modifiers: int = 0
+
+
+@dataclass(frozen=True, slots=True)
 class PasteEvent:
     """One complete terminal bracketed-paste payload."""
 
     value: str
 
 
-InputEvent = KeyEvent | MouseEvent | PasteEvent
+InputEvent = KeyEvent | MouseEvent | PasteEvent | WheelEvent
 
 _MOUSE_ENABLE = "\x1b[?1000h\x1b[?1006h\x1b[?2004h"
 _MOUSE_DISABLE = "\x1b[?1000l\x1b[?1006l\x1b[?2004l"
@@ -105,10 +115,32 @@ class InputDecoder:
             and _BRACKETED_PASTE_END not in self.buffer[len(_BRACKETED_PASTE_START) :]
         )
 
+    def _peek_wheel(self) -> tuple[WheelEvent, int] | None:
+        mouse = _SGR_MOUSE.match(self.buffer)
+        if mouse is None:
+            return None
+        button, x, y = (int(value) for value in mouse.groups()[:3])
+        if mouse.group(4) != "M" or button & ~0b11100 not in (64, 65) or x < 1 or y < 1:
+            return None
+        return WheelEvent(1 if button & 1 else -1, x, y, button & 0b11100), mouse.end()
+
+    def drain_wheel(self) -> Iterator[WheelEvent]:
+        """Consume only complete consecutive buffered wheels, without pacing or I/O."""
+        while (pending := self._peek_wheel()) is not None:
+            event, end = pending
+            self.buffer = self.buffer[end:]
+            self.control_at = None
+            self.escape_at = None
+            yield event
+        if not self.buffer:
+            self.overloaded = False
+
     def next(self, *, now: float | None = None) -> InputEvent | None:
         now = time.monotonic() if now is None else now
-        if self.pacing_remaining(now=now) > 0 and not self.buffer.startswith(
-            _BRACKETED_PASTE_START
+        if (
+            self.pacing_remaining(now=now) > 0
+            and not self.buffer.startswith(_BRACKETED_PASTE_START)
+            and self._peek_wheel() is None
         ):
             return None
         while self.buffer:
@@ -192,12 +224,13 @@ class InputDecoder:
 
         mouse = _SGR_MOUSE.match(self.buffer)
         if mouse is not None:
+            wheel = self._peek_wheel()
             button, x, y = (int(value) for value in mouse.groups()[:3])
             self.buffer = self.buffer[mouse.end() :]
             self.control_at = None
             modifiers = button & ~_MOUSE_BUTTON_MASK
             if modifiers & _MOUSE_WHEEL:
-                return None
+                return wheel[0] if wheel is not None else None
             return MouseEvent(button & _MOUSE_BUTTON_MASK, x, y, mouse.group(4) == "M", modifiers)
 
         if self.buffer.startswith("\x1b[<"):
