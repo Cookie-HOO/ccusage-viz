@@ -300,17 +300,35 @@ def test_tiny_viewports_and_empty_comparison(height):
     assert not viewport.scroll(1)
 
 
-def test_transient_theme_and_copy_changes_reuse_preparation(monkeypatch):
+def test_style_and_theme_changes_reuse_data_and_geometry(monkeypatch):
     model = projection(100)
     viewport = RankingViewport()
     render(model, viewport)
+    viewport.offset = 40
     entries, starts = viewport.entries, viewport.starts
     monkeypatch.setattr(
         RankingViewport, "prepare_lines", lambda *a, **kw: pytest.fail("rebuilt layout")
     )
-    render(model, viewport, replace(context(), color=True, color_scheme="dracula"), copied="1")
+    styled = replace(context(), style="list")
+    render(model, viewport, styled, copied="1")
+    render(model, viewport, replace(styled, color=True, color_scheme="dracula"))
     assert viewport.entries is entries
     assert viewport.starts is starts
+    assert viewport.offset == 40
+
+
+def test_density_change_reuses_data_and_preserves_offset_then_clamps():
+    model = projection(100, descriptions=True)
+    viewport = RankingViewport()
+    render(model, viewport, context(height=16, density="detailed"))
+    entries, starts = viewport.entries, viewport.starts
+    viewport.offset = 100
+
+    render(model, viewport, context(height=16, density="minimal"))
+
+    assert viewport.entries is entries
+    assert viewport.starts is not starts
+    assert viewport.offset == min(100, viewport.total_rows - viewport.visible_rows)
 
 
 def test_standalone_custom_ranking_does_not_use_dashboard_viewport(monkeypatch):

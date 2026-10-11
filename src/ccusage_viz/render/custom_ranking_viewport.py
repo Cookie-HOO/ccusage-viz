@@ -53,22 +53,26 @@ def render_custom_ranking_viewport(
         viewport.offset = 0
         viewport.reset_key = reset_key
     comparison = config.ranking_comparison if config else "full"
-    key = (
+    # Entry facts are stable across presentation changes. The source identity
+    # plus locale and query define the localized, filtered entry projection.
+    data_key = (context.translator.language, search_query)
+    rebuild_data = viewport.source is not projection.series or viewport.data_key != data_key
+    # These facts can alter column widths, chrome height, wrapping, or row
+    # spacing. Styles and themes intentionally do not: they only change marks.
+    geometry_key = (
         context.width,
         context.density,
-        context.style,
         context.period,
         context.pending,
-        context.translator.language,
         projection.unit,
         comparison,
         projection.comparison_available,
         projection.show_percentage,
         descriptions_visible,
-        search_query,
+        search_editing,
         item_spacing,
     )
-    rebuild = viewport.source is not projection.series or viewport.key != key
+    rebuild_geometry = rebuild_data or viewport.geometry_key != geometry_key
 
     def value(number: int | Decimal) -> str:
         return format_custom_value(
@@ -109,7 +113,7 @@ def render_custom_ranking_viewport(
             entries_matched=True,
         )
 
-    if rebuild:
+    if rebuild_data:
 
         def localized(text: LocalizedText) -> str:
             return text.zh_cn if context.translator.language == "zh" else text.en
@@ -161,12 +165,17 @@ def render_custom_ranking_viewport(
         viewport.maximum = (
             max((entry.current for entry in viewport.entries), default=Decimal()) or 1
         )
+        viewport.source = projection.series
+        viewport.data_key = data_key
+    if rebuild_geometry:
         viewport.columns = RankingColumns()
         if viewport.entries:
             render(viewport.entries, 0, measure=True)
         viewport.prepare_lines(descriptions=descriptions_visible, spacing=item_spacing)
-        viewport.source = projection.series
-        viewport.key = key
+        # Geometry changes retain the display-line position whenever it remains
+        # valid; render() performs a second clamp once chrome height is known.
+        viewport.clamp()
+        viewport.geometry_key = geometry_key
     if not projection.series:
         viewport.active = True
         viewport.offset = viewport.total_rows = viewport.visible_rows = 0

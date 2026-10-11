@@ -42,7 +42,8 @@ class RankingViewport:
     copy_all_hit: tuple[int, int] | None = None
     active: bool = False
     source: object | None = None
-    key: object = None
+    data_key: object = None
+    geometry_key: object = None
     reset_key: object = None
     entries: tuple[RankingPresentationEntry, ...] = ()
     by_id: dict[str, RankingPresentationEntry] = field(default_factory=dict)
@@ -73,7 +74,7 @@ class RankingViewport:
         self.scrollbar = None
         self.copy_all_hit = None
         self.active = False
-        self.source = self.key = self.reset_key = None
+        self.source = self.data_key = self.geometry_key = self.reset_key = None
         self.entries = ()
         self.by_id.clear()
         self.hits.clear()
