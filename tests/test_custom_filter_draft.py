@@ -6,6 +6,7 @@ from ccusage_viz.custom_filter_draft import (
     run_custom_filter_editor,
 )
 from ccusage_viz.custom_models import CustomFilter, CustomFilterOption, LocalizedText
+from ccusage_viz.formatting import strip_ansi
 from ccusage_viz.i18n import load_translator
 from ccusage_viz.tui_input import KeyEvent, MouseEvent
 
@@ -60,6 +61,23 @@ def test_tab_rows_render_accepted_counts_without_using_unsubmitted_draft() -> No
 
     assert "[Category 1/2]" in rendered
     assert "Selected 2 / 2" in rendered
+
+
+def test_color_rendering_distinguishes_current_and_effective_filter_tabs() -> None:
+    rendered = _render_custom_filter_draft(
+        CustomFilterDraft((("category", ("fiction",)),)),
+        CHOICES,
+        load_translator("en"),
+        80,
+        accepted=(("category", ("fiction",)),),
+        color=True,
+        color_scheme="classic",
+    )
+
+    assert "\x1b[" in rendered
+    assert "[Category 1/2]" in strip_ansi(rendered)
+    assert "Source 0/1" in strip_ansi(rendered)
+    assert "Selected 1 / 2" in strip_ansi(rendered)
 
 
 def test_tab_counts_describe_accepted_filters_not_draft_filters() -> None:

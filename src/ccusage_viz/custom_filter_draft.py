@@ -9,7 +9,14 @@ from ccusage_viz.custom_models import CustomFilter, CustomFilterOption
 from ccusage_viz.formatting import clip_width, display_width, pad_width
 from ccusage_viz.i18n import Translator
 from ccusage_viz.options import CustomFilters
+from ccusage_viz.render.base import styled_text
+from ccusage_viz.render.palette import get_color_scheme
 from ccusage_viz.tui_input import KeyEvent, MouseEvent, PasteEvent
+
+
+@dataclass(frozen=True, slots=True)
+class _FilterColorContext:
+    color: bool
 
 FilterEditorInput = str | KeyEvent | MouseEvent | PasteEvent
 
@@ -90,6 +97,8 @@ def run_custom_filter_editor(
     height: int = 24,
     paint: Callable[[str, str], None],
     read_key: Callable[[], FilterEditorInput | None],
+    color: bool = False,
+    color_scheme: str = "no-color",
 ) -> CustomFilters | None:
     """Edit protocol-declared Dataset filters locally until the draft is applied."""
 
@@ -97,7 +106,16 @@ def run_custom_filter_editor(
     while True:
         draft = _normalise_draft(draft, choices, translator, height)
         paint(
-            _render_custom_filter_draft(draft, choices, translator, width, height, accepted=filters),
+            _render_custom_filter_draft(
+                draft,
+                choices,
+                translator,
+                width,
+                height,
+                accepted=filters,
+                color=color,
+                color_scheme=color_scheme,
+            ),
             translator.text("status.custom_filter_controls"),
         )
         event = read_key()
@@ -301,13 +319,25 @@ def _render_custom_filter_draft(
     height: int = 24,
     *,
     accepted: CustomFilters | None = None,
+    color: bool = False,
+    color_scheme: str = "no-color",
 ) -> str:
     current = draft.current_filter(choices)
     accepted = draft.filters if accepted is None else accepted
+    context = _FilterColorContext(color)
+    scheme = get_color_scheme(color_scheme)
+
+    def tab(choice: CustomFilter, selected: int, total: int) -> str:
+        label = _localized(choice.label, translator)
+        count = f"{selected}/{total}"
+        if choice == current:
+            return styled_text(f"[{label} {count}]", scheme.highlight, context, bold=True)
+        if selected:
+            return f"{styled_text(label, scheme.muted, context, dim=True)} {styled_text(count, scheme.cache, context)}"
+        return styled_text(f"{label} {count}", scheme.muted, context, dim=True)
+
     tabs = " · ".join(
-        f"[{_localized(choice.label, translator)} {selected}/{total}]"
-        if choice == current
-        else f"{_localized(choice.label, translator)} {selected}/{total}"
+        tab(choice, selected, total)
         for choice, (selected, total) in zip(
             choices, filter_tab_counts(accepted, choices), strict=True
         )
@@ -319,6 +349,8 @@ def _render_custom_filter_draft(
     options = _matching_options(current, draft.query, translator)
     selected = set(draft.selected(current.id))
     selected_count = sum(option.id in selected for option in all_options)
+    selected_status = translator.text("status.custom_filter_count", selected=selected_count, total=len(all_options))
+    selected_prefix, selected_value, selected_suffix = selected_status.partition(str(selected_count))
     rows = [clip_width(tabs, width)]
     if draft.query or draft.search_editing:
         cursor = "_" if draft.search_editing else ""
@@ -338,7 +370,9 @@ def _render_custom_filter_draft(
     else:
         rows.append(
             clip_width(
-                translator.text("status.custom_filter_count", selected=selected_count, total=len(all_options)),
+                f"{styled_text(selected_prefix, scheme.muted, context, dim=True)}"
+                f"{styled_text(selected_value, scheme.highlight, context, bold=True)}"
+                f"{styled_text(selected_suffix, scheme.muted, context, dim=True)}",
                 width,
             )
         )

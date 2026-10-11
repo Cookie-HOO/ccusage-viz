@@ -384,6 +384,8 @@ def run_custom_monitor(options: StandaloneLaunch, translator: Translator) -> int
                             height=max(0, terminal.height - 2),
                             paint=paint_filter_editor,
                             read_key=lambda: read_key(5),
+                            color=terminal.color,
+                            color_scheme=component.candidate.presentation.theme,
                         )
                         if edited is not None and edited != component.candidate.filters:
                             component.configure(

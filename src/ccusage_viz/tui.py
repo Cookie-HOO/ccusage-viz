@@ -4585,6 +4585,8 @@ def _run_custom_standalone_adjustment(
                         height=max(0, size.lines - 2),
                         paint=paint_filter_editor,
                         read_key=lambda: read_key(min(0.1, timer.remaining())),
+                        color=current.presentation.theme != "no-color",
+                        color_scheme=current.presentation.theme,
                     )
                     if edited is not None:
                         updated = replace(current, filters=edited)
@@ -9855,6 +9857,8 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                     height=max(0, size.lines - 2),
                                     paint=paint_custom_filter_editor,
                                     read_key=read_custom_filter_key,
+                                    color=dashboard_theme != "no-color",
+                                    color_scheme=dashboard_theme,
                                 )
                             except AdjustmentTimeout:
                                 end_adjustment()
