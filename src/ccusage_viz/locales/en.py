@@ -170,6 +170,7 @@ MESSAGES = {
     "status.custom_group_restricted": "This chart is limited to its declared grouping.",
     "status.custom_metric_no_alternative": "No related Metric is available to switch to",
     "status.custom_metric_switch_rejected": "Related Metric does not support {field}: {value}",
+    "status.custom_metric_switch_no_default": "Cannot switch to {metric}: this Metric does not support the current {field} and declares no fallback default",
     "status.custom_period_restricted": "This chart is limited to its declared period.",
     "status.custom_top_source_limit": "This Dataset can provide at most {max} ranking items.",
     "help.grid": "Pane grid: ROWSxCOLUMNS",

@@ -6395,6 +6395,35 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                             )
                             changed = True
                             continue
+                        if (
+                            isinstance(failure, CustomProtocolFailure)
+                            and failure.code == "unsupported_query"
+                            and failure.unsupported is not None
+                            and isinstance(pane.component, (CustomHistoricalComponent, CustomMonitorComponent))
+                            and pane.component.switch_target_config is not None
+                            and pane.component.v2_descriptor is not None
+                        ):
+                            target = next(
+                                (
+                                    metric
+                                    for metric in pane.component.v2_descriptor.metrics
+                                    if metric.id == pane.component.request_config.metric_id
+                                ),
+                                None,
+                            )
+                            field = failure.unsupported.get("field")
+                            if target is not None and field is not None:
+                                pane.component.cancel_metric_switch()
+                                copy_feedback.show(
+                                    translator.text(
+                                        "status.custom_metric_switch_no_default",
+                                        metric=_dataset_title(target.title, translator),
+                                        field=field,
+                                    )
+                                )
+                                pane.lifecycle.complete(operation, generation=outcome.generation)
+                                changed = True
+                                continue
                         failed = (
                             pane.component.fail(outcome.error, generation=outcome.generation)
                             if isinstance(pane.component, CustomMonitorComponent)

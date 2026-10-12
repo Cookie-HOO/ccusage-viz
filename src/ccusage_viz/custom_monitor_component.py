@@ -221,6 +221,17 @@ class CustomMonitorComponent:
         self.render_revision += 1
         return True
 
+    def cancel_metric_switch(self) -> bool:
+        """Discard a failed pending target while retaining accepted observations."""
+
+        if self.switch_target_config is None:
+            return False
+        self.switch_target_config = None
+        self.switch_normalizations = frozenset()
+        self.error = None
+        self.render_revision += 1
+        return True
+
     def configure(self, config: CustomChartConfig, *, data_affecting: bool) -> None:
         if config.kind != "monitor":
             raise ValueError("custom monitor component requires a monitor configuration")

@@ -170,6 +170,7 @@ MESSAGES = {
     "status.custom_group_restricted": "该图表仅支持能力声明中的分组。",
     "status.custom_metric_no_alternative": "当前指标没有可切换的关联指标",
     "status.custom_metric_switch_rejected": "关联指标不支持 {field}: {value}",
+    "status.custom_metric_switch_no_default": "无法切换到 {metric}：该指标不支持当前{field}，且未声明可恢复的默认值",
     "status.custom_period_restricted": "该图表仅支持能力声明中的周期。",
     "status.custom_top_source_limit": "该数据集最多可提供 {max} 个排行项目。",
     "help.grid": "Pane 网格：ROWSxCOLUMNS",
