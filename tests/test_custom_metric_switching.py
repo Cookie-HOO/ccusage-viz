@@ -122,6 +122,21 @@ def test_normalizes_target_period_and_filter_fields_from_metric_defaults() -> No
     assert normalize_switch_config(current, target, "filters").filters == (("kind", ("tool",)),)  # type: ignore[union-attr]
 
 
+def test_uses_the_only_declared_period_when_target_has_no_default() -> None:
+    target = V2MetricDescriptor(
+        "updated_days",
+        TEXT,
+        TEXT,
+        UNIT,
+        "sum",
+        V2MetricCapabilities((), (), {"ranking": capability(periods=("all",))}),
+        {},
+        group_id="github",
+    )
+
+    assert normalize_switch_config(config(), target, "period").date_range.period == "all"  # type: ignore[union-attr]
+
+
 def test_unknown_or_unchanged_default_does_not_normalize() -> None:
     target = V2MetricDescriptor(
         "updated_days", TEXT, TEXT, UNIT, "sum", V2MetricCapabilities((), (), {"ranking": capability()}), {"ranking": CustomChartDefaults("14d", None, None)}, group_id="github"

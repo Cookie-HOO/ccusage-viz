@@ -6,9 +6,12 @@ from dataclasses import replace
 from datetime import date
 from typing import Literal
 
-from ccusage_viz.custom_models import V2MetricDescriptor, V2ProbeDescriptor
-
 from ccusage_viz.core.time import DateRange
+from ccusage_viz.custom_models import (
+    V2HistoricalChartCapability,
+    V2MetricDescriptor,
+    V2ProbeDescriptor,
+)
 from ccusage_viz.options import CustomChartConfig, resolve_date_range
 
 SwitchNormalization = Literal["period", "group_by", "granularity", "filters", "top"]
@@ -68,17 +71,21 @@ def normalize_switch_config(
     if category == "filters":
         filters = () if defaults is None else defaults.filters
         updated = config if filters == config.filters else replace(config, filters=filters)
-    elif defaults is None:
-        return None
-    elif category == "period" and defaults.period is not None:
-        if config.date_range.period == defaults.period:
+    elif category == "period":
+        capability = target.capabilities.charts.get(config.kind)
+        period = defaults.period if defaults is not None else None
+        if period is None and isinstance(capability, V2HistoricalChartCapability):
+            period = capability.periods[0] if len(capability.periods) == 1 else None
+        if period is None or config.date_range.period == period:
             return None
         date_range = (
             DateRange(date(1971, 1, 1), config.date_range.until, period="all")
-            if defaults.period == "all" and config.kind == "ranking"
-            else resolve_date_range(config.kind, period=defaults.period, since=None, until=None)
+            if period == "all" and config.kind == "ranking"
+            else resolve_date_range(config.kind, period=period, since=None, until=None)
         )
         updated = replace(config, date_range=date_range)
+    elif defaults is None:
+        return None
     elif category == "group_by":
         updated = replace(config, group_by=defaults.group_by)
     elif category == "granularity" and defaults.granularity is not None:
