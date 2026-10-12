@@ -79,7 +79,12 @@ def normalize_switch_config(
         if period is None or config.date_range.period == period:
             return None
         date_range = (
-            DateRange(date(1971, 1, 1), config.date_range.until, period="all")
+            DateRange(
+                date(1971, 1, 1),
+                config.date_range.until,
+                relative_until=True,
+                period="all",
+            )
             if period == "all" and config.kind == "ranking"
             else resolve_date_range(config.kind, period=period, since=None, until=None)
         )

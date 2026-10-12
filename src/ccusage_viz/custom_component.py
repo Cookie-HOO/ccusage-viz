@@ -441,7 +441,11 @@ class CustomHistoricalComponent:
                 raise TypeError("v2 chart response does not describe the selected historical chart")
             descriptor = payload.descriptor
             runtime = payload.runtime
-            request_config = replace(self.request_config, ranking_comparison=capability.comparison)
+            request_config = replace(
+                self.request_config,
+                metric_periods=capability.periods,
+                ranking_comparison=capability.comparison,
+            )
             if self.switch_target_config is not None:
                 self.switch_target_config = request_config
             else:
@@ -458,6 +462,7 @@ class CustomHistoricalComponent:
                             tuple(item.id for item in payload.runtime.filters),
                             capability.max_items,
                             capability.descriptions_default,
+                            capability.periods,
                             comparison=capability.comparison,
                             show_percentage=capability.show_percentage,
                             refresh_interval_seconds=capability.refresh_interval_seconds,

@@ -96,6 +96,7 @@ from ccusage_viz.custom_models import (
     CustomFilter,
     CustomProtocolFailure,
     V2HistoricalChartCapability,
+    V2MetricDescriptor,
     V2MonitorCapability,
     V2ProbeDescriptor,
 )
@@ -597,6 +598,15 @@ class DashboardDatasetModalState:
 
 def _dataset_title(value, translator: Translator) -> str:
     return value.zh_cn if translator.language == "zh" else value.en
+
+
+def _custom_metric_periods(
+    metric: V2MetricDescriptor, kind: str
+) -> tuple[str, ...]:
+    """Return the periods declared for one Metric's selected historical chart."""
+
+    capability = metric.capabilities.charts.get(kind)
+    return capability.periods if isinstance(capability, V2HistoricalChartCapability) else ()
 
 
 def _dataset_metric_chooser_rows(
@@ -2620,6 +2630,17 @@ def _custom_capability(pane: TuiCustomPane) -> CustomChartCapability | V2Monitor
     return _custom_capability_for_component(pane.component)
 
 
+def _custom_period_adjustment_chart(
+    chart: CustomChartConfig,
+    capability: CustomChartCapability | V2MonitorCapability | None,
+) -> CustomChartConfig:
+    """Use the live historical capability as the period-cycle authority."""
+
+    if isinstance(capability, CustomChartCapability):
+        return replace(chart, metric_periods=capability.periods)
+    return chart
+
+
 def _ranking_search_eligible(pane: TuiPane) -> bool:
     """Whether a pane can own an in-memory historical Ranking search query."""
     if not isinstance(pane, (TuiChartPane, TuiCustomPane)) or pane.body_view != "chart":
@@ -4279,10 +4300,6 @@ def _choose_dataset_pane_config(
                     metric_id = metric.id
                     metric_summary = metric.summary
                     metric_titles = (metric.title.en, metric.title.zh_cn)
-                    ranking = metric.capabilities.charts.get("ranking")
-                    metric_periods = (
-                        ranking.periods if isinstance(ranking, V2HistoricalChartCapability) else ()
-                    )
                     break
             if metric_id is None:
                 continue
@@ -4302,6 +4319,8 @@ def _choose_dataset_pane_config(
         )
         if view is None:
             continue
+        if isinstance(descriptor, V2ProbeDescriptor):
+            metric_periods = _custom_metric_periods(metric, view)
         try:
             source = service.registered_command_source(status.registration.dataset_id)
         except UsageError as exc:
@@ -4542,7 +4561,12 @@ def _run_custom_standalone_adjustment(
                 capability = _custom_capability_for_component(component)
                 updated = current
                 if key in {"p", "P", "d", "t", "T", "s", "S", "k", "l", "o", "+", "=", "-", "_"}:
-                    updated = adjust_custom_chart(current, key)
+                    adjustment = (
+                        _custom_period_adjustment_chart(current, capability)
+                        if key in {"p", "P"}
+                        else current
+                    )
+                    updated = adjust_custom_chart(adjustment, key)
                 elif (
                     key in {"g", "G"}
                     and capability is not None
@@ -8989,10 +9013,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 modal.metric_id = metric.id
                 modal.metric_summary = metric.summary
                 modal.metric_titles = (metric.title.en, metric.title.zh_cn)
-                ranking = metric.capabilities.charts.get("ranking")
-                modal.metric_periods = (
-                    ranking.periods if isinstance(ranking, V2HistoricalChartCapability) else ()
-                )
+                modal.metric_periods = ()
                 modal.chart_kinds = tuple(metric.capabilities.charts)
                 if modal.chart_kinds:
                     modal.stage, modal.index, modal.offset = "installed", 0, 0
@@ -9116,14 +9137,24 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 except UsageError as exc:
                     modal.error = format_error(exc, translator)
                 else:
+                    kind = modal.chart_kinds[modal.index]
+                    metric_periods = modal.metric_periods
+                    if modal.metric_id is not None:
+                        metric = next(
+                            item
+                            for item in modal.metrics
+                            if isinstance(item, V2MetricDescriptor)
+                            and item.id == modal.metric_id
+                        )
+                        metric_periods = _custom_metric_periods(metric, kind)
                     finish_dataset_modal(
                         default_custom_pane(
-                            modal.chart_kinds[modal.index],
+                            kind,
                             source=source,
                             dashboard=options,
                             metric_id=modal.metric_id,
                             metric_summary=modal.metric_summary,
-                            metric_periods=modal.metric_periods,
+                            metric_periods=metric_periods,
                             metric_titles=modal.metric_titles,
                         )
                     )
@@ -9819,7 +9850,8 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                     ),
                                 )
                         elif key in {"p", "P"}:
-                            updated = adjust_custom_chart(base, key)
+                            period_base = _custom_period_adjustment_chart(base, capability)
+                            updated = adjust_custom_chart(period_base, key)
                             if updated != base:
                                 record_mutation(
                                     ("pane", focused_index, "custom-period"),
@@ -9827,7 +9859,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                         config, mutation="period"
                                     ),
                                 )
-                            elif base.metric_periods:
+                            elif period_base.metric_periods:
                                 copy_feedback.show(
                                     translator.text("status.custom_period_restricted")
                                 )

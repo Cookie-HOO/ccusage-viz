@@ -398,6 +398,79 @@ def test_probe_capability_keeps_period_and_group_controls_after_rejected_query()
     )
 
 
+def test_custom_metric_periods_follow_the_selected_chart_kind() -> None:
+    metric = V2MetricDescriptor(
+        "reading",
+        LocalizedText("Reading", "阅读"),
+        LocalizedText("Reading", "阅读"),
+        CustomUnit("page", LocalizedText("pages", "页"), "suffix", 0),
+        "sum",
+        V2MetricCapabilities(
+            (),
+            (),
+            {
+                "timeline": tui_module.V2HistoricalChartCapability(
+                    ("day",), (), (), ("7d", "30d")
+                ),
+                "calendar": tui_module.V2HistoricalChartCapability(("day",), (), ()),
+                "ranking": tui_module.V2HistoricalChartCapability(
+                    ("day",), (), (), ("all",)
+                ),
+            },
+        ),
+        {},
+    )
+
+    assert tui_module._custom_metric_periods(metric, "timeline") == ("7d", "30d")
+    assert tui_module._custom_metric_periods(metric, "ranking") == ("all",)
+    assert tui_module._custom_metric_periods(metric, "calendar") == ()
+    assert tui_module._custom_metric_periods(metric, "missing") == ()
+
+
+def test_live_capability_periods_replace_stale_pane_periods_for_adjustment() -> None:
+    chart = CustomChartConfig(
+        "ranking",
+        CustomCommandSource("reading", ("reader",)),
+        DateRange(
+            date(2026, 10, 12),
+            date(2026, 10, 12),
+            relative_until=True,
+            period="1d",
+        ),
+        metric_periods=("all",),
+    )
+    capability = CustomChartCapability(
+        ("day",), (), (), periods=("1d", "7d")
+    )
+
+    effective = tui_module._custom_period_adjustment_chart(chart, capability)
+
+    assert effective.metric_periods == ("1d", "7d")
+    assert adjust_custom_chart(effective, "p").date_range.period == "7d"
+    assert adjust_custom_chart(effective, "P").date_range.period == "7d"
+
+
+def test_undeclared_live_periods_restore_generic_period_cycling() -> None:
+    chart = CustomChartConfig(
+        "timeline",
+        CustomCommandSource("reading", ("reader",)),
+        DateRange(
+            date(2026, 10, 6),
+            date(2026, 10, 12),
+            relative_until=True,
+            period="7d",
+        ),
+        metric_periods=("all",),
+    )
+
+    effective = tui_module._custom_period_adjustment_chart(
+        chart, CustomChartCapability(("day",), (), ())
+    )
+
+    assert effective.metric_periods == ()
+    assert adjust_custom_chart(effective, "p").date_range.period == "14d"
+
+
 def test_probe_capability_remains_available_before_the_first_chart_response() -> None:
     chart = CustomChartConfig(
         "timeline",

@@ -425,9 +425,11 @@ def test_projection_rejects_non_overlapping_aggregation_bucket() -> None:
         process_custom_historical(monthly, chart)
 
 
-def v2_chart_response(metric_id: str) -> V2ChartResponse:
+def v2_chart_response(
+    metric_id: str, *, periods: tuple[str, ...] = ()
+) -> V2ChartResponse:
     text = LocalizedText("Reading", "阅读")
-    capability = V2HistoricalChartCapability(("day",), ("book",), ())
+    capability = V2HistoricalChartCapability(("day",), ("book",), (), periods)
 
     def metric(identifier: str) -> V2MetricDescriptor:
         return V2MetricDescriptor(
@@ -517,6 +519,25 @@ def test_metric_switch_accepts_v2_response_for_requested_metric() -> None:
     assert component.accepted_config is not None
     assert component.accepted_config.metric_id == "updated_days"
     assert not component.is_pending
+
+
+def test_metric_switch_accepts_target_chart_periods() -> None:
+    component = CustomHistoricalComponent(
+        config(metric_id="stars", metric_periods=("all",))
+    )
+    assert component.accept_response(response())
+    component.begin_metric_switch(config(metric_id="updated_days", metric_periods=("all",)))
+
+    assert component.apply_provider_result(
+        SimpleNamespace(
+            custom_response=v2_chart_response("updated_days", periods=("1d", "7d"))
+        )
+    )
+    assert component.candidate.metric_periods == ("1d", "7d")
+    assert component.accepted_config is not None
+    assert component.accepted_config.metric_periods == ("1d", "7d")
+    assert component.capability is not None
+    assert component.capability.periods == ("1d", "7d")
 
 
 def test_component_accepts_provider_chart_response_without_legacy_summary() -> None:

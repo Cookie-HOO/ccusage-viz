@@ -18,7 +18,9 @@ from ccusage_viz.custom_models import (
     V2MetricGroup,
     V2ProbeDescriptor,
 )
+from ccusage_viz.i18n import load_translator
 from ccusage_viz.options import CustomChartConfig, CustomCommandSource
+from ccusage_viz.render.base import RenderContext, date_range_heading
 
 TEXT = LocalizedText("Text", "文本")
 UNIT = CustomUnit("count", TEXT, "suffix", 0)
@@ -120,6 +122,48 @@ def test_normalizes_target_period_and_filter_fields_from_metric_defaults() -> No
     assert normalize_switch_config(current, target, "period").date_range.period == "all"  # type: ignore[union-attr]
     assert normalization_category("query.filters.language") == "filters"
     assert normalize_switch_config(current, target, "filters").filters == (("kind", ("tool",)),)  # type: ignore[union-attr]
+
+
+def test_metric_switch_all_period_remains_relative_and_hides_anchor_in_heading() -> None:
+    all_metric = metric(
+        "all_time", group_id="github", charts={"ranking": capability(periods=("all",))}
+    )
+    day_metric = metric(
+        "daily", group_id="github", charts={"ranking": capability(periods=("1d",))}
+    )
+    initial = config(
+        date_range=DateRange(
+            date(1971, 1, 1),
+            date(2026, 9, 30),
+            relative_until=True,
+            period="all",
+        )
+    )
+
+    one_day = normalize_switch_config(initial, day_metric, "period")
+    assert one_day is not None
+    assert one_day.date_range.period == "1d"
+    assert one_day.date_range.relative_until
+
+    all_time = normalize_switch_config(one_day, all_metric, "period")
+    assert all_time is not None
+    assert all_time.date_range.since == date(1971, 1, 1)
+    assert all_time.date_range.period == "all"
+    assert all_time.date_range.relative_until
+    heading = date_range_heading(
+        "Ranking",
+        all_time.date_range.since,
+        all_time.date_range.until,
+        RenderContext(
+            80,
+            24,
+            load_translator("en"),
+            color=False,
+            period=all_time.date_range.period if all_time.date_range.relative_until else None,
+        ),
+    )
+    assert heading == "Ranking · all"
+    assert "1971-01-01" not in heading
 
 
 def test_uses_the_only_declared_period_when_target_has_no_default() -> None:
