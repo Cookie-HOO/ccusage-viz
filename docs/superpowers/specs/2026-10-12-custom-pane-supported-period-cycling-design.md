@@ -33,6 +33,12 @@ The ordered declared list controls forward/reverse wrapping. A one-item list lea
 
 V1 capabilities and V2 capabilities with omitted or empty `periods` remain unrestricted by the Host. No protocol, persistence schema, or Dataset behavior changes are required.
 
+## Metric Switching to `all`
+
+The `all` period remains a relative period whose authoritative meaning is the `range.period: "all"` marker interpreted by the Dataset. The `1971-01-01` start date is only the existing protocol anchor and must not turn the selection into a fixed range or appear in the heading.
+
+When Metric switching normalizes a target to `all`, it must construct the same relative `DateRange` as ordinary period selection, including `relative_until=True`. This preserves the existing `all` heading through an `all → 1d → all` Metric-switch sequence. No general heading behavior changes.
+
 ## Error Handling
 
 No unsupported period request should be emitted when a non-empty period list is declared. Existing Dataset error handling remains in place for dynamic compatibility constraints and for Datasets that do not declare periods.
@@ -44,7 +50,8 @@ Add regression coverage for:
 1. selecting a non-Ranking chart whose period list differs from Ranking and verifying the Pane receives the selected chart's periods;
 2. Dashboard adjustment preferring the live selected-chart capability over stale stored `metric_periods`;
 3. forward and reverse cycling staying within the declared ordered list;
-4. an omitted period list retaining generic period cycling.
+4. an omitted period list retaining generic period cycling;
+5. Metric normalization through `all → 1d → all` retaining relative-period semantics and never exposing the anchor date in the heading.
 
 ## Scope
 
