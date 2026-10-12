@@ -50,7 +50,7 @@ from ccusage_viz.custom_protocol import (
     V2SummaryRequest,
 )
 from ccusage_viz.errors import QueryError
-from ccusage_viz.formatting import display_width
+from ccusage_viz.formatting import display_width, strip_ansi
 from ccusage_viz.i18n import load_translator
 from ccusage_viz.lifecycle import FixedIntervalScheduler, LifecycleOperation, LifecycleTrigger
 from ccusage_viz.options import (
@@ -1077,9 +1077,17 @@ def test_standalone_metric_chooser_uses_ascii_host_setting(
             (), (), {"ranking": tui_module.V2HistoricalChartCapability(("day",), (None,), ())}
         ),
         {},
+        group_id="github",
     )
     forks = replace(metric, id="forks", title=LocalizedText("Forks", "分支"))
-    descriptor = V2ProbeDescriptor("revision", "1", V2Dataset(text, text), (metric, forks), ())
+    descriptor = V2ProbeDescriptor(
+        "revision",
+        "1",
+        V2Dataset(text, text),
+        (metric, forks),
+        (),
+        metric_groups=(V2MetricGroup("github", LocalizedText("GitHub", "GitHub")),),
+    )
     status = SimpleNamespace(
         registration=SimpleNamespace(dataset_id="dataset", probe=SimpleNamespace(descriptor=descriptor))
     )
@@ -1118,24 +1126,133 @@ def test_standalone_metric_chooser_uses_ascii_host_setting(
     metric_body = next(body for body in bodies if "Stars" in body)
     assert "\\- Long" in metric_body
     assert "└" not in metric_body
+    assert "\x1b[1mGitHub\x1b[0m" in metric_body
+    assert "\x1b[2m|  \\- Long descrip\x1b[0m" in metric_body
 
 
-def test_metric_chooser_navigation_and_enter_ignore_description_rows() -> None:
-    rows = (
-        tui_module.MetricChooserRow("metric", "First", 0),
-        tui_module.MetricChooserRow("description", "  └─ First description"),
-        tui_module.MetricChooserRow("metric", "Second", 1),
-        tui_module.MetricChooserRow("description", "  └─ Second description"),
+def test_dashboard_metric_modal_wraps_to_target_pane_and_submits_selected_metric(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The live Dashboard modal uses its pane width and navigates metric rows only."""
+
+    text = LocalizedText("Dataset", "数据集")
+    unit = CustomUnit("count", text, "suffix", 0)
+
+    def metric(identifier: str, description: str) -> V2MetricDescriptor:
+        return V2MetricDescriptor(
+            identifier,
+            LocalizedText(identifier.title(), identifier),
+            LocalizedText(description, description),
+            unit,
+            "sum",
+            V2MetricCapabilities(
+                (), (), {"ranking": tui_module.V2HistoricalChartCapability(("day",), (None,), ())}
+            ),
+            {},
+            group_id="github",
+        )
+
+    descriptor = V2ProbeDescriptor(
+        "revision",
+        "1",
+        V2Dataset(text, text),
+        (
+            metric("stars", "A deliberately long description that must wrap inside this narrow pane."),
+            metric("forks", "Another deliberately long description that must not become selectable."),
+        ),
+        (),
+        metric_groups=(V2MetricGroup("github", LocalizedText("GitHub", "GitHub")),),
     )
-    selectable = tuple(row.metric_index for row in rows if row.metric_index is not None)
-    selected = selectable[0]
+    status = SimpleNamespace(
+        registration=SimpleNamespace(dataset_id="dataset", probe=SimpleNamespace(descriptor=descriptor))
+    )
+    submitted: list[str | None] = []
+    frames: list[object] = []
 
-    selected = selectable[(selectable.index(selected) + 1) % len(selectable)]
-    selected_row = next(row for row in rows if row.metric_index == selected)
+    class DatasetService:
+        def ready_registered_sources(self) -> tuple[object, ...]:
+            return (status,)
 
-    assert selected == 1
-    assert selected_row.kind == "metric"
-    assert selected_row.metric_index == 1
+        def registered_command_source(self, _dataset_id: str) -> CustomCommandSource:
+            return CustomCommandSource("dataset", ("dataset",))
+
+    class FailedHandle:
+        def result(self) -> object:
+            raise QueryError("error.custom_command_protocol")
+
+        def cancel(self) -> None:
+            pass
+
+    class Runtime:
+        def submit(self, _intent: object) -> FailedHandle:
+            return FailedHandle()
+
+        def cancel(self) -> None:
+            pass
+
+    class Screen:
+        def __init__(self, _stream: object) -> None:
+            pass
+
+        def paint(self, frame: object, **_kwargs: object) -> None:
+            frames.append(frame)
+
+        def finish(self) -> None:
+            pass
+
+    original_default_custom_pane = tui_module.default_custom_pane
+
+    def record_default_custom_pane(*args: object, **kwargs: object) -> object:
+        submitted.append(kwargs.get("metric_id"))
+        return original_default_custom_pane(*args, **kwargs)
+
+    # Enter pane management, open Dataset chooser, select Datasets, then drive
+    # the live metric modal with j/Enter before accepting its chart kind.
+    events = iter(
+        (
+            KeyEvent("m"),
+            KeyEvent("r"),
+            KeyEvent("k"),
+            KeyEvent("\r"),
+            KeyEvent("\r"),
+            KeyEvent("j"),
+            KeyEvent("\r"),
+            KeyEvent("\r"),
+            KeyEvent("\x03"),
+        )
+    )
+    options = _to_options(
+        build_parser(load_translator("en")).parse_args(
+            ["dashboard", "--empty", "--header-style", "hidden"]
+        )
+    )
+    monkeypatch.setattr("ccusage_viz.datasets.service.DatasetService", DatasetService)
+    monkeypatch.setattr(tui_module, "build_query_runtime", Runtime)
+    monkeypatch.setattr(tui_module, "FramePainter", Screen)
+    monkeypatch.setattr(tui_module, "tui_input_mode", __import__("contextlib").nullcontext)
+    monkeypatch.setattr(tui_module, "read_event", lambda _decoder, _timeout: next(events))
+    monkeypatch.setattr(tui_module, "get_terminal_size", lambda: __import__("os").terminal_size((44, 20)))
+    monkeypatch.setattr(tui_module, "default_custom_pane", record_default_custom_pane)
+
+    assert tui_module.run_tui(options, load_translator("en")) == 0
+    assert submitted == ["forks"]
+
+    metric_frames = [
+        "\n".join(frame.rows)
+        for frame in frames
+        if "rrow pane." in "\n".join(frame.rows)
+    ]
+    assert metric_frames
+    # Pane zero is framed and its interior is 20 columns wide at this terminal
+    # size.  The visible wrapped description reaches its frame boundary without
+    # leaking into the adjacent pane.
+    metric_lines = [
+        strip_ansi(line)
+        for line in metric_frames[-1].splitlines()
+        if "rrow pane." in strip_ansi(line)
+    ]
+    assert metric_lines
+    assert all(display_width(line[:22]) == 22 and line[21] == "│" for line in metric_lines)
 
 
 def test_dataset_metric_chooser_keeps_legacy_descriptor_flat() -> None:

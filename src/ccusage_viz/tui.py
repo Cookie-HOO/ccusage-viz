@@ -4337,8 +4337,20 @@ def _choose_dataset_pane_config(
                     for index, row in enumerate(metric_display_rows)
                     if row.metric_index == metric_index
                 )
+                scheme = get_color_scheme(dashboard.host.theme)
                 metric_choices = [
-                    f"{'›' if row.metric_index == metric_index else ' '} {row.text}"
+                    f"{'›' if row.metric_index == metric_index else ' '} "
+                    + (
+                        emphasize(
+                            row.text,
+                            color=scheme.highlight,
+                            enabled=dashboard.host.theme != "no-color",
+                        )
+                        if row.kind == "group"
+                        else dimmed(row.text, color=dashboard.host.theme != "no-color")
+                        if row.kind == "description"
+                        else row.text
+                    )
                     for row in metric_display_rows
                 ]
                 metric_body, metric_offset = _chooser_viewport(
@@ -8701,7 +8713,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             action, pane_index, initial, statuses, service, draft=draft, error=error
         )
 
-    def _dataset_modal_height(pane_index: int) -> int:
+    def _dataset_modal_size(pane_index: int) -> tuple[int, int]:
+        """Return the target pane's content dimensions for its Dataset modal."""
+
         size = get_terminal_size()
         header_rows = len(
             _header_lines(
@@ -8712,10 +8726,15 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 last_successful_update,
             )
         )
-        layout = grid_geometry(size.columns, size.lines, header_rows, 0)
-        cell_height = layout.pane(pane_index).height
+        rect = grid_geometry(size.columns, size.lines, header_rows, 0).pane(pane_index)
         framed = frame_style != "none" or pane_index == focused
-        return max(1, cell_height - 2 if framed else cell_height)
+        return (
+            max(1, rect.width - 2 if framed else rect.width),
+            max(1, rect.height - 2 if framed else rect.height),
+        )
+
+    def _dataset_modal_height(pane_index: int) -> int:
+        return _dataset_modal_size(pane_index)[1]
 
     def _paint_dataset_modal() -> None:
         """Render the active Dataset state in its target pane."""
@@ -8723,7 +8742,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         nonlocal chooser_overlay
         assert dataset_modal is not None
         modal = dataset_modal
-        height = _dataset_modal_height(modal.pane_index)
+        width, height = _dataset_modal_size(modal.pane_index)
         notices = () if modal.error is None else (modal.error,)
         if modal.stage == "pane":
             rows = [
@@ -8843,7 +8862,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             assert isinstance(selected, V2ProbeDescriptor)
             metric_rows = _metric_chooser_display_rows(
                 _dataset_metric_chooser_rows(selected, translator),
-                width=get_terminal_size().columns,
+                width=width,
                 ascii=options.host.ascii,
             )
             metric_row_index = next(
@@ -8889,10 +8908,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             )
             title = translator.text("status.custom_pane_title")
             controls = translator.text("status.custom_pane_controls")
-        size = get_terminal_size()
         formatted_notices = format_notice_lines(
             notices,
-            width=size.columns,
+            width=width,
             color=dashboard_theme != "no-color",
             ascii=options.host.ascii,
             translator=translator,
