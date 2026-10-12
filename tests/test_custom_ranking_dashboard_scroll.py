@@ -14,6 +14,7 @@ from ccusage_viz.custom_component import CustomHistoricalComponent
 from ccusage_viz.i18n import load_translator
 from ccusage_viz.lifecycle import FixedIntervalScheduler, LifecycleOperation, LifecycleTrigger
 from ccusage_viz.options import ProcessConfig
+from ccusage_viz.render.ranking_viewport import RankingViewport
 from ccusage_viz.tui_input import InputDecoder, KeyEvent, MouseEvent, WheelEvent
 
 
@@ -126,9 +127,7 @@ def test_copy_all_uses_every_filtered_entry_without_focus_or_query_work(dashboar
 
     def verify_all():
         assert copied == [
-            "\n\n".join(
-                f"Project {index}\nhttps://example.com/{index}" for index in range(100)
-            )
+            "\n\n".join(f"Project {index}\nhttps://example.com/{index}" for index in range(100))
         ]
         assert focuses[-1] == -1
         assert opened == []
@@ -174,9 +173,7 @@ def test_copy_all_respects_search_and_includes_offscreen_matches(dashboard):
     def verify_search():
         matches = (9, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99)
         assert copied == [
-            "\n\n".join(
-                f"Project {index}\nhttps://example.com/{index}" for index in matches
-            )
+            "\n\n".join(f"Project {index}\nhttps://example.com/{index}" for index in matches)
         ]
         assert len(pane.ranking_viewport.entries) == len(matches)
         return KeyEvent("\x03")
@@ -304,13 +301,20 @@ def test_presentation_adjustments_retain_scrolled_ranking_interactions_without_w
     pane.component.candidate = pane.component.accepted_config = initial_config
     pane.component.model = replace(pane.component.model, config=initial_config)
     initial_offset = 10
-    states: list[tuple[object, tuple[int, tuple[float, float, float, bool], int, tuple[object | None, ...]]]] = []
+    states: list[
+        tuple[object, tuple[int, tuple[float, float, float, bool], int, tuple[object | None, ...]]]
+    ] = []
 
     def state() -> tuple[int, tuple[float, float, float, bool], int, tuple[object | None, ...]]:
         scheduler = pane.scheduler
         return (
             pane.component.generation,
-            (scheduler.baseline, scheduler.interval, scheduler.next_opportunity, scheduler.stopping),
+            (
+                scheduler.baseline,
+                scheduler.interval,
+                scheduler.next_opportunity,
+                scheduler.stopping,
+            ),
             len(requests),
             tuple(current.lifecycle.active for current in panes),
         )
@@ -372,9 +376,7 @@ def test_presentation_adjustments_retain_scrolled_ranking_interactions_without_w
         # This hit map is freshly captured from the current rendered viewport.
         assert pane.ranking_copy_rows == pane.ranking_viewport.hits
         row, (entry_id, column, link_column) = next(
-            (row, hit)
-            for row, hit in pane.ranking_copy_rows.items()
-            if hit[2] is not None
+            (row, hit) for row, hit in pane.ranking_copy_rows.items() if hit[2] is not None
         )
         target.append(entry_id)
         rect = layouts[-1].pane(0)
@@ -414,6 +416,146 @@ def test_presentation_adjustments_retain_scrolled_ranking_interactions_without_w
             after_style,
             check_copy,
             check_link,
+        ]
+    )
+
+
+def test_frameless_focus_reuses_two_committed_ranking_geometries(dashboard):
+    run, panes, frames, focuses, layouts, decoder, copied, opened, _ = dashboard
+    del decoder, copied, opened
+    pane = panes[0]
+    viewport = pane.ranking_viewport
+    initial_offset = 10
+    prepared_widths: list[int] = []
+    snapshots: dict[str, object] = {}
+    original_prepare = RankingViewport.prepare_lines
+
+    def geometry_key_parts(key: object) -> tuple[int, tuple[object, ...]]:
+        # The renderer's geometry key starts with its effective context width.
+        assert isinstance(key, tuple)
+        width, *remaining = key
+        assert isinstance(width, int)
+        return width, tuple(remaining)
+
+    def geometry_snapshot():
+        return (
+            viewport.columns.widths.copy(),
+            viewport.columns.description_width,
+            viewport.starts,
+            viewport.heights,
+            viewport.total_rows,
+        )
+
+    def runtime_state():
+        return tuple(
+            (
+                current.component.generation,
+                current.component.pending_generation,
+                current.scheduler.baseline,
+                current.scheduler.interval,
+                current.scheduler.next_opportunity,
+                current.scheduler.stopping,
+                current.lifecycle.active,
+            )
+            for current in panes
+        ), len(requests)
+
+    def assert_usable():
+        maximum_offset = max(0, viewport.total_rows - viewport.visible_rows)
+        expected_offset = min(initial_offset, maximum_offset)
+        assert expected_offset > 0
+        assert viewport.offset == expected_offset
+        assert viewport.scrollbar is not None
+        assert viewport.scrollbar.offset == viewport.offset
+        assert viewport.scrollbar.maximum_offset == maximum_offset
+        assert viewport.hits
+        assert pane.ranking_copy_rows == viewport.hits
+        rect = layouts[-1].pane(0)
+        framed = focuses[-1] == 0
+        for row, (entry_id, _, _) in viewport.hits.items():
+            assert viewport.body_top <= row < viewport.body_top + viewport.visible_rows
+            assert entry_id in viewport.by_id
+            frame_row = rect.top + row + int(framed)
+            assert 0 <= frame_row < len(frames[-1].rows)
+            assert any(marker in frames[-1].rows[frame_row] for marker in ("⊞", "✓"))
+        assert runtime_state() == snapshots["runtime"]
+
+    requests = []
+    original_request = LifecycleOperation.request
+
+    def record_request(self, trigger, **kwargs):
+        requests.append((self, trigger))
+        return original_request(self, trigger, **kwargs)
+
+    run.monkeypatch.setattr(LifecycleOperation, "request", record_request)
+
+    def after_initial_render():
+        assert focuses[-1] == -1
+        assert viewport.scrollbar is not None
+        assert viewport.hits
+        viewport.offset = initial_offset
+        snapshots["unfocused_key"] = viewport.geometry_key
+        snapshots["unfocused"] = geometry_snapshot()
+        snapshots["runtime"] = runtime_state()
+
+        def count_prepare(self, **kwargs):
+            original_prepare(self, **kwargs)
+            if self is viewport:
+                prepared_widths.append(self.columns.description_width)
+
+        run.monkeypatch.setattr(RankingViewport, "prepare_lines", count_prepare)
+        return KeyEvent("m")
+
+    def after_first_focus():
+        assert focuses[-1] == 0
+        assert viewport.geometry_key != snapshots["unfocused_key"]
+        snapshots["focused_key"] = viewport.geometry_key
+        snapshots["focused"] = geometry_snapshot()
+        unfocused_width, unfocused_remaining = geometry_key_parts(snapshots["unfocused_key"])
+        focused_width, focused_remaining = geometry_key_parts(snapshots["focused_key"])
+        assert unfocused_width - focused_width == 2
+        assert focused_remaining == unfocused_remaining
+        assert viewport.columns.description_width != snapshots["unfocused"][1]
+        assert prepared_widths == [viewport.columns.description_width]
+        assert_usable()
+        return KeyEvent("\x1b")
+
+    def after_first_exit():
+        assert focuses[-1] == -1
+        assert viewport.geometry_key == snapshots["unfocused_key"]
+        assert geometry_snapshot() == snapshots["unfocused"]
+        assert prepared_widths == [snapshots["focused"][1]]
+        assert_usable()
+        return KeyEvent("m")
+
+    def after_second_focus():
+        assert focuses[-1] == 0
+        assert viewport.geometry_key == snapshots["focused_key"]
+        assert geometry_snapshot() == snapshots["focused"]
+        assert prepared_widths == [snapshots["focused"][1]]
+        assert_usable()
+        return KeyEvent("\x1b")
+
+    def after_second_exit():
+        assert focuses[-1] == -1
+        assert viewport.geometry_key == snapshots["unfocused_key"]
+        assert geometry_snapshot() == snapshots["unfocused"]
+        assert prepared_widths == [snapshots["focused"][1]]
+        assert len(viewport._geometry_cache) == 2
+        assert set(viewport._geometry_cache) == {
+            snapshots["unfocused_key"],
+            snapshots["focused_key"],
+        }
+        assert_usable()
+        return KeyEvent("\x03")
+
+    run(
+        [
+            after_initial_render,
+            after_first_focus,
+            after_first_exit,
+            after_second_focus,
+            after_second_exit,
         ]
     )
 
@@ -650,7 +792,9 @@ def test_scrollbar_drag_moves_body_and_releases_capture(dashboard):
         )
 
     def check_inert():
-        assert panes[0].ranking_viewport.offset == panes[0].ranking_viewport.scrollbar.maximum_offset
+        assert (
+            panes[0].ranking_viewport.offset == panes[0].ranking_viewport.scrollbar.maximum_offset
+        )
         return KeyEvent("\x03")
 
     run([prime, grab_thumb, drag_down, check_dragged, check_released, check_inert])
@@ -678,7 +822,9 @@ def test_scrollbar_track_click_pages_without_starting_drag(dashboard):
 
     def check_paged():
         pane = panes[0]
-        assert pane.ranking_viewport.offset == captured["before"] + pane.ranking_viewport.visible_rows
+        assert (
+            pane.ranking_viewport.offset == captured["before"] + pane.ranking_viewport.visible_rows
+        )
         # A page click starts no drag: a later stray motion is inert.
         bar = captured["bar"]
         rect = captured["rect"]
@@ -686,7 +832,9 @@ def test_scrollbar_track_click_pages_without_starting_drag(dashboard):
 
     def check_no_drag():
         pane = panes[0]
-        assert pane.ranking_viewport.offset == captured["before"] + pane.ranking_viewport.visible_rows
+        assert (
+            pane.ranking_viewport.offset == captured["before"] + pane.ranking_viewport.visible_rows
+        )
         return KeyEvent("\x03")
 
     run([prime, click_below_thumb, check_paged, check_no_drag])
