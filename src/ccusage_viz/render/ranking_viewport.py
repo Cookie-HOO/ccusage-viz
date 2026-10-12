@@ -20,6 +20,17 @@ if TYPE_CHECKING:
     from ccusage_viz.render.ranking_presentation import RankingPresentationEntry
 
 
+@dataclass(frozen=True, slots=True)
+class _RankingGeometry:
+    """Immutable scalar facts for one prepared ranking layout."""
+
+    widths: tuple[tuple[str, int], ...]
+    description_width: int
+    starts: tuple[int, ...]
+    heights: tuple[int, ...]
+    total_rows: int
+
+
 @dataclass(slots=True)
 class RankingColumns:
     """Widths measured once across the complete matching sequence."""
@@ -54,6 +65,39 @@ class RankingViewport:
     hits: dict[int, tuple[str, int, int | None]] = field(default_factory=dict)
     total: int | Decimal = 0
     maximum: int | Decimal = 1
+    _geometry_cache: dict[object, _RankingGeometry] = field(
+        default_factory=dict, init=False, repr=False
+    )
+
+    def restore_geometry(self, key: object) -> bool:
+        """Restore and mark recent a defensively copied geometry snapshot."""
+        snapshot = self._geometry_cache.pop(key, None)
+        if snapshot is None:
+            return False
+        self._geometry_cache[key] = snapshot
+        self.columns = RankingColumns(dict(snapshot.widths), snapshot.description_width)
+        self.starts = snapshot.starts
+        self.heights = snapshot.heights
+        self.total_rows = snapshot.total_rows
+        return True
+
+    def remember_geometry(self, key: object) -> None:
+        """Snapshot active geometry and retain only the two most recent layouts."""
+        snapshot = _RankingGeometry(
+            tuple(self.columns.widths.items()),
+            self.columns.description_width,
+            self.starts,
+            self.heights,
+            self.total_rows,
+        )
+        self._geometry_cache.pop(key, None)
+        self._geometry_cache[key] = snapshot
+        while len(self._geometry_cache) > 2:
+            del self._geometry_cache[next(iter(self._geometry_cache))]
+
+    def invalidate_geometry(self) -> None:
+        """Discard snapshots without changing the current scroll position."""
+        self._geometry_cache.clear()
 
     def clamp(self) -> None:
         self.offset = min(max(0, self.offset), max(0, self.total_rows - self.visible_rows))
@@ -68,6 +112,7 @@ class RankingViewport:
         return self.offset != before
 
     def clear(self) -> None:
+        self.invalidate_geometry()
         self.offset = self.total_rows = self.visible_rows = self.reserved_rows = 0
         self.total, self.maximum = 0, 1
         self.body_top = 0

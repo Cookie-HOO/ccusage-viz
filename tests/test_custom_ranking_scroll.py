@@ -118,6 +118,7 @@ def render(
     scrollbar=False,
     copy_all_action=False,
     copied_all=False,
+    search_editing=False,
 ):
     ctx = ctx or context()
     return render_custom_ranking_viewport(
@@ -127,7 +128,7 @@ def render(
         heading="Ranking",
         descriptions_visible=ctx.density in {"full", "detailed"},
         search_query=search,
-        search_editing=False,
+        search_editing=search_editing,
         show_visible_count=True,
         copied_entry_id=copied,
         item_spacing=spacing,
@@ -243,6 +244,190 @@ def test_refresh_shrink_resize_top_and_source_reset():
     assert viewport.offset == 0
 
 
+def test_geometry_cache_restores_copied_columns_and_evicts_lru() -> None:
+    viewport = RankingViewport()
+    viewport.columns.widths["right"] = 12
+    viewport.columns.description_width = 40
+    viewport.starts = (0, 1)
+    viewport.heights = (1,)
+    viewport.total_rows = 1
+    viewport.remember_geometry("a")
+
+    viewport.columns.widths["right"] = 99
+    assert viewport.restore_geometry("a")
+    assert viewport.columns.widths == {"right": 12}
+    assert viewport.columns.description_width == 40
+    assert viewport.starts == (0, 1)
+    assert viewport.heights == (1,)
+    assert viewport.total_rows == 1
+
+    # Restores must create fresh mutable columns from the immutable snapshot.
+    viewport.columns.widths["right"] = 15
+    assert viewport.restore_geometry("a")
+    assert viewport.columns.widths == {"right": 12}
+
+    viewport.remember_geometry("b")
+    viewport.remember_geometry("c")
+    assert not viewport.restore_geometry("a")
+    assert viewport.restore_geometry("c")
+    assert viewport.restore_geometry("b")
+
+    # Restoring b marked it recent, so adding d evicts c and proves capacity two.
+    viewport.remember_geometry("d")
+    assert viewport.restore_geometry("b")
+    assert not viewport.restore_geometry("c")
+    assert viewport.restore_geometry("d")
+
+
+def test_two_warm_widths_skip_all_geometry_work(monkeypatch: pytest.MonkeyPatch) -> None:
+    import ccusage_viz.render.custom_ranking_viewport as module
+
+    viewport = RankingViewport()
+    model = projection(10_000, descriptions=True, comparison=True)
+    wide = context(width=100, height=24, density="detailed")
+    narrow = replace(wide, width=98)
+    render(model, viewport, wide, spacing="line", scrollbar=True)
+    render(model, viewport, narrow, spacing="line", scrollbar=True)
+
+    monkeypatch.setattr(
+        RankingViewport,
+        "prepare_lines",
+        lambda *args, **kwargs: pytest.fail("rebuilt lines"),
+    )
+    monkeypatch.setattr(
+        module,
+        "measure_ranking_columns",
+        lambda *args, **kwargs: pytest.fail("remeasured columns"),
+    )
+    # With scrollbar gutters these exercise effective geometry widths 99 and 97.
+    render(model, viewport, wide, spacing="line", scrollbar=True)
+    render(model, viewport, narrow, spacing="line", scrollbar=True)
+
+
+def test_cached_geometry_clamps_with_new_visible_rows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import ccusage_viz.render.custom_ranking_viewport as module
+
+    viewport = RankingViewport()
+    model = projection(100)
+    tall = context(height=30)
+
+    # Warm both chrome geometries, then leave the non-editing geometry active.
+    render(model, viewport, tall)
+    render(model, viewport, tall, search_editing=True)
+    render(model, viewport, tall)
+
+    monkeypatch.setattr(
+        RankingViewport,
+        "prepare_lines",
+        lambda *args, **kwargs: pytest.fail("rebuilt lines"),
+    )
+    monkeypatch.setattr(
+        module,
+        "measure_ranking_columns",
+        lambda *args, **kwargs: pytest.fail("remeasured columns"),
+    )
+    original = viewport.total_rows - 2
+    viewport.offset = original
+
+    # Restoring editing chrome while shrinking the context must not clamp with
+    # the tall viewport's stale, larger visible_rows before render recalculates it.
+    render(model, viewport, replace(tall, height=8), search_editing=True)
+
+    assert viewport.visible_rows < tall.height - 2
+    assert viewport.offset == min(original, viewport.total_rows - viewport.visible_rows)
+
+
+def test_cached_geometry_matches_first_render_at_each_width() -> None:
+    viewport = RankingViewport()
+    model = projection(100, descriptions=True, comparison=True)
+    wide = context(width=100, height=24, density="detailed")
+    narrow = replace(wide, width=98)
+
+    render(model, viewport, wide, spacing="line", scrollbar=True, copied="5")
+    viewport.offset = 17
+
+    def capture(ctx: RenderContext):
+        output = render(model, viewport, ctx, spacing="line", scrollbar=True, copied="5")
+        return (
+            output,
+            viewport.total_rows,
+            viewport.scrollbar,
+            viewport.starts,
+            viewport.heights,
+            viewport.hits.copy(),
+            viewport.offset,
+        )
+
+    expected_wide = capture(wide)
+    expected_narrow = capture(narrow)
+    assert "✓" in expected_wide[0]
+    assert expected_wide[-1] > 0
+    assert capture(wide) == expected_wide
+    assert capture(narrow) == expected_narrow
+
+
+@pytest.mark.parametrize("change", ("series", "search", "language", "unit"))
+def test_stable_data_changes_invalidate_all_geometry_snapshots(
+    monkeypatch: pytest.MonkeyPatch, change: str
+) -> None:
+    viewport = RankingViewport()
+    model = projection(100, descriptions=True, comparison=True)
+    wide = context(width=100, density="detailed")
+    narrow = replace(wide, width=98)
+    render(model, viewport, wide, spacing="line", scrollbar=True)
+    render(model, viewport, narrow, spacing="line", scrollbar=True)
+    stale_starts = viewport.starts
+
+    calls = 0
+    original = RankingViewport.prepare_lines
+
+    def count_prepare(self, **kwargs):
+        nonlocal calls
+        calls += 1
+        return original(self, **kwargs)
+
+    monkeypatch.setattr(RankingViewport, "prepare_lines", count_prepare)
+    changed_model = model
+    changed_context = wide
+    search = ""
+    if change == "series":
+        changed_model = replace(model, series=model.series[:-1])
+    elif change == "search":
+        search = "Project 9"
+    elif change == "language":
+        changed_context = replace(wide, translator=load_translator("zh"))
+    else:
+        changed_model = replace(
+            model,
+            unit=CustomUnit("tokens", LocalizedText("tokens", "令牌"), "suffix", 0),
+        )
+
+    render(
+        changed_model,
+        viewport,
+        changed_context,
+        search=search,
+        spacing="line",
+        scrollbar=True,
+    )
+    assert calls == 1
+    assert viewport.starts is not stale_starts
+
+    # The other formerly warm width was invalidated along with the active one.
+    other_context = replace(changed_context, width=98)
+    render(
+        changed_model,
+        viewport,
+        other_context,
+        search=search,
+        spacing="line",
+        scrollbar=True,
+    )
+    assert calls == 2
+
+
 def test_warm_large_ranking_only_formats_visible_entries(monkeypatch):
     import ccusage_viz.render.custom_ranking_viewport as module
     import ccusage_viz.render.ranking_presentation as presentation
@@ -327,7 +512,8 @@ def test_density_rebuild_preserves_window_body_scrollbar_and_hits():
     minimal = replace(detailed, density="minimal")
     actual = render(model, viewport, minimal, spacing="line", scrollbar=True).splitlines()
     expected = render_custom_ranking(
-        model, replace(minimal, width=minimal.width - 1),
+        model,
+        replace(minimal, width=minimal.width - 1),
         descriptions_visible=False,
         show_visible_count=True,
     ).splitlines()
@@ -446,9 +632,11 @@ def test_scrollbar_persists_on_overflow_and_tracks_wheel_offset(ascii):
     assert viewport.scrollbar.thumb_top > bar.thumb_top
     rows = moved.splitlines()
     for row in range(bar.top, bar.top + bar.height):
-        expected = ("#" if ascii else "█") if viewport.scrollbar.on_thumb(row) else ("|" if ascii else "│")
+        expected = (
+            ("#" if ascii else "█") if viewport.scrollbar.on_thumb(row) else ("|" if ascii else "│")
+        )
         assert strip_ansi(rows[row])[-1] == expected
-    assert rows[:bar.top] == initial.splitlines()[:bar.top]
+    assert rows[: bar.top] == initial.splitlines()[: bar.top]
     viewport.offset = 9999
     render(model, viewport, ctx, scrollbar=True)
     bar = viewport.scrollbar
@@ -479,7 +667,9 @@ def test_scrollbar_gutter_reuses_warm_layout_and_does_not_overlap_hits(monkeypat
     ctx = context(width=80)
     render(model, viewport, ctx, scrollbar=True)
     prepared = viewport.entries
-    monkeypatch.setattr(RankingViewport, "prepare_lines", lambda **kw: pytest.fail("layout rebuilt"))
+    monkeypatch.setattr(
+        RankingViewport, "prepare_lines", lambda **kw: pytest.fail("layout rebuilt")
+    )
     viewport.offset = 9990
     render(model, viewport, ctx, scrollbar=True)
     assert viewport.entries is prepared

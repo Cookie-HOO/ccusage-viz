@@ -115,6 +115,7 @@ def render_custom_ranking_viewport(
         )
 
     if rebuild_data:
+        viewport.invalidate_geometry()
 
         def localized(text: LocalizedText) -> str:
             return text.zh_cn if context.translator.language == "zh" else text.en
@@ -186,23 +187,24 @@ def render_custom_ranking_viewport(
         viewport.source = projection.series
         viewport.data_key = data_key
     if rebuild_geometry:
-        viewport.columns = RankingColumns()
-        if viewport.entries:
-            measure_ranking_columns(
-                viewport.entries,
-                context=context,
-                total=viewport.total,
-                show_percentage=projection.show_percentage,
-                comparison_mode=comparison,
-                comparison_available=projection.comparison_available,
-                show_new_entries=True,
-                total_entry_count=len(viewport.entries),
-                columns=viewport.columns,
-            )
-        viewport.prepare_lines(descriptions=descriptions_visible, spacing=item_spacing)
-        # Geometry changes retain the display-line position whenever it remains
-        # valid; render() performs a second clamp once chrome height is known.
-        viewport.clamp()
+        if not viewport.restore_geometry(geometry_key):
+            viewport.columns = RankingColumns()
+            if viewport.entries:
+                measure_ranking_columns(
+                    viewport.entries,
+                    context=context,
+                    total=viewport.total,
+                    show_percentage=projection.show_percentage,
+                    comparison_mode=comparison,
+                    comparison_available=projection.comparison_available,
+                    show_new_entries=True,
+                    total_entry_count=len(viewport.entries),
+                    columns=viewport.columns,
+                )
+            viewport.prepare_lines(descriptions=descriptions_visible, spacing=item_spacing)
+            viewport.remember_geometry(geometry_key)
+        # render() clamps only after deriving visible_rows from the current
+        # chrome and context height; the previous viewport size may be stale.
         viewport.geometry_key = geometry_key
     if not projection.series:
         viewport.active = True
@@ -240,8 +242,12 @@ def render_custom_ranking_viewport(
             rendered = "\n".join(rows)
     if gutter and viewport.visible_rows > 0 and viewport.total_rows > viewport.visible_rows:
         bar = Scrollbar(
-            context.width, viewport.body_top, viewport.visible_rows,
-            viewport.total_rows, viewport.visible_rows, viewport.offset,
+            context.width,
+            viewport.body_top,
+            viewport.visible_rows,
+            viewport.total_rows,
+            viewport.visible_rows,
+            viewport.offset,
         )
         viewport.scrollbar = bar
         scheme = get_color_scheme(context.color_scheme)
@@ -250,8 +256,13 @@ def render_custom_ranking_viewport(
         for row in range(bar.top, bar.top + bar.height):
             thumb = bar.on_thumb(row)
             mark = ("#" if context.ascii else "█") if thumb else ("|" if context.ascii else "│")
-            rows[row] = pad_width(clip_width(rows[row], context.width), context.width) + styled_text(
-                mark, scheme.highlight if thumb else scheme.muted, context, bold=thumb,
+            rows[row] = pad_width(
+                clip_width(rows[row], context.width), context.width
+            ) + styled_text(
+                mark,
+                scheme.highlight if thumb else scheme.muted,
+                context,
+                bold=thumb,
             )
         rendered = "\n".join(rows)
     return rendered
