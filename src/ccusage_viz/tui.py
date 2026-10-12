@@ -609,17 +609,21 @@ def _custom_metric_periods(
     return capability.periods if isinstance(capability, V2HistoricalChartCapability) else ()
 
 
+@dataclass(frozen=True, slots=True)
+class MetricChooserRow:
+    """One presentation row in the V2 Dataset Metric chooser."""
+
+    kind: Literal["group", "metric", "description"]
+    text: str
+    metric_index: int | None = None
+
+
 def _dataset_metric_chooser_rows(
     descriptor: V2ProbeDescriptor, translator: Translator
-) -> tuple[tuple[str, int | None], ...]:
-    """Return display rows and Metric indexes, keeping legacy descriptors flat."""
+) -> tuple[MetricChooserRow, ...]:
+    """Return grouped, selectable Metric rows with explanatory children."""
 
-    if not descriptor.metric_groups:
-        return tuple(
-            (_dataset_title(metric.title, translator), index)
-            for index, metric in enumerate(descriptor.metrics)
-        )
-    rows: list[tuple[str, int | None]] = []
+    rows: list[MetricChooserRow] = []
     for group in descriptor.metric_groups:
         members = [
             (index, metric)
@@ -628,14 +632,42 @@ def _dataset_metric_chooser_rows(
         ]
         if not members:
             continue
-        rows.append((_dataset_title(group.title, translator), None))
-        rows.extend((f"  {_dataset_title(metric.title, translator)}", index) for index, metric in members)
+        rows.append(MetricChooserRow("group", _dataset_title(group.title, translator)))
+        for member_index, (index, metric) in enumerate(members):
+            is_last = member_index == len(members) - 1
+            branch = "└─" if is_last else "├─"
+            continuation = "   " if is_last else "│  "
+            rows.extend(
+                (
+                    MetricChooserRow(
+                        "metric", f"{branch} {_dataset_title(metric.title, translator)}", index
+                    ),
+                    MetricChooserRow(
+                        "description",
+                        f"{continuation}└─ {_dataset_title(metric.description, translator)}",
+                    ),
+                )
+            )
     rows.extend(
-        (_dataset_title(metric.title, translator), index)
+        row
         for index, metric in enumerate(descriptor.metrics)
         if metric.group_id is None
+        for row in (
+            MetricChooserRow("metric", _dataset_title(metric.title, translator), index),
+            MetricChooserRow(
+                "description", f"  └─ {_dataset_title(metric.description, translator)}"
+            ),
+        )
     )
     return tuple(rows)
+
+
+def _metric_chooser_row_text(row: MetricChooserRow, *, ascii: bool) -> str:
+    """Adapt tree connectors for an ASCII terminal without changing row identity."""
+
+    if not ascii:
+        return row.text
+    return row.text.translate(str.maketrans({"├": "|", "└": "\\", "│": "|", "─": "-"}))
 
 
 def _dataset_metric_chooser_chrome(
@@ -4261,7 +4293,9 @@ def _choose_dataset_pane_config(
         metric_titles: tuple[str, str] | None = None
         if isinstance(descriptor, V2ProbeDescriptor):
             metric_rows = _dataset_metric_chooser_rows(descriptor, translator)
-            selectable = tuple(index for _, index in metric_rows if index is not None)
+            selectable = tuple(
+                row.metric_index for row in metric_rows if row.metric_index is not None
+            )
             metric_index = next(
                 (index for index in selectable if descriptor.metrics[index].id == descriptor.default_metric_id),
                 selectable[0],
@@ -4270,11 +4304,14 @@ def _choose_dataset_pane_config(
             while True:
                 metric = descriptor.metrics[metric_index]
                 metric_row_index = next(
-                    index for index, (_, item_index) in enumerate(metric_rows) if item_index == metric_index
+                    index
+                    for index, row in enumerate(metric_rows)
+                    if row.metric_index == metric_index
                 )
                 metric_choices = [
-                    f"{'›' if item_index == metric_index else ' '} {label}"
-                    for label, item_index in metric_rows
+                    f"{'›' if row.metric_index == metric_index else ' '} "
+                    f"{_metric_chooser_row_text(row, ascii=False)}"
+                    for row in metric_rows
                 ]
                 metric_body, metric_offset = _chooser_viewport(
                     metric_choices,
@@ -8778,11 +8815,28 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             assert isinstance(selected, V2ProbeDescriptor)
             metric_rows = _dataset_metric_chooser_rows(selected, translator)
             metric_row_index = next(
-                index for index, (_, item_index) in enumerate(metric_rows) if item_index == modal.index
+                index
+                for index, row in enumerate(metric_rows)
+                if row.metric_index == modal.index
             )
+            scheme = get_color_scheme(dashboard_theme)
             rows = [
-                f"{'›' if item_index == modal.index else ' '} {label}"
-                for label, item_index in metric_rows
+                f"{'›' if row.metric_index == modal.index else ' '} "
+                + (
+                    emphasize(
+                        _metric_chooser_row_text(row, ascii=options.host.ascii),
+                        color=scheme.highlight,
+                        enabled=dashboard_theme != "no-color",
+                    )
+                    if row.kind == "group"
+                    else dimmed(
+                        _metric_chooser_row_text(row, ascii=options.host.ascii),
+                        color=dashboard_theme != "no-color",
+                    )
+                    if row.kind == "description"
+                    else _metric_chooser_row_text(row, ascii=options.host.ascii)
+                )
+                for row in metric_rows
             ]
             metric_body, modal.offset = _chooser_viewport(
                 rows, index=metric_row_index, offset=modal.offset, height=height, reserved_rows=4
@@ -8988,9 +9042,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 if isinstance(descriptor, V2ProbeDescriptor):
                     modal.metrics = descriptor.metrics
                     selectable = tuple(
-                        item_index
-                        for _, item_index in _dataset_metric_chooser_rows(descriptor, translator)
-                        if item_index is not None
+                        row.metric_index
+                        for row in _dataset_metric_chooser_rows(descriptor, translator)
+                        if row.metric_index is not None
                     )
                     modal.index = next(
                         (
@@ -9015,9 +9069,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             )
             assert isinstance(selected, V2ProbeDescriptor)
             selectable = tuple(
-                item_index
-                for _, item_index in _dataset_metric_chooser_rows(selected, translator)
-                if item_index is not None
+                row.metric_index
+                for row in _dataset_metric_chooser_rows(selected, translator)
+                if row.metric_index is not None
             )
             if key == "\x1b":
                 modal.stage, modal.index, modal.offset = "source", 0, 0

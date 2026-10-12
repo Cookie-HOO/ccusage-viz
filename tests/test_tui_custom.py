@@ -984,7 +984,7 @@ def test_dataset_metric_chooser_groups_declared_metrics_and_keeps_ungrouped_flat
     def metric(identifier: str, group_id: str | None = None) -> V2MetricDescriptor:
         return V2MetricDescriptor(
             identifier,
-            LocalizedText(identifier, identifier),
+            LocalizedText(identifier, f"{identifier}-zh"),
             text,
             unit,
             "sum",
@@ -1005,12 +1005,28 @@ def test_dataset_metric_chooser_groups_declared_metrics_and_keeps_ungrouped_flat
         ),
     )
 
-    assert tui_module._dataset_metric_chooser_rows(descriptor, load_translator("en")) == (
-        ("GitHub tools", None),
-        ("  stars", 0),
-        ("  updated", 1),
-        ("legacy", 2),
-    )
+    rows = tui_module._dataset_metric_chooser_rows(descriptor, load_translator("en"))
+
+    assert [(row.kind, row.text, row.metric_index) for row in rows] == [
+        ("group", "GitHub tools", None),
+        ("metric", "├─ stars", 0),
+        ("description", "│  └─ Dataset", None),
+        ("metric", "└─ updated", 1),
+        ("description", "   └─ Dataset", None),
+        ("metric", "legacy", 2),
+        ("description", "  └─ Dataset", None),
+    ]
+
+    chinese_rows = tui_module._dataset_metric_chooser_rows(descriptor, load_translator("zh"))
+    assert [(row.text, row.metric_index) for row in chinese_rows] == [
+        ("GitHub 工具", None),
+        ("├─ stars-zh", 0),
+        ("│  └─ 数据集", None),
+        ("└─ updated-zh", 1),
+        ("   └─ 数据集", None),
+        ("legacy-zh", 2),
+        ("  └─ 数据集", None),
+    ]
 
 
 def test_dataset_metric_chooser_keeps_legacy_descriptor_flat() -> None:
@@ -1027,7 +1043,12 @@ def test_dataset_metric_chooser_keeps_legacy_descriptor_flat() -> None:
     )
     descriptor = V2ProbeDescriptor("revision", "1", V2Dataset(text, text), (metric,), ())
 
-    assert tui_module._dataset_metric_chooser_rows(descriptor, load_translator("en")) == (("Stars", 0),)
+    rows = tui_module._dataset_metric_chooser_rows(descriptor, load_translator("en"))
+
+    assert [(row.kind, row.text, row.metric_index) for row in rows] == [
+        ("metric", "Stars", 0),
+        ("description", "  └─ Dataset", None),
+    ]
 
 
 def test_dataset_metric_chooser_titles_the_selected_dataset() -> None:
