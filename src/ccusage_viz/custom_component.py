@@ -42,6 +42,18 @@ def custom_replacement_required(current: CustomChartConfig, updated: CustomChart
     )
 
 
+def custom_projection_replacement_required(
+    current: CustomChartConfig, updated: CustomChartConfig
+) -> bool:
+    """Return whether accepted facts need a new local projection."""
+
+    return (
+        current.top != updated.top
+        or current.other != updated.other
+        or current.ranking_comparison != updated.ranking_comparison
+    )
+
+
 def custom_summary_replacement_required(
     current: CustomChartConfig, updated: CustomChartConfig
 ) -> bool:
@@ -83,6 +95,37 @@ def _query_identity(config: CustomChartConfig) -> tuple[object, ...]:
         config.filters,
         config.group_by,
         config.granularity,
+    )
+
+
+def _primary_completion_matches(
+    issued: CustomChartConfig | None, current: CustomChartConfig | None
+) -> bool:
+    """Match primary source facts independently of local projection and rendering."""
+
+    return (
+        issued is not None
+        and current is not None
+        and issued.metric_id == current.metric_id
+        and _query_identity(issued) == _query_identity(current)
+    )
+
+
+def _comparison_completion_matches(
+    issued: CustomChartConfig | None, current: CustomChartConfig | None
+) -> bool:
+    """Match comparison data semantics while allowing renderer metadata to drift."""
+
+    if issued is None or current is None:
+        return False
+    return issued == replace(
+        current,
+        presentation=issued.presentation,
+        weekdays=issued.weekdays,
+        initial_explicit=issued.initial_explicit,
+        metric_summary=issued.metric_summary,
+        metric_periods=issued.metric_periods,
+        metric_titles=issued.metric_titles,
     )
 
 
@@ -181,9 +224,10 @@ class CustomHistoricalComponent:
     def _reproject(self) -> None:
         if self.accepted_config is None or self.accepted_response is None:
             return
+        comparison_request = self.comparison_request_config()
         comparison = (
             self.comparison_response
-            if self.comparison_config == self.comparison_request_config()
+            if _comparison_completion_matches(self.comparison_config, comparison_request)
             else None
         )
         self.model = process_custom_historical(
@@ -209,7 +253,12 @@ class CustomHistoricalComponent:
         """Normalize one Dataset-reported target field and retry without committing it."""
 
         category = normalization_category(field)
-        if self.switch_target_config is None or category is None or category in self.switch_normalizations:
+        if (
+            self.switch_target_config is None
+            or target.id != self.switch_target_config.metric_id
+            or category is None
+            or category in self.switch_normalizations
+        ):
             return False
         updated = normalize_switch_config(self.switch_target_config, target, category)
         if updated is None:
@@ -228,7 +277,17 @@ class CustomHistoricalComponent:
     def configure(self, config: CustomChartConfig, *, data_affecting: bool) -> None:
         if config == self.candidate:
             return
+        previous_comparison_request = self.comparison_request_config()
+        previous_comparison_attached = _comparison_completion_matches(
+            self.comparison_config, previous_comparison_request
+        )
         self.candidate = config
+        current_comparison_request = self.comparison_request_config()
+        if not _comparison_completion_matches(
+            previous_comparison_request, current_comparison_request
+        ):
+            self.comparison_pending_generation = None
+            self.comparison_error = None
         if data_affecting:
             if self.accepted_config is not None and self.accepted_config.source != config.source:
                 self.capability = None
@@ -246,8 +305,19 @@ class CustomHistoricalComponent:
             and not self.is_pending
             and not custom_replacement_required(self.accepted_config, config)
         ):
+            previous_accepted = self.accepted_config
             self.accepted_config = config
-            self._reproject()
+            if (
+                custom_projection_replacement_required(previous_accepted, config)
+                or previous_comparison_attached
+                != _comparison_completion_matches(
+                    self.comparison_config, current_comparison_request
+                )
+                or self.model is None
+            ):
+                self._reproject()
+            else:
+                self.model = replace(self.model, config=config)
 
     def set_capability(self, capability: CustomChartCapability) -> None:
         """Keep Probe-declared controls available across rejected chart queries."""
@@ -269,23 +339,24 @@ class CustomHistoricalComponent:
         if completion.generation != self.generation:
             return False
         if completion.purpose == "comparison":
-            if completion.config != self.comparison_request_config():
+            comparison_request = self.comparison_request_config()
+            if not self.comparison_is_pending or not _comparison_completion_matches(
+                completion.config, comparison_request
+            ):
                 return False
-            self.comparison_config = completion.config
+            self.comparison_config = comparison_request
             self.comparison_response = completion.response
             self.comparison_pending_generation = None
             self.comparison_error = None
             self._reproject()
             self.render_revision += 1
             return True
-        if completion.config != self.request_config:
+        if not _primary_completion_matches(completion.config, self.request_config):
             return False
         if self.switch_target_config is not None:
             self.candidate = self.switch_target_config
             self.switch_target_config = None
             self.switch_normalizations = frozenset()
-        if self.capability is not None:
-            self.candidate = replace(self.candidate, ranking_comparison=self.capability.comparison)
         self.accepted_config = self.candidate
         self.accepted_response = completion.response
         self.retrieval_top = completion.config.top
@@ -348,6 +419,8 @@ class CustomHistoricalComponent:
         descriptor: V2ProbeDescriptor | None = None
         runtime: V2Runtime | None = None
         if isinstance(payload, V2ChartResponse):
+            if payload.metric_id != self.request_config.metric_id:
+                return False
             metric = next(
                 item for item in payload.descriptor.metrics if item.id == payload.metric_id
             )
@@ -356,9 +429,7 @@ class CustomHistoricalComponent:
                 raise TypeError("v2 chart response does not describe the selected historical chart")
             descriptor = payload.descriptor
             runtime = payload.runtime
-            request_config = replace(
-                self.request_config, ranking_comparison=capability.comparison
-            )
+            request_config = replace(self.request_config, ranking_comparison=capability.comparison)
             if self.switch_target_config is not None:
                 self.switch_target_config = request_config
             else:
@@ -399,6 +470,8 @@ class CustomHistoricalComponent:
         if generation != self.generation:
             return False
         if purpose == "comparison":
+            if not self.comparison_is_pending:
+                return False
             self.comparison_pending_generation = None
             self.comparison_error = error
             return True

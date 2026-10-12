@@ -6,10 +6,12 @@ from typing import Literal, cast
 
 import pytest
 
+import ccusage_viz.custom_component as custom_component_module
 from ccusage_viz.core.time import DateRange
 from ccusage_viz.custom_component import (
     CustomCompletion,
     CustomHistoricalComponent,
+    custom_projection_replacement_required,
     custom_replacement_required,
     custom_summary_replacement_required,
 )
@@ -29,14 +31,18 @@ from ccusage_viz.custom_models import (
     CustomSeries,
     CustomUnit,
     LocalizedText,
+    V2Dataset,
     V2HistoricalChartCapability,
     V2MetricCapabilities,
     V2MetricDescriptor,
+    V2ProbeDescriptor,
+    V2Runtime,
 )
 from ccusage_viz.custom_protocol import (
     CustomChartResponse,
     CustomPaneResponse,
     CustomSummaryResponse,
+    V2ChartResponse,
 )
 from ccusage_viz.errors import QueryError, UsageError
 from ccusage_viz.formatting import display_width, strip_ansi
@@ -135,6 +141,17 @@ def test_historical_metric_switch_commits_only_after_target_response() -> None:
     assert component.request_config.metric_id == "updated_days"
 
 
+def test_historical_metric_switch_rejects_completion_for_previous_metric() -> None:
+    component = CustomHistoricalComponent(config(metric_id="stars"))
+    issued = component.request_config
+    component.begin_metric_switch(config(metric_id="updated_days"))
+
+    assert not component.apply_result(CustomCompletion(component.generation, issued, response()))
+    assert component.is_pending
+    assert component.switch_target_config is not None
+    assert component.switch_target_config.metric_id == "updated_days"
+
+
 def test_historical_metric_switch_failure_retains_old_facts_and_metric() -> None:
     component = CustomHistoricalComponent(config(metric_id="stars"))
     assert component.accept_response(response())
@@ -157,15 +174,47 @@ def test_historical_metric_switch_retries_unsupported_period_with_target_default
         LocalizedText("Updated", "更新"),
         UNIT,
         "sum",
-        V2MetricCapabilities((), (), {"timeline": V2HistoricalChartCapability(("day",), ("book",), (), ("30d",))}),
+        V2MetricCapabilities(
+            (), (), {"timeline": V2HistoricalChartCapability(("day",), ("book",), (), ("30d",))}
+        ),
         {"timeline": CustomChartDefaults("30d", "book", None)},
     )
-    component.begin_metric_switch(replace(config(metric_id="updated_days"), date_range=DateRange(date(2026, 9, 1), date(2026, 9, 2), period="7d")))
+    component.begin_metric_switch(
+        replace(
+            config(metric_id="updated_days"),
+            date_range=DateRange(date(2026, 9, 1), date(2026, 9, 2), period="7d"),
+        )
+    )
 
     assert component.retry_metric_switch("range.period", target)
     assert component.candidate.metric_id == "stars"
     assert component.request_config.date_range.period == "30d"
     assert not component.retry_metric_switch("range.period", target)
+
+
+def test_historical_metric_switch_retry_rejects_mismatched_target_without_mutation() -> None:
+    component = CustomHistoricalComponent(config(metric_id="stars"))
+    component.begin_metric_switch(config(metric_id="updated_days"))
+    target = V2MetricDescriptor(
+        "different_metric",
+        LocalizedText("Different", "不同"),
+        LocalizedText("Different", "不同"),
+        UNIT,
+        "sum",
+        V2MetricCapabilities(
+            (), (), {"timeline": V2HistoricalChartCapability(("day",), ("book",), (), ("30d",))}
+        ),
+        {"timeline": CustomChartDefaults("30d", "book", None)},
+    )
+    request = component.request_config
+    generation = component.generation
+    pending_generation = component.pending_generation
+
+    assert not component.retry_metric_switch("range.period", target)
+    assert component.request_config is request
+    assert component.generation == generation
+    assert component.pending_generation == pending_generation
+    assert component.switch_normalizations == frozenset()
 
 
 def test_custom_ranking_uses_capability_sort_direction_for_entries_and_prior_ranks() -> None:
@@ -177,7 +226,9 @@ def test_custom_ranking_uses_capability_sort_direction_for_entries_and_prior_ran
             current.capabilities,
             charts={
                 **current.capabilities.charts,
-                "ranking": replace(current.capabilities.charts["ranking"], sort_direction="ascending"),
+                "ranking": replace(
+                    current.capabilities.charts["ranking"], sort_direction="ascending"
+                ),
             },
         ),
     )
@@ -374,6 +425,100 @@ def test_projection_rejects_non_overlapping_aggregation_bucket() -> None:
         process_custom_historical(monthly, chart)
 
 
+def v2_chart_response(metric_id: str) -> V2ChartResponse:
+    text = LocalizedText("Reading", "阅读")
+    capability = V2HistoricalChartCapability(("day",), ("book",), ())
+
+    def metric(identifier: str) -> V2MetricDescriptor:
+        return V2MetricDescriptor(
+            identifier,
+            LocalizedText(identifier, identifier),
+            text,
+            UNIT,
+            "sum",
+            V2MetricCapabilities(
+                (),
+                (),
+                {kind: capability for kind in ("timeline", "ranking")},
+            ),
+            {},
+        )
+
+    return V2ChartResponse(
+        metric_id,
+        response().data,
+        V2ProbeDescriptor(
+            "reading-1",
+            "0.1.0",
+            V2Dataset(text, text),
+            (metric("stars"), metric("updated_days")),
+            (),
+        ),
+        V2Runtime(()),
+    )
+
+
+@pytest.mark.parametrize("purpose", ("primary", "comparison"))
+def test_metric_switch_rejects_v2_response_for_previous_metric_without_mutation(
+    purpose: Literal["primary", "comparison"],
+) -> None:
+    component = CustomHistoricalComponent(config(kind="ranking", metric_id="stars"))
+    assert component.accept_response(response())
+    component.begin_metric_switch(config(kind="ranking", metric_id="updated_days"))
+    if purpose == "comparison":
+        assert component.start_comparison() is not None
+    state = (
+        component.candidate,
+        component.switch_target_config,
+        component.model,
+        component.accepted_config,
+        component.accepted_response,
+        component.generation,
+        component.pending_generation,
+        component.comparison_pending_generation,
+        component.is_pending,
+        component.comparison_is_pending,
+        component.capability,
+        component.v2_descriptor,
+        component.runtime,
+        component.render_revision,
+    )
+
+    assert not component.apply_provider_result(
+        SimpleNamespace(custom_response=v2_chart_response("stars")), purpose=purpose
+    )
+    assert (
+        component.candidate,
+        component.switch_target_config,
+        component.model,
+        component.accepted_config,
+        component.accepted_response,
+        component.generation,
+        component.pending_generation,
+        component.comparison_pending_generation,
+        component.is_pending,
+        component.comparison_is_pending,
+        component.capability,
+        component.v2_descriptor,
+        component.runtime,
+        component.render_revision,
+    ) == state
+
+
+def test_metric_switch_accepts_v2_response_for_requested_metric() -> None:
+    component = CustomHistoricalComponent(config(metric_id="stars"))
+    assert component.accept_response(response())
+    component.begin_metric_switch(config(metric_id="updated_days"))
+
+    assert component.apply_provider_result(
+        SimpleNamespace(custom_response=v2_chart_response("updated_days"))
+    )
+    assert component.candidate.metric_id == "updated_days"
+    assert component.accepted_config is not None
+    assert component.accepted_config.metric_id == "updated_days"
+    assert not component.is_pending
+
+
 def test_component_accepts_provider_chart_response_without_legacy_summary() -> None:
     legacy = response()
     chart = CustomChartResponse(legacy.dataset, legacy.capabilities, legacy.data)
@@ -521,6 +666,38 @@ def test_custom_replacement_requires_only_source_query_fields() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    "updated",
+    (
+        lambda value: replace(value, presentation=replace(value.presentation, theme="dracula")),
+        lambda value: replace(value, presentation=replace(value.presentation, style="list")),
+        lambda value: replace(value, presentation=replace(value.presentation, density="minimal")),
+        lambda value: replace(value, presentation=replace(value.presentation, legend="hidden")),
+        lambda value: replace(value, weekdays="hide"),
+    ),
+)
+def test_renderer_only_changes_do_not_require_custom_reprojection(updated: object) -> None:
+    current = config(kind="ranking", top=10)
+
+    assert callable(updated)
+    assert not custom_projection_replacement_required(current, updated(current))
+
+
+@pytest.mark.parametrize(
+    "updated",
+    (
+        lambda value: replace(value, top=1),
+        lambda value: replace(value, other="hide"),
+        lambda value: replace(value, ranking_comparison="none"),
+    ),
+)
+def test_local_projection_changes_require_custom_reprojection(updated: object) -> None:
+    current = config(kind="ranking", top=10)
+
+    assert callable(updated)
+    assert custom_projection_replacement_required(current, updated(current))
+
+
 def test_custom_summary_replacement_requires_only_summary_query_fields() -> None:
     current = config()
 
@@ -618,24 +795,341 @@ def test_component_reprojects_only_display_local_configuration() -> None:
     assert component.accept_response(response())
     accepted_model = component.model
     accepted_config = component.accepted_config
+    accepted_response = component.accepted_response
+    generation = component.generation
     source_changed = replace(component.candidate, source=CustomCommandSource("other", ("other",)))
 
     component.configure(source_changed, data_affecting=False)
 
     assert component.model is accepted_model
     assert component.accepted_config is accepted_config
-    assert component.accepted_response is not None
+    assert component.accepted_response is accepted_response
+    assert component.generation == generation
 
 
-def test_component_reprojects_accepted_response_for_local_display_change() -> None:
-    component = CustomHistoricalComponent(config(top=None))
+@pytest.mark.parametrize(
+    "updated",
+    (
+        lambda value: replace(value, presentation=replace(value.presentation, theme="dracula")),
+        lambda value: replace(value, presentation=replace(value.presentation, style="list")),
+        lambda value: replace(value, presentation=replace(value.presentation, density="minimal")),
+        lambda value: replace(value, presentation=replace(value.presentation, legend="hidden")),
+        lambda value: replace(value, weekdays="hide"),
+    ),
+)
+def test_renderer_only_config_reuses_accepted_projection(
+    monkeypatch: pytest.MonkeyPatch, updated: object
+) -> None:
+    component = CustomHistoricalComponent(config(kind="ranking", top=None))
     assert component.accept_response(response())
+    model = component.model
+    assert model is not None
+    revision = component.render_revision
+    lifecycle = (
+        component.generation,
+        component.pending_generation,
+        component.comparison_config,
+        component.comparison_response,
+        component.comparison_pending_generation,
+        component.comparison_error,
+    )
+    calls: list[object] = []
+
+    def processor_spy(*args: object, **kwargs: object) -> object:
+        calls.append((args, kwargs))
+        return process_custom_historical(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(custom_component_module, "process_custom_historical", processor_spy)
+    assert callable(updated)
+    next_config = updated(component.candidate)
+    component.configure(next_config, data_affecting=False)
+
+    assert calls == []
+    assert component.accepted_config == next_config
+    assert component.model is not model
+    assert component.model.config == next_config
+    assert component.model.series is model.series
+    assert component.model.days is model.days
+    assert component.model.unit is model.unit
+    assert component.model.presentation is model.presentation
+    assert component.model.comparison_available == model.comparison_available
+    assert component.model.show_percentage == model.show_percentage
+    assert component.render_revision == revision + 1
+    assert (
+        component.generation,
+        component.pending_generation,
+        component.comparison_config,
+        component.comparison_response,
+        component.comparison_pending_generation,
+        component.comparison_error,
+    ) == lifecycle
+
+
+@pytest.mark.parametrize(
+    ("updated", "expected_labels"),
+    (
+        (lambda value: replace(value, top=1), ["a", "Other"]),
+        (lambda value: replace(value, other="hide"), ["a", "b"]),
+        (lambda value: replace(value, ranking_comparison="none"), ["a", "b", "Other"]),
+    ),
+)
+def test_local_projection_config_invokes_processor_and_preserves_semantics(
+    monkeypatch: pytest.MonkeyPatch, updated: object, expected_labels: list[str]
+) -> None:
+    component = CustomHistoricalComponent(config(kind="ranking", top=2))
+    source_response = response()
+    assert component.accept_response(source_response)
+    calls: list[object] = []
+
+    def processor_spy(*args: object, **kwargs: object) -> object:
+        calls.append((args, kwargs))
+        return process_custom_historical(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(custom_component_module, "process_custom_historical", processor_spy)
+    assert callable(updated)
+    next_config = updated(component.candidate)
+    component.configure(next_config, data_affecting=False)
+
+    assert len(calls) == 1
+    assert component.model == process_custom_historical(source_response, next_config)
+    assert component.model is not None
+    assert [series.label.en for series in component.model.series] == expected_labels
+
+
+def test_primary_completion_accepts_renderer_change_while_pending() -> None:
+    component = CustomHistoricalComponent(config())
+    assert component.accept_response(response())
+    pending_config = replace(component.candidate, group_by=None)
+    component.configure(pending_config, data_affecting=True)
+    generation = component.generation
+    updated = replace(
+        pending_config,
+        presentation=replace(pending_config.presentation, theme="dracula"),
+    )
+
+    component.configure(updated, data_affecting=False)
+
+    assert component.generation == generation
+    assert component.apply_result(CustomCompletion(generation, pending_config, response()))
+    assert component.accepted_config == updated
+    assert component.model is not None
+    assert component.model.config == updated
+    assert not component.is_pending
+
+
+def test_comparison_completion_accepts_and_normalizes_renderer_change() -> None:
+    component = CustomHistoricalComponent(config(kind="ranking"))
+    assert component.accept_response(response((("api", "3"), ("app", "1"))))
+    issued = component.start_comparison()
+    assert issued is not None
+    updated = replace(
+        component.candidate,
+        presentation=replace(component.candidate.presentation, theme="dracula", density="full"),
+    )
+
+    component.configure(updated, data_affecting=False)
+    previous = response((("api", "1"), ("app", "2")), point_date=issued.date_range.since)
+
+    assert component.apply_result(
+        CustomCompletion(component.generation, issued, previous, "comparison")
+    )
+    assert component.comparison_config == component.comparison_request_config()
+    assert component.comparison_config is not None
+    assert component.comparison_config.presentation == updated.presentation
+    assert component.model is not None
+    assert component.model.comparison_available
+    assert not component.comparison_is_pending
+
+
+def test_comparison_renderer_disable_cancels_pending_and_rejects_old_completion() -> None:
+    component = CustomHistoricalComponent(config(kind="ranking"))
+    assert component.accept_response(response())
+    issued = component.start_comparison()
+    assert issued is not None
+
+    component.configure(
+        replace(
+            component.candidate,
+            presentation=replace(component.candidate.presentation, density="minimal"),
+        ),
+        data_affecting=False,
+    )
+
+    assert not component.comparison_is_pending
+    assert component.comparison_pending_generation is None
+    assert not component.apply_result(
+        CustomCompletion(component.generation, issued, response(), "comparison")
+    )
+    assert component.comparison_response is None
+
+
+@pytest.mark.parametrize(
+    ("updated", "expected_labels"),
+    (
+        (lambda value: replace(value, top=1), ["a", "Other"]),
+        (lambda value: replace(value, other="hide"), ["a", "b"]),
+        (lambda value: replace(value, ranking_comparison="none"), ["a", "b", "Other"]),
+    ),
+)
+def test_primary_pending_completion_accepts_local_projection_drift(
+    updated: object, expected_labels: list[str]
+) -> None:
+    component = CustomHistoricalComponent(config(kind="ranking", metric_id="read", top=2))
+    assert component.accept_response(response())
+    issued = replace(component.candidate, filters=(("genre", ("fiction",)),))
+    component.configure(issued, data_affecting=True)
+    assert callable(updated)
+    current = updated(issued)
+    component.configure(current, data_affecting=False)
+
+    assert component.apply_result(CustomCompletion(component.generation, issued, response()))
+    assert component.accepted_config == current
+    assert component.model is not None
+    assert component.model.config == current
+    assert [series.label.en for series in component.model.series] == expected_labels
+    assert component.retrieval_top == issued.top
+    assert not component.is_pending
+
+
+@pytest.mark.parametrize(
+    "changed",
+    (
+        lambda value: replace(value, metric_id="other"),
+        lambda value: replace(value, group_by=None),
+    ),
+)
+def test_primary_completion_rejects_different_metric_or_query(changed: object) -> None:
+    component = CustomHistoricalComponent(config(metric_id="read", top=2))
+    assert component.accept_response(response())
+    issued = component.candidate
+    assert callable(changed)
+    component.configure(changed(issued), data_affecting=False)
+
+    assert not component.apply_result(CustomCompletion(component.generation, issued, response()))
+
+
+def test_comparison_semantic_change_cancels_pending_and_rejects_completion_and_failure() -> None:
+    component = CustomHistoricalComponent(config(kind="ranking"))
+    assert component.accept_response(response())
+    issued = component.start_comparison()
+    assert issued is not None
+    component.configure(replace(component.candidate, top=1), data_affecting=False)
+    revision = component.render_revision
+
+    assert not component.comparison_is_pending
+    assert not component.apply_result(
+        CustomCompletion(component.generation, issued, response(), "comparison")
+    )
+    error = RuntimeError("stale comparison failure")
+    assert not component.fail(error, generation=component.generation, purpose="comparison")
+    assert component.comparison_error is None
+    assert component.comparison_response is None
+    assert component.render_revision == revision
+
+
+def test_comparison_disable_clears_existing_error_and_rejects_stale_failure() -> None:
+    component = CustomHistoricalComponent(config(kind="ranking"))
+    assert component.accept_response(response())
+    assert component.start_comparison() is not None
+    failure = RuntimeError("first failure")
+    assert component.fail(failure, generation=component.generation, purpose="comparison")
+    assert component.comparison_error is failure
+
+    component.configure(
+        replace(
+            component.candidate,
+            presentation=replace(component.candidate.presentation, density="minimal"),
+        ),
+        data_affecting=False,
+    )
+
+    assert component.comparison_error is None
+    stale = RuntimeError("stale failure")
+    assert not component.fail(stale, generation=component.generation, purpose="comparison")
+    assert component.comparison_error is None
+
+
+def test_accepted_comparison_detaches_and_reattaches_only_for_matching_request() -> None:
+    component = CustomHistoricalComponent(config(kind="ranking"))
+    assert component.accept_response(response((("api", "3"), ("app", "1"))))
+    issued = component.start_comparison()
+    assert issued is not None
+    previous = response((("api", "1"), ("app", "2")), point_date=issued.date_range.since)
+    assert component.apply_result(
+        CustomCompletion(component.generation, issued, previous, "comparison")
+    )
+    accepted_comparison = component.comparison_response
+
+    component.configure(
+        replace(component.candidate, ranking_comparison="none"), data_affecting=False
+    )
+
+    assert component.comparison_response is accepted_comparison
+    assert component.model is not None
+    assert not component.model.comparison_available
+
+    component.configure(
+        replace(component.candidate, ranking_comparison="full"), data_affecting=False
+    )
+
+    assert component.comparison_response is accepted_comparison
+    assert component.model is not None
+    assert component.model.comparison_available
 
     component.configure(replace(component.candidate, top=1), data_affecting=False)
-
-    assert component.accepted_config == component.candidate
+    assert component.comparison_response is accepted_comparison
     assert component.model is not None
-    assert [series.label.en for series in component.model.series] == ["a", "Other"]
+    assert not component.model.comparison_available
+
+
+def test_renderer_only_config_while_pending_preserves_accepted_facts() -> None:
+    component = CustomHistoricalComponent(config())
+    assert component.accept_response(response())
+    accepted_config = component.accepted_config
+    accepted_model = component.model
+    component.configure(replace(component.candidate, group_by=None), data_affecting=True)
+    revision = component.render_revision
+
+    component.configure(
+        replace(
+            component.candidate,
+            presentation=replace(component.candidate.presentation, theme="dracula"),
+        ),
+        data_affecting=False,
+    )
+
+    assert component.is_pending
+    assert component.accepted_config is accepted_config
+    assert component.model is accepted_model
+    assert component.render_revision == revision + 1
+
+
+def test_renderer_only_config_reprojects_when_accepted_model_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    component = CustomHistoricalComponent(config())
+    assert component.accept_response(response())
+    component.model = None
+    calls = 0
+    real_processor = process_custom_historical
+
+    def processor_spy(*args: object, **kwargs: object) -> object:
+        nonlocal calls
+        calls += 1
+        return real_processor(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(custom_component_module, "process_custom_historical", processor_spy)
+    updated = replace(
+        component.candidate,
+        presentation=replace(component.candidate.presentation, theme="dracula"),
+    )
+
+    component.configure(updated, data_affecting=False)
+
+    assert calls == 1
+    assert component.accepted_config == updated
+    assert component.model is not None
+    assert component.model.config == updated
 
 
 @pytest.mark.parametrize(
@@ -997,9 +1491,7 @@ def test_custom_ranking_renders_project_link_after_copy_marker() -> None:
         source,
         data=replace(
             source.data,
-            series=(
-                replace(source.data.series[0], link="https://example.com/books/book"),
-            ),
+            series=(replace(source.data.series[0], link="https://example.com/books/book"),),
         ),
     )
     projection = process_custom_historical(
@@ -1024,9 +1516,7 @@ def test_non_ranking_custom_projection_rejects_project_links() -> None:
         source,
         data=replace(
             source.data,
-            series=(
-                replace(source.data.series[0], link="https://example.com/books/book"),
-            ),
+            series=(replace(source.data.series[0], link="https://example.com/books/book"),),
         ),
     )
 
