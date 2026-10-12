@@ -600,6 +600,35 @@ def _dataset_title(value, translator: Translator) -> str:
     return value.zh_cn if translator.language == "zh" else value.en
 
 
+def _accepted_custom_metric_help_node(
+    pane: TuiCustomPane, translator: Translator
+) -> tuple[str, tuple[tuple[str, tuple[object, ...]], ...]] | None:
+    """Return help metadata for the Custom Pane's committed V2 Metric only."""
+
+    accepted_config = pane.component.accepted_config
+    descriptor = pane.component.v2_descriptor
+    if (
+        accepted_config is None
+        or accepted_config.metric_id is None
+        or not isinstance(descriptor, V2ProbeDescriptor)
+    ):
+        return None
+    metric = next(
+        (item for item in descriptor.metrics if item.id == accepted_config.metric_id), None
+    )
+    if metric is None:
+        return None
+    return (
+        translator.text("status.tui_help_current_metric"),
+        (
+            (
+                _dataset_title(metric.title, translator),
+                ((_dataset_title(metric.description, translator), ()),),
+            ),
+        ),
+    )
+
+
 def _custom_metric_periods(
     metric: V2MetricDescriptor, kind: str
 ) -> tuple[str, ...]:
@@ -7507,9 +7536,15 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     )
                 )
                 structure_children.pop(0)
+            current_metric_node = (
+                _accepted_custom_metric_help_node(focused_pane, translator)
+                if isinstance(focused_pane, TuiCustomPane)
+                else None
+            )
             control_nodes = (
                 (translator.text("status.tui_help_mode"), mode_pages()),
                 (translator.text("status.tui_help_pane_settings"), tuple(parameter_children)),
+                *((current_metric_node,) if current_metric_node is not None else ()),
                 (translator.text("status.tui_help_pane_structure"), tuple(structure_children)),
                 (translator.text("status.tui_help_common"), tuple(common_children)),
                 *text_navigation,

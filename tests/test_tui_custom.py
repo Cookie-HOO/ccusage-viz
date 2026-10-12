@@ -608,6 +608,90 @@ def test_custom_dashboard_adjustment_uses_native_footer() -> None:
     assert ("L", "custom_logs") in tui_module._custom_pane_adjustment_bindings(pane, "advanced")
 
 
+def _accepted_metric_help_pane() -> tui_module.TuiCustomPane:
+    text = LocalizedText("Dataset", "数据集")
+    unit = CustomUnit("count", text, "suffix", 0)
+
+    def metric(identifier: str, title: LocalizedText, description: LocalizedText) -> V2MetricDescriptor:
+        return V2MetricDescriptor(
+            identifier,
+            title,
+            description,
+            unit,
+            "sum",
+            V2MetricCapabilities(
+                (), (), {"timeline": tui_module.V2HistoricalChartCapability(("day",), (), ())}
+            ),
+            {},
+        )
+
+    chart = CustomChartConfig(
+        "timeline",
+        CustomCommandSource("dataset", ("dataset",)),
+        DateRange(date(2026, 10, 1), date(2026, 10, 8)),
+        metric_id="stars",
+    )
+    component = CustomHistoricalComponent(chart)
+    component.accepted_config = chart
+    component.candidate = replace(chart, metric_id="growth")
+    component.v2_descriptor = V2ProbeDescriptor(
+        "revision",
+        "1",
+        V2Dataset(text, text),
+        (
+            metric(
+                "stars",
+                LocalizedText("Stars", "星标"),
+                LocalizedText("Total GitHub stars", "GitHub 星标总数"),
+            ),
+            metric(
+                "growth",
+                LocalizedText("Growth", "增长"),
+                LocalizedText("New GitHub stars", "新增 GitHub 星标"),
+            ),
+        ),
+        (),
+    )
+    return tui_module.TuiCustomPane(
+        component,
+        FixedIntervalScheduler(10, now=0),
+        LifecycleOperation("accepted-metric-help"),
+        _to_options(build_parser(load_translator("en")).parse_args(["dashboard", "--empty"])).process,
+    )
+
+
+def test_accepted_custom_metric_help_uses_only_committed_v2_metric() -> None:
+    pane = _accepted_metric_help_pane()
+    translator = load_translator("en")
+
+    assert tui_module._accepted_custom_metric_help_node(pane, translator) == (
+        translator.text("status.tui_help_current_metric"),
+        (("Stars", (("Total GitHub stars", ()),)),),
+    )
+
+
+@pytest.mark.parametrize("missing", ("accepted_config", "descriptor", "v1", "metric"))
+def test_accepted_custom_metric_help_omits_unusable_metadata(missing: str) -> None:
+    pane = _accepted_metric_help_pane()
+    if missing == "accepted_config":
+        pane.component.accepted_config = None
+    elif missing == "descriptor":
+        pane.component.v2_descriptor = None
+    elif missing == "v1":
+        pane.component.v2_descriptor = SimpleNamespace(metrics=())
+    else:
+        assert pane.component.accepted_config is not None
+        pane.component.accepted_config = replace(pane.component.accepted_config, metric_id="missing")
+
+    assert tui_module._accepted_custom_metric_help_node(pane, load_translator("en")) is None
+
+
+def test_accepted_custom_metric_help_is_localized() -> None:
+    assert tui_module._accepted_custom_metric_help_node(
+        _accepted_metric_help_pane(), load_translator("zh")
+    ) == ("当前指标", (("星标", (("GitHub 星标总数", ()),)),))
+
+
 def _custom_monitor_component(*, grouped: bool = True, total: str = "90") -> CustomMonitorComponent:
     chart = CustomChartConfig(
         "monitor",

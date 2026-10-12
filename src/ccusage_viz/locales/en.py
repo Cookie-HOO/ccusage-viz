@@ -457,6 +457,7 @@ MESSAGES = {
     "status.tui_help_section_modes": "MODES",
     "status.tui_help_section_controls": "CONTROLS",
     "status.tui_help_section_policy": "STRATEGY",
+    "status.tui_help_current_metric": "CURRENT METRIC",
     "status.tui_help_summary_scope": "SUMMARY SCOPE [COMPUTATION LOGIC]",
     "status.tui_help_summary_scope_fixed": (
         "Fixed --since/--until ranges: selected-range total only"

@@ -457,6 +457,7 @@ MESSAGES = {
     "status.tui_help_section_modes": "模式",
     "status.tui_help_section_controls": "操作",
     "status.tui_help_section_policy": "策略",
+    "status.tui_help_current_metric": "当前指标",
     "status.tui_help_summary_scope": "摘要统计 [计算逻辑]",
     "status.tui_help_summary_scope_fixed": "固定 --since/--until 范围：仅显示所选范围总量",
     "status.tui_help_summary_scope_filters": ("筛选影响总量；分组、Top N 和其他仅影响展示序列"),
