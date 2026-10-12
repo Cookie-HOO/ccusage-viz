@@ -2641,6 +2641,23 @@ def _custom_period_adjustment_chart(
     return chart
 
 
+def _custom_period_adjustment_target(
+    component: CustomHistoricalComponent,
+) -> CustomChartConfig:
+    """Resolve period controls against a pending target Metric when present."""
+
+    chart = component.request_config
+    descriptor = component.v2_descriptor
+    if component.switch_target_config is not None and descriptor is not None:
+        metric = next(
+            (item for item in descriptor.metrics if item.id == chart.metric_id),
+            None,
+        )
+        if metric is not None:
+            return replace(chart, metric_periods=_custom_metric_periods(metric, chart.kind))
+    return _custom_period_adjustment_chart(chart, component.capability)
+
+
 def _ranking_search_eligible(pane: TuiPane) -> bool:
     """Whether a pane can own an in-memory historical Ranking search query."""
     if not isinstance(pane, (TuiChartPane, TuiCustomPane)) or pane.body_view != "chart":
@@ -9850,15 +9867,40 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                     ),
                                 )
                         elif key in {"p", "P"}:
-                            period_base = _custom_period_adjustment_chart(base, capability)
+                            period_base = (
+                                _custom_period_adjustment_target(component)
+                                if isinstance(component, CustomHistoricalComponent)
+                                else _custom_period_adjustment_chart(base, capability)
+                            )
                             updated = adjust_custom_chart(period_base, key)
-                            if updated != base:
-                                record_mutation(
-                                    ("pane", focused_index, "custom-period"),
-                                    lambda config=updated: apply_custom_query(
-                                        config, mutation="period"
-                                    ),
-                                )
+                            if updated != period_base:
+                                if (
+                                    isinstance(component, CustomHistoricalComponent)
+                                    and component.switch_target_config is not None
+                                ):
+                                    def update_pending_metric_period(
+                                        config: CustomChartConfig = updated,
+                                        component: CustomHistoricalComponent = component,
+                                        pane_index: int = focused_index,
+                                    ) -> None:
+                                        component.begin_metric_switch(config)
+                                        refresh(
+                                            pane_index,
+                                            trigger=LifecycleTrigger.CONFIGURATION,
+                                            data_affecting=False,
+                                        )
+
+                                    record_mutation(
+                                        ("pane", focused_index, "custom-period"),
+                                        update_pending_metric_period,
+                                    )
+                                else:
+                                    record_mutation(
+                                        ("pane", focused_index, "custom-period"),
+                                        lambda config=updated: apply_custom_query(
+                                            config, mutation="period"
+                                        ),
+                                    )
                             elif period_base.metric_periods:
                                 copy_feedback.show(
                                     translator.text("status.custom_period_restricted")

@@ -450,6 +450,80 @@ def test_live_capability_periods_replace_stale_pane_periods_for_adjustment() -> 
     assert adjust_custom_chart(effective, "P").date_range.period == "7d"
 
 
+def test_pending_metric_switch_uses_target_metric_periods() -> None:
+    text = LocalizedText("GitHub", "GitHub")
+    unit = CustomUnit("count", text, "suffix", 0)
+
+    def metric(identifier: str, periods: tuple[str, ...]) -> V2MetricDescriptor:
+        return V2MetricDescriptor(
+            identifier,
+            LocalizedText(identifier, identifier),
+            text,
+            unit,
+            "sum",
+            V2MetricCapabilities(
+                (),
+                (),
+                {
+                    "ranking": tui_module.V2HistoricalChartCapability(
+                        ("day",), (), (), periods
+                    )
+                },
+            ),
+            {},
+            group_id="github",
+        )
+
+    component = CustomHistoricalComponent(
+        CustomChartConfig(
+            "ranking",
+            CustomCommandSource("github", ("github",)),
+            DateRange(
+                date(1971, 1, 1),
+                date(2026, 10, 12),
+                relative_until=True,
+                period="all",
+            ),
+            metric_id="stars",
+            metric_periods=("all",),
+        )
+    )
+    component.capability = CustomChartCapability(
+        ("day",), (), (), periods=("all",)
+    )
+    component.v2_descriptor = V2ProbeDescriptor(
+        "revision",
+        "1",
+        V2Dataset(text, text),
+        (
+            metric("stars", ("all",)),
+            metric("growth", ("1d", "7d", "14d")),
+        ),
+        (),
+        metric_groups=(V2MetricGroup("github", text),),
+    )
+    component.begin_metric_switch(
+        replace(
+            component.candidate,
+            metric_id="growth",
+            date_range=DateRange(
+                date(2026, 10, 12),
+                date(2026, 10, 12),
+                relative_until=True,
+                period="1d",
+            ),
+        )
+    )
+
+    target = tui_module._custom_period_adjustment_target(component)
+    updated = adjust_custom_chart(target, "p")
+
+    assert target.metric_id == "growth"
+    assert target.metric_periods == ("1d", "7d", "14d")
+    assert updated.metric_id == "growth"
+    assert updated.date_range.period == "7d"
+
+
 def test_undeclared_live_periods_restore_generic_period_cycling() -> None:
     chart = CustomChartConfig(
         "timeline",
