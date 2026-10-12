@@ -121,7 +121,7 @@ def run_custom_filter_editor(
         event = read_key()
         if isinstance(event, MouseEvent):
             if event.pressed and event.button == 0:
-                tab_index = _filter_index_at(event, choices, translator, draft.filter_index)
+                tab_index = _filter_index_at(event, choices, translator, draft.filter_index, filters)
                 if tab_index is not None:
                     draft = replace(
                         draft,
@@ -226,6 +226,13 @@ def filter_tab_counts(
     return tuple(counts)
 
 
+def _selection_mark(choice: CustomFilter, selected: bool) -> str:
+    """Return a mode-appropriate, color-independent option selection mark."""
+    if choice.mode == "single_select":
+        return "(●)" if selected else "( )"
+    return "[x]" if selected else "[ ]"
+
+
 def _grid_rows(option_count: int, columns: int) -> int:
     columns = max(1, min(3, columns))
     return (option_count + columns - 1) // columns
@@ -260,23 +267,41 @@ def _normalise_draft(
     return replace(draft, option_index=option_index, viewport_row=viewport)
 
 
+def _tab_layout(
+    choices: tuple[CustomFilter, ...],
+    translator: Translator,
+    active_index: int,
+    accepted: CustomFilters,
+) -> tuple[tuple[int, int, int, str, int], ...]:
+    """Return unstyled count-inclusive tab segments and their one-based x ranges."""
+    position = 1
+    segments: list[tuple[int, int, int, str, int]] = []
+    for index, (choice, (selected, total)) in enumerate(
+        zip(choices, filter_tab_counts(accepted, choices), strict=True)
+    ):
+        label = _localized(choice.label, translator)
+        text = f"[{label} {selected}/{total}]" if index == active_index else f"{label} {selected}/{total}"
+        end = position + display_width(text)
+        segments.append((index, position, end, text, selected))
+        position = end + display_width(" · ")
+    return tuple(segments)
+
+
 def _filter_index_at(
     event: MouseEvent,
     choices: tuple[CustomFilter, ...],
     translator: Translator,
     active_index: int,
+    accepted: CustomFilters,
 ) -> int | None:
-    """Map a click on the first body row to the Dataset filter tab it occupies."""
+    """Map a click on the rendered tab row to the Dataset filter tab it occupies."""
     if event.y != 1:
         return None
-    position = 1
-    for index, choice in enumerate(choices):
-        label = _localized(choice.label, translator)
-        rendered = f"[{label}]" if index == active_index else label
-        end = position + display_width(rendered)
-        if position <= event.x < end:
+    for index, start, end, _text, _selected in _tab_layout(
+        choices, translator, active_index, accepted
+    ):
+        if start <= event.x < end:
             return index
-        position = end + len(" · ")
     return None
 
 
@@ -327,19 +352,18 @@ def _render_custom_filter_draft(
     context = _FilterColorContext(color)
     scheme = get_color_scheme(color_scheme)
 
-    def tab(choice: CustomFilter, selected: int, total: int) -> str:
-        label = _localized(choice.label, translator)
-        count = f"{selected}/{total}"
-        if choice == current:
-            return styled_text(f"[{label} {count}]", scheme.highlight, context, bold=True)
+    def tab(index: int, text: str, selected: int) -> str:
+        if index == draft.filter_index:
+            return styled_text(text, scheme.highlight, context, bold=True)
         if selected:
+            label, count = text.rsplit(" ", 1)
             return f"{styled_text(label, scheme.muted, context, dim=True)} {styled_text(count, scheme.cache, context)}"
-        return styled_text(f"{label} {count}", scheme.muted, context, dim=True)
+        return styled_text(text, scheme.muted, context, dim=True)
 
     tabs = " · ".join(
-        tab(choice, selected, total)
-        for choice, (selected, total) in zip(
-            choices, filter_tab_counts(accepted, choices), strict=True
+        tab(index, text, selected)
+        for index, _start, _end, text, selected in _tab_layout(
+            choices, translator, draft.filter_index, accepted
         )
     )
     if current is None:
@@ -405,7 +429,7 @@ def _render_custom_filter_draft(
                 option = options[index]
                 text = (
                     f"{'›' if index == draft.option_index else ' '} "
-                    f"{'[x]' if option.id in selected else '[ ]'} {_localized(option.label, translator)}"
+                    f"{_selection_mark(current, option.id in selected)} {_localized(option.label, translator)}"
                 )
             entries.append(pad_width(clip_width(text, column_width), column_width))
         rows.append(clip_width(" ".join(entries).rstrip(), width))

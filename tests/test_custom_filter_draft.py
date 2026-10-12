@@ -1,5 +1,6 @@
 from ccusage_viz.custom_filter_draft import (
     CustomFilterDraft,
+    _filter_index_at,
     _matching_options,
     _render_custom_filter_draft,
     filter_tab_counts,
@@ -175,7 +176,7 @@ def test_custom_filter_editor_moves_vertically_in_columns_with_incomplete_final_
 
 
 def test_custom_filter_editor_click_switches_filter_tab() -> None:
-    events = iter((MouseEvent(0, 16, 1, True, 0), KeyEvent(" "), KeyEvent("\r")))
+    events = iter((MouseEvent(0, 20, 1, True, 0), KeyEvent(" "), KeyEvent("\r")))
 
     result = run_custom_filter_editor(
         (),
@@ -188,6 +189,39 @@ def test_custom_filter_editor_click_switches_filter_tab() -> None:
     )
 
     assert result == (("source", ("app",)),)
+
+
+def test_custom_filter_editor_clicks_full_rendered_tab_but_not_separator() -> None:
+    translator = load_translator("en")
+
+    assert _filter_index_at(MouseEvent(0, 20, 1, True, 0), CHOICES, translator, 0, ()) == 1
+    assert _filter_index_at(MouseEvent(0, 16, 1, True, 0), CHOICES, translator, 0, ()) is None
+
+
+def test_custom_filter_editor_renders_radio_marks_for_single_select() -> None:
+    single = CustomFilter(
+        "seed_book",
+        LocalizedText("Book", "图书"),
+        (CustomFilterOption("a", LocalizedText("A", "甲")),),
+        "single_select",
+    )
+
+    rendered = _render_custom_filter_draft(
+        CustomFilterDraft((("seed_book", ("a",)),)),
+        (single, CHOICES[0]),
+        load_translator("en"),
+        80,
+    )
+
+    multi_rendered = _render_custom_filter_draft(
+        CustomFilterDraft(()),
+        (CHOICES[0],),
+        load_translator("en"),
+        80,
+    )
+
+    assert "(●) A" in rendered
+    assert "[ ] Fiction" in multi_rendered
 
 
 def test_custom_filter_editor_click_toggles_visible_option() -> None:
