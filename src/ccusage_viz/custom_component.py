@@ -14,6 +14,7 @@ from ccusage_viz.custom_models import (
     CustomDataset,
     CustomPresentationDescriptor,
     CustomProtocolFailure,
+    CustomProtocolWarning,
     V2HistoricalChartCapability,
     V2MetricDescriptor,
     V2ProbeDescriptor,
@@ -150,6 +151,7 @@ class CustomHistoricalComponent:
         "capability",
         "accepted_config",
         "accepted_response",
+        "accepted_warnings",
         "accepted_at",
         "comparison_config",
         "comparison_error",
@@ -173,6 +175,7 @@ class CustomHistoricalComponent:
         self.capability: CustomChartCapability | None = None
         self.accepted_config: CustomChartConfig | None = None
         self.accepted_response: CustomChartResponse | None = None
+        self.accepted_warnings: tuple[CustomProtocolWarning, ...] = ()
         self.accepted_at: datetime | None = None
         self.comparison_config: CustomChartConfig | None = None
         self.comparison_error: BaseException | None = None
@@ -371,6 +374,7 @@ class CustomHistoricalComponent:
             self.switch_normalizations = frozenset()
         self.accepted_config = self.candidate
         self.accepted_response = completion.response
+        self.accepted_warnings = completion.response.warnings
         self.retrieval_top = completion.config.top
         self.presentation = CustomPresentationDescriptor(
             completion.response.dataset,

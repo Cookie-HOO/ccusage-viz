@@ -28,6 +28,7 @@ from ccusage_viz.custom_models import (
     CustomPaneSummary,
     CustomPoint,
     CustomProtocolFailure,
+    CustomProtocolWarning,
     CustomSeries,
     CustomUnit,
     LocalizedText,
@@ -124,6 +125,31 @@ def response(
         data,
         CustomPaneSummary(metric),
     )
+
+
+def test_primary_response_retains_its_protocol_warnings() -> None:
+    component = CustomHistoricalComponent(config())
+    warning = CustomProtocolWarning("coverage", LocalizedText("using 2d", "使用 2 天"))
+    source = response()
+    warned = CustomPaneResponse(
+        source.dataset, source.capabilities, source.data, source.summary, warnings=(warning,)
+    )
+
+    assert component.accept_response(warned)
+    assert component.accepted_warnings == (warning,)
+
+
+def test_warning_free_primary_response_clears_accepted_warnings() -> None:
+    component = CustomHistoricalComponent(config())
+    warning = CustomProtocolWarning("coverage", LocalizedText("using 2d", "使用 2 天"))
+    source = response()
+    warned = CustomPaneResponse(
+        source.dataset, source.capabilities, source.data, source.summary, warnings=(warning,)
+    )
+    assert component.accept_response(warned)
+
+    assert component.accept_response(response())
+    assert component.accepted_warnings == ()
 
 
 def test_historical_metric_switch_commits_only_after_target_response() -> None:

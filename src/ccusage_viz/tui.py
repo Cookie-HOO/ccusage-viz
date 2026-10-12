@@ -1940,6 +1940,17 @@ def _append_custom_monitor_attachment(
     return "\n".join((body, *result.rows)) if result.viable else body
 
 
+def _custom_response_warning_notices(
+    component: CustomHistoricalComponent, translator: Translator
+) -> tuple[str, ...]:
+    """Return localized notices belonging to the currently accepted chart facts."""
+
+    return tuple(
+        warning.message.zh_cn if translator.language == "zh" else warning.message.en
+        for warning in component.accepted_warnings
+    )
+
+
 def _render_custom_projection(
     projection: CustomChartProjection,
     config: CustomChartConfig,
@@ -2215,11 +2226,13 @@ def _pane_render(
                 rendered.notices,
                 rendered.error_body,
             )
+        warning_notices = _custom_response_warning_notices(component, translator)
         if component.error is not None:
             return PaneRender(
-                rendered.chart, (format_error(component.error, translator, color=False),)
+                rendered.chart,
+                (*rendered.notices, *warning_notices, format_error(component.error, translator, color=False)),
             )
-        return rendered
+        return PaneRender(rendered.chart, (*rendered.notices, *warning_notices))
     if isinstance(pane, TuiAnimationPane):
         if pane.body_view != "chart":
             return PaneRender("")

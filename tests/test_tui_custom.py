@@ -24,6 +24,7 @@ from ccusage_viz.custom_models import (
     CustomPaneSummary,
     CustomPoint,
     CustomProtocolFailure,
+    CustomProtocolWarning,
     CustomSeries,
     CustomSummary,
     CustomSummaryCurrent,
@@ -1598,6 +1599,46 @@ def test_custom_dashboard_context_matches_native_timeline_presentation() -> None
     assert english.period == "14d"
     assert english.title_content == "Total"
     assert chinese.title_content == "总量"
+
+
+def test_custom_dashboard_pane_renders_accepted_response_warnings_as_local_notices() -> None:
+    dashboard = _to_options(
+        build_parser(load_translator("en")).parse_args(["dashboard", "--empty"])
+    )
+    pane = _new_pane(
+        dashboard,
+        default_custom_pane(
+            "timeline",
+            source=CustomCommandSource("reading", ("reader", "ccuv")),
+            dashboard=dashboard,
+        ),
+        "dashboard:pane:0",
+        build_query_runtime(),
+    )
+    assert isinstance(pane, tui_module.TuiCustomPane)
+    pane.component.configure(
+        replace(pane.component.candidate, date_range=DateRange(date(2026, 9, 1), date(2026, 9, 2))),
+        data_affecting=False,
+    )
+    from test_custom_component import response
+
+    source = response()
+    warnings = (
+        CustomProtocolWarning("coverage", LocalizedText("using 2d", "使用 2 天")),
+        CustomProtocolWarning("other", LocalizedText("second notice", "第二条提示")),
+    )
+    warned = CustomPaneResponse(
+        source.dataset, source.capabilities, source.data, source.summary, warnings=warnings
+    )
+    pane.component.accept_response(warned)
+
+    english = _pane_render(pane, load_translator("en"), Terminal(80, 12, False, True))
+    chinese = _pane_render(pane, load_translator("zh"), Terminal(80, 12, False, True))
+
+    assert "a" in english.chart
+    assert english.notices == ("using 2d", "second notice")
+    assert "using 2d" not in english.chart
+    assert chinese.notices == ("使用 2 天", "第二条提示")
 
 
 def test_custom_dashboard_pane_renders_accepted_decimal_projection() -> None:
