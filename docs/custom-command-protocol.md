@@ -22,6 +22,8 @@ the Dataset has exactly one metric.
 
 Each metric declares `aggregation: "sum"` or `aggregation: "value"`.
 
+Every Metric's existing required bilingual `description` is localized explanatory metadata for that Metric. Hosts may show it beneath the Metric title during Metric selection and in help for the currently selected Pane. It does not alter request shape, metric ID, aggregation, or data semantics.
+
 ### V2 Metric Groups
 
 A V2 descriptor may declare an ordered top-level `metric_groups` array. Each

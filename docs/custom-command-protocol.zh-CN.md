@@ -12,6 +12,8 @@
 
 每个指标声明 `aggregation: "sum"` 或 `aggregation: "value"`。`sum` 允许 ccuv 对返回事实做历史投影聚合；`value` 是数据源拥有的最终事实，切换范围、分组、粒度、筛选或图表时 ccuv 必须重新请求，不能本地相加、平均或生成 Other。
 
+每个指标既有的必填双语 `description` 是该指标的本地化说明元数据。宿主可在指标选择时将其显示在指标标题下方，并在当前 Pane 帮助中显示。它不改变请求形状、指标 ID、聚合或数据语义。
+
 本地 Dataset 注册会缓存成功的 Probe，用于资源发现、环境状态和非阻塞选择器。再次执行 `ccuv dataset add-local COMMAND` 时，若 Dataset ID 相同，会直接覆盖本地注册并刷新该缓存。Custom Monitor Pane 启动前仍会重新发起 runtime Probe；缓存元数据不作为最终能力权威。
 
 每次成功的 V2 `chart` 和 `monitor` 响应都是完整的 accepted snapshot：同时携带完整 Probe 形状的 `descriptor`、`runtime` 对象与本次 `data` 或 `observation`。首次 Probe 完成 Dataset/Metric 选择后，ccuv 从最近接受响应的 descriptor 读取静态控制能力。`runtime.filters` 为必填项（可以为空），并且是 ccuv 通过 `f` 展示的唯一 filter 目录；Probe descriptor 与静态 chart capability 不再声明 filter 或 option 值。每个 runtime filter 的 `mode` 是 `"multi_select"` 或 `"single_select"`；省略时默认为 `"multi_select"`。两种模式继续使用现有的 option ID 数组查询格式，但 ccuv 对 `single_select` 最多发送一个 ID。空选择是否合法、是否必填仍由 Dataset 权威决定。
