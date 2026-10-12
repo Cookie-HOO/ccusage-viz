@@ -1,6 +1,7 @@
 from dataclasses import replace
 from datetime import UTC, date, datetime
 from decimal import Decimal
+from types import SimpleNamespace
 
 import pytest
 
@@ -1027,6 +1028,114 @@ def test_dataset_metric_chooser_groups_declared_metrics_and_keeps_ungrouped_flat
         ("legacy-zh", 2),
         ("  └─ 数据集", None),
     ]
+
+
+def test_metric_chooser_display_rows_use_ascii_connectors_and_wrap_descriptions() -> None:
+    rows = (
+        tui_module.MetricChooserRow("group", "GitHub"),
+        tui_module.MetricChooserRow("metric", "├─ Stars", 0),
+        tui_module.MetricChooserRow(
+            "description", "│  └─ A deliberately long metric description for narrow terminals"
+        ),
+        tui_module.MetricChooserRow("metric", "└─ Forks", 1),
+        tui_module.MetricChooserRow(
+            "description", "   └─ Another deliberately long description for the viewport"
+        ),
+    )
+
+    displayed = tui_module._metric_chooser_display_rows(rows, width=20, ascii=True)
+    choices = [f"{'>' if row.metric_index == 1 else ' '} {row.text}" for row in displayed]
+    body, offset = tui_module._chooser_viewport(
+        choices,
+        index=next(index for index, row in enumerate(displayed) if row.metric_index == 1),
+        offset=0,
+        height=5,
+        reserved_rows=2,
+    )
+
+    assert all(display_width(row.text) <= 18 for row in displayed)
+    assert all(display_width(choice) <= 20 for choice in choices)
+    assert any("|- Stars" in choice for choice in choices)
+    assert "|  \\- " in "\n".join(choices)
+    assert "   \\- " in "\n".join(choices)
+    assert "├" not in "\n".join(choices)
+    assert body.splitlines()[-1].startswith("> \\- Forks")
+    assert offset == next(index for index, row in enumerate(displayed) if row.metric_index == 1) - 2
+
+
+def test_standalone_metric_chooser_uses_ascii_host_setting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    text = LocalizedText("Dataset", "数据集")
+    metric = V2MetricDescriptor(
+        "stars",
+        LocalizedText("Stars", "星标"),
+        LocalizedText("Long description for ASCII chooser output", "描述"),
+        CustomUnit("count", text, "suffix", 0),
+        "sum",
+        V2MetricCapabilities(
+            (), (), {"ranking": tui_module.V2HistoricalChartCapability(("day",), (None,), ())}
+        ),
+        {},
+    )
+    forks = replace(metric, id="forks", title=LocalizedText("Forks", "分支"))
+    descriptor = V2ProbeDescriptor("revision", "1", V2Dataset(text, text), (metric, forks), ())
+    status = SimpleNamespace(
+        registration=SimpleNamespace(dataset_id="dataset", probe=SimpleNamespace(descriptor=descriptor))
+    )
+
+    class DatasetService:
+        def ready_registered_sources(self) -> tuple[object, ...]:
+            return (status,)
+
+        def registered_command_source(self, _dataset_id: str) -> CustomCommandSource:
+            return CustomCommandSource("dataset", ("dataset",))
+
+    class Screen:
+        def paint(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+    bodies: list[str] = []
+    events = iter((KeyEvent("\r"), KeyEvent("j"), KeyEvent("\r"), KeyEvent("\r")))
+    dashboard = _to_options(
+        build_parser(load_translator("en")).parse_args(["dashboard", "--empty", "--ascii"])
+    )
+    monkeypatch.setattr("ccusage_viz.datasets.service.DatasetService", DatasetService)
+    monkeypatch.setattr(tui_module, "get_terminal_size", lambda: __import__("os").terminal_size((20, 24)))
+
+    config = tui_module._choose_dataset_pane_config(
+        Screen(),
+        load_translator("en"),
+        InputDecoder(),
+        height=8,
+        dashboard=dashboard,
+        paint_choices=lambda body, *_args: bodies.append(body),
+        read_input=lambda: next(events),
+    )
+
+    assert config is not None
+    assert config.chart.metric_id == "forks"
+    metric_body = next(body for body in bodies if "Stars" in body)
+    assert "\\- Long" in metric_body
+    assert "└" not in metric_body
+
+
+def test_metric_chooser_navigation_and_enter_ignore_description_rows() -> None:
+    rows = (
+        tui_module.MetricChooserRow("metric", "First", 0),
+        tui_module.MetricChooserRow("description", "  └─ First description"),
+        tui_module.MetricChooserRow("metric", "Second", 1),
+        tui_module.MetricChooserRow("description", "  └─ Second description"),
+    )
+    selectable = tuple(row.metric_index for row in rows if row.metric_index is not None)
+    selected = selectable[0]
+
+    selected = selectable[(selectable.index(selected) + 1) % len(selectable)]
+    selected_row = next(row for row in rows if row.metric_index == selected)
+
+    assert selected == 1
+    assert selected_row.kind == "metric"
+    assert selected_row.metric_index == 1
 
 
 def test_dataset_metric_chooser_keeps_legacy_descriptor_flat() -> None:

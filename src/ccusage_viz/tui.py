@@ -670,6 +670,32 @@ def _metric_chooser_row_text(row: MetricChooserRow, *, ascii: bool) -> str:
     return row.text.translate(str.maketrans({"├": "|", "└": "\\", "│": "|", "─": "-"}))
 
 
+def _metric_chooser_display_rows(
+    rows: tuple[MetricChooserRow, ...], *, width: int, ascii: bool
+) -> tuple[MetricChooserRow, ...]:
+    """Wrap descriptive tree children within the chooser's marker-safe width."""
+
+    content_width = max(1, width - 2)  # selection marker and its following space
+    connector = "\\- " if ascii else "└─ "
+    display_rows: list[MetricChooserRow] = []
+    for row in rows:
+        text = _metric_chooser_row_text(row, ascii=ascii)
+        if row.kind != "description":
+            display_rows.append(replace(row, text=text))
+            continue
+        prefix, description = text.rsplit(connector, 1)
+        prefix = f"{prefix}{connector}"
+        wrapped = wrap_width(description, max(1, content_width - display_width(prefix)))
+        continuation = prefix[: -len(connector)] + " " * display_width(connector)
+        display_rows.extend(
+            MetricChooserRow("description", f"{line_prefix}{line}")
+            for line_prefix, line in zip(
+                (prefix, *(continuation for _ in wrapped[1:])), wrapped, strict=True
+            )
+        )
+    return tuple(display_rows)
+
+
 def _dataset_metric_chooser_chrome(
     descriptor: V2ProbeDescriptor, translator: Translator
 ) -> tuple[str, str]:
@@ -4303,15 +4329,17 @@ def _choose_dataset_pane_config(
             metric_offset = 0
             while True:
                 metric = descriptor.metrics[metric_index]
+                metric_display_rows = _metric_chooser_display_rows(
+                    metric_rows, width=get_terminal_size().columns, ascii=dashboard.host.ascii
+                )
                 metric_row_index = next(
                     index
-                    for index, row in enumerate(metric_rows)
+                    for index, row in enumerate(metric_display_rows)
                     if row.metric_index == metric_index
                 )
                 metric_choices = [
-                    f"{'›' if row.metric_index == metric_index else ' '} "
-                    f"{_metric_chooser_row_text(row, ascii=False)}"
-                    for row in metric_rows
+                    f"{'›' if row.metric_index == metric_index else ' '} {row.text}"
+                    for row in metric_display_rows
                 ]
                 metric_body, metric_offset = _chooser_viewport(
                     metric_choices,
@@ -8813,7 +8841,11 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 if status.registration.dataset_id == modal.draft.dataset_id
             )
             assert isinstance(selected, V2ProbeDescriptor)
-            metric_rows = _dataset_metric_chooser_rows(selected, translator)
+            metric_rows = _metric_chooser_display_rows(
+                _dataset_metric_chooser_rows(selected, translator),
+                width=get_terminal_size().columns,
+                ascii=options.host.ascii,
+            )
             metric_row_index = next(
                 index
                 for index, row in enumerate(metric_rows)
@@ -8824,17 +8856,17 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 f"{'›' if row.metric_index == modal.index else ' '} "
                 + (
                     emphasize(
-                        _metric_chooser_row_text(row, ascii=options.host.ascii),
+                        row.text,
                         color=scheme.highlight,
                         enabled=dashboard_theme != "no-color",
                     )
                     if row.kind == "group"
                     else dimmed(
-                        _metric_chooser_row_text(row, ascii=options.host.ascii),
+                        row.text,
                         color=dashboard_theme != "no-color",
                     )
                     if row.kind == "description"
-                    else _metric_chooser_row_text(row, ascii=options.host.ascii)
+                    else row.text
                 )
                 for row in metric_rows
             ]
