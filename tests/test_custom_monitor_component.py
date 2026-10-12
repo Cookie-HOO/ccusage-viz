@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
+import ccusage_viz.tui as tui_module
 from ccusage_viz.chart_models import DistributionCoverage
 from ccusage_viz.custom_models import (
     CustomDimension,
@@ -24,7 +25,14 @@ from ccusage_viz.custom_monitor_component import (
     resolve_metric,
 )
 from ccusage_viz.custom_protocol import V2MonitorResponse
-from ccusage_viz.options import CustomChartConfig, CustomCommandSource, resolve_date_range
+from ccusage_viz.i18n import load_translator
+from ccusage_viz.lifecycle import FixedIntervalScheduler, LifecycleOperation
+from ccusage_viz.options import (
+    CustomChartConfig,
+    CustomCommandSource,
+    ProcessConfig,
+    resolve_date_range,
+)
 
 
 def config(*, metric_id: str = "tokens") -> CustomChartConfig:
@@ -67,6 +75,61 @@ def test_monitor_metric_switch_commits_only_after_target_observation() -> None:
     assert component.candidate.metric_id == "updated_days"
     assert [item.observation.total for item in component.history] == [Decimal("120")]
     assert component.history is not old_history
+
+
+def test_monitor_metric_switch_pending_state_retains_accepted_metric_help() -> None:
+    text = LocalizedText("Dataset", "数据集")
+    unit = CustomUnit("count", text, "suffix", 0)
+
+    def metric(identifier: str, title: str, description: str) -> V2MetricDescriptor:
+        return V2MetricDescriptor(
+            identifier,
+            LocalizedText(title, title),
+            LocalizedText(description, description),
+            unit,
+            "sum",
+            V2MetricCapabilities((), (), {"monitor": V2MonitorCapability(60, 10, (), ())}),
+            {},
+        )
+
+    descriptor = V2ProbeDescriptor(
+        "revision",
+        "1",
+        V2Dataset(text, text),
+        (
+            metric("stars", "Stars", "Accepted stars help"),
+            metric("growth", "Growth", "Pending growth help"),
+        ),
+        (),
+    )
+    component = CustomMonitorComponent(config(metric_id="stars"))
+    assert component.accept(
+        CustomMonitorCompletion(
+            0,
+            config(metric_id="stars"),
+            V2MonitorResponse(
+                "stars",
+                response("stars").observation,
+                descriptor=descriptor,
+            ),
+        ),
+        accepted_at=datetime.now(UTC),
+    )
+
+    component.begin_metric_switch(config(metric_id="growth"))
+
+    assert component.pending
+    assert component.candidate.metric_id == "stars"
+    assert component.request_config.metric_id == "growth"
+    pane = tui_module.TuiCustomPane(
+        component,
+        FixedIntervalScheduler(10, now=0),
+        LifecycleOperation("monitor-metric-help"),
+        ProcessConfig(),
+    )
+    assert tui_module._accepted_custom_metric_help_node(
+        pane, load_translator("en")
+    ) == ("CURRENT METRIC", (("Stars", (("Accepted stars help", ()),)),))
 
 
 def test_monitor_metric_switch_failure_retains_old_sampling_state() -> None:

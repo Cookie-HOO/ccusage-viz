@@ -1,3 +1,5 @@
+import threading
+from contextlib import nullcontext
 from dataclasses import replace
 from datetime import UTC, date, datetime
 from decimal import Decimal
@@ -690,6 +692,112 @@ def test_accepted_custom_metric_help_is_localized() -> None:
     assert tui_module._accepted_custom_metric_help_node(
         _accepted_metric_help_pane(), load_translator("zh")
     ) == ("当前指标", (("星标", (("GitHub 星标总数", ()),)),))
+
+
+def _dashboard_help_frames(
+    monkeypatch: pytest.MonkeyPatch, pane: tui_module.TuiCustomPane, *, language: str, width: int
+) -> str:
+    """Drive Dashboard pane adjustment and Help using a production Custom Pane."""
+
+    frames: list[object] = []
+
+    class Handle:
+        def cancel(self) -> None:
+            pass
+
+        def result(self) -> object:
+            threading.Event().wait(1)
+            raise RuntimeError("cancelled test query")
+
+    class Runtime:
+        def submit(self, _intent: object) -> Handle:
+            return Handle()
+
+        def cancel(self) -> None:
+            pass
+
+    class Screen:
+        def __init__(self, _stream: object) -> None:
+            pass
+
+        def paint(self, frame: object, **_kwargs: object) -> None:
+            frames.append(frame)
+
+        def finish(self) -> None:
+            pass
+
+    options = _to_options(
+        build_parser(load_translator(language)).parse_args(
+            ["dashboard", "--empty", "--header-style", "hidden"]
+        )
+    )
+    events = iter((KeyEvent("m"), KeyEvent("h"), KeyEvent("\x03")))
+    monkeypatch.setattr(tui_module, "build_query_runtime", Runtime)
+    monkeypatch.setattr(tui_module, "_new_pane", lambda *_args: pane)
+    monkeypatch.setattr(tui_module, "FramePainter", Screen)
+    monkeypatch.setattr(tui_module, "tui_input_mode", nullcontext)
+    monkeypatch.setattr(tui_module, "read_event", lambda _decoder, _timeout: next(events))
+    monkeypatch.setattr(
+        tui_module, "get_terminal_size", lambda: __import__("os").terminal_size((width, 40))
+    )
+
+    translator = load_translator(language)
+    assert tui_module.run_tui(options, translator) == 0
+    overlays = [
+        "\n".join(frame.rows)
+        for frame in frames
+        if translator.text("status.tui_help_title") in "\n".join(frame.rows)
+    ]
+    assert overlays
+    return overlays[-1]
+
+
+def test_dashboard_help_overlay_shows_committed_localized_v2_metric_and_omits_v1(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    v2_help = _dashboard_help_frames(
+        monkeypatch, _accepted_metric_help_pane(), language="zh", width=80
+    )
+
+    assert "当前指标" in v2_help
+    assert "星标" in v2_help
+    assert "GitHub 星标总数" in v2_help
+
+    pane = _accepted_metric_help_pane()
+    pane.component.v2_descriptor = None
+    v1_help = _dashboard_help_frames(monkeypatch, pane, language="zh", width=80)
+
+    assert "当前指标" not in v1_help
+    assert "星标" not in v1_help
+
+
+def test_dashboard_help_overlay_wraps_metric_description_at_tree_continuation_indent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pane = _accepted_metric_help_pane()
+    assert isinstance(pane.component.v2_descriptor, V2ProbeDescriptor)
+    metric = pane.component.v2_descriptor.metrics[0]
+    pane.component.v2_descriptor = replace(
+        pane.component.v2_descriptor,
+        metrics=(
+            replace(
+                metric,
+                description=LocalizedText(
+                    "A description long enough to wrap through the current Metric tree node.",
+                    "A description long enough to wrap through the current Metric tree node.",
+                ),
+            ),
+            *pane.component.v2_descriptor.metrics[1:],
+        ),
+    )
+    lines = [
+        strip_ansi(line)
+        for line in _dashboard_help_frames(monkeypatch, pane, language="en", width=44).splitlines()
+    ]
+    first = next(index for index, line in enumerate(lines) if "A description long" in line)
+
+    assert "└─ A description long" in lines[first]
+    assert lines[first + 1].index("ap through") == lines[first].index("A description long") + 3
 
 
 def _custom_monitor_component(*, grouped: bool = True, total: str = "90") -> CustomMonitorComponent:
