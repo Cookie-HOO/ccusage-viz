@@ -521,6 +521,16 @@ def test_metric_switch_accepts_v2_response_for_requested_metric() -> None:
     assert not component.is_pending
 
 
+def test_primary_v1_response_clears_previously_accepted_v2_metadata() -> None:
+    component = CustomHistoricalComponent(config(metric_id="stars"))
+    assert component.apply_provider_result(SimpleNamespace(custom_response=v2_chart_response("stars")))
+    assert component.v2_descriptor is not None
+
+    assert component.apply_provider_result(SimpleNamespace(custom_response=response()))
+
+    assert component.v2_descriptor is None
+
+
 def test_metric_switch_accepts_target_chart_periods() -> None:
     component = CustomHistoricalComponent(
         config(metric_id="stars", metric_periods=("all",))

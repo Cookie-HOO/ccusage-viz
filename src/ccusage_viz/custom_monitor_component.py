@@ -345,7 +345,7 @@ class CustomMonitorComponent:
             ):
                 return False
             self.set_metric(metric)
-            self.v2_descriptor = descriptor
+        self.v2_descriptor = descriptor
         self.runtime = completion.response.runtime
         self.accepted_config = completion.config
         self.accepted_response = completion.response

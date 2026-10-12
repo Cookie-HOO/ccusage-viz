@@ -406,9 +406,12 @@ class CustomHistoricalComponent:
         config = self.request_config if purpose == "primary" else self.comparison_request_config()
         if config is None:
             return False
-        return self.apply_result(
+        accepted = self.apply_result(
             CustomCompletion(self.generation, config, response, purpose), accepted_at=accepted_at
         )
+        if accepted and purpose == "primary":
+            self.v2_descriptor = None
+        return accepted
 
     def start_comparison(self) -> CustomChartConfig | None:
         """Mark and return the prior range after the current response is accepted."""

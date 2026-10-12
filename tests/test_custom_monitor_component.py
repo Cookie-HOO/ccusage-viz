@@ -131,6 +131,14 @@ def test_monitor_metric_switch_pending_state_retains_accepted_metric_help() -> N
         pane, load_translator("en")
     ) == ("CURRENT METRIC", (("Stars", (("Accepted stars help", ()),)),))
 
+    assert component.accept(
+        CustomMonitorCompletion(1, config(metric_id="growth"), response("growth")),
+        accepted_at=datetime.now(UTC),
+    )
+    assert component.candidate.metric_id == "growth"
+    assert component.v2_descriptor is None
+    assert tui_module._accepted_custom_metric_help_node(pane, load_translator("en")) is None
+
 
 def test_monitor_metric_switch_failure_retains_old_sampling_state() -> None:
     component = CustomMonitorComponent(config(metric_id="stars"))

@@ -38,6 +38,7 @@ from ccusage_viz.custom_models import (
     V2MonitorCapability,
     V2MonitorObservation,
     V2ProbeDescriptor,
+    V2Runtime,
 )
 from ccusage_viz.custom_monitor_component import (
     CustomMonitorCompletion,
@@ -48,6 +49,7 @@ from ccusage_viz.custom_protocol import (
     CustomChartResponse,
     CustomPaneResponse,
     CustomSummaryResponse,
+    V2ChartResponse,
     V2MonitorResponse,
     V2SummaryRequest,
 )
@@ -634,9 +636,7 @@ def _accepted_metric_help_pane() -> tui_module.TuiCustomPane:
         metric_id="stars",
     )
     component = CustomHistoricalComponent(chart)
-    component.accepted_config = chart
-    component.candidate = replace(chart, metric_id="growth")
-    component.v2_descriptor = V2ProbeDescriptor(
+    descriptor = V2ProbeDescriptor(
         "revision",
         "1",
         V2Dataset(text, text),
@@ -653,6 +653,13 @@ def _accepted_metric_help_pane() -> tui_module.TuiCustomPane:
             ),
         ),
         (),
+    )
+    assert component.apply_provider_result(
+        SimpleNamespace(
+            custom_response=V2ChartResponse(
+                "stars", CustomData(()), descriptor, V2Runtime(())
+            )
+        )
     )
     return tui_module.TuiCustomPane(
         component,
@@ -672,13 +679,11 @@ def test_accepted_custom_metric_help_uses_only_committed_v2_metric() -> None:
     )
 
 
-@pytest.mark.parametrize("missing", ("accepted_config", "descriptor", "v1", "metric"))
+@pytest.mark.parametrize("missing", ("accepted_config", "v1", "metric"))
 def test_accepted_custom_metric_help_omits_unusable_metadata(missing: str) -> None:
     pane = _accepted_metric_help_pane()
     if missing == "accepted_config":
         pane.component.accepted_config = None
-    elif missing == "descriptor":
-        pane.component.v2_descriptor = None
     elif missing == "v1":
         pane.component.v2_descriptor = SimpleNamespace(metrics=())
     else:
@@ -764,11 +769,80 @@ def test_dashboard_help_overlay_shows_committed_localized_v2_metric_and_omits_v1
     assert "GitHub 星标总数" in v2_help
 
     pane = _accepted_metric_help_pane()
-    pane.component.v2_descriptor = None
+    assert pane.component.apply_provider_result(
+        SimpleNamespace(
+            custom_response=CustomChartResponse(
+                CustomDataset(
+                    LocalizedText("Dataset", "数据集"),
+                    LocalizedText("Daily", "每日"),
+                    CustomUnit("count", LocalizedText("Dataset", "数据集"), "suffix", 0),
+                ),
+                CustomCapabilities(
+                    (), (), {"timeline": CustomChartCapability(("day",), (), ())}
+                ),
+                CustomData(()),
+            )
+        )
+    )
+    assert pane.component.v2_descriptor is None
     v1_help = _dashboard_help_frames(monkeypatch, pane, language="zh", width=80)
 
     assert "当前指标" not in v1_help
     assert "星标" not in v1_help
+
+
+def test_dashboard_help_overlay_omits_monitor_metric_after_descriptorless_acceptance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    text = LocalizedText("Router", "路由")
+    unit = CustomUnit("count", text, "suffix", 0)
+    chart = CustomChartConfig(
+        "monitor",
+        CustomCommandSource("router", ("router",)),
+        DateRange(date(2026, 10, 1), date(2026, 10, 8)),
+        metric_id="tokens",
+    )
+    component = CustomMonitorComponent(chart)
+    descriptor = V2ProbeDescriptor(
+        "revision",
+        "1",
+        V2Dataset(text, text),
+        (
+            V2MetricDescriptor(
+                "tokens",
+                LocalizedText("Tokens", "令牌"),
+                LocalizedText("Current token rate", "当前令牌速率"),
+                unit,
+                "sum",
+                V2MetricCapabilities(
+                    (), (), {"monitor": V2MonitorCapability(60, 10, (), ())}
+                ),
+                {},
+            ),
+        ),
+        (),
+    )
+    observation = V2MonitorObservation(datetime(2026, 10, 8, 12, tzinfo=UTC), Decimal("1"), ())
+    assert component.accept(
+        CustomMonitorCompletion(0, chart, V2MonitorResponse("tokens", observation, descriptor)),
+        accepted_at=datetime(2026, 10, 8, 12, tzinfo=UTC),
+    )
+    assert component.accept(
+        CustomMonitorCompletion(0, chart, V2MonitorResponse("tokens", observation)),
+        accepted_at=datetime(2026, 10, 8, 12, tzinfo=UTC),
+    )
+    assert component.v2_descriptor is None
+    pane = tui_module.TuiCustomPane(
+        component,
+        FixedIntervalScheduler(10, now=0),
+        LifecycleOperation("monitor-v1-metric-help"),
+        _to_options(build_parser(load_translator("en")).parse_args(["dashboard", "--empty"])).process,
+    )
+
+    help_overlay = _dashboard_help_frames(monkeypatch, pane, language="en", width=80)
+
+    assert "CURRENT METRIC" not in help_overlay
+    assert "Tokens" not in help_overlay
 
 
 def test_dashboard_help_overlay_wraps_metric_description_at_tree_continuation_indent(
