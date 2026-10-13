@@ -107,7 +107,7 @@ def normalize_switch_config(
             partition_candidates = tuple(
                 dict.fromkeys(
                     choice
-                    for choice in (preferred_partition, config.partition_by, *partition_choices)
+                    for choice in (preferred_partition, None, *partition_choices)
                     if choice in partition_choices
                 )
             )

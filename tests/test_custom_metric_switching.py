@@ -1,5 +1,6 @@
 from datetime import date
 
+from ccusage_viz.acquisition import custom_historical_query_intent
 from ccusage_viz.core.time import DateRange
 from ccusage_viz.custom_metric_switching import (
     cycle_switch_metric,
@@ -18,7 +19,9 @@ from ccusage_viz.custom_models import (
     V2MetricGroup,
     V2ProbeDescriptor,
 )
+from ccusage_viz.custom_protocol import V2ChartRequest
 from ccusage_viz.i18n import load_translator
+from ccusage_viz.lifecycle import QueryTrigger
 from ccusage_viz.options import CustomChartConfig, CustomCommandSource
 from ccusage_viz.render.base import RenderContext, date_range_heading
 
@@ -210,6 +213,44 @@ def test_normalizes_partition_and_group_atomically_without_collisions() -> None:
     partitioned = normalize_switch_config(current, target, "partition_by")
     assert partitioned is not None
     assert (partitioned.partition_by, partitioned.group_by) == ("logical", "real")
+
+
+def test_switch_to_optional_partition_without_default_clears_active_partition_on_wire() -> None:
+    target = V2MetricDescriptor(
+        "updated_days",
+        TEXT,
+        TEXT,
+        UNIT,
+        "sum",
+        V2MetricCapabilities(
+            (),
+            (),
+            {
+                "ranking": capability(
+                    group_by=("logical", "real"),
+                    partition_by=(None, "logical"),
+                )
+            },
+        ),
+        {},
+        group_id="github",
+    )
+    current = config(metric_id="updated_days", partition_by="logical", group_by="real")
+
+    normalized = normalize_switch_config(current, target, "partition_by")
+
+    assert normalized is not None
+    assert normalized.partition_by is None
+    intent = custom_historical_query_intent(
+        normalized,
+        timezone="UTC",
+        owner_id="pane",
+        generation=1,
+        trigger=QueryTrigger.REFRESH,
+        partition_declared=True,
+    )
+    assert isinstance(intent.payload, V2ChartRequest)
+    assert intent.payload.to_wire()["query"]["partition_by"] is None
 
 
 def test_required_partition_without_defaults_chooses_first_legal_pair() -> None:
