@@ -6,7 +6,7 @@ from decimal import Decimal
 import pytest
 
 from ccusage_viz.coverage import DateInterval
-from ccusage_viz.custom_models import LocalizedText
+from ccusage_viz.custom_models import CustomData, CustomSeries, LocalizedText
 from ccusage_viz.custom_protocol import (
     PROTOCOL_VERSION,
     V2_PROTOCOL_VERSION,
@@ -404,6 +404,30 @@ def test_v2_request_omits_undeclared_partition_but_emits_declared_null() -> None
     assert canonical_custom_request_key(aware) != canonical_custom_request_key(
         V2ChartRequest(**{**common, "partition_by": "logical_model"}, partition_declared=True)
     )
+
+
+def test_v2_request_rejects_partition_when_capability_is_undeclared() -> None:
+    with pytest.raises(ValueError, match="partition_by requires partition_declared"):
+        V2ChartRequest(
+            request_id="chart-v2-invalid-partition",
+            dataset_id="router",
+            metric_id="tokens",
+            timezone="Asia/Shanghai",
+            start_date=date(2026, 10, 1),
+            end_date=date(2026, 10, 8),
+            partition_by="logical_model",
+            partition_declared=False,
+        )
+
+
+def test_custom_data_manual_construction_enforces_flat_or_grouped_union() -> None:
+    series = CustomSeries("model", LocalizedText("Model", "模型"), ())
+
+    with pytest.raises(ValueError, match="groups and series are mutually exclusive"):
+        CustomData(series=(series,), groups=())
+
+    assert CustomData(series=(series,)).groups is None
+    assert CustomData(groups=()).series == ()
 
 
 def partitioned_ranking_request(**changes: object) -> V2ChartRequest:

@@ -266,6 +266,10 @@ class CustomData:
     series: tuple[CustomSeries, ...] = ()
     groups: tuple[CustomRankingGroup, ...] | None = None
 
+    def __post_init__(self) -> None:
+        if self.groups is not None and self.series:
+            raise ValueError("custom data groups and series are mutually exclusive")
+
 
 @dataclass(frozen=True, slots=True)
 class CustomComparison:

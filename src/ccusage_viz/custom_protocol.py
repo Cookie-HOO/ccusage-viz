@@ -233,6 +233,8 @@ class V2ChartRequest:
             raise ValueError("v2 custom request range end date must not precede start date")
         if self.top is not None and self.top < 1:
             raise ValueError("v2 custom request top must be positive")
+        if not self.partition_declared and self.partition_by is not None:
+            raise ValueError("v2 custom request partition_by requires partition_declared")
         object.__setattr__(self, "filters", _canonical_filters(self.filters))
 
     def to_wire(self) -> dict[str, object]:
