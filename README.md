@@ -152,6 +152,13 @@ overview composed from multiple panes.
 > custom Dashboard and choose your own grid or named layout. See the
 > [usage guide](docs/usage.md).
 
+A declared V2 Dataset can independently rank real models within each logical
+model:
+
+```bash
+ccuv chart ranking --dataset router --partition-by logical_model --group-by real_model
+```
+
 For commands, filters, controls, styles, and data semantics, see the
 [usage guide](docs/usage.md). The [architecture overview](docs/architecture.md)
 is intended for maintainers.

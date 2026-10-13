@@ -108,6 +108,12 @@ ccuv dashboard weekly-review --ccusage-bin /opt/bin/ccusage
 > [!TIP]
 > 想将多个聚焦图表一同查看？可以把独立图表命令组合为自定义 Dashboard，并自行选择网格或命名布局。参阅[使用指南](docs/usage.zh-CN.md)。
 
+已声明该能力的 V2 Dataset 可以在每个逻辑模型中独立排列真实模型：
+
+```bash
+ccuv chart ranking --dataset router --partition-by logical_model --group-by real_model
+```
+
 命令、筛选、控制、样式和数据语义请参阅[使用指南](docs/usage.zh-CN.md)。
 [架构文档](docs/architecture.zh-CN.md)面向维护者。
 

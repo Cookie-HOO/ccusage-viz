@@ -99,6 +99,41 @@ requested change, ccuv keeps the current query and shows a short notice rather
 than sending an unsupported request. Omit `periods` to let ccuv use its normal
 period cycle and let the Dataset dynamically interpret each request.
 
+### Grouped V2 Ranking
+
+A V2 Metric may give Ranking an optional outer partition. The Metric can declare
+a separate ordered partition-dimension catalog; if it omits that catalog,
+partition IDs and labels fall back to the existing `capabilities.group_by`
+catalog. `group_by` IDs always use the grouping catalog.
+
+```json
+"capabilities": {
+  "group_by": [
+    {"id": "real_model", "label": {"en": "Real Model", "zh-CN": "真实模型"}}
+  ],
+  "partition_by": [
+    {"id": "logical_model", "label": {"en": "Logical Model", "zh-CN": "逻辑模型"}}
+  ],
+  "charts": {
+    "ranking": {
+      "partition_by": [null, "logical_model"],
+      "group_by": ["real_model"],
+      "show_percentage": true,
+      "max_items": 100
+    }
+  }
+}
+```
+
+`capabilities.charts.ranking.partition_by` is Ranking-only. Omitting it keeps
+the old flat capability and wire format. A declared list containing `null`
+allows flat Ranking; a list without `null` requires a partition. An active
+partition requires a non-null grouping, and the active `partition_by` and
+`group_by` IDs must differ. Every non-null partition ID must occur in the
+explicit partition catalog, or in the grouping catalog when the partition
+catalog is omitted. Invalid references or combinations reject the descriptor;
+ccuv does not silently downgrade them.
+
 ### V2 chart defaults
 
 Each Metric may use `defaults` to suggest its initial state for a chart. This is
@@ -117,15 +152,30 @@ An explicit CLI or Dashboard Pane option overrides the Dataset field.
     "style": "line-points",
     "theme": "nord"
   },
+  "ranking": {
+    "period": "14d",
+    "partition_by": "logical_model",
+    "group_by": "real_model",
+    "top": 3
+  },
   "monitor": {"style": "ranking", "window": "6h"}
 }
 ```
 
 All fields are optional. `period`, `granularity`, and `group_by` must be
 supported by the selected chart capability; `top` needs a valid final grouping;
-and style must be compatible with that grouping. `other` is `"show"` or
-`"hide"`. `theme` and `style` use ccuv's ordinary CLI values. Filters have no
-static default: their IDs and options are response-owned `runtime.filters`.
+and style must be compatible with that grouping. `partition_by` is valid only
+for Ranking and must follow the declared partition capability. A non-null
+partition default requires a non-null, different `group_by`; invalid default
+combinations reject the descriptor. `other` is `"show"` or `"hide"`. `theme`
+and `style` use ccuv's ordinary CLI values. Filters have no static default:
+their IDs and options are response-owned `runtime.filters`.
+
+Explicit CLI and Dashboard Pane settings override Dataset defaults. Dashboard
+presets persist `partition_by`; older presets omit it and remain flat. When a
+Metric switch needs normalization, ccuv chooses the target's valid partition
+default, otherwise `null` when allowed or the first required partition, then
+chooses a non-conflicting grouping.
 
 `defaults.top` is only the first-screen Top N suggestion. For a historical
 Ranking, `capabilities.charts.ranking.max_items` may declare a positive
@@ -156,6 +206,109 @@ keyboard override; switching Metrics applies the target Metric's declared
 direction. Use `"ascending"` for a fact such as days since last update when
 smaller values should appear first, and `"descending"` for Stars, growth,
 ratings, or counts when larger values should appear first.
+
+#### Grouped request compatibility
+
+An undeclared partition capability leaves `query.partition_by` absent. Once the
+Ranking capability declares `partition_by`, every request includes the selected
+value: either a dimension ID or explicit JSON `null`. The explicit null tells a
+partition-aware Dataset that a capable client selected flat mode.
+
+```json
+"query": {
+  "filters": {},
+  "partition_by": "logical_model",
+  "group_by": "real_model",
+  "granularity": "day",
+  "top": 3
+}
+```
+
+`query.top` keeps its source-coverage meaning. The Dataset decides how many raw
+series to return in each group and may return fewer than, exactly, or more than
+N; ccuv never treats omitted source entries as zero or infers an omitted
+remainder.
+
+#### Flat and grouped response shapes
+
+A flat request, including a declared explicit-null partition, requires the
+existing `data.series` shape. A non-null partition requires `data.groups`.
+`series` and `groups` are mutually exclusive.
+
+```json
+"data": {
+  "groups": [
+    {
+      "id": "coding",
+      "label": {"en": "Coding Model", "zh-CN": "代码模型"},
+      "description": {
+        "en": "Routes coding workloads",
+        "zh-CN": "面向代码场景的逻辑路由"
+      },
+      "display": {"en": "12.4K requests", "zh-CN": "1.24 万次请求"},
+      "comparison_display": {
+        "en": "+1.8K requests",
+        "zh-CN": "+1800 次请求"
+      },
+      "link": "https://example.com/router/coding",
+      "series": [
+        {
+          "id": "seed-code",
+          "label": {"en": "Seed Code", "zh-CN": "豆包代码模型"},
+          "points": [{"date": "2026-10-13", "value": "7100"}]
+        }
+      ]
+    }
+  ]
+}
+```
+
+Group IDs must be unique. Series IDs must be unique within a group, but may
+repeat in different groups; stable inner identity is `(group.id, series.id)`.
+Groups retain Dataset response order and may be empty. `label` is required.
+Optional `description`, `display`, `comparison_display`, and absolute HTTPS
+`link` have the same localization, safety, and presentation rules as Ranking
+series metadata. Inner series use the existing dated-point Ranking schema and
+metadata. `max_items` bounds the sum of all returned inner series, not the
+number of groups. Any invalid group or series rejects the whole response.
+
+ccuv sums each series' points in the selected interval, sums returned series to
+form each group total, and sums group totals to form the global total. There is
+no separate numeric group-total field: optional `group.display` changes only its
+formatted text. For `period: "all"`, the anchored dates and `all` marker retain
+their existing meaning; a Dataset may return one official aggregate point at
+`end_date` per series, and ccuv makes no prior-period request.
+
+Outer groups are never sorted, ranked, or limited by Top. Inside every group,
+ccuv independently applies the Metric's sort direction, uses series ID as the
+equal-value tie-breaker, restarts numbering at 1, and applies Top N. `Other` is
+the arithmetic sum of actual returned series beyond N and is shown or hidden by
+the existing setting; it is never inferred from a separate total. Signed
+Decimal values, including negative entries and negative Other, are not clamped
+or reinterpreted.
+
+With `show_percentage: true`, a group's share is its returned total divided by
+the global returned total, while an item's share is its total divided by its
+returned group total. These denominators are established before Top/Other
+visibility, search, or scrolling. A zero global total omits group shares; a zero
+group total omits that group's item shares. Source facts may legitimately yield
+negative shares or shares above 100%.
+
+Search matches inner series labels, descriptions, safe link text, and link URLs;
+it does not match group metadata. Groups without matching inner rows are hidden.
+Search changes visibility only: original within-group ranks, totals, shares, bar
+scales, and comparisons still come from the complete latest response. A refresh
+rebuilds those facts before reapplying the unchanged search. Copy All follows
+Dataset group order, includes group headings, honors Top/Other, and during search
+copies only matching inner series under their headings.
+
+For ordinary comparison periods, groups match by group ID and series by the
+stable pair. Current and previous totals each use only the series actually
+returned in that response; differing response coverage is not filled with zero.
+A missing prior group or series is new, and moving a series to another group
+makes it new there. Group totals may show value comparison but not outer rank
+movement; inner rows retain their independent within-group comparison. `Other`
+has no comparison.
 
 For a Custom Monitor, `window` is ccuv's local display horizon (`5m` through
 `24h`), not the source business window. The fixed request interval remains
@@ -210,6 +363,9 @@ ccuv chart timeline --dataset example --command 'example-reader ccuv'
 ccuv chart stack --dataset example --command 'example-reader ccuv'
 ccuv chart calendar --dataset example --command 'example-reader ccuv'
 ccuv chart ranking --dataset example --command 'example-reader ccuv'
+
+# A declared V2 partition: independently rank real models within each logical model.
+ccuv chart ranking --dataset router --partition-by logical_model --group-by real_model
 ```
 
 `--dataset` is required. It is the stable identity of the source and every
@@ -226,9 +382,16 @@ ccuv chart timeline --dataset example --command "sh -lc 'collector | adapter'"
 A custom chart begins with a 14-day, ungrouped total graph and a day-period
 summary. Custom data cannot use `monitor`. The Dashboard pane always exposes
 `p`/`P` to cycle the shared rolling graph range (`7d → 14d → 30d → 90d → 180d → 365d → 1w → 1mo → 1y`). `1w`, `1mo`, and `1y` mean This week, This month, and This year. After the first successful response,
-it also exposes capability-gated query controls: `g` cycles declared
-granularities, `b` cycles total and declared groupings, and `f` edits declared
-filter options. Each such adjustment starts a new command query. Source editing
+it also exposes capability-gated query controls. For ordinary historical
+charts, `g` cycles granularities and `b` cycles total and declared groupings.
+For a grouped-capable Ranking, Quick `g/G` cycles declared outer partitions and
+`b/B` cycles inner grouping dimensions; both directions skip the other active
+dimension, and an unavailable alternative keeps the valid query with a short
+notice. Quick `s/S` changes style. Advanced `s/S` changes Ranking spacing, `o`
+changes Other, and `f` edits filters; filters are Advanced for all Dashboard
+chart panes. Standalone charts retain one unsplit control set. Data-affecting
+partition, grouping, and filter adjustments start a new command query; spacing
+is presentation-only. Source editing
 (`e`) and diagnostic Logs (`L`) are also available. Lowercase `l` cycles the
 custom Timeline/Stack legend; uppercase `L` is reserved for Logs.
 
