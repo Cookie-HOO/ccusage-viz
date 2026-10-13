@@ -121,6 +121,8 @@ from ccusage_viz.dashboard_layout import (
     PaneLayout as ResolvedPaneLayout,
 )
 from ccusage_viz.dashboard_layout import (
+    MIN_PANE_HEIGHT,
+    MIN_PANE_WIDTH,
     PaneRect,
     adjust_weight,
     fixed_shape,
@@ -1302,7 +1304,14 @@ def _frame(
     shell_context: RenderContext | None = None,
 ) -> list[str]:
     """Frame a pane only when configured or explicitly selected for adjustment."""
-    width, height = max(4, width), max(3, height)
+    if height <= 0:
+        return []
+    if width <= 0:
+        return ["" for _ in range(height)]
+    if width < 3 or height < 3:
+        body = [_fit_line(line, width) for line in lines[:height]]
+        body.extend(" " * width for _ in range(height - len(body)))
+        return body
     if frame_style == "none" and not selected:
         body = [_fit_line(line, width) for line in lines[:height]]
         body.extend(" " * width for _ in range(height - len(body)))
@@ -1438,6 +1447,7 @@ def _compose_resolved_panes(
             shell_context=shell_context,
         )
         for rect in layout.panes
+        if rect.width > 0 and rect.height > 0
     }
     vertical = (
         ":" if ascii and divider_style == "dashed" else "┊" if divider_style == "dashed" else "│"
@@ -1457,14 +1467,14 @@ def _compose_resolved_panes(
     cursor = 0
     for size in layout.column_sizes[:-1]:
         cursor += size
-        column_gutters.update(range(cursor, cursor + layout.gutter))
-        cursor += layout.gutter
+        column_gutters.update(range(cursor, cursor + layout.column_gutter))
+        cursor += layout.column_gutter
     row_gutters: set[int] = set()
     cursor = 0
     for size in layout.row_sizes[:-1]:
         cursor += size
-        row_gutters.update(range(cursor, cursor + layout.gutter))
-        cursor += layout.gutter
+        row_gutters.update(range(cursor, cursor + layout.row_gutter))
+        cursor += layout.row_gutter
 
     output: list[str] = []
     for y in range(layout.height):
@@ -1475,7 +1485,9 @@ def _compose_resolved_panes(
                 (
                     item
                     for item in layout.panes
-                    if item.left <= x < item.left + item.width
+                    if item.width > 0
+                    and item.height > 0
+                    and item.left <= x < item.left + item.width
                     and item.top <= y < item.top + item.height
                 ),
                 None,
@@ -8124,7 +8136,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         return (clip_width(context, width), preset_operations(width), global_operations(width))
 
     def controls() -> tuple[str, ...]:
-        return () if controls_hidden else _controls()
+        return () if controls_hidden or get_terminal_size().lines < MIN_PANE_HEIGHT else _controls()
 
     def notices() -> tuple[str, ...]:
         feedback = feedback_lines(
@@ -8174,21 +8186,53 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         )
         layout = grid_geometry(size.columns, size.lines, header_rows, 0)
         slot = layout.topology.slot(pane_index)
+        def can_adjust_axis(
+            *, axis: str, weights: tuple[int, ...], index: int
+        ) -> tuple[bool, tuple[int, ...]]:
+            candidate = adjust_weight(weights, index, delta)
+            candidate_layout = resolve_pane_layout(
+                layout=active_layout or active_grid,
+                pane_count=len(panes),
+                width=layout.width,
+                height=layout.height,
+                divider_style=divider_style,
+                column_weights=(
+                    candidate
+                    if axis == "column"
+                    else reconcile_weights(column_weights, layout.topology.columns)
+                ),
+                row_weights=(
+                    candidate
+                    if axis == "row"
+                    else reconcile_weights(row_weights, layout.topology.rows)
+                ),
+            )
+            before = layout.column_sizes if axis == "column" else layout.row_sizes
+            after = candidate_layout.column_sizes if axis == "column" else candidate_layout.row_sizes
+            return after != before, candidate
+
         if axis == "column":
+            weights = reconcile_weights(column_weights, layout.topology.columns)
+            can_adjust, candidate = can_adjust_axis(
+                axis="column", weights=weights, index=slot.column
+            )
+            if not can_adjust:
+                return False
 
             def adjust_column() -> None:
                 nonlocal column_weights
-                column_weights = adjust_weight(
-                    reconcile_weights(column_weights, layout.topology.columns), slot.column, delta
-                )
+                column_weights = candidate
 
             return record_mutation(("layout", "column-weight", slot.column), adjust_column)
 
+        weights = reconcile_weights(row_weights, layout.topology.rows)
+        can_adjust, candidate = can_adjust_axis(axis="row", weights=weights, index=slot.row)
+        if not can_adjust:
+            return False
+
         def adjust_row() -> None:
             nonlocal row_weights
-            row_weights = adjust_weight(
-                reconcile_weights(row_weights, layout.topology.rows), slot.row, delta
-            )
+            row_weights = candidate
 
         return record_mutation(("layout", "row-weight", slot.row), adjust_row)
 
@@ -8619,6 +8663,15 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 rect = layout.pane(index)
                 cell_width = rect.width
                 cell_height = rect.height
+                if cell_width < MIN_PANE_WIDTH or cell_height < MIN_PANE_HEIGHT:
+                    rendered_panes.append(
+                        clip_width(
+                            translator.text("status.tui_pane_too_small"), max(0, cell_width)
+                        )
+                        if cell_width > 0 and cell_height > 0
+                        else ""
+                    )
+                    continue
                 # The active frame-less pane gets a selection ring, so reserve its
                 # interior too; its content is never overwritten by the indicator.
                 framed = frame_style != "none" or index == focused

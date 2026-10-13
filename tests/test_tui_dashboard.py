@@ -768,6 +768,108 @@ def test_dashboard_animation_pane_renders_text_overlay() -> None:
     assert "OVERLAY" in rendered.chart
 
 
+def test_dashboard_resize_saturates_at_dashboard_minimum(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    options = _to_options(
+        build_parser(load_translator("en")).parse_args(
+            [
+                "dashboard",
+                "--header-style",
+                "hidden",
+                "--pane",
+                "animate rain",
+                "--pane",
+                "animate rain",
+            ]
+        )
+    )
+    frames: list[object] = []
+
+    class Runtime:
+        def cancel(self) -> None:
+            pass
+
+    class Screen:
+        def __init__(self, _stream: object) -> None:
+            pass
+
+        def paint(self, frame: object, **_kwargs: object) -> None:
+            frames.append(frame)
+
+        def finish(self) -> None:
+            pass
+
+    events = iter((KeyEvent("m"), *(KeyEvent("}") for _ in range(8)), KeyEvent("\x03")))
+    monkeypatch.setattr(tui_module, "build_query_runtime", Runtime)
+    monkeypatch.setattr(tui_module, "FramePainter", Screen)
+    monkeypatch.setattr(tui_module, "tui_input_mode", nullcontext)
+    monkeypatch.setattr(tui_module, "read_event", lambda _decoder, _timeout: next(events))
+    monkeypatch.setattr(
+        tui_module, "get_terminal_size", lambda: __import__("os").terminal_size((9, 8))
+    )
+    monkeypatch.setattr(tui_module, "_pane_render", lambda *_args, **_kwargs: tui_module.PaneRender("chart"))
+
+    assert tui_module.run_tui(options, load_translator("en")) == 0
+    assert frames[-2].rows == frames[-1].rows
+
+
+def test_undersized_dashboard_panes_skip_normal_rendering(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    options = _to_options(
+        build_parser(load_translator("en")).parse_args(
+            [
+                "dashboard",
+                "--header-style",
+                "hidden",
+                "--pane",
+                "animate rain",
+                "--pane",
+                "animate rain",
+            ]
+        )
+    )
+    frames: list[object] = []
+
+    class Runtime:
+        def cancel(self) -> None:
+            pass
+
+    class Screen:
+        def __init__(self, _stream: object) -> None:
+            pass
+
+        def paint(self, frame: object, **_kwargs: object) -> None:
+            frames.append(frame)
+
+        def finish(self) -> None:
+            pass
+
+    monkeypatch.setattr(tui_module, "build_query_runtime", Runtime)
+    monkeypatch.setattr(tui_module, "FramePainter", Screen)
+    monkeypatch.setattr(tui_module, "tui_input_mode", nullcontext)
+    monkeypatch.setattr(
+        tui_module, "read_event", lambda _decoder, _timeout: KeyEvent("\x03")
+    )
+    monkeypatch.setattr(
+        tui_module, "get_terminal_size", lambda: __import__("os").terminal_size((1, 1))
+    )
+    monkeypatch.setattr(
+        tui_module,
+        "_pane_render",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("undersized pane rendered")
+        ),
+    )
+
+    assert tui_module.run_tui(options, load_translator("en")) == 0
+    assert frames
+    assert all(len(frame.rows) == 1 for frame in frames)
+
+
+
+
 def test_dashboard_animation_panes_keep_independent_session_state() -> None:
     parser = build_parser(load_translator("en"))
     options = _to_options(

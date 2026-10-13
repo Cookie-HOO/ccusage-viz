@@ -670,6 +670,7 @@ MESSAGES = {
     "status.tui_pane_management_divider": "━━ Dashboard 子图管理 ━━",
     "status.tui_pane_content": "子图",
     "status.tui_pane_position": "位置",
+    "status.tui_pane_too_small": "子图过小",
     "status.tui_adjust_monitor": "调整预览中 · 后台采样继续 · 当前图为进入调整时快照",
     "status.tui_adjust_monitor_pending": "调整预览中 · 后台采样继续 · 有新数据待应用",
     "status.tui_layout_prompt": "设置网格（行x列）：{value}",

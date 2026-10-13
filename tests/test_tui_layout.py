@@ -6,13 +6,17 @@ import pytest
 import ccusage_viz.tui as tui_module
 from ccusage_viz.cli import _to_options, build_parser
 from ccusage_viz.coverage import DateCoverage
+from ccusage_viz.dashboard_layout import resolve_pane_layout
 from ccusage_viz.deltas import RefreshRanks
+from ccusage_viz.formatting import display_width
 from ccusage_viz.i18n import load_translator
 from ccusage_viz.query.models import QueryTrigger
 from ccusage_viz.tui import (
     _adjustment_controls,
     _choose_layout_shortcut,
     _choose_pane_type,
+    _compose_resolved_panes,
+    _frame,
     _grid_for_pane_count,
     _grid_shape,
     _insert_pane,
@@ -70,6 +74,25 @@ def test_dashboard_constrained_pane_preserves_identity_before_local_notices() ->
     pane = _local_pane_content("Identity\nbody\nstatus", ("notice one", "notice two"), height=3)
 
     assert pane.splitlines() == ["Identity", "body", "status"]
+
+
+def test_tiny_frame_preserves_exact_zero_width_or_height_geometry() -> None:
+    assert _frame(["content"], 0, 2, selected=False, ascii=True, frame_style="auto") == ["", ""]
+    assert _frame(["content"], 2, 0, selected=False, ascii=True, frame_style="auto") == []
+
+
+def test_resolved_pane_compositor_preserves_asymmetric_axis_gutters() -> None:
+    layout = resolve_pane_layout(
+        layout="2x2", pane_count=4, width=9, height=2, divider_style="line"
+    )
+
+    output = _compose_resolved_panes(["a", "b", "c", "d"], layout, ascii=True)
+
+    assert layout.column_gutter == 1
+    assert layout.row_gutter == 0
+    assert [display_width(row) for row in output.splitlines()] == [9, 9]
+    assert output.splitlines()[0][4] == "│"
+    assert output.splitlines()[1][4] == "│"
 
 
 def test_tui_grid_auto_and_compositor() -> None:
@@ -373,13 +396,13 @@ def test_insert_pane_uses_list_index_and_starts_only_new_pane() -> None:
 
 @pytest.mark.parametrize(
     ("key", "expected"),
-    (("J", (11, 13)), ("K", (13, 11))),
+    (("J", (11, 13)), ("K", None)),
 )
 @pytest.mark.parametrize("first_pane", ("ranking", "animate rain"))
 def test_dashboard_pane_height_keys_adjust_only_shared_row_weights(
     monkeypatch: pytest.MonkeyPatch,
     key: str,
-    expected: tuple[int, int],
+    expected: tuple[int, int] | None,
     first_pane: str,
 ) -> None:
     parser = build_parser(load_translator("en"))
@@ -486,7 +509,10 @@ def test_dashboard_pane_height_keys_adjust_only_shared_row_weights(
     assert tui_module.run_tui(options, load_translator("en")) == 0
 
     assert copied
-    assert f"--row-weight {expected[0]} --row-weight {expected[1]}" in copied[-1]
+    if expected is None:
+        assert "--row-weight" not in copied[-1]
+    else:
+        assert f"--row-weight {expected[0]} --row-weight {expected[1]}" in copied[-1]
     if first_pane == "ranking":
         assert "--top 10" in copied[-1]
     else:

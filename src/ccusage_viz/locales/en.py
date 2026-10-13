@@ -677,6 +677,7 @@ MESSAGES = {
     "status.tui_pane_management_divider": "━━ Dashboard Pane Management ━━",
     "status.tui_pane_content": "Pane",
     "status.tui_pane_position": "Position",
+    "status.tui_pane_too_small": "Pane too small",
     "status.tui_adjust_monitor": "Adjusting preview · background sampling continues · current chart is the entry snapshot",
     "status.tui_adjust_monitor_pending": "Adjusting preview · background sampling continues · new data waiting to apply",
     "status.tui_layout_prompt": "Set grid (ROWSxCOLUMNS): {value}",
