@@ -48,6 +48,7 @@ Aggregation: value
 Summary: none
 Chart capability: ranking only
 Grouping: quota_pool only
+Monitor refresh interval: 20 seconds
 ```
 
 `value` means the Dataset owns the exact current quota snapshot. ccusage-viz
@@ -58,7 +59,8 @@ model list identifies models attached to the pool; it must not claim models
 have independent quota balances.
 
 The Dataset continues to expose the existing Router Runtime metrics unchanged:
-`requests`, `error_rate`, and `latency_p95_ms`.
+`requests`, `error_rate`, and `latency_p95_ms`. Their current 60-second business
+window and 10-second Monitor refresh interval remain unchanged.
 
 ## Pool Inclusion And Values
 
@@ -159,11 +161,26 @@ cumulative-bars because the quota metric declares ranking only.
 
 ## Error Handling And Freshness
 
-The Router quota snapshot includes freshness state. When it is unavailable or
-stale beyond the accepted Dataset policy, the Dataset reports `source_unavailable`
-rather than returning fabricated zeroes. A valid latest snapshot must retain its
-provider timestamp in Router state; the Dataset's Monitor observation endpoint
-uses its normal query `end_at` for the observation time.
+Router retains a normalized, redacted quota snapshot with a 20-second maximum
+freshness age. `GET /internal/providers/trae/usage` returns that cached snapshot
+while it is younger than 20 seconds. Once expired, concurrent callers share one
+Router-to-`traex_proxy` refresh; the successful refresh replaces the snapshot
+before the endpoint responds. The Dataset's quota Monitor declares a 20-second
+refresh interval, so normal sampling can obtain one fresh provider snapshot per
+observation rather than repeated identical ten-second samples.
+
+Model catalog and capability discovery remain independent: startup refresh plus
+hourly background refresh. The quota endpoint must not make catalog discovery
+or capability probes run at the 20-second quota cadence.
+
+When the quota snapshot is unavailable, or its refresh fails before any valid
+snapshot exists, the Dataset reports `source_unavailable` rather than returning
+fabricated zeroes. On refresh failure after a prior success, Router retains the
+last good snapshot, marks it `stale: true`, and returns it. The Dataset must
+reject that stale value as `source_unavailable` rather than presenting it as a
+current quota observation. A valid latest snapshot retains its provider refresh
+timestamp in Router state; the Dataset Monitor response uses its normal query
+`end_at` for the observation time.
 
 ## Verification
 
@@ -174,7 +191,9 @@ Router tests cover:
 - documented Trae metered models map explicitly to `basic`;
 - unassociated pools have no model description;
 - `live_limited` does not affect the ratio;
-- malformed/missing quota data remains unavailable rather than becoming zero.
+- malformed/missing quota data remains unavailable rather than becoming zero;
+- concurrent expired usage reads share exactly one refresh and the 20-second
+  quota freshness age does not trigger model catalog refresh.
 
 Dataset tests cover:
 
@@ -184,7 +203,10 @@ Dataset tests cover:
 - finite pools use the computed ratio;
 - descriptions are single-line comma-separated model IDs;
 - no raw pack identifier is returned;
-- unavailable provider data maps to the existing source-unavailable error.
+- stale or unavailable provider data maps to the existing source-unavailable
+  error;
+- the quota metric declares a 20-second refresh while Router Runtime metrics
+  retain their 10-second refresh.
 
 ccusage-viz tests cover:
 
