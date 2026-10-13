@@ -251,6 +251,11 @@ from ccusage_viz.render.custom import (
 from ccusage_viz.render.custom_monitor import render_custom_monitor
 from ccusage_viz.render.custom_ranking_viewport import render_custom_ranking_viewport
 from ccusage_viz.render.filters import active_filter_summary
+from ccusage_viz.render.grouped_ranking_viewport import (
+    GroupedIdentity,
+    GroupedRankingViewport,
+    render_grouped_custom_ranking_viewport,
+)
 from ccusage_viz.render.palette import COLOR_SCHEMES, get_color_scheme
 from ccusage_viz.render.ranking_presentation import copyable_description_text
 from ccusage_viz.render.ranking_viewport import RankingViewport
@@ -430,13 +435,22 @@ class TuiCustomPane:
     attachment: AnimationSessionState | None = None
     attachment_renderer: AnimationRenderer | None = None
     attachment_enabled: bool = False
-    ranking_copy_rows: dict[int, tuple[str, int, int | None]] = field(default_factory=dict)
-    copied_ranking_entry_id: str | None = None
+    ranking_copy_rows: dict[int, tuple[object, int, int | None]] = field(default_factory=dict)
+    copied_ranking_entry_id: object | None = None
     copied_ranking_until: float = 0.0
     copied_ranking_all_until: float = 0.0
     ranking_search: RankingSearchState = field(default_factory=RankingSearchState)
     ranking_item_spacing: str = "compact"
     ranking_viewport: RankingViewport = field(default_factory=RankingViewport)
+    grouped_ranking_viewport: GroupedRankingViewport = field(default_factory=GroupedRankingViewport)
+
+    @property
+    def active_ranking_viewport(self) -> RankingViewport | GroupedRankingViewport:
+        return (
+            self.grouped_ranking_viewport
+            if self.grouped_ranking_viewport.active
+            else self.ranking_viewport
+        )
 
     @property
     def interval(self) -> float:
@@ -1991,6 +2005,7 @@ def _render_custom_projection(
     entry_offset: int = 0,
     entry_limit: int | None = None,
     ranking_viewport: RankingViewport | None = None,
+    grouped_ranking_viewport: GroupedRankingViewport | None = None,
 ) -> PaneRender:
     context = _custom_render_context(
         config,
@@ -2035,7 +2050,10 @@ def _render_custom_projection(
                 controls=controls,
                 reserved_summary_rows=len(summary_render.splitlines()),
             )
-    if ranking_viewport is not None:
+    active_viewport: RankingViewport | GroupedRankingViewport | None = (
+        grouped_ranking_viewport if projection.groups is not None else ranking_viewport
+    )
+    if active_viewport is not None:
         audit = render_audit(context)
         summary_rows = len(summary_render.splitlines())
         context = replace(
@@ -2045,13 +2063,18 @@ def _render_custom_projection(
                 terminal.height
                 - summary_rows
                 - len(audit.splitlines())
-                - ranking_viewport.reserved_rows,
+                - active_viewport.reserved_rows,
             ),
         )
-        rendered = render_custom_ranking_viewport(
+        render_viewport = (
+            render_grouped_custom_ranking_viewport
+            if projection.groups is not None
+            else render_custom_ranking_viewport
+        )
+        rendered = render_viewport(
             replace(projection, config=config),
             context,
-            ranking_viewport,
+            active_viewport,
             heading=custom_heading(config, context, projection.presentation).strip(),
             descriptions_visible=config.presentation.density in {"full", "detailed"},
             search_query=search_query,
@@ -2063,15 +2086,15 @@ def _render_custom_projection(
             copy_all_action=True,
             copied_all=copied_all,
         )
-        ranking_viewport.hits = {
-            row + summary_rows: hit for row, hit in ranking_viewport.hits.items()
+        active_viewport.hits = {
+            row + summary_rows: hit for row, hit in active_viewport.hits.items()
         }
-        if ranking_viewport.copy_all_hit is not None:
-            row, column = ranking_viewport.copy_all_hit
-            ranking_viewport.copy_all_hit = (row + summary_rows, column)
-        if ranking_viewport.scrollbar is not None:
-            ranking_viewport.scrollbar = replace(
-                ranking_viewport.scrollbar, top=ranking_viewport.scrollbar.top + summary_rows
+        if active_viewport.copy_all_hit is not None:
+            row, column = active_viewport.copy_all_hit
+            active_viewport.copy_all_hit = (row + summary_rows, column)
+        if active_viewport.scrollbar is not None:
+            active_viewport.scrollbar = replace(
+                active_viewport.scrollbar, top=active_viewport.scrollbar.top + summary_rows
             )
         rows = rendered.splitlines()
         rows.extend("" for _ in range(context.height - len(rows)))
@@ -2117,15 +2140,18 @@ def _pane_render(
     if isinstance(pane, TuiCustomPane):
         component = pane.component
         pane.ranking_viewport.active = False
-        pane.ranking_viewport.scrollbar = None
-        pane.ranking_viewport.copy_all_hit = None
-        pane.ranking_viewport.hits.clear()
+        pane.grouped_ranking_viewport.active = False
+        for viewport in (pane.ranking_viewport, pane.grouped_ranking_viewport):
+            viewport.scrollbar = None
+            viewport.copy_all_hit = None
+            viewport.hits.clear()
         pane.ranking_copy_rows.clear()
         if (
             not isinstance(component, CustomHistoricalComponent)
             or component.candidate.kind != "ranking"
         ):
             pane.ranking_viewport.clear()
+            pane.grouped_ranking_viewport.clear()
         if (
             pane.body_view in {"command", "full-command", "data-table", "data-json"}
             and dashboard is None
@@ -2229,12 +2255,17 @@ def _pane_render(
                 if dashboard is not None and component.candidate.kind == "ranking"
                 else None
             ),
+            grouped_ranking_viewport=(
+                pane.grouped_ranking_viewport
+                if dashboard is not None and component.candidate.kind == "ranking"
+                else None
+            ),
         )
         if (
             component.candidate.kind == "ranking"
             and pane.body_view == "chart"
             and pane.ranking_item_spacing != "compact"
-            and not pane.ranking_viewport.active
+            and not pane.active_ranking_viewport.active
         ):
             rendered = PaneRender(
                 _apply_custom_ranking_spacing(
@@ -8047,9 +8078,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             and isinstance(pane.component, CustomHistoricalComponent)
             and pane.component.candidate.kind == "ranking"
             and pane.body_view == "chart"
-            and pane.ranking_viewport.active
+            and pane.active_ranking_viewport.active
         ):
-            pane.ranking_viewport.scroll(event.delta)
+            pane.active_ranking_viewport.scroll(event.delta)
 
     def handle_scrollbar_drag(event: MouseEvent) -> bool:
         """Let a press, drag, or track click on a Ranking scrollbar move its body."""
@@ -8082,15 +8113,16 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         if scrollbar_drag is not None and (motion or event.button == 0):
             pane_index, grab = scrollbar_drag
             pane = panes[pane_index]
-            bar = pane.ranking_viewport.scrollbar if isinstance(pane, TuiCustomPane) else None
-            if bar is None:
+            viewport = pane.active_ranking_viewport if isinstance(pane, TuiCustomPane) else None
+            bar = viewport.scrollbar if viewport is not None else None
+            if bar is None or viewport is None:
                 scrollbar_drag = None
                 return False
             rect = displayed_layout.pane(pane_index)
             framed = frame_style != "none" or pane_index == focused
             interior_row = grid_y - rect.top - int(framed)
-            pane.ranking_viewport.offset = bar.offset_at(interior_row, grab)
-            pane.ranking_viewport.clamp()
+            viewport.offset = bar.offset_at(interior_row, grab)
+            viewport.clamp()
             return True
         # A fresh capture only begins on a stationary primary-button press.
         if motion or event.button != 0:
@@ -8099,8 +8131,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         if selected is None:
             return False
         pane = panes[selected]
-        bar = pane.ranking_viewport.scrollbar if isinstance(pane, TuiCustomPane) else None
-        if bar is None or not pane.ranking_viewport.active:
+        viewport = pane.active_ranking_viewport if isinstance(pane, TuiCustomPane) else None
+        bar = viewport.scrollbar if viewport is not None else None
+        if bar is None or viewport is None or not viewport.active:
             return False
         rect = displayed_layout.pane(selected)
         framed = frame_style != "none" or selected == focused
@@ -8113,8 +8146,8 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             scrollbar_drag = (selected, bar.grab_at(interior_row))
         else:
             # A track click moves one visible page and does not begin a drag.
-            pane.ranking_viewport.offset = bar.page_offset(interior_row)
-            pane.ranking_viewport.clamp()
+            viewport.offset = bar.page_offset(interior_row)
+            viewport.clamp()
         return True
 
     def handle_pane_mouse(event: MouseEvent) -> bool:
@@ -8188,29 +8221,35 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         now: float,
     ) -> bool:
         """Copy all filtered Dataset Ranking entries from the fixed marker."""
-        hit = pane.ranking_viewport.copy_all_hit
+        viewport = pane.active_ranking_viewport
+        hit = viewport.copy_all_hit
         if hit is None:
             return False
         interior_row = row - int(framed)
         interior_column = column - int(framed)
         if interior_row != hit[0] or not hit[1] - 2 <= interior_column <= hit[1] + 2:
             return False
-        if pane.ranking_viewport.active:
+        if pane.grouped_ranking_viewport.active:
+            payload = pane.grouped_ranking_viewport.clipboard_all_text()
+            entries = ()
+        elif pane.ranking_viewport.active:
+            payload = ""
             entries = tuple(
                 (entry.label, entry.description, entry.project_link)
                 for entry in pane.ranking_viewport.entries
                 if not entry.is_other
             )
         else:
+            payload = ""
             entries = tuple(
                 (label, description, link)
                 for _, _, label, description, link in _custom_ranking_copyable_entries(
                     pane, translator
                 )
             )
-        if not entries:
+        if not payload and not entries:
             return False
-        copied = copy_command(_custom_ranking_clipboard_all_text(entries))
+        copied = copy_command(payload or _custom_ranking_clipboard_all_text(entries))
         if copied:
             pane.copied_ranking_all_until = now + 1.5
         copy_feedback.show(
@@ -8237,10 +8276,21 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         copy_hit = target[1] - 2 <= interior_column <= target[1] + 2
         if not copy_hit and not link_hit:
             return False
-        if pane.ranking_viewport.active:
+        if pane.grouped_ranking_viewport.active:
+            identity = cast(GroupedIdentity, target[0])
+            prepared_entry = pane.grouped_ranking_viewport.by_id.get(identity)
+            if prepared_entry is None:
+                return False
+            payload = pane.grouped_ranking_viewport.clipboard_text(identity)
+            entry_id = identity
+            project_link = getattr(prepared_entry, "project_link", None) or getattr(
+                prepared_entry, "link", None
+            )
+        elif pane.ranking_viewport.active:
             prepared_entry = pane.ranking_viewport.by_id.get(target[0])
             if prepared_entry is None:
                 return False
+            payload = ""
             entry_id = str(prepared_entry.key)
             label, description, project_link = (
                 prepared_entry.label,
@@ -8252,6 +8302,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             entry = next((item for item in entries if item[1] == target[0]), None)
             if entry is None:
                 return False
+            payload = ""
             _, entry_id, label, description, project_link = entry
         if link_hit and project_link is not None:
             opened = webbrowser.open(project_link)
@@ -8260,7 +8311,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 now=now,
             )
             return True
-        copied = copy_command(_custom_ranking_clipboard_text(label, description, project_link))
+        copied = copy_command(
+            payload or _custom_ranking_clipboard_text(label, description, project_link)
+        )
         if copied:
             pane.copied_ranking_entry_id = entry_id
             pane.copied_ranking_until = now + 1.5
@@ -8280,8 +8333,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         """Map rendered copy markers to pane-local rows for the next mouse hit."""
         del fixed_rows, framed
         pane.ranking_copy_rows.clear()
-        if pane.ranking_viewport.active:
-            pane.ranking_copy_rows.update(pane.ranking_viewport.hits)
+        viewport = pane.active_ranking_viewport
+        if viewport.active:
+            pane.ranking_copy_rows.update(viewport.hits)
             return
         entries_by_rank = {
             rank: (entry_id, label, description, link)
@@ -8596,10 +8650,11 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     translator=translator,
                     color_scheme=color_scheme,
                 )
-                if isinstance(pane, TuiCustomPane) and pane.ranking_viewport.active:
+                if isinstance(pane, TuiCustomPane) and pane.active_ranking_viewport.active:
+                    viewport = pane.active_ranking_viewport
                     reserved = min(len(local_notices), max(0, interior_height - 3))
-                    if reserved != pane.ranking_viewport.reserved_rows:
-                        pane.ranking_viewport.reserved_rows = reserved
+                    if reserved != viewport.reserved_rows:
+                        viewport.reserved_rows = reserved
                         rendered = _pane_render(pane, translator, terminal, dashboard=options)
                 chart = (
                     _append_monitor_attachment(
@@ -9540,7 +9595,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     continue
                 if isinstance(event, WheelEvent):
                     scrolling = tuple(
-                        pane.ranking_viewport for pane in panes if isinstance(pane, TuiCustomPane)
+                        pane.active_ranking_viewport
+                        for pane in panes
+                        if isinstance(pane, TuiCustomPane)
                     )
                     before = tuple(viewport.offset for viewport in scrolling)
                     handle_ranking_wheel(event)

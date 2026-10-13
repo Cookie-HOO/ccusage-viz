@@ -9,10 +9,18 @@ from ccusage_viz.custom_models import CustomUnit, LocalizedText
 from ccusage_viz.formatting import strip_ansi
 from ccusage_viz.i18n import load_translator
 from ccusage_viz.options import ChartPresentation, CustomChartConfig, CustomCommandSource
-from ccusage_viz.processing.custom_historical import CustomChartProjection, CustomProjectedSeries
+from ccusage_viz.processing.custom_historical import (
+    CustomChartProjection,
+    CustomProjectedRankingGroup,
+    CustomProjectedSeries,
+)
 from ccusage_viz.render.base import RenderContext
 from ccusage_viz.render.custom import render_custom_ranking
 from ccusage_viz.render.custom_ranking_viewport import render_custom_ranking_viewport
+from ccusage_viz.render.grouped_ranking_viewport import (
+    GroupedRankingViewport,
+    render_grouped_custom_ranking_viewport,
+)
 from ccusage_viz.render.ranking_viewport import RankingViewport
 
 
@@ -99,6 +107,148 @@ def projection(count=100, *, descriptions=False, comparison=False):
         config,
         comparison_available=comparison,
     )
+
+
+def grouped_projection() -> CustomChartProjection:
+    model = projection(0)
+
+    def group(group_id: str, label: str, entries: tuple[tuple[str, str, str], ...]):
+        series = tuple(
+            CustomProjectedSeries(
+                series_id,
+                LocalizedText(series_label, series_label),
+                (Decimal(value),),
+                rank=index,
+                description=LocalizedText(f"Details for {series_label}", "描述"),
+                link=f"https://example.com/{group_id}/{series_id}",
+            )
+            for index, (series_id, series_label, value) in enumerate(entries, 1)
+        )
+        total = sum((item.total for item in series), start=Decimal())
+        return CustomProjectedRankingGroup(
+            group_id,
+            LocalizedText(label, label),
+            series,
+            total,
+            None,
+            False,
+            max((item.total for item in series), default=Decimal()),
+            description=LocalizedText(f"About {label}", "描述"),
+            link=f"https://example.com/{group_id}",
+        )
+
+    groups = (
+        group("coding", "Coding Model", (("shared", "Seed", "70"), ("sonnet", "Sonnet", "30"))),
+        group("general", "General Model", (("shared", "Sonnet General", "20"),)),
+        group("empty", "Empty Unmatched Group", ()),
+    )
+    return replace(model, groups=groups, series=())
+
+
+def render_grouped(
+    model: CustomChartProjection,
+    viewport: GroupedRankingViewport,
+    ctx: RenderContext | None = None,
+    *,
+    search: str = "",
+    spacing: str = "compact",
+    scrollbar: bool = False,
+    copy_all_action: bool = False,
+) -> str:
+    return render_grouped_custom_ranking_viewport(
+        model,
+        ctx or context(),
+        viewport,
+        heading="Grouped Ranking",
+        descriptions_visible=(ctx or context()).density in {"full", "detailed"},
+        search_query=search,
+        search_editing=False,
+        show_visible_count=True,
+        copied_entry_id=None,
+        item_spacing=spacing,
+        scrollbar=scrollbar,
+        copy_all_action=copy_all_action,
+        copied_all=False,
+    )
+
+
+def test_grouped_search_matches_only_inner_fields_and_preserves_full_facts() -> None:
+    viewport = GroupedRankingViewport()
+    output = strip_ansi(render_grouped(grouped_projection(), viewport, search="sonnet"))
+    assert "Coding Model" in output and "General Model" in output
+    assert "Empty Unmatched Group" not in output
+    coding = next(line for line in output.splitlines() if "Sonnet" in line and "General" not in line)
+    assert coding.lstrip().startswith("2 ")
+    assert "30.0%" in coding
+    assert all(identity[0] != "group" or identity[1] != "empty" for identity in viewport.by_id)
+
+
+def test_grouped_sticky_heading_is_label_only_and_has_no_hit() -> None:
+    viewport = GroupedRankingViewport()
+    ctx = context(height=5)
+    render_grouped(grouped_projection(), viewport, ctx)
+    viewport.offset = next(
+        index for index, row in enumerate(viewport.rows) if row.kind == "series"
+    )
+    output = strip_ansi(render_grouped(grouped_projection(), viewport, ctx))
+    sticky_row = output.splitlines()[viewport.body_top]
+    assert sticky_row.strip() == "Coding Model"
+    assert not any(row == viewport.body_top for row in viewport.hits)
+
+
+def test_grouped_identity_scrollbar_and_copy_payloads() -> None:
+    viewport = GroupedRankingViewport()
+    ctx = context(height=8, density="detailed")
+    render_grouped(
+        grouped_projection(), viewport, ctx, spacing="line", scrollbar=True, copy_all_action=True
+    )
+    assert viewport.scrollbar is not None
+    assert ("series", "coding", "shared") in viewport.by_id
+    assert ("series", "general", "shared") in viewport.by_id
+    assert all(identity[0] != "other" for identity, *_ in viewport.hits.values())
+    payload = viewport.clipboard_all_text()
+    assert payload.index("Coding Model") < payload.index("Seed") < payload.index("General Model")
+    assert viewport.clipboard_text(("series", "coding", "shared")).startswith(
+        "Coding Model\nSeed"
+    )
+
+
+def test_dashboard_routes_grouped_projection_without_changing_flat_viewport() -> None:
+    import ccusage_viz.tui as tui
+    from ccusage_viz.terminal import Terminal
+
+    grouped = GroupedRankingViewport()
+    flat = RankingViewport(offset=3)
+    model = grouped_projection()
+    tui._render_custom_projection(
+        model,
+        model.config,
+        load_translator("en"),
+        Terminal(100, 12, False, False),
+        accepted_at=None,
+        interval=None,
+        pending=False,
+        surface=tui.dashboard_pane_surface("ranking"),
+        ranking_viewport=flat,
+        grouped_ranking_viewport=grouped,
+    )
+    assert grouped.active
+    assert flat.offset == 3
+    assert not flat.active
+
+
+def test_grouped_geometry_change_restores_group_and_series_anchor() -> None:
+    viewport = GroupedRankingViewport()
+    model = grouped_projection()
+    render_grouped(model, viewport, context(height=8, density="detailed"))
+    viewport.offset = next(
+        index
+        for index, row in enumerate(viewport.rows)
+        if row.kind == "series" and row.group_id == "general" and row.series_id == "shared"
+    )
+    render_grouped(model, viewport, context(height=8, density="normal"))
+    visible = viewport.rows[viewport.offset : viewport.offset + viewport.visible_rows]
+    assert any((row.group_id, row.series_id) == ("general", "shared") for row in visible)
 
 
 def context(*, height=12, width=100, density="normal", color=False):
