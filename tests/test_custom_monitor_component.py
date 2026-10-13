@@ -3,6 +3,8 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
+import pytest
+
 import ccusage_viz.tui as tui_module
 from ccusage_viz.chart_models import DistributionCoverage
 from ccusage_viz.custom_models import (
@@ -256,13 +258,14 @@ def test_cumulative_bars_cover_the_display_horizon_in_the_host_timezone() -> Non
     assert distribution.buckets[17].ended_at.strftime("%H:%M") == "18:00"
 
 
-def test_dataset_monitor_heading_uses_declared_metric_group_and_window() -> None:
+def _accepted_metric_component(*, style: str) -> CustomMonitorComponent:
     chart = CustomChartConfig(
         "monitor",
         CustomCommandSource("router", ("router-dataset",)),
         resolve_date_range("timeline", period="14d", since=None, until=None),
         metric_id="tokens",
         group_by="model",
+        presentation=replace(config().presentation, style=style),
     )
     metric = V2MetricDescriptor(
         "tokens",
@@ -279,6 +282,19 @@ def test_dataset_monitor_heading_uses_declared_metric_group_and_window() -> None
     )
     component = CustomMonitorComponent(chart)
     component.set_metric(metric)
+    return component
+
+
+@pytest.mark.parametrize("style", ("ranking", "ranking-dot", "list"))
+def test_ranking_style_heading_omits_view_and_data_window(style: str) -> None:
+    component = _accepted_metric_component(style=style)
+
+    assert component.heading(language="en") == "Model · Requests"
+    assert component.heading(language="zh") == "模型 · 请求数"
+
+
+def test_temporal_custom_monitor_heading_keeps_view_and_data_window() -> None:
+    component = _accepted_metric_component(style="line")
 
     assert component.heading(language="en") == "Model · Requests · view 1h · data window 90s"
     assert component.heading(language="zh") == "模型 · 请求数 · 视图 1h · 数据窗口 90s"

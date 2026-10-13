@@ -32,7 +32,7 @@ from ccusage_viz.custom_models import (
     V2Runtime,
 )
 from ccusage_viz.custom_protocol import V2MonitorResponse
-from ccusage_viz.options import CustomChartConfig, compatible_styles
+from ccusage_viz.options import CustomChartConfig, compatible_styles, is_monitor_ranking_style
 from ccusage_viz.render.palette import COLOR_SCHEMES
 
 # This is deliberately the largest local window offered by the Dashboard, rather
@@ -440,7 +440,9 @@ class CustomMonitorComponent:
             else config.metric_id or config.source.dataset_id
         )
         group = self._group_label(config.group_by, language)
-        return " · ".join((group, title, self._display_period_label(language)))
+        return " · ".join(
+            part for part in (group, title, self._display_period_label(language)) if part
+        )
 
     def timeline_model(
         self,
@@ -672,6 +674,8 @@ class CustomMonitorComponent:
                 day = "昨天" if self.distribution_day_window == "yesterday" else "今天"
                 return f"{day} · 小时累计柱 · 数据窗口 {source}"
             return f"{self.distribution_day_window} · hourly cumulative bars · data window {source}"
+        if is_monitor_ranking_style(self.candidate.presentation.style):
+            return ""
         view = self._duration_label(self.display_window_seconds)
         return (
             f"视图 {view} · 数据窗口 {source}"
