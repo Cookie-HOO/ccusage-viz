@@ -220,7 +220,7 @@ def _grouped_ranking_group_clipboard_text(
         for part in (group.label, copyable_description_text(group.description or ""), group.link)
         if part
     )
-    return "\n\n".join((heading, *(_entry_text(entry) for entry in entries if not entry.is_other)))
+    return "\n\n".join((heading, *(_entry_text(entry) for entry in entries)))
 
 
 def _grouped_ranking_clipboard_all_text(
@@ -229,9 +229,7 @@ def _grouped_ranking_clipboard_all_text(
     ],
 ) -> str:
     return "\n\n".join(
-        _grouped_ranking_group_clipboard_text(group, entries)
-        for group, entries in groups
-        if not entries or any(not entry.is_other for entry in entries)
+        _grouped_ranking_group_clipboard_text(group, entries) for group, entries in groups
     )
 
 
@@ -333,7 +331,15 @@ def render_grouped_custom_ranking_viewport(
             viewport.preparation_key = preparation_key
         prepared = viewport.groups
         matched = tuple(
-            (group, filter_ranking_entries(group.entries, search_query)) for group in prepared
+            (
+                group,
+                tuple(
+                    entry
+                    for entry in filter_ranking_entries(group.entries, search_query)
+                    if not search_query or not entry.is_other
+                ),
+            )
+            for group in prepared
         )
         visible = tuple(
             (group, entries)
@@ -522,13 +528,14 @@ def render_grouped_custom_ranking_viewport(
             viewport.group_headings = tuple(
                 index for index, row in enumerate(records) if row.kind == "group"
             )
+            group_ends = (
+                (*viewport.group_headings[1:], len(records))
+                if viewport.group_headings
+                else ()
+            )
             viewport.group_has_series = tuple(
                 any(row.kind == "series" for row in records[start:end])
-                for start, end in zip(
-                    viewport.group_headings,
-                    (*viewport.group_headings[1:], len(records)),
-                    strict=True,
-                )
+                for start, end in zip(viewport.group_headings, group_ends, strict=True)
             )
             viewport.total_rows = len(records)
             viewport.remember_geometry(geometry_key)

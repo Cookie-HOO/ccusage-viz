@@ -274,20 +274,63 @@ def test_grouped_identity_scrollbar_and_copy_payloads() -> None:
     assert viewport.clipboard_text(("series", "coding", "shared")).startswith("Coding Model\nSeed")
 
 
-def test_grouped_copy_all_preserves_mixed_empty_groups_and_excludes_other() -> None:
+def test_grouped_copy_all_preserves_empty_groups_and_visible_other_exactly() -> None:
     model = grouped_projection()
     coding, general, empty = model.groups or ()
-    other = replace(coding.series[0], id="other", label=LocalizedText("Other", "其他"), is_other=True)
+    other = replace(
+        coding.series[0],
+        id="other",
+        label=LocalizedText("Other", "其他"),
+        description=None,
+        link=None,
+        is_other=True,
+    )
     model = replace(model, groups=(empty, coding, replace(general, series=(other,))))
     viewport = GroupedRankingViewport()
     render_grouped(model, viewport)
-    payload = viewport.clipboard_all_text()
-    assert payload.index("Empty Unmatched Group") < payload.index("Coding Model")
-    assert "Seed" in payload and "Sonnet" in payload
-    assert "General Model" not in payload and "Other" not in payload
+    assert viewport.clipboard_all_text() == (
+        "Empty Unmatched Group\n"
+        "About Empty Unmatched Group\n"
+        "https://example.com/empty\n\n"
+        "Coding Model\n"
+        "About Coding Model\n"
+        "https://example.com/coding\n\n"
+        "Seed\n"
+        "Details for Seed\n"
+        "https://example.com/coding/shared\n\n"
+        "Sonnet\n"
+        "Details for Sonnet\n"
+        "https://example.com/coding/sonnet\n\n"
+        "General Model\n"
+        "About General Model\n"
+        "https://example.com/general\n\n"
+        "Other"
+    )
+    assert viewport.clipboard_text(("group", "general")) == (
+        "General Model\n"
+        "About General Model\n"
+        "https://example.com/general\n\n"
+        "Other"
+    )
+    assert viewport.clipboard_text(("series", "general", "other")) == ""
 
     render_grouped(model, viewport, search="Seed")
-    assert "Empty Unmatched Group" not in viewport.clipboard_all_text()
+    assert viewport.clipboard_all_text() == (
+        "Coding Model\n"
+        "About Coding Model\n"
+        "https://example.com/coding\n\n"
+        "Seed\n"
+        "Details for Seed\n"
+        "https://example.com/coding/shared"
+    )
+
+
+def test_grouped_copy_all_omits_other_when_projection_hides_it() -> None:
+    model = grouped_projection()
+    coding = (model.groups or ())[0]
+    viewport = GroupedRankingViewport()
+    render_grouped(replace(model, groups=(coding,)), viewport)
+    assert "Other" not in viewport.clipboard_all_text()
 
 
 def test_grouped_spacing_starts_between_series_not_after_group_heading() -> None:
@@ -538,14 +581,33 @@ def test_grouped_copy_all_requires_a_rendered_nonminimal_count_row() -> None:
         assert "item(s) total |" not in strip_ansi(output)
 
 
-def test_grouped_other_only_has_zero_match_count_and_no_copy_all_payload() -> None:
+def test_grouped_other_only_has_copy_all_payload_but_no_individual_hit() -> None:
     model = grouped_projection()
     coding = (model.groups or ())[0]
-    other = replace(coding.series[0], id="other", is_other=True, link=None)
+    other = replace(
+        coding.series[0],
+        id="other",
+        label=LocalizedText("Other", "其他"),
+        description=None,
+        link=None,
+        is_other=True,
+    )
     model = replace(model, groups=(replace(coding, series=(other,)),))
     viewport = GroupedRankingViewport()
     output = strip_ansi(render_grouped(model, viewport, copy_all_action=True))
-    assert output.splitlines()[1] == "0 item(s) total"
+    assert output.splitlines()[1] == "0 item(s) total | ⊞"
+    assert viewport.copy_all_hit is not None
+    assert all(hit[0] != ("series", "coding", "other") for hit in viewport.hits.values())
+    assert viewport.clipboard_all_text() == (
+        "Coding Model\n"
+        "About Coding Model\n"
+        "https://example.com/coding\n\n"
+        "Other"
+    )
+
+    searched = strip_ansi(render_grouped(model, viewport, search="Other", copy_all_action=True))
+    assert "Showing 0/0 item(s)" in searched
+    assert "Coding Model" not in searched and "Other" not in searched.splitlines()[3:]
     assert viewport.copy_all_hit is None
     assert viewport.clipboard_all_text() == ""
 
