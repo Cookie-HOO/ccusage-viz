@@ -488,13 +488,12 @@ def adjust_chart(chart: ChartConfig, key: str, *, demo: bool = False) -> ChartCo
         current = chart.by if chart.by in values else values[0]
         by = values[(values.index(current) + (1 if key == "b" else -1)) % len(values)]
         styles = compatible_styles(chart.kind, by)
-        top = None if by is None else chart.top or (10 if isinstance(chart, StackConfig) else 3)
         presentation = (
             chart.presentation
             if chart.presentation.style in styles
             else replace(chart.presentation, style=styles[0])
         )
-        return replace(chart, by=by, top=top, presentation=presentation)
+        return replace(chart, by=by, top=chart.top, presentation=presentation)
     if (
         key in {"+", "="}
         and isinstance(chart, (TimelineConfig, StackConfig, RankingConfig, MonitorConfig))

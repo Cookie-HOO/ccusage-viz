@@ -808,6 +808,74 @@ def test_runtime_adjustments_replace_owned_nested_configs() -> None:
     assert adjust_standalone(timeline(rolling=False), "p") == timeline(rolling=False)
 
 
+@pytest.mark.parametrize(
+    ("chart", "key", "expected_by"),
+    (
+        (
+            TimelineConfig(
+                "timeline", resolve_date_range("timeline", period="14d", since=None, until=None)
+            ),
+            "b",
+            "agent",
+        ),
+        (
+            StackConfig(
+                "stack", resolve_date_range("stack", period="14d", since=None, until=None), top=None
+            ),
+            "b",
+            "agent",
+        ),
+        (
+            RankingConfig(
+                "ranking",
+                resolve_date_range("ranking", period="14d", since=None, until=None),
+                top=None,
+            ),
+            "B",
+            "composition",
+        ),
+        (MonitorConfig("monitor", 3600, top=None), "b", "model"),
+    ),
+)
+def test_builtin_grouping_cycles_preserve_unbounded_top(chart, key, expected_by) -> None:
+    source = StandaloneLaunch(ProcessConfig(), StandaloneHostConfig(), chart)
+
+    updated = adjust_standalone(source, key)
+
+    assert updated.chart.by == expected_by
+    assert updated.chart.top is None
+
+
+def test_builtin_grouping_cycles_preserve_explicit_top_in_both_directions() -> None:
+    chart = TimelineConfig(
+        "timeline",
+        resolve_date_range("timeline", period="14d", since=None, until=None),
+        by="model",
+        top=7,
+    )
+    source = StandaloneLaunch(ProcessConfig(), StandaloneHostConfig(), chart)
+
+    forward = adjust_standalone(source, "b")
+    reverse = adjust_standalone(source, "B")
+    to_total = adjust_standalone(
+        StandaloneLaunch(
+            ProcessConfig(),
+            StandaloneHostConfig(),
+            TimelineConfig(
+                "timeline",
+                resolve_date_range("timeline", period="14d", since=None, until=None),
+                by="composition",
+                top=7,
+            ),
+        ),
+        "b",
+    )
+
+    assert (forward.chart.by, forward.chart.top) == ("project", 7)
+    assert (reverse.chart.by, reverse.chart.top) == ("agent", 7)
+    assert to_total.chart.top == 7
+
+
 def test_calendar_style_key_cycles_between_relative_and_grid() -> None:
     source = StandaloneLaunch(
         ProcessConfig(),
