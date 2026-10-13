@@ -66,21 +66,19 @@ def _prepare_group(
         else _value(group.total, projection, context)
     )
     comparison_display = ""
-    if (
-        context.period != "all"
-        and projection.comparison_available
-        and group.comparison_ready
-        and group.previous_total is not None
-    ):
-        if group.comparison_display is not None:
-            comparison_display = _localized(group.comparison_display, context)
-        else:
-            delta = group.total - group.previous_total
-            comparison_display = (
-                "0"
-                if delta == 0
-                else f"{'+' if delta > 0 else '-'}{_value(abs(delta), projection, context)}"
-            )
+    if context.period != "all" and projection.comparison_available:
+        if not group.comparison_ready:
+            comparison_display = context.translator.text("label.ranking_new")
+        elif group.previous_total is not None:
+            if group.comparison_display is not None:
+                comparison_display = _localized(group.comparison_display, context)
+            else:
+                delta = group.total - group.previous_total
+                comparison_display = (
+                    "0"
+                    if delta == 0
+                    else f"{'+' if delta > 0 else '-'}{_value(abs(delta), projection, context)}"
+                )
     return GroupedRankingPresentationGroup(
         group.id,
         _localized(group.label, context).replace("\n", "\\n"),
@@ -114,7 +112,6 @@ def render_grouped_custom_ranking(
         lines.append(context.translator.text("message.custom_no_data"))
         return "\n".join(lines)
     columns = RankingColumns()
-    all_entries = tuple(entry for group in prepared for entry in group.entries)
     comparison_mode = (
         projection.config.ranking_comparison if projection.config is not None else "full"
     )
@@ -126,18 +123,29 @@ def render_grouped_custom_ranking(
         and projection.comparison_available
         and comparison_mode != "none"
     )
-    if all_entries and context.width >= 58 and context.density in {"full", "detailed"}:
-        measure_ranking_columns(
-            all_entries,
-            context=context,
-            total=max((group.total for group in prepared), default=Decimal()),
-            show_percentage=projection.show_percentage,
-            comparison_mode=comparison_mode,
-            comparison_available=projection.comparison_available,
-            show_new_entries=True,
-            total_entry_count=total_entry_count,
-            columns=columns,
-        )
+    if context.width >= 58 and context.density in {"full", "detailed"}:
+        # Measure each inner ranking against its own denominator. In particular,
+        # signed values can produce shares far beyond 100%; all such widths must
+        # be known before the first row is rendered so later groups cannot move
+        # the shared columns.
+        for group in prepared:
+            group_columns = RankingColumns()
+            measure_ranking_columns(
+                group.entries,
+                context=context,
+                total=group.total,
+                show_percentage=projection.show_percentage,
+                comparison_mode=comparison_mode,
+                comparison_available=projection.comparison_available,
+                show_new_entries=True,
+                total_entry_count=total_entry_count,
+                columns=group_columns,
+            )
+            for name, width in group_columns.widths.items():
+                columns.widths[name] = max(columns.widths.get(name, 0), width)
+            columns.description_width = max(
+                columns.description_width, group_columns.description_width
+            )
         # Include every heading before rendering so later groups cannot shift
         # columns already used by earlier groups.
         if comparison_visible:

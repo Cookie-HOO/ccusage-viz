@@ -275,6 +275,103 @@ def test_grouped_custom_ranking_centers_main_heading_and_aligns_shared_value_col
     ) + len("12345 requests")
 
 
+def test_grouped_custom_ranking_premeasures_extreme_inner_shares_with_each_group_total() -> None:
+    groups = (
+        CustomProjectedRankingGroup(
+            "ordinary",
+            LocalizedText("Ordinary", "普通"),
+            (
+                CustomProjectedSeries(
+                    "ordinary-item",
+                    LocalizedText("ordinary-item", "普通项"),
+                    (Decimal("10"),),
+                    rank=1,
+                ),
+            ),
+            Decimal("10"),
+            None,
+            False,
+            Decimal("10"),
+        ),
+        CustomProjectedRankingGroup(
+            "signed",
+            LocalizedText("Signed", "有符号"),
+            (
+                CustomProjectedSeries(
+                    "positive", LocalizedText("positive", "正"), (Decimal("100"),), rank=1
+                ),
+                CustomProjectedSeries(
+                    "negative", LocalizedText("negative", "负"), (Decimal("-99"),), rank=2
+                ),
+            ),
+            Decimal("1"),
+            None,
+            False,
+            Decimal("100"),
+        ),
+    )
+    context = RenderContext(
+        100, 30, load_translator("en"), color=False, ascii=True, density="detailed"
+    )
+    lines = strip_ansi(
+        render_custom_projection(_grouped_ranking_projection(groups=groups), context)
+    ).splitlines()
+
+    ordinary = next(line for line in lines if "ordinary-item" in line)
+    positive = next(line for line in lines if "positive" in line)
+    negative = next(line for line in lines if "negative" in line)
+    assert "10000.0%" in positive
+    assert "-9900.0%" in negative
+    assert ordinary.rindex("100.0%") + len("100.0%") == positive.rindex("10000.0%") + len(
+        "10000.0%"
+    )
+    assert len({display_width(line) for line in (ordinary, positive, negative)}) == 1
+    assert all(display_width(line) <= context.width for line in lines)
+
+
+def test_grouped_custom_ranking_new_group_uses_localized_full_comparison_only() -> None:
+    projection = _grouped_ranking_projection()
+    assert projection.config is not None
+
+    for language, expected in (("en", "New"), ("zh", "新增")):
+        context = RenderContext(
+            100,
+            30,
+            load_translator(language),
+            color=False,
+            ascii=True,
+            density="detailed",
+        )
+        output = strip_ansi(render_custom_projection(projection, context))
+        new_group_label = "General Model" if language == "en" else "通用模型"
+        heading = next(line for line in output.splitlines() if new_group_label in line)
+        assert expected in heading
+
+    rank_output = render_custom_projection(
+        replace(projection, config=replace(projection.config, ranking_comparison="rank")),
+        RenderContext(100, 30, load_translator("en"), color=False, ascii=True, density="detailed"),
+    )
+    none_output = render_custom_projection(
+        replace(projection, config=replace(projection.config, ranking_comparison="none")),
+        RenderContext(100, 30, load_translator("en"), color=False, ascii=True, density="detailed"),
+    )
+    all_output = render_custom_projection(
+        replace(projection, date_range=replace(projection.date_range, period="all")),
+        RenderContext(
+            100,
+            30,
+            load_translator("en"),
+            color=False,
+            ascii=True,
+            density="detailed",
+            period="all",
+        ),
+    )
+    for output in (rank_output, none_output, all_output):
+        heading = next(line for line in strip_ansi(output).splitlines() if "General Model" in line)
+        assert "New" not in heading
+
+
 def test_grouped_custom_ranking_rank_mode_suppresses_group_value_delta() -> None:
     projection = _grouped_ranking_projection()
     assert projection.config is not None
