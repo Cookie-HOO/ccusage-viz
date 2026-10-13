@@ -643,10 +643,7 @@ def test_partition_and_group_cycles_skip_each_other_in_both_directions() -> None
     reverse_partition = tui_module._cycle_custom_partitioning(
         chart, (None, "logical", "real"), ("logical", "real", "provider"), step=-1
     )
-    assert (forward_partition.partition_by, forward_partition.group_by) == (
-        "real",
-        "logical",
-    )
+    assert (forward_partition.partition_by, forward_partition.group_by) == (None, "real")
     assert (reverse_partition.partition_by, reverse_partition.group_by) == (None, "real")
     assert tui_module._cycle_custom_grouping(
         chart, ("logical", "real", "provider"), step=1
@@ -655,10 +652,14 @@ def test_partition_and_group_cycles_skip_each_other_in_both_directions() -> None
         chart, ("logical", "real", "provider"), step=-1
     ).group_by == "provider"
     assert tui_module._cycle_custom_grouping(chart, ("logical", "real")) == chart
-    swapped = tui_module._cycle_custom_partitioning(
+    skipped = tui_module._cycle_custom_partitioning(
+        chart, ("logical", "real", "provider"), ("logical", "real", "provider")
+    )
+    restricted = tui_module._cycle_custom_partitioning(
         chart, ("logical", "real"), ("logical", "real")
     )
-    assert (swapped.partition_by, swapped.group_by) == ("real", "logical")
+    assert (skipped.partition_by, skipped.group_by) == ("provider", "real")
+    assert restricted == chart
 
 
 def test_partition_cycle_atomically_groups_a_flat_ranking_in_both_directions() -> None:
@@ -707,7 +708,7 @@ def test_partition_cycle_supports_required_partitions_and_retains_no_legal_pair(
     assert restricted == chart
 
 
-def test_partition_cycle_falls_back_when_current_group_matches_new_partition() -> None:
+def test_partition_cycle_skips_choice_matching_existing_group() -> None:
     chart = CustomChartConfig(
         "ranking",
         CustomCommandSource("router", ("router",)),
@@ -719,7 +720,7 @@ def test_partition_cycle_falls_back_when_current_group_matches_new_partition() -
         chart, (None, "logical"), ("logical", "real"), step=1
     )
 
-    assert (updated.partition_by, updated.group_by) == ("logical", "real")
+    assert updated == chart
 
 
 def test_partition_cycle_preserves_a_legal_current_group_before_catalog_fallback() -> None:

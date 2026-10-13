@@ -2724,7 +2724,7 @@ def _cycle_custom_partitioning(
     *,
     step: int = 1,
 ) -> CustomChartConfig:
-    """Advance to the next legal partition/group pair in either direction."""
+    """Cycle partitions without changing an existing legal grouping."""
     if not partitions:
         return config
     if config.partition_by in partitions:
@@ -2736,27 +2736,27 @@ def _cycle_custom_partitioning(
     else:
         candidates = partitions if step > 0 else tuple(reversed(partitions))
 
+    current_group_is_legal = config.group_by is not None and config.group_by in groupings
     for partition_by in candidates:
-        if partition_by is None:
-            group_by = config.group_by if config.group_by in groupings else None
-        else:
-            current_group_is_declared = (
-                config.group_by is not None and config.group_by in groupings
-            )
-            group_by = (
-                config.group_by
-                if current_group_is_declared and config.group_by != partition_by
-                else next(
-                    (
-                        choice
-                        for choice in groupings
-                        if choice is not None and choice != partition_by
-                    ),
-                    None,
-                )
+        if current_group_is_legal:
+            if partition_by == config.group_by:
+                continue
+            group_by = config.group_by
+        elif config.group_by is None and partition_by is not None:
+            group_by = next(
+                (
+                    choice
+                    for choice in groupings
+                    if choice is not None and choice != partition_by
+                ),
+                None,
             )
             if group_by is None:
                 continue
+        elif config.group_by is None:
+            group_by = None
+        else:
+            continue
         if (partition_by, group_by) == (config.partition_by, config.group_by):
             continue
         presentation = config.presentation
