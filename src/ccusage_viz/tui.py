@@ -2742,7 +2742,7 @@ def _cycle_custom_partitioning(
             if partition_by == config.group_by:
                 continue
             group_by = config.group_by
-        elif config.group_by is None and partition_by is not None:
+        elif partition_by is not None:
             group_by = next(
                 (
                     choice
@@ -2753,10 +2753,8 @@ def _cycle_custom_partitioning(
             )
             if group_by is None:
                 continue
-        elif config.group_by is None:
-            group_by = None
         else:
-            continue
+            group_by = None
         if (partition_by, group_by) == (config.partition_by, config.group_by):
             continue
         presentation = config.presentation
@@ -10113,14 +10111,11 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                             adjustment_page = "advanced" if adjustment_page == "quick" else "quick"
                             paint()
                             continue
-                        target_page = (
-                            adjustment_page
-                            if key in _custom_pane_adjustment_keys(pane, adjustment_page)
-                            else "advanced"
-                            if adjustment_page == "quick"
-                            else "quick"
-                        )
-                        adjustment_page = target_page
+                        current_page_keys = _custom_pane_adjustment_keys(pane, adjustment_page)
+                        other_page = "advanced" if adjustment_page == "quick" else "quick"
+                        other_page_keys = _custom_pane_adjustment_keys(pane, other_page)
+                        if key not in current_page_keys and key in other_page_keys:
+                            adjustment_page = other_page
                         component = pane.component
                         base = component.candidate
                         capability = _custom_capability(pane)

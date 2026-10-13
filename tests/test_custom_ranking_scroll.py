@@ -22,16 +22,30 @@ from ccusage_viz.render.grouped_ranking_viewport import (
     GroupedRankingViewport,
     render_grouped_custom_ranking_viewport,
 )
+from ccusage_viz.render.palette import get_color_scheme
 from ccusage_viz.render.ranking_viewport import RankingViewport, ranking_separator
 
 
-def test_dashed_separator_is_muted_and_dim_with_plain_fallback() -> None:
-    colored_context = replace(context(width=12), color=True, color_scheme="classic")
+@pytest.mark.parametrize("width", (1, 2, 5, 6, 12))
+@pytest.mark.parametrize("ascii_mode", (False, True), ids=("unicode", "ascii"))
+def test_dashed_separator_uses_scheme_muted_across_widths(
+    width: int, ascii_mode: bool
+) -> None:
+    scheme_name = "vivid"
+    expected = ("- " * ((width + 1) // 2)).rstrip()
+    colored_context = replace(
+        context(width=width), color=True, ascii=ascii_mode, color_scheme=scheme_name
+    )
+
     colored = ranking_separator("dashed", colored_context)
-    assert "\x1b[38;5;245m" in colored
+
+    assert f"\x1b[38;5;{get_color_scheme(scheme_name).muted}m" in colored
     assert "\x1b[2m" in colored
-    assert strip_ansi(colored) == "- - - - - -"
-    assert ranking_separator("dashed", context(width=12)) == "- - - - - -"
+    assert strip_ansi(colored) == expected
+    assert ranking_separator(
+        "dashed",
+        replace(context(width=width), color=False, ascii=ascii_mode, color_scheme="no-color"),
+    ) == expected
 
 
 def test_flat_and_grouped_dash_rendering_share_muted_separator() -> None:

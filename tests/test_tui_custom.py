@@ -723,6 +723,34 @@ def test_partition_cycle_skips_choice_matching_existing_group() -> None:
     assert updated == chart
 
 
+@pytest.mark.parametrize(
+    ("step", "expected"),
+    (
+        (1, ("logical", "real")),
+        (-1, ("real", "logical")),
+    ),
+    ids=("forward", "reverse"),
+)
+def test_partition_cycle_recovers_from_stale_non_null_grouping(
+    step: int, expected: tuple[str, str]
+) -> None:
+    chart = CustomChartConfig(
+        "ranking",
+        CustomCommandSource("router", ("router",)),
+        DateRange(date(2026, 1, 1), date(2026, 1, 14)),
+        group_by="stale",
+    )
+
+    updated = tui_module._cycle_custom_partitioning(
+        chart,
+        (None, "logical", "real"),
+        (None, "logical", "real"),
+        step=step,
+    )
+
+    assert (updated.partition_by, updated.group_by) == expected
+
+
 def test_partition_cycle_preserves_a_legal_current_group_before_catalog_fallback() -> None:
     chart = CustomChartConfig(
         "ranking",
@@ -744,8 +772,9 @@ def test_partition_cycle_preserves_a_legal_current_group_before_catalog_fallback
         ("g", (None, "logical", "real"), (None, "real", "provider"), ("logical", "real"), False),
         ("G", (None, "logical", "real"), (None, "real", "provider"), ("real", "provider"), False),
         ("g", (None, "logical"), (None, "logical"), (None, None), True),
+        ("G", (None, "logical"), (None, "logical"), (None, None), True),
     ),
-    ids=("forward-refresh", "reverse-refresh", "restricted"),
+    ids=("forward-refresh", "reverse-refresh", "forward-restricted", "reverse-restricted"),
 )
 def test_dashboard_partition_interaction_refreshes_or_reports_restriction(
     monkeypatch: pytest.MonkeyPatch,
@@ -818,6 +847,8 @@ def test_dashboard_partition_interaction_refreshes_or_reports_restriction(
     if restricted:
         message = load_translator("en").text("status.custom_partition_restricted")
         assert any(message in frame for frame in frames)
+        assert "Quick settings" in frames[-1]
+        assert "Advanced settings" not in frames[-1]
 
 
 def test_partition_binding_requires_multiple_effective_choices() -> None:

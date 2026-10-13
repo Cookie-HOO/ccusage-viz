@@ -28,7 +28,7 @@ def ranking_separator(spacing: str, context: RenderContext) -> str:
         return " "
     if spacing == "line":
         return ("-" if context.ascii else "─") * context.width
-    raw = ("- " * max(1, context.width // 2)).rstrip()
+    raw = ("- " * max(1, (context.width + 1) // 2)).rstrip()
     if spacing == "dashed":
         return styled_text(
             raw,

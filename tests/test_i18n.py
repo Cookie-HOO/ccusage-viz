@@ -66,6 +66,13 @@ def test_catalogs_have_the_same_keys_and_placeholders() -> None:
     assert ZH_MESSAGES["label.adjust_custom_logs"] == "日志"
     assert EN_MESSAGES["label.adjust_chart"] == "adjust chart"
     assert ZH_MESSAGES["label.adjust_chart"] == "调整图表"
+    assert EN_MESSAGES["label.adjust_partition"] == "partition"
+    assert ZH_MESSAGES["label.adjust_partition"] == "分区"
+    assert (
+        EN_MESSAGES["status.custom_partition_restricted"]
+        == "This chart is limited to its declared partition."
+    )
+    assert ZH_MESSAGES["status.custom_partition_restricted"] == "该图表仅支持能力声明中的分区。"
     assert "status.tui_help_modes" not in EN_MESSAGES
     assert "status.tui_help_current" not in EN_MESSAGES
     for mode in ("browse", "pane", "global"):
