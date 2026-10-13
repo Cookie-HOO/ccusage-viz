@@ -8,13 +8,17 @@ _OSC8 = re.compile(r"\x1b]8;;[^\x1b\x07]*(?:\x1b\\|\x07)")
 _TERMINAL_CONTROL = re.compile(r"(?:\x1b\[[0-?]*[ -/]*[@-~]|\x1b]8;;[^\x1b\x07]*(?:\x1b\\|\x07))")
 
 
-def sanitize_terminal_text(value: str) -> str:
+def sanitize_terminal_text(value: str, *, preserve_newlines: bool = False) -> str:
     """Remove terminal control sequences and control characters from untrusted text.
 
     Unlike :func:`strip_ansi`, this is an input-boundary sanitizer.  It removes
     arbitrary CSI and OSC sequences (including OSC clipboard commands), the
     other string controls terminated by ST, and standalone C0/C1 controls.
+    When ``preserve_newlines`` is true, CRLF and CR are normalized to LF and
+    those authored line boundaries are retained.
     """
+    if preserve_newlines:
+        value = value.replace("\r\n", "\n").replace("\r", "\n")
     output: list[str] = []
     position = 0
     length = len(value)
@@ -65,6 +69,10 @@ def sanitize_terminal_text(value: str) -> str:
                     position += 2
                     break
                 position += 1
+            continue
+        if code == 0x0A and preserve_newlines:
+            output.append("\n")
+            position += 1
             continue
         if code < 0x20 or 0x7F <= code <= 0x9F:
             position += 1

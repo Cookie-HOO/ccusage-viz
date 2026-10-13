@@ -47,6 +47,13 @@ def test_terminal_text_sanitizer_removes_csi_osc_and_controls_but_keeps_unicode(
     assert sanitize_terminal_text(value) == "正常 cafévisibletail!"
 
 
+def test_terminal_text_sanitizer_can_normalize_and_preserve_newlines() -> None:
+    value = "one\r\ntwo\rthree\nfour\x00"
+
+    assert sanitize_terminal_text(value) == "onetwothreefour"
+    assert sanitize_terminal_text(value, preserve_newlines=True) == "one\ntwo\nthree\nfour"
+
+
 def test_unicode_width_and_truncation() -> None:
     assert display_width("项目a") == 5
     assert clip_width("项目abc", 5) == "项目a"

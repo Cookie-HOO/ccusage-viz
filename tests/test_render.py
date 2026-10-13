@@ -2713,6 +2713,25 @@ def test_historical_ranking_description_sanitizes_c1_osc_and_dcs_before_parsing(
     assert output.count("\x1b]8;;https://example.com/release\x1b\\") == 2
 
 
+def test_historical_ranking_description_preserves_source_lines_and_removes_c1() -> None:
+    context = RenderContext(100, 24, load_translator("en"), color=False, style="dot")
+    entry = RankingPresentationEntry(
+        "api",
+        "API",
+        10,
+        description="First line\n\x9d52;c;attack\x9cSecond line",
+    )
+    output = render_historical_ranking(
+        (entry,), heading="Ranking", value_formatter=str, context=context, descriptions_visible=True
+    )
+
+    visible_lines = strip_ansi(output).splitlines()
+    first_index = next(index for index, line in enumerate(visible_lines) if line.strip() == "First line")
+    assert visible_lines[first_index + 1].strip() == "Second line"
+    assert "attack" not in output
+    assert not any(0x7F <= ord(character) <= 0x9F for character in output)
+
+
 def test_historical_ranking_description_supports_star_emphasis_only() -> None:
     context = RenderContext(80, 24, load_translator("en"), color=True, style="dot")
     entry = RankingPresentationEntry(

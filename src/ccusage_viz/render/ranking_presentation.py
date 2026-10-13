@@ -79,7 +79,7 @@ def _description_visible_text_part(value: str) -> str:
 
 def _description_parts(value: str) -> tuple[_DescriptionPart, ...]:
     """Parse the one safe inline description construct without executing source controls."""
-    sanitized = sanitize_terminal_text(value).strip()
+    sanitized = sanitize_terminal_text(value, preserve_newlines=True).strip()
     parts: list[_DescriptionPart] = []
     position = 0
     for match in _DESCRIPTION_LINK.finditer(sanitized):
