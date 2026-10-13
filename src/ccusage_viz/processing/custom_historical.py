@@ -20,7 +20,11 @@ from ccusage_viz.custom_models import (
     CustomUnit,
     LocalizedText,
 )
-from ccusage_viz.custom_protocol import CustomChartResponse
+from ccusage_viz.custom_protocol import (
+    CustomChartResponse,
+    CustomProtocolError,
+    validate_partition_selection,
+)
 from ccusage_viz.options import CustomChartConfig
 from ccusage_viz.processing.summaries import period_end, period_start
 
@@ -408,6 +412,11 @@ def _validate_capability(response: CustomChartResponse, config: CustomChartConfi
         raise CustomProjectionError(
             f"custom response does not support grouping by {config.group_by}"
         )
+    if config.kind == "ranking":
+        try:
+            validate_partition_selection(config.partition_by, config.group_by, capability)
+        except CustomProtocolError as exc:
+            raise CustomProjectionError(f"custom response {exc}") from exc
     supported_filters = {
         item.id: {option.id for option in item.options}
         for item in response.capabilities.filters

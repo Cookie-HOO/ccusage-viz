@@ -514,6 +514,8 @@ def parse_custom_response(raw: bytes, request: CustomRequest) -> CustomResponse:
             if _is_ranking_request(request, metric)
             else None
         )
+        if isinstance(ranking_capability, V2HistoricalChartCapability):
+            _validate_ranking_request_partition(request, ranking_capability)
         return V2ChartResponse(
             metric_id,
             _parse_data(
@@ -648,6 +650,23 @@ def _is_ranking_request(request: V2ChartRequest, metric: V2MetricDescriptor) -> 
         if kind in metric.capabilities.charts
     }
     return historical_kinds == {"ranking"}
+
+
+def _validate_ranking_request_partition(
+    request: V2ChartRequest, capability: V2HistoricalChartCapability
+) -> None:
+    """Validate the issued Ranking selection against the returned descriptor."""
+
+    if capability.partition_by is None:
+        if request.partition_declared:
+            raise CustomProtocolError(
+                "v2 response ranking capability does not declare request partition_by"
+            )
+        return
+    try:
+        validate_partition_selection(request.partition_by, request.group_by, capability)
+    except CustomProtocolError as exc:
+        raise CustomProtocolError(f"v2 response ranking capability {exc}") from exc
 
 
 def _parse_v2_runtime(value: object) -> V2Runtime:

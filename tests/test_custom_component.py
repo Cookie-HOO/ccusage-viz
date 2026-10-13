@@ -416,6 +416,31 @@ def _grouped_response(
     )
 
 
+def test_projection_rejects_manually_constructed_partition_selection_outside_capability() -> None:
+    source = _grouped_response((("one", (("a", "1"),)),))
+
+    with pytest.raises(CustomProjectionError, match="partition_by is not supported"):
+        process_custom_historical(
+            source,
+            config(
+                kind="ranking",
+                partition_by="unsupported",
+                group_by="real_model",
+                top=None,
+            ),
+        )
+
+
+def test_projection_rejects_manually_constructed_flat_selection_for_required_partition() -> None:
+    source = _grouped_response((("one", (("a", "1"),)),))
+
+    with pytest.raises(CustomProjectionError, match="partition_by is required"):
+        process_custom_historical(
+            source,
+            config(kind="ranking", partition_by=None, group_by="real_model", top=None),
+        )
+
+
 def test_grouped_projection_preserves_dataset_order_and_projects_each_group() -> None:
     projection = process_custom_historical(
         _grouped_response(
