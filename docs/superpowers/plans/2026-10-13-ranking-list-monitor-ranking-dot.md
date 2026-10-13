@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add text-only historical Ranking lists and dot-prefixed Monitor rankings across native and Custom Dataset surfaces.
+**Goal:** Add aligned text-only historical Ranking lists and single-dot-track Monitor rankings across native and Custom Dataset surfaces.
 
-**Architecture:** Extend the central style registry so CLI, TUI, Dashboard, and persisted presentation normalization expose the two styles consistently. Reuse the shared Ranking renderer: its existing historical list path becomes selectable for Ranking, while its observed-ranking path adds a leading marker only for `ranking-dot`; Monitor and Custom Monitor classify that style as a Ranking projection.
+**Architecture:** Extend the central style registry so CLI, TUI, Dashboard, and persisted presentation normalization expose the two styles consistently. Reuse the shared Ranking renderer: its existing historical list path becomes selectable for Ranking and omits the graph heading with the graph field, while its observed-ranking path uses the existing single-dot proportional track for `ranking-dot`; Monitor and Custom Monitor classify that style as a Ranking projection.
 
 **Tech Stack:** Python 3.12, pytest, terminal ANSI rendering, existing chart options and shared ranking renderer.
 
@@ -15,7 +15,7 @@
 - Historical Ranking supports `dot`, `bar`, `dots`, and `list`; `list` renders no proportional bar, dot track, or filled graphic.
 - Monitor supports `ranking-dot` alongside existing styles.
 - `ranking-dot` must preserve existing Ranking model, grouping, refresh, observation, description, animation, and ranking-like controls.
-- Its marker uses the entry categorical palette color, with aligned no-color and ASCII fallback.
+- Its middle graphic uses Ranking's `●`/`·` single-dot track with `o`/`.` ASCII fallback; it adds no leading marker.
 - Changes are presentation-only: no provider request, ordering, aggregation, baseline, refresh, retained-observation, search, scroll, description, or export behavior changes.
 - Native and Custom Dataset Monitor paths must behave consistently.
 
@@ -26,7 +26,7 @@
 - `src/ccusage_viz/options.py`: Canonical selectable style tuples and ranking-like Monitor predicates.
 - `src/ccusage_viz/monitor_component.py`: Native Monitor style-to-model projection.
 - `src/ccusage_viz/render/custom_monitor.py`: Custom Monitor style-to-renderer projection.
-- `src/ccusage_viz/render/ranking.py`: Observed Monitor row marker rendering and list geometry.
+- `src/ccusage_viz/render/ranking.py`: Observed Monitor single-dot track rendering and list geometry.
 - `src/ccusage_viz/monitor.py`, `src/ccusage_viz/tui.py`: Existing ranking-like style guards expanded to include `ranking-dot` where relevant.
 - `tests/test_options.py`, `tests/test_monitor_component.py`, `tests/test_custom_monitor.py`, `tests/test_render.py`: Regression coverage for selection, projection, and rendering.
 
@@ -161,7 +161,7 @@ git add src/ccusage_viz/monitor_component.py src/ccusage_viz/render/custom_monit
 git commit -m "feat: project monitor dot style as ranking"
 ```
 
-### Task 3: Render the categorical Monitor dot without changing normal ranking
+### Task 3: Render the Monitor single-dot track without changing normal ranking
 
 **Files:**
 - Modify: `src/ccusage_viz/render/ranking.py`
@@ -169,49 +169,40 @@ git commit -m "feat: project monitor dot style as ranking"
 
 **Interfaces:**
 - Consumes: observed `RankingModel`, `ScalarRankingEntry`, and `RenderContext.style == "ranking-dot"`.
-- Produces: one leading per-entry marker in the observed row; normal `ranking` and `list` output remains unchanged.
+- Produces: a single-dot proportional track in the observed row's middle graphic; normal `ranking` and `list` output remains unchanged.
 
 - [ ] **Step 1: Write failing renderer tests for color and fallback output**
 
 ```python
-def test_observed_ranking_dot_prefixes_each_entry_with_a_marker() -> None:
+def test_observed_ranking_dot_uses_single_dot_track() -> None:
     rendered = render_ranking(
         observed_ranking_model(),
         RenderContext(80, 20, load_translator("en"), color=False, style="ranking-dot"),
     )
     rows = rendered.splitlines()[1:]
-    assert all(row.lstrip().startswith("● ") for row in rows)
+    assert all("●" in row and "·" in row for row in rows)
+    assert all(not row.startswith("● ") for row in rows)
 
 
-def test_observed_ranking_dot_uses_ascii_marker_in_ascii_mode() -> None:
+def test_observed_ranking_dot_uses_ascii_track_in_ascii_mode() -> None:
     rendered = render_ranking(
         observed_ranking_model(),
         RenderContext(80, 20, load_translator("en"), color=False, ascii=True, style="ranking-dot"),
     )
-    assert "o " in rendered
+    assert "o" in rendered and "." in rendered
 ```
 
-Also assert a `style="ranking"` fixture has no newly introduced leading dot.
+Also assert a `style="ranking"` fixture retains filled bars and has no dot track.
 
 - [ ] **Step 2: Run the focused renderer tests to verify they fail**
 
 Run: `uv run pytest tests/test_render.py -k 'ranking_dot' -v`
 
-Expected: FAIL because the observed renderer treats `ranking-dot` as a bar-like style and has no leading marker.
+Expected: FAIL because the observed renderer treats `ranking-dot` as a filled-bar style.
 
-- [ ] **Step 3: Add a marker before each observed ranking row**
+- [ ] **Step 3: Route the middle graphic through the dot-track branch**
 
-In `render_ranking()`, derive the per-entry color from the existing entry semantics (`scheme.other` for Other, otherwise `scheme.highlight`) and construct:
-
-```python
-ranking_dot = (
-    colored_mark("o" if context.ascii else "●", entry_color, context) + " "
-    if context.style == "ranking-dot"
-    else ""
-)
-```
-
-Prefix both observed list-layout and chart-layout rows with `ranking_dot`. Reduce the observed available row geometry by `display_width(ranking_dot)` so values remain within `context.width`. Treat `ranking-dot` as the normal `ranking` graphic branch for the proportional mark; only the leading categorical marker is new.
+Do not prefix the row. Route `ranking-dot` through the same `dot` track branch used by Ranking, retaining the rank, label, track, and value columns. Use `●`/`·` or ASCII `o`/`.` and keep the existing highlight/Other color semantics.
 
 - [ ] **Step 4: Run renderer regressions**
 

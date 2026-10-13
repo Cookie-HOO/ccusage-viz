@@ -1168,7 +1168,7 @@ def test_observed_ranking_uses_content_driven_label_width() -> None:
     assert "A           " not in row
 
 
-def test_monitor_ranking_dot_prefixes_observed_rows_and_preserves_ascii_fallback() -> None:
+def test_monitor_ranking_dot_replaces_the_middle_bar_with_a_single_dot_track() -> None:
     model = RankingModel(
         (),
         None,
@@ -1195,10 +1195,16 @@ def test_monitor_ranking_dot_prefixes_observed_rows_and_preserves_ascii_fallback
         RenderContext(80, 24, load_translator("en"), color=False, style="ranking"),
     )
 
-    assert all(row.startswith("● ") for row in dotted.splitlines()[-2:])
-    assert all(row.startswith("o ") for row in ascii_dotted.splitlines()[-2:])
-    assert all(not row.startswith("● ") for row in ranking.splitlines()[-2:])
-    assert all(display_width(row) <= 80 for row in dotted.splitlines())
+    dotted_rows = dotted.splitlines()[-2:]
+    ascii_rows = ascii_dotted.splitlines()[-2:]
+    ranking_rows = ranking.splitlines()[-2:]
+
+    assert all(not row.startswith(("● ", "o ")) for row in (*dotted_rows, *ascii_rows))
+    assert all("●" in row and "·" in row for row in dotted_rows)
+    assert all("o" in row and "." in row for row in ascii_rows)
+    assert all("█" in row for row in ranking_rows)
+    assert all("●" not in row and "·" not in row for row in ranking_rows)
+    assert all(display_width(row) <= 80 for row in dotted_rows)
 
 
 def test_monitor_list_is_centered_and_omits_bar_tracks() -> None:
@@ -2276,6 +2282,11 @@ def test_historical_ranking_list_keeps_label_and_value_columns_aligned() -> None
     assert summary == "Today Units 15"
     assert heading.strip() == "Ranking"
     assert "Current" in header
+    assert "Scale" not in header
+    project_start = header.index("Project")
+    current_start = header.index("Current")
+    assert rows[0].index("A") == project_start
+    assert rows[0].index("10") + len("10") == current_start + len("Current")
     assert "A" in rows[0]
     assert "A much longer" in rows[1]
     assert rows[0].endswith("66.7%")

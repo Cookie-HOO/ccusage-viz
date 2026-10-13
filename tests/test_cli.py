@@ -458,7 +458,9 @@ def test_all_commands_accept_themes() -> None:
         ("monitor", "line-points"),
         ("monitor", "cumulative-bars"),
         ("monitor", "ranking"),
+        ("monitor", "ranking-dot"),
         ("monitor", "list"),
+        ("ranking", "list"),
     ],
 )
 def test_commands_accept_their_own_styles(command: str, style: str) -> None:
@@ -471,13 +473,6 @@ def test_style_is_rejected_for_the_wrong_command(style: str) -> None:
     parser = build_parser(load_translator("en"))
     with pytest.raises(UsageError) as caught:
         parser.parse_args(["chart", "calendar", "--style", style])
-    assert caught.value.key == "error.arguments"
-
-
-def test_historical_ranking_rejects_monitor_list_style() -> None:
-    parser = build_parser(load_translator("en"))
-    with pytest.raises(UsageError) as caught:
-        parser.parse_args(["chart", "ranking", "--style", "list"])
     assert caught.value.key == "error.arguments"
 
 

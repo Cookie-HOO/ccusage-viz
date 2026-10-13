@@ -724,26 +724,42 @@ def render_historical_ranking(
             current_width = columns.width("current", current_width)
             share_width = columns.width("share", share_width)
             rank_change_width = columns.width("rank_change", rank_change_width)
-        fixed_width = (
-            rank_column_width
-            + current_width
-            + delta_width
-            + share_width
-            + rank_change_width
-            + 4
-            + int(show_percentage)
-            + int(growth_visible)
-            + int(rank_comparison_visible)
-        )
-        available = max(2, context.width - fixed_width)
-        label_width = min(label_width, max(1, available - 2))
-        bar_width = max(1, available - label_width - 1)
-        header_fields = [
-            pad_width(rank_heading, rank_column_width, align="right"),
-            pad_width(project_heading, label_width),
-            pad_width(scale_heading, bar_width),
-            pad_width(current_heading, current_width, align="right"),
-        ]
+        optional_width = delta_width + share_width + rank_change_width
+        optional_count = sum((growth_visible, rank_comparison_visible, show_percentage))
+        if context.style == "list":
+            # List removes the graph column as a whole. Give its space to the
+            # label and count only separators between fields that are rendered.
+            fixed_width = (
+                rank_column_width
+                + current_width
+                + optional_width
+                + 2
+                + optional_count
+            )
+            label_width = min(label_width, max(1, context.width - fixed_width))
+            bar_width = 0
+            header_fields = [
+                pad_width(rank_heading, rank_column_width, align="right"),
+                pad_width(project_heading, label_width),
+                pad_width(current_heading, current_width, align="right"),
+            ]
+        else:
+            fixed_width = (
+                rank_column_width
+                + current_width
+                + optional_width
+                + 4
+                + optional_count
+            )
+            available = max(2, context.width - fixed_width)
+            label_width = min(label_width, max(1, available - 2))
+            bar_width = max(1, available - label_width - 1)
+            header_fields = [
+                pad_width(rank_heading, rank_column_width, align="right"),
+                pad_width(project_heading, label_width),
+                pad_width(scale_heading, bar_width),
+                pad_width(current_heading, current_width, align="right"),
+            ]
         if growth_visible:
             header_fields.append(pad_width(delta_heading, delta_width, align="right"))
         if rank_comparison_visible:
@@ -788,7 +804,7 @@ def render_historical_ranking(
             fields = [
                 pad_width(rank_value, rank_column_width, align="right"),
                 label,
-                mark,
+                *(() if context.style == "list" else (mark,)),
                 pad_width(current, current_width, align="right"),
             ]
             if growth_visible:

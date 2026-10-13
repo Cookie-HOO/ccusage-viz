@@ -20,7 +20,7 @@ from ccusage_viz.render.base import (
     styled_text,
     title_with_querying,
 )
-from ccusage_viz.render.palette import categorical_colors, get_color_scheme
+from ccusage_viz.render.palette import get_color_scheme
 from ccusage_viz.render.ranking_presentation import (
     RankingPresentationEntry,
     description_visible_text,
@@ -118,13 +118,7 @@ def _observed_dimensions(
     """Allocate observed ranking columns from content while retaining a useful bar."""
     label_size = max(display_width(label) for label in labels)
     value_size = max(6, *(display_width(value) for value in values))
-    available = max(
-        1,
-        context.width
-        - value_size
-        - 11
-        - (2 if context.style == "ranking-dot" else 0),
-    )
+    available = max(1, context.width - value_size - 11)
     if context.style == "list":
         return min(label_size, available), 0, value_size
     label_width = min(label_size, max(1, available - 8))
@@ -280,7 +274,6 @@ def render_ranking(
     dot, track = ("●", "·") if not context.ascii else ("o", ".")
     scheme = get_color_scheme(context.color_scheme)
     mark_color = scheme.highlight
-    entry_colors = categorical_colors((entry.key for entry in entries), context.color_scheme)
     growth = context.deltas or {}
     rank_growth = context.rank_deltas or {}
     lines = [line for line in (summary, heading) if line]
@@ -289,7 +282,7 @@ def render_ranking(
     ):
         value = _entry_value(entry)
         length = round(value / maximum * bar_width)
-        if context.style == "dot":
+        if context.style in {"dot", "ranking-dot"}:
             mark = (
                 track * max(0, length - 1)
                 + colored_mark(dot, mark_color, context)
@@ -328,12 +321,7 @@ def render_ranking(
         rank_marker = " " if pending else rank_marker
         activity = " " if pending else activity
         value_marker = " " if pending else value_marker
-        ranking_dot = (
-            colored_mark("o" if context.ascii else "●", entry_colors[entry.key], context) + " "
-            if context.style == "ranking-dot"
-            else ""
-        )
-        prefix = f"{ranking_dot}{rank:>2} {rank_marker} {activity} "
+        prefix = f"{rank:>2} {rank_marker} {activity} "
         if separate_fields:
             agent_text = "" if entry.is_other or agent is None else agent
             label_text = (
@@ -344,7 +332,7 @@ def render_ranking(
             label_text = pad_width(truncate_width(label, label_width), label_width)
         if model.is_observed and context.style == "list":
             row = (
-                f"{ranking_dot}{rank_marker} {activity} {label_text} "
+                f"{rank_marker} {activity} {label_text} "
                 f"{pad_width(formatted, value_width, align='right')} {value_marker}"
             )
             lines.append(center_text(row, context.width))
