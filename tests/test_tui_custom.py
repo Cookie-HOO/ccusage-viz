@@ -1667,36 +1667,40 @@ def test_v2_ranking_source_limit_is_a_pane_local_notice() -> None:
     assert tui_module._custom_top_limit_notice(pane, load_translator("en")) == ()
 
 
-@pytest.mark.parametrize("step", (1, -1))
-@pytest.mark.parametrize("top", (None, 6))
-def test_custom_historical_grouping_cycles_preserve_top(step, top) -> None:
+def test_custom_historical_grouping_cycle_to_total_preserves_top() -> None:
     chart = CustomChartConfig(
         "timeline",
         CustomCommandSource("reading", ("reader", "ccuv")),
         DateRange(date(2026, 10, 1), date(2026, 10, 8)),
-        group_by=None,
-        top=top,
+        group_by="book",
+        top=6,
     )
 
-    updated = tui_module._cycle_custom_grouping(chart, (None, "book"), step=step)
+    updated = tui_module._cycle_custom_grouping(chart, (None, "book"))
 
-    assert updated.group_by == "book"
-    assert updated.top == top
+    assert (updated.group_by, updated.top) == (None, 6)
 
 
+@pytest.mark.parametrize("group_by", (None, "model"))
+@pytest.mark.parametrize("step", (1, -1))
 @pytest.mark.parametrize("top", (None, 6))
-def test_custom_monitor_grouping_cycles_preserve_top(top) -> None:
+def test_custom_monitor_grouping_cycles_preserve_top_at_group_boundaries(
+    group_by, step, top
+) -> None:
     chart = CustomChartConfig(
         "monitor",
         CustomCommandSource("router", ("router", "ccuv")),
         DateRange(date(2026, 10, 1), date(2026, 10, 8)),
-        group_by=None,
+        group_by=group_by,
         top=top,
     )
 
-    updated = tui_module._cycle_custom_grouping(chart, (None, "model"))
+    updated = tui_module._cycle_custom_grouping(chart, (None, "model"), step=step)
 
-    assert (updated.group_by, updated.top) == ("model", top)
+    assert (updated.group_by, updated.top) == (
+        "model" if group_by is None else None,
+        top,
+    )
 
 
 def test_custom_monitor_grouping_cycles_from_total_in_declared_order() -> None:

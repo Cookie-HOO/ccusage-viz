@@ -2712,7 +2712,7 @@ def _cycle_dimension(
     start = values.index(current) if current in values else 0
     for distance in range(1, len(values) + 1):
         candidate = values[(start + step * distance) % len(values)]
-        if candidate != blocked:
+        if blocked is None or candidate != blocked:
             return candidate
     return current
 
