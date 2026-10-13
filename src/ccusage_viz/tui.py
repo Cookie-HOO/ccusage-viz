@@ -2050,10 +2050,18 @@ def _render_custom_projection(
                 controls=controls,
                 reserved_summary_rows=len(summary_render.splitlines()),
             )
+    grouped = projection.groups is not None
     active_viewport: RankingViewport | GroupedRankingViewport | None = (
-        grouped_ranking_viewport if projection.groups is not None else ranking_viewport
+        grouped_ranking_viewport if grouped else ranking_viewport
+    )
+    incompatible_viewport: RankingViewport | GroupedRankingViewport | None = (
+        ranking_viewport if grouped else grouped_ranking_viewport
     )
     if active_viewport is not None:
+        # Partition-mode changes invalidate the other renderer's complete
+        # session state, including offsets, hits, source facts, and caches.
+        if incompatible_viewport is not None:
+            incompatible_viewport.clear()
         audit = render_audit(context)
         summary_rows = len(summary_render.splitlines())
         context = replace(
@@ -2068,7 +2076,7 @@ def _render_custom_projection(
         )
         render_viewport = (
             render_grouped_custom_ranking_viewport
-            if projection.groups is not None
+            if grouped
             else render_custom_ranking_viewport
         )
         rendered = render_viewport(

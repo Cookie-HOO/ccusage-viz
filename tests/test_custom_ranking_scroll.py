@@ -211,6 +211,22 @@ def test_grouped_identity_scrollbar_and_copy_payloads() -> None:
     assert viewport.clipboard_text(("series", "coding", "shared")).startswith("Coding Model\nSeed")
 
 
+def test_grouped_copy_all_preserves_mixed_empty_groups_and_excludes_other() -> None:
+    model = grouped_projection()
+    coding, general, empty = model.groups or ()
+    other = replace(coding.series[0], id="other", label=LocalizedText("Other", "其他"), is_other=True)
+    model = replace(model, groups=(empty, coding, replace(general, series=(other,))))
+    viewport = GroupedRankingViewport()
+    render_grouped(model, viewport)
+    payload = viewport.clipboard_all_text()
+    assert payload.index("Empty Unmatched Group") < payload.index("Coding Model")
+    assert "Seed" in payload and "Sonnet" in payload
+    assert "General Model" not in payload and "Other" not in payload
+
+    render_grouped(model, viewport, search="Seed")
+    assert "Empty Unmatched Group" not in viewport.clipboard_all_text()
+
+
 def test_grouped_spacing_starts_between_series_not_after_group_heading() -> None:
     viewport = GroupedRankingViewport()
     render_grouped(grouped_projection(), viewport, context(density="detailed"), spacing="line")
@@ -341,7 +357,8 @@ def test_grouped_sticky_capacity_reaches_final_row_and_sets_truthful_scrollbar_m
     render_grouped(model, viewport, ctx, scrollbar=True)
     viewport.offset = 10_000
     output = strip_ansi(render_grouped(model, viewport, ctx, scrollbar=True))
-    assert viewport.reserved_rows == 1
+    assert viewport.sticky_rows == 1
+    assert viewport.reserved_rows == 0
     assert viewport.offset == viewport.total_rows - viewport.effective_capacity()
     assert "Item 7" in output
     assert viewport.scrollbar is not None
@@ -351,28 +368,51 @@ def test_grouped_sticky_capacity_reaches_final_row_and_sets_truthful_scrollbar_m
     )
 
 
-def test_dashboard_routes_grouped_projection_without_changing_flat_viewport() -> None:
+def test_dashboard_partition_mode_switch_clears_incompatible_viewport_state() -> None:
     import ccusage_viz.tui as tui
     from ccusage_viz.terminal import Terminal
 
     grouped = GroupedRankingViewport()
     flat = RankingViewport(offset=3)
     model = grouped_projection()
-    tui._render_custom_projection(
-        model,
-        model.config,
-        load_translator("en"),
-        Terminal(100, 12, False, False),
-        accepted_at=None,
-        interval=None,
-        pending=False,
-        surface=tui.dashboard_pane_surface("ranking"),
-        ranking_viewport=flat,
-        grouped_ranking_viewport=grouped,
-    )
+
+    def dispatch(projection: CustomChartProjection) -> None:
+        tui._render_custom_projection(
+            projection,
+            projection.config,
+            load_translator("en"),
+            Terminal(100, 12, False, False),
+            accepted_at=None,
+            interval=None,
+            pending=False,
+            surface=tui.dashboard_pane_surface("ranking"),
+            ranking_viewport=flat,
+            grouped_ranking_viewport=grouped,
+        )
+
+    dispatch(model)
     assert grouped.active
-    assert flat.offset == 3
-    assert not flat.active
+    # Grouped dispatch clears all stale flat state, not merely its active bit.
+    assert flat.offset == 0 and not flat.hits and not flat._geometry_cache
+    grouped.offset = 2
+    grouped.hits[9] = (("group", "coding"), 10, None)
+    dispatch(replace(model, groups=None, series=projection(3).series))
+    assert flat.active
+    assert grouped.offset == 0 and not grouped.hits and not grouped.rows
+
+
+def test_grouped_notice_and_sticky_reservations_are_independent_and_stable() -> None:
+    viewport = GroupedRankingViewport(reserved_rows=2)
+    model = grouped_projection()
+    ctx = context(height=5)
+    render_grouped(model, viewport, ctx)
+    viewport.offset = next(index for index, row in enumerate(viewport.rows) if row.kind == "series")
+    first = render_grouped(model, viewport, ctx)
+    state = (viewport.reserved_rows, viewport.sticky_rows, viewport.visible_rows, viewport.offset)
+    second = render_grouped(model, viewport, ctx)
+    assert state == (2, 1, viewport.visible_rows, viewport.offset)
+    assert (viewport.reserved_rows, viewport.sticky_rows, viewport.visible_rows, viewport.offset) == state
+    assert first == second
 
 
 def test_grouped_geometry_change_restores_group_and_series_anchor() -> None:
@@ -387,6 +427,25 @@ def test_grouped_geometry_change_restores_group_and_series_anchor() -> None:
     render_grouped(model, viewport, context(height=8, density="normal"))
     visible = viewport.rows[viewport.offset : viewport.offset + viewport.visible_rows]
     assert any((row.group_id, row.series_id) == ("general", "shared") for row in visible)
+
+
+def test_grouped_top_series_description_keeps_its_series_on_source_change() -> None:
+    viewport = GroupedRankingViewport()
+    model = grouped_projection()
+    detailed = context(height=8, density="detailed")
+    render_grouped(model, viewport, detailed)
+    viewport.offset = next(
+        index
+        for index, row in enumerate(viewport.rows)
+        if row.kind == "series_description"
+        and row.group_id == "coding"
+        and row.series_id == "shared"
+    )
+    coding, general, empty = model.groups or ()
+    refreshed = replace(model, groups=(coding, replace(general, label=LocalizedText("Changed", "Changed")), empty))
+    render_grouped(refreshed, viewport, detailed)
+    top = viewport.rows[viewport.offset]
+    assert (top.group_id, top.series_id) == ("coding", "shared")
 
 
 def context(*, height=12, width=100, density="normal", color=False):

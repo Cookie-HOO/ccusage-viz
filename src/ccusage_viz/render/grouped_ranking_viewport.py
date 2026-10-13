@@ -30,11 +30,14 @@ from ccusage_viz.render.summary import format_custom_value
 from ccusage_viz.scrollbar import Scrollbar
 
 GroupedIdentity = tuple[Literal["group"], str] | tuple[Literal["series"], str, str]
+GroupedRowKind = Literal[
+    "group", "description", "separator", "series", "series_description", "empty"
+]
 
 
 @dataclass(frozen=True, slots=True)
 class GroupedRankingRow:
-    kind: Literal["group", "description", "separator", "series", "series_description", "empty"]
+    kind: GroupedRowKind
     group_id: str
     series_id: str | None
     source_line: int
@@ -46,6 +49,7 @@ class GroupedRankingViewport:
     total_rows: int = 0
     visible_rows: int = 0
     reserved_rows: int = 0
+    sticky_rows: int = 0
     body_top: int = 0
     scrollbar: Scrollbar | None = None
     copy_all_hit: tuple[int, int] | None = None
@@ -105,7 +109,7 @@ class GroupedRankingViewport:
         return before != self.offset
 
     def clear(self) -> None:
-        self.offset = self.total_rows = self.visible_rows = self.reserved_rows = 0
+        self.offset = self.total_rows = self.visible_rows = self.reserved_rows = self.sticky_rows = 0
         self.body_top = 0
         self.scrollbar = self.copy_all_hit = None
         self.active = False
@@ -168,12 +172,13 @@ def _grouped_ranking_clipboard_all_text(
         tuple[GroupedRankingPresentationGroup, tuple[RankingPresentationEntry, ...]], ...
     ],
 ) -> str:
-    # A group whose projection contains only Other has no concrete matched
-    # payload. Do not turn that heading into a misleading Copy All result.
+    # Preserve declared Dataset order and genuine empty headings. A group
+    # whose projection contains only synthetic Other is not genuinely empty,
+    # but Other itself must never become a clipboard entry.
     return "\n\n".join(
         _grouped_ranking_group_clipboard_text(group, entries)
         for group, entries in groups
-        if any(not entry.is_other for entry in entries)
+        if not entries or any(not entry.is_other for entry in entries)
     )
 
 
@@ -251,10 +256,11 @@ def render_grouped_custom_ranking_viewport(
     old_rows, old_offset = viewport.rows, viewport.offset
     anchor: tuple[str, str | None] | None = None
     if old_rows and restore_identity:
-        for row in old_rows[min(old_offset, len(old_rows) - 1) :]:
-            if row.kind in {"series", "group"}:
-                anchor = (row.group_id, row.series_id)
-                break
+        # Every physical row carries the identity it visually belongs to.
+        # Separators consistently belong to the following group/series, so a
+        # geometry/source refresh preserves what was actually at the top.
+        row = old_rows[min(old_offset, len(old_rows) - 1)]
+        anchor = (row.group_id, row.series_id)
 
     global_total = sum((group.total for group in projection.groups or ()), start=Decimal())
     prepared = tuple(
@@ -362,8 +368,8 @@ def render_grouped_custom_ranking_viewport(
     records: list[GroupedRankingRow] = []
 
     def append(
-        kind: GroupedRankingRow.kind, group_id: str, series_id: str | None, line: str
-    ) -> None:  # type: ignore[name-defined]
+        kind: GroupedRowKind, group_id: str, series_id: str | None, line: str
+    ) -> None:
         records.append(GroupedRankingRow(kind, group_id, series_id, len(lines)))
         lines.append(line)
 
@@ -522,8 +528,8 @@ def render_grouped_custom_ranking_viewport(
     if sticky is not None:
         body.insert(0, sticky)
 
-    viewport.reserved_rows = int(sticky is not None)
-    screen_shift = viewport.reserved_rows
+    viewport.sticky_rows = int(sticky is not None)
+    screen_shift = viewport.sticky_rows
     for source_index in range(viewport.offset, min(len(records), viewport.offset + content_rows)):
         row = records[source_index]
         if row.kind not in {"group", "series"}:
