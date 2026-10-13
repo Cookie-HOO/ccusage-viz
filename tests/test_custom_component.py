@@ -1,17 +1,20 @@
 from dataclasses import replace
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 from typing import Literal, cast
+from zoneinfo import ZoneInfo
 
 import pytest
 
 import ccusage_viz.custom_component as custom_component_module
 from ccusage_viz.acquisition import custom_historical_query_intent
+from ccusage_viz.core.custom_ranking_time import TimestampRange
 from ccusage_viz.core.time import DateRange
 from ccusage_viz.custom_component import (
     CustomCompletion,
     CustomHistoricalComponent,
+    custom_date_summary_supported,
     custom_projection_replacement_required,
     custom_replacement_required,
     custom_summary_replacement_required,
@@ -1027,6 +1030,127 @@ def test_component_rejects_provider_summary_response_for_chart() -> None:
 
     with pytest.raises(TypeError, match="chart response"):
         component.apply_provider_result(SimpleNamespace(custom_response=summary))
+
+
+def test_timestamp_comparison_is_contiguous_with_the_accepted_anchor() -> None:
+    end = datetime(2026, 10, 15, 12, 0, tzinfo=UTC)
+    current = TimestampRange(end - timedelta(minutes=10), end, relative_until=True, period="10m")
+    component = CustomHistoricalComponent(
+        config(kind="ranking", metric_id="reading_time", date_range=current)
+    )
+
+    previous = component.comparison_request_config()
+
+    assert previous is not None
+    assert previous.date_range == TimestampRange(
+        end - timedelta(minutes=20),
+        end - timedelta(minutes=10),
+        period="10m",
+        fixed_bounds=True,
+    )
+
+
+def test_timestamp_completion_for_distinct_dst_fold_instant_is_rejected() -> None:
+    zone = ZoneInfo("America/New_York")
+    first = config(
+        kind="ranking",
+        metric_id="reading_time",
+        date_range=TimestampRange(
+            datetime(2026, 11, 1, 0, 30, tzinfo=zone),
+            datetime(2026, 11, 1, 1, 30, tzinfo=zone, fold=0),
+            relative_until=True,
+            period="1h",
+        ),
+    )
+    component = CustomHistoricalComponent(first)
+    second = replace(
+        first,
+        date_range=TimestampRange(
+            datetime(2026, 11, 1, 1, 30, tzinfo=zone, fold=0),
+            datetime(2026, 11, 1, 1, 30, tzinfo=zone, fold=1),
+            relative_until=True,
+            period="1h",
+        ),
+    )
+    component.configure(second, data_affecting=True)
+
+    assert not component.apply_result(CustomCompletion(component.generation, first, response()))
+    assert component.accepted_config is None
+
+
+def test_timestamp_completion_for_an_older_exact_range_is_rejected() -> None:
+    first_end = datetime(2026, 10, 15, 12, 0, tzinfo=UTC)
+    first = config(
+        kind="ranking",
+        metric_id="reading_time",
+        date_range=TimestampRange(
+            first_end - timedelta(minutes=10),
+            first_end,
+            relative_until=True,
+            period="10m",
+        ),
+    )
+    component = CustomHistoricalComponent(first)
+    newer = replace(
+        first,
+        date_range=TimestampRange(
+            first_end - timedelta(minutes=5),
+            first_end + timedelta(minutes=5),
+            relative_until=True,
+            period="10m",
+        ),
+    )
+    component.configure(newer, data_affecting=True)
+
+    assert not component.apply_result(CustomCompletion(component.generation, first, response()))
+    assert component.accepted_config is None
+
+
+def test_relative_timestamp_heading_uses_configured_period() -> None:
+    interval = TimestampRange(
+        datetime.fromisoformat("2026-10-15T11:50:00+08:00"),
+        datetime.fromisoformat("2026-10-15T12:00:00+08:00"),
+        relative_until=True,
+        period="10m",
+    )
+    chart = config(kind="ranking", metric_id="reading_time", date_range=interval)
+
+    heading = custom.custom_heading(
+        chart,
+        RenderContext(120, 20, load_translator("en"), color=False),
+    )
+
+    assert heading.endswith(" · 10m")
+    assert "2026-10-15T" not in heading
+
+
+def test_fixed_timestamp_heading_uses_exact_aware_half_open_bounds() -> None:
+    interval = TimestampRange(
+        datetime.fromisoformat("2026-10-15T11:50:00+08:00"),
+        datetime.fromisoformat("2026-10-15T12:00:00+08:00"),
+    )
+    chart = config(kind="ranking", metric_id="reading_time", date_range=interval)
+
+    heading = custom.custom_heading(
+        chart,
+        RenderContext(120, 20, load_translator("en"), color=False),
+    )
+
+    assert "[2026-10-15T11:50:00+08:00, 2026-10-15T12:00:00+08:00)" in heading
+
+
+def test_date_only_summary_support_restores_after_leaving_subday_period() -> None:
+    end = datetime(2026, 10, 15, 12, 0, tzinfo=UTC)
+    subday = config(
+        kind="ranking",
+        metric_id="reading_time",
+        date_range=TimestampRange(
+            end - timedelta(minutes=10), end, relative_until=True, period="10m"
+        ),
+    )
+
+    assert not custom_date_summary_supported(subday)
+    assert custom_date_summary_supported(replace(subday, date_range=RANGE))
 
 
 def test_component_accepts_matching_comparison_without_replacing_current_projection() -> None:

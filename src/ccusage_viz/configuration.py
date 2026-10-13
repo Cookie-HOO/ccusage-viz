@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from contextlib import suppress
 from dataclasses import replace
+from datetime import datetime
 
 from ccusage_viz.custom_models import (
     CustomCapabilities,
@@ -73,6 +74,7 @@ def apply_custom_probe_defaults(
     descriptor: CustomProbeDescriptor,
     *,
     timezone: str,
+    now: datetime | None = None,
 ) -> CustomChartConfig:
     """Apply compatible Dataset suggestions to an initial historical chart."""
     defaults = descriptor.defaults.get(config.kind)
@@ -82,10 +84,10 @@ def apply_custom_probe_defaults(
 
     explicit = config.initial_explicit
     partition_choices = getattr(capability, "partition_by", None)
-    if "partition_by" in explicit:
-        partition_candidates = (config.partition_by,)
-    elif partition_choices is None:
+    if partition_choices is None:
         partition_candidates = (None,)
+    elif "partition_by" in explicit and config.partition_by in partition_choices:
+        partition_candidates = (config.partition_by,)
     else:
         preferred_partition = (
             defaults.partition_by
@@ -102,7 +104,7 @@ def apply_custom_probe_defaults(
         partition_candidates = tuple(
             dict.fromkeys(choice for choice in partition_preferences if choice in partition_choices)
         )
-    if "group_by" in explicit:
+    if "group_by" in explicit and config.group_by in capability.group_by:
         group_candidates = (config.group_by,)
     else:
         preferred_group = (
@@ -155,13 +157,21 @@ def apply_custom_probe_defaults(
         and (not supported_periods or defaults.period in supported_periods)
     ):
         with suppress(ValueError):
-            date_range = resolve_date_range(
-                config.kind,
-                period=defaults.period,
-                since=None,
-                until=None,
-                timezone=timezone,
-            )
+            if is_v2_custom_ranking(config):
+                from ccusage_viz.core.custom_ranking_time import resolve_custom_ranking_range
+
+                anchor = now or datetime.now().astimezone()
+                date_range = resolve_custom_ranking_range(
+                    defaults.period, now=anchor, timezone=timezone
+                )
+            else:
+                date_range = resolve_date_range(
+                    config.kind,
+                    period=defaults.period,
+                    since=None,
+                    until=None,
+                    timezone=timezone,
+                )
     granularity = "day" if is_v2_custom_ranking(config) else config.granularity
     if (
         not is_v2_custom_ranking(config)

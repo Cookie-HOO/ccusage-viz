@@ -5,6 +5,7 @@ import subprocess
 from dataclasses import replace
 from shutil import which
 
+from ccusage_viz.core.custom_ranking_time import TimestampRange
 from ccusage_viz.formatting import char_width, display_width
 from ccusage_viz.options import (
     COMMAND_DEFAULT_PERIODS,
@@ -130,19 +131,36 @@ def _custom_source_args(source: CustomCommandSource) -> list[str]:
     return [*args, "--command", shlex.join(source.command_argv)]
 
 
+def _custom_range_args(chart: CustomChartConfig, *, full: bool) -> list[str]:
+    date_range = chart.date_range
+    if isinstance(date_range, TimestampRange):
+        if date_range.period is None:
+            raise ValueError(
+                "fixed timestamp ranges cannot be copied because the CLI has no timestamp-bound flags"
+            )
+        return ["--period", date_range.period]
+    if date_range.relative_until and date_range.period is not None:
+        return (
+            ["--period", date_range.period]
+            if full or date_range.period != COMMAND_DEFAULT_PERIODS[chart.kind]
+            else []
+        )
+    args = ["--since", date_range.since.isoformat()]
+    if not date_range.implicit_until:
+        args.extend(("--until", date_range.until.isoformat()))
+    return args
+
+
 def _custom_chart_args(options: StandaloneLaunch, *, full: bool) -> list[str]:
     chart = options.chart
     if not isinstance(chart, CustomChartConfig):
         raise TypeError("custom command formatting requires a custom chart")
-    args = ["chart", chart.kind, *_custom_source_args(chart.source)]
-    date_range = chart.date_range
-    if date_range.relative_until and date_range.period is not None:
-        if full or date_range.period != COMMAND_DEFAULT_PERIODS[chart.kind]:
-            args.extend(("--period", date_range.period))
-    else:
-        args.extend(("--since", date_range.since.isoformat()))
-        if not date_range.implicit_until:
-            args.extend(("--until", date_range.until.isoformat()))
+    args = [
+        "chart",
+        chart.kind,
+        *_custom_source_args(chart.source),
+        *_custom_range_args(chart, full=full),
+    ]
     for filter_id, option_ids in chart.filters:
         for option_id in option_ids:
             args.extend(("--filter", f"{filter_id}={option_id}"))
@@ -231,14 +249,12 @@ def format_full_dashboard_command(
             fragment = "empty"
         elif isinstance(pane_config, CustomChartPaneConfig):
             chart = pane_config.chart
-            fragment_args = ["chart", chart.kind, *_custom_source_args(chart.source)]
-            date_range = chart.date_range
-            if date_range.relative_until and date_range.period is not None:
-                fragment_args.extend(("--period", date_range.period))
-            else:
-                fragment_args.extend(("--since", date_range.since.isoformat()))
-                if not date_range.implicit_until:
-                    fragment_args.extend(("--until", date_range.until.isoformat()))
+            fragment_args = [
+                "chart",
+                chart.kind,
+                *_custom_source_args(chart.source),
+                *_custom_range_args(chart, full=True),
+            ]
             for filter_id, option_ids in chart.filters:
                 for option_id in option_ids:
                     fragment_args.extend(("--filter", f"{filter_id}={option_id}"))

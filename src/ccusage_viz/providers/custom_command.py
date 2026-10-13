@@ -39,9 +39,9 @@ class CustomCommandProvider:
 
     provider = CUSTOM_COMMAND_PROVIDER
     capabilities = ProviderCapabilities(
-        resolutions=(DataResolution.DATE.value,),
+        resolutions=(DataResolution.DATE.value, DataResolution.TIMESTAMP.value),
         dimensions=(),
-        execution_options=(),
+        execution_options=("end_at", "start_at"),
     )
 
     def compile(self, intent: QueryIntent) -> PhysicalPlan:
@@ -130,7 +130,8 @@ class CustomCommandProvider:
         return PhysicalResult(query, stdout, stderr)
 
     def normalize(self, result: PhysicalResult) -> ProviderResultFragment:
-        request = result.query.payload
+        executed = result.executed_query or result.query
+        request = executed.payload
         if not isinstance(request, CustomRequest):
             raise ValueError("custom command result lacks its request payload")
         try:
@@ -148,10 +149,15 @@ class CustomCommandProvider:
                 detail=str(exc),
                 stderr=_decode_stderr(result.diagnostics),
             ) from exc
+        resolution = (
+            DataResolution.TIMESTAMP
+            if getattr(request, "start_at", None) is not None
+            else DataResolution.DATE
+        )
         return ProviderResultFragment(
             (),
             (ProviderProvenance(result.query.provider, result.query.fingerprint),),
-            DataResolution.DATE,
+            resolution,
             result.query.coverage,
             custom_response=response,
             diagnostics=result.diagnostics,
@@ -166,7 +172,7 @@ class CustomCommandProvider:
         return ProviderResult(
             (),
             fragment.provenance,
-            DataResolution.DATE,
+            fragment.resolution,
             fragment.coverage,
             custom_response=fragment.custom_response,
             diagnostics=fragment.diagnostics,

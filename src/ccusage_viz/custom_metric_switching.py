@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import date
+from datetime import date, datetime
 from typing import Literal
 
 from ccusage_viz.core.time import DateRange
@@ -72,6 +72,9 @@ def normalize_switch_config(
     config: CustomChartConfig,
     target: V2MetricDescriptor,
     category: SwitchNormalization,
+    *,
+    now: datetime | None = None,
+    timezone: str = "UTC",
 ) -> CustomChartConfig | None:
     """Apply one target-Metric default, or return ``None`` when it cannot change config."""
 
@@ -88,16 +91,22 @@ def normalize_switch_config(
             period = capability.periods[0] if len(capability.periods) == 1 else None
         if period is None or config.date_range.period == period:
             return None
-        date_range = (
-            DateRange(
-                date(1971, 1, 1),
-                config.date_range.until,
-                relative_until=True,
-                period="all",
+        if is_v2_custom_ranking(config):
+            from ccusage_viz.core.custom_ranking_time import resolve_custom_ranking_range
+
+            anchor = now or datetime.now().astimezone()
+            date_range = resolve_custom_ranking_range(period, now=anchor, timezone=timezone)
+        else:
+            date_range = (
+                DateRange(
+                    date(1971, 1, 1),
+                    config.date_range.until,
+                    relative_until=True,
+                    period="all",
+                )
+                if period == "all" and config.kind == "ranking"
+                else resolve_date_range(config.kind, period=period, since=None, until=None)
             )
-            if period == "all" and config.kind == "ranking"
-            else resolve_date_range(config.kind, period=period, since=None, until=None)
-        )
         updated = replace(config, date_range=date_range)
     elif category in {"partition_by", "group_by"}:
         capability = target.capabilities.charts.get(config.kind)

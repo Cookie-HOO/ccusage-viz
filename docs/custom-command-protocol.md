@@ -54,9 +54,14 @@ Each Metric still independently owns its unit, aggregation, capabilities,
 defaults, summary, data, display, and source validation. Hosts may use `m/M`
 to cycle same-Group Metrics that support the active chart kind; this only sends
 a normal request with the target `metric_id` and adds no request field.
-`sum` permits ccuv to aggregate returned facts for historical projections.
-`value` is source-owned: ccuv displays only the exact query result and asks the
-Dataset again whenever range, grouping, granularity, filters, or chart changes.
+`sum` permits ccuv to aggregate returned dated facts for Timeline, Stack, and
+Calendar projections. `value` is source-owned: ccuv displays only the exact
+query result and asks the Dataset again whenever a data-affecting range,
+grouping, filter, or chart choice changes. V2 Ranking is scalar for either
+aggregation mode: the Dataset computes each entry's complete-range `value`,
+while ccuv may still sort returned entries and derive Top, Other, shares, and
+comparisons across them. Non-Ranking historical charts also requery for
+granularity changes; V2 Ranking has no granularity.
 
 Local Dataset registration caches its successful Probe for discovery, environment
 state, and the nonblocking chooser. Re-running `ccuv dataset add-local COMMAND`
@@ -86,11 +91,16 @@ V2 metrics may declare `summary: "comparisons" | "total" | "none"`.
 `comparisons` is the default and permits the ordinary current/sequential/year-over-year
 summary. `total` permits only one total value. `none` suppresses Dataset summary
 acquisition. A historical chart capability may declare its supported `periods`.
-When present, ccuv limits `p/P` to that ordered list. `all` is Ranking-only:
-ccuv sends `period: "all"` with an anchored range from
-`1971-01-01` through today. The marker, not the anchor date, means all source
-data. Datasets must reject unsupported periods with their existing
-`unsupported_query` response for `range.period`.
+When present, ccuv limits `p/P` to that ordered list. A V2 Ranking may include
+positive-integer `Ns`, `Nm`, and `Nh` periods (seconds, minutes, and hours).
+The Dataset owns the exact spellings and declaration order: ccuv neither sorts
+nor normalizes them, so `90s` remains `90s`. Omission keeps ccuv's legacy period
+fallback and does not add built-in subday periods. Existing `d`, `w`, `mo`, `q`,
+`y`, and `all` meanings are unchanged; in particular, `1d` is a calendar-date
+period, not the last 24 hours. `all` is Ranking-only: ccuv sends `period: "all"`
+with an anchored range from `1971-01-01` through today. The marker, not the
+anchor date, means all source data. Datasets must reject unsupported periods
+with their existing `unsupported_query` response for `range.period`.
 
 Each chart's `group_by` is also an ordered set of permitted query values. Use
 JSON `null` to permit the ungrouped total; dimension IDs remain strings, so a
@@ -162,9 +172,10 @@ An explicit CLI or Dashboard Pane option overrides the Dataset field.
 }
 ```
 
-All fields are optional. `period`, `granularity`, and `group_by` must be
-supported by the selected chart capability; `top` needs a valid final grouping;
-and style must be compatible with that grouping. `partition_by` is valid only
+All fields are optional. `period` and `group_by` must be supported by the
+selected chart capability; non-Ranking `granularity` must also be supported.
+A legacy Ranking `granularity` default is accepted but ignored. `top` needs a
+valid final grouping; style must be compatible with that grouping. `partition_by` is valid only
 for Ranking and must follow the declared partition capability. A non-null
 partition default requires a non-null, different `group_by`; invalid default
 combinations reject the descriptor. `other` is `"show"` or `"hide"`. `theme`
@@ -200,7 +211,7 @@ range and displays rank movement, but hides the absolute-growth column.
 A Ranking capability may also declare `sort_direction: "ascending" |
 "descending"`; omission defaults to `"descending"`. It is Dataset-owned Metric
 semantics, not a host preference: ccuv applies it before Ranking order, Top N,
-Other, and rank-comparison derivation. It does not change numeric point values,
+Other, and rank-comparison derivation. It does not change numeric values,
 units, Dataset `display`, or comparison facts. There is no CLI, Dashboard, or
 keyboard override; switching Metrics applies the target Metric's declared
 direction. Use `"ascending"` for a fact such as days since last update when
@@ -215,14 +226,22 @@ value: either a dimension ID or explicit JSON `null`. The explicit null tells a
 partition-aware Dataset that a capable client selected flat mode.
 
 ```json
-"query": {
-  "filters": {},
-  "partition_by": "logical_model",
-  "group_by": "real_model",
-  "granularity": "day",
-  "top": 3
+{
+  "chart_kind": "ranking",
+  "query": {
+    "filters": {},
+    "partition_by": "logical_model",
+    "group_by": "real_model",
+    "top": 3
+  }
 }
 ```
+
+Every V2 historical request explicitly includes top-level `chart_kind`, including
+non-Ranking requests. V2 Ranking requests omit `query.granularity`. A legacy
+Ranking capability or default may still contain granularity metadata; ccuv
+accepts but ignores it and never uses it for validation, matching, refresh, or
+request identity.
 
 `query.top` keeps its source-coverage meaning. The Dataset decides how many raw
 series to return in each group and may return fewer than, exactly, or more than
@@ -232,12 +251,30 @@ remainder.
 #### Flat and grouped response shapes
 
 A flat request, including a declared explicit-null partition, requires the
-existing `data.series` shape. A non-null partition requires `data.groups`.
-`series` and `groups` are mutually exclusive.
+existing `data.series` container. A non-null partition requires `data.groups`.
+`series` and `groups` are mutually exclusive. In both containers, V2 Ranking
+entries are scalar:
 
 ```json
-"data": {
-  "groups": [
+{
+  "data": {
+    "series": [
+      {
+        "id": "seed-code",
+        "label": {"en": "Seed Code", "zh-CN": "豆包代码模型"},
+        "value": "7100"
+      }
+    ]
+  }
+}
+```
+
+A partitioned response nests the same scalar entries:
+
+```json
+{
+  "data": {
+    "groups": [
     {
       "id": "coding",
       "label": {"en": "Coding Model", "zh-CN": "代码模型"},
@@ -255,11 +292,12 @@ existing `data.series` shape. A non-null partition requires `data.groups`.
         {
           "id": "seed-code",
           "label": {"en": "Seed Code", "zh-CN": "豆包代码模型"},
-          "points": [{"date": "2026-10-13", "value": "7100"}]
+          "value": "7100"
         }
       ]
     }
   ]
+  }
 }
 ```
 
@@ -268,16 +306,19 @@ repeat in different groups; stable inner identity is `(group.id, series.id)`.
 Groups retain Dataset response order and may be empty. `label` is required.
 Optional `description`, `display`, `comparison_display`, and absolute HTTPS
 `link` have the same localization, safety, and presentation rules as Ranking
-series metadata. Inner series use the existing dated-point Ranking schema and
-metadata. `max_items` bounds the sum of all returned inner series, not the
-number of groups. Any invalid group or series rejects the whole response.
+series metadata. Inner series use the V2 Ranking scalar-entry schema and metadata. Each entry
+must contain exactly one decimal-string `value` and must not contain `points`,
+a date, or a timestamp. The Dataset computes the authoritative value for the
+requested range—whether it is a sum, percentile, growth value, or another
+existing source algorithm—and ccuv never reconstructs it from time-series
+points. `max_items` bounds the sum of all returned inner series, not the number
+of groups. Any invalid group or series rejects the whole response.
 
-ccuv sums each series' points in the selected interval, sums returned series to
-form each group total, and sums group totals to form the global total. There is
-no separate numeric group-total field: optional `group.display` changes only its
-formatted text. For `period: "all"`, the anchored dates and `all` marker retain
-their existing meaning; a Dataset may return one official aggregate point at
-`end_date` per series, and ccuv makes no prior-period request.
+ccuv sums returned scalar entries to form each group total, then sums group
+totals to form the global total. There is no separate numeric group-total field:
+optional `group.display` changes only its formatted text. For `period: "all"`,
+the anchored dates and `all` marker retain their existing meaning, and ccuv
+makes no prior-period request.
 
 Outer groups are never sorted, ranked, or limited by Top. Inside every group,
 ccuv independently applies the Metric's sort direction, uses series ID as the
@@ -302,8 +343,9 @@ rebuilds those facts before reapplying the unchanged search. Copy All follows
 Dataset group order, includes group headings, honors Top/Other, and during search
 copies only matching inner series under their headings.
 
-For ordinary comparison periods, groups match by group ID and series by the
-stable pair. Current and previous totals each use only the series actually
+For ordinary comparison periods, flat entries match by item ID. Grouped results
+first match group ID, then match entries by the stable `(group.id, series.id)`
+pair. Current and previous totals each use only the scalar entries actually
 returned in that response; differing response coverage is not filled with zero.
 A missing prior group or series is new, and moving a series to another group
 makes it new there. Group totals may show value comparison but not outer rank
@@ -448,8 +490,8 @@ it never changes the stored preset. A demo-enabled preset remains demo-enabled.
 After a custom Dashboard pane is selected, `v` and `V` cycle forward and backward
 through chart, compact command, full command, data table, and JSON views. The
 data views serialize ccuv's current locally projected chart data: they honor the
-active range, filters, grouping, granularity, Top/Other selection, and unit
-precision. JSON keeps canonical series IDs and Decimal values as strings beside
+active range, filters, grouping, applicable non-Ranking granularity, Top/Other
+selection, and unit precision. JSON keeps canonical series IDs and Decimal values as strings beside
 localized display labels; it does not expose an opaque raw process response.
 
 `--pane 'empty'` is a real temporary pane: it takes part in layout, focus, mouse
@@ -493,15 +535,18 @@ through a separate request. The command must be stateless; a result must not
 depend on a previous command process.
 
 For a non-fixed Ranking at `full` or `detailed` density, unless its Ranking
-capability declares `comparison: "none"`, ccuv first requests
-the selected range and then requests the contiguous prior range with the same
-duration. A Dataset returns ordinary dated series points for both ranges. ccuv
-matches stable `data.series[].id` values and derives displayed absolute growth
-and rank movement locally; no delta, previous-total, or previous-rank fields
-belong in the protocol. A failed or unavailable prior-range response leaves the
-current Ranking visible without comparison markers. `comparison: "rank"` uses
-that response only for rank movement. Fixed date-range and `all` Rankings do
-not request a prior range.
+capability declares `comparison: "none"`, ccuv first requests the selected range
+and then requests the contiguous prior range with the same duration. V1 keeps
+its dated-series response contract. V2 returns scalar entries for both ranges;
+ccuv matches flat item IDs, or grouped `(group.id, series.id)` pairs, and derives
+displayed absolute growth and rank movement locally. A missing prior item is
+new, never zero. No delta, previous-total, or previous-rank fields belong in the
+protocol. A failed or unavailable prior-range response leaves the current
+Ranking visible without comparison markers. `comparison: "rank"` uses that
+response only for rank movement. Fixed date-range and `all` Rankings do not
+request a prior range. For a subday range anchored at `T`, current is
+`[T-duration, T)` and prior is `[T-2*duration, T-duration)`: both derive from the
+same captured aware instant, so they cannot have a gap or overlap.
 
 For a Ranking query only, a `data.series` item may include optional bilingual
 `description`, `display`, `comparison_display`, and `link` fields. The first
@@ -511,8 +556,9 @@ muted, indented explanation below the Ranking item at `full` and `detailed`
 density, wrapping to at most two terminal rows. `display` is the Dataset-owned formatted total shown in
 the Ranking value column. `comparison_display` is the Dataset-owned formatted
 absolute-change text shown in the prior-period comparison column when ccuv has
-calculated a non-zero comparison. Its numeric `points[].value` facts remain the
-source for ranking, shares, comparisons, colours, and rank movement. When either
+calculated a non-zero comparison. In V1, numeric `points[].value` facts remain the source for those calculations.
+In V2 Ranking, the scalar `value` is authoritative for ranking, shares,
+comparisons, colours, and rank movement. When either
 display field is omitted, ccuv formats that value from the declared unit. A description may contain `[label](https://URL)` links,
 `**bold text**`, and `*italic text*`; ccuv renders only `label` as a clickable
 terminal hyperlink. Star emphasis is also allowed inside a link label. Underscore
@@ -571,6 +617,39 @@ absolute date boundaries or change the protocol version.
 
 `range.start_date` and `range.end_date` are inclusive, resolved, and authoritative graph coverage. `range.period` is the canonical rolling-period spelling (`1w`, `1mo`, and `1y` carry natural week-to-date, month-to-date, and year-to-date intent); it is `null` for a fixed `--since`/`--until` range. A Dataset may use it for source-specific semantics but must not replace the supplied dates. `query` supplies source-side business filters, grouping, and aggregation. ccuv does not send style, theme, density, legend,
 sort order, Top N, Other, pane geometry, or layout.
+
+V2 historical chart requests additionally carry an explicit top-level
+`chart_kind`. Timeline, Stack, and Calendar continue to use the inclusive dated
+range and dated points above. V2 Ranking also uses that date form for day and
+longer periods, but returns scalar values, never points. Only V2 Ranking may use
+a declared positive-integer `Ns`, `Nm`, or `Nh` period; every such spelling,
+including `24h` or `48h`, uses aware timestamps and an exact half-open range:
+
+```json
+{
+  "protocol": "ccuv.custom/v2",
+  "request_id": "physical-request-id",
+  "request_kind": "chart",
+  "chart_kind": "ranking",
+  "dataset_id": "router",
+  "metric_id": "requests",
+  "timezone": "Asia/Shanghai",
+  "range": {
+    "start_at": "2026-10-14T22:59:45+08:00",
+    "end_at": "2026-10-14T23:00:00+08:00",
+    "period": "15s"
+  },
+  "query": {"filters": {}, "group_by": "route", "top": 10}
+}
+```
+
+Both timestamps must be timezone-aware, `start_at` must precede `end_at`, and
+the Dataset must query exactly `[start_at, end_at)` without recomputing “now.”
+A request contains one complete range form and never mixes date and timestamp
+fields. Each refresh captures a new aware end instant; presentation-only changes
+retain the accepted range. A timestamp-form Ranking has no date-based summary
+request or summary display. Existing summaries for inclusive date-form Ranking
+ranges (`d`, `w`, `mo`, `q`, or `y`) are unchanged.
 
 A summary request contains the resolved, inclusive intervals for exactly one
 user-facing scope. ccuv performs all calendar translation: commands must use
@@ -697,25 +776,29 @@ multi-select filters only; no text/range/regex filters, pagination, search, or
 hierarchies. An unsupported grouping, filter, granularity, or combination must
 be rejected rather than weakened or silently changed.
 
-Each chart declaration lists permitted granularities, grouping dimensions, and
-filters. Timeline, Stack, and Ranking use total or grouped date series.
-Calendar requires an ungrouped daily total. A Dataset owns source-specific
+Each non-Ranking chart declaration lists permitted granularities; chart
+declarations also list their grouping dimensions and filters. V2 Ranking may
+carry legacy granularity metadata, but ccuv ignores it. Timeline and Stack use total or grouped date series, and Calendar requires an
+ungrouped daily total. V1 Ranking remains dated. V2 Ranking instead returns one
+authoritative scalar `value` per flat or grouped entry and never returns
+`points`. A Dataset owns source-specific
 combination rules—such as an otherwise declared grouping that is available only
 for particular `range.period` values—and returns its correlated
 `unsupported_query` response when the selected combination is unavailable.
 ccuv sends the selected query unchanged: it does not maintain a Dataset-specific
 compatibility matrix, substitute Total data, or select another period. The
 protocol and projection capability-validate period syntax, grouping,
-granularity, filter IDs, and selected filter option IDs. The Dashboard only shows
+applicable non-Ranking granularity, filter IDs, and selected filter option IDs. The Dashboard only shows
 `g`, `b`, and `f` after a successful response declares the corresponding
 capability. Local Top N/Other changes remain display-only and do not start a
 command query.
 
-A Dataset may represent an official period aggregate in a Ranking response with
-one point per entity at the request `end_date`. That point is a coordinate for
-Ranking projection, not daily attribution; its value is the source aggregate.
-Such a Dataset must declare the grouping only for Ranking, not for Timeline,
-Stack, or Calendar unless it also supplies the respective source-backed data.
+A V1 Dataset may represent an official period aggregate in a Ranking response
+with one point per entity at the request `end_date`; this legacy coordinate is
+not daily attribution. A V2 Dataset must return that authoritative aggregate as
+the entry's scalar `value` instead, with no point or fabricated date. In either
+version, declare the grouping only for Ranking unless the Dataset also supplies
+the respective source-backed Timeline, Stack, or Calendar data.
 
 Summary values use the active filters but not grouping, Top N, or Other.
 Summary responses return exactly one `metric`: its `current.value` and ready
@@ -771,9 +854,13 @@ They must not prescribe ccuv shortcuts or controls: a Dataset can run under
 multiple hosts, and the host renders the controls available in its current
 surface. Do not silently substitute a different period or query.
 
-ccuv compares a failed request's data-affecting identity—source, chart kind,
-inclusive range plus `range.period`, filters, grouping, and granularity—with the
-accepted query. A same-query refresh may retain valid facts, while a failed
+ccuv compares a failed request's data-affecting identity with the accepted
+query. For V1 and non-Ranking dated charts this includes source, chart kind,
+inclusive range plus `range.period`, filters, grouping, and granularity. For V2
+Ranking it includes source, explicit chart kind, Dataset and Metric IDs,
+timezone, the exact date or timestamp range plus period spelling, normalized
+filters, grouping, partition, Top/source coverage, and other existing
+source-affecting fields—but never Ranking granularity. A same-query refresh may retain valid facts, while a failed
 replacement clears them and retains only localized Dataset metadata for the
 candidate title/range. This is Dataset-neutral and never depends on specific
 period names, Dataset IDs, or source endpoints. Empty series is not an error:
@@ -785,14 +872,21 @@ unknown protocol versions, timeouts, spawn failures, and nonzero exits without a
 valid protocol error are source/protocol failures. stderr may appear in bounded
 diagnostics but is never parsed into a result.
 
-Only exact concurrent requests coalesce. Identity includes argv and execution
+Only exact concurrent requests coalesce. V1 identity includes argv and execution
 context, dataset ID, request kind, timezone, inclusive range **and its
 `range.period` semantic**, normalized filters (sorted keys and choices), grouping,
-granularity, and summary period/as-of date. Thus, equal resolved dates with
-different selected period semantics never share an execution. Identity excludes
-chart kind, style, theme, density, legend, Top N, Other, layout, and pane
-position. Version 1 has no overlapping-range merge, interval/range union,
-completed-result cache, batching, or result slicing.
+granularity, and summary period/as-of date; its existing chart-kind and
+presentation exclusions are unchanged. V2 historical identity also includes the
+explicit `chart_kind`, Metric ID, partition and source-affecting Top coverage.
+For V2 Ranking it excludes granularity and includes exact timestamp boundaries
+when present. Timestamp identity is normalized by UTC instant, so equivalent
+offsets coalesce, while different second-level ranges never collapse to one date
+key. Equal resolved boundaries with different declared period spellings remain
+distinct. A refresh creates a new subday anchor and therefore a new identity;
+comparison requests use their exact prior range. Style, theme, density, legend,
+Other, layout, and pane position remain presentation-only. Version 1 has no
+overlapping-range merge, interval/range union, completed-result cache, batching,
+or result slicing.
 
 Custom Dashboard panes provide **Source** (`e`). Installed Dataset panes edit
 only chart type and Dataset ID, then revalidate the local installation; arbitrary

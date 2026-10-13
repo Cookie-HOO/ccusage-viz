@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, Literal
 
+from ccusage_viz.core.custom_ranking_time import (
+    TimestampRange,
+    previous_custom_ranking_range,
+)
 from ccusage_viz.core.time import DateRange
 from ccusage_viz.custom_metric_switching import normalization_category, normalize_switch_config
 from ccusage_viz.custom_models import (
@@ -80,6 +84,12 @@ def custom_summary_replacement_required(
     )
 
 
+def custom_date_summary_supported(config: CustomChartConfig) -> bool:
+    """Whether the chart can participate in the date-only summary lifecycle."""
+
+    return not isinstance(config.date_range, TimestampRange)
+
+
 CustomPurpose = Literal["primary", "comparison"]
 
 
@@ -97,13 +107,27 @@ def _invalidates_accepted_chart(error: BaseException) -> bool:
     )
 
 
+def _query_range_identity(value: DateRange | TimestampRange) -> object:
+    """Canonicalize timestamp bounds as instants, including across DST folds."""
+
+    if not isinstance(value, TimestampRange):
+        return value
+    return (
+        value.start_at.astimezone(UTC),
+        value.end_at.astimezone(UTC),
+        value.relative_until,
+        value.period,
+        value.fixed_bounds,
+    )
+
+
 def _query_identity(config: CustomChartConfig) -> tuple[object, ...]:
     """Return the data-affecting portion of a custom query configuration."""
 
     return (
         config.source,
         config.kind,
-        config.date_range,
+        _query_range_identity(config.date_range),
         config.filters,
         config.partition_by,
         config.group_by,
@@ -179,8 +203,10 @@ class CustomHistoricalComponent:
         "render_revision",
         "retrieval_top",
         "runtime",
+        "switch_anchor",
         "switch_normalizations",
         "switch_target_config",
+        "switch_timezone",
         "v2_descriptor",
     )
 
@@ -204,6 +230,8 @@ class CustomHistoricalComponent:
         self.retrieval_top: int | None = None
         self.runtime: V2Runtime | None = None
         self.switch_target_config: CustomChartConfig | None = None
+        self.switch_anchor: datetime | None = None
+        self.switch_timezone = "UTC"
         self.switch_normalizations: frozenset[str] = frozenset()
         self.v2_descriptor: V2ProbeDescriptor | None = None
 
@@ -241,6 +269,12 @@ class CustomHistoricalComponent:
         """Return the ordinary prior-range request required by complete-content Ranking."""
         config = self.request_config
         if (
+            self.accepted_config is not None
+            and config.metric_id == self.accepted_config.metric_id
+            and isinstance(self.accepted_config.date_range, TimestampRange)
+        ):
+            config = replace(config, date_range=self.accepted_config.date_range)
+        if (
             config.kind != "ranking"
             or not has_complete_content(config.presentation.density)
             or config.date_range.fixed_bounds
@@ -248,6 +282,11 @@ class CustomHistoricalComponent:
             or config.ranking_comparison == "none"
         ):
             return None
+        if isinstance(config.date_range, TimestampRange):
+            return replace(
+                config,
+                date_range=previous_custom_ranking_range(config.date_range),
+            )
         interval = ranking_comparison_interval(config.date_range)
         return replace(
             config,
@@ -282,11 +321,19 @@ class CustomHistoricalComponent:
                 comparison_config=self.comparison_config if comparison is not None else None,
             )
 
-    def begin_metric_switch(self, config: CustomChartConfig) -> None:
+    def begin_metric_switch(
+        self,
+        config: CustomChartConfig,
+        *,
+        now: datetime | None = None,
+        timezone: str = "UTC",
+    ) -> None:
         """Request a related Metric without replacing accepted historical facts yet."""
 
         if config == self.candidate:
             return
+        self.switch_anchor = now or datetime.now().astimezone()
+        self.switch_timezone = timezone
         target = (
             next(
                 (metric for metric in self.v2_descriptor.metrics if metric.id == config.metric_id),
@@ -296,7 +343,16 @@ class CustomHistoricalComponent:
             else None
         )
         if target is not None:
-            config = normalize_switch_config(config, target, "partition_by") or config
+            config = (
+                normalize_switch_config(
+                    config,
+                    target,
+                    "partition_by",
+                    now=self.switch_anchor,
+                    timezone=self.switch_timezone,
+                )
+                or config
+            )
         self.switch_target_config = config
         self.switch_normalizations = frozenset()
         self.generation += 1
@@ -315,7 +371,13 @@ class CustomHistoricalComponent:
             or category in self.switch_normalizations
         ):
             return False
-        updated = normalize_switch_config(self.switch_target_config, target, category)
+        updated = normalize_switch_config(
+            self.switch_target_config,
+            target,
+            category,
+            now=self.switch_anchor,
+            timezone=self.switch_timezone,
+        )
         if updated is None:
             return False
         self.switch_target_config = updated

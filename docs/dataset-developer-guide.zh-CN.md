@@ -42,19 +42,26 @@ import (
 
 const protocol = "ccuv.custom/v2"
 const datasetID = "example-activity"
-type Request struct { Protocol string `json:"protocol"`; RequestID string `json:"request_id"`; RequestKind string `json:"request_kind"`; MetricID string `json:"metric_id"`; Range map[string]any `json:"range"` }
+type Request struct { Protocol string `json:"protocol"`; RequestID string `json:"request_id"`; RequestKind string `json:"request_kind"`; ChartKind string `json:"chart_kind"`; MetricID string `json:"metric_id"`; Range map[string]any `json:"range"` }
 func text(en, zh string) map[string]string { return map[string]string{"en":en,"zh-CN":zh} }
 func unit() map[string]any { return map[string]any{"id":"event","label":text("events","事件"),"placement":"suffix","decimal_places":0} }
 func ok(r Request, p map[string]any) map[string]any { out:=map[string]any{"protocol":protocol,"request_id":r.RequestID,"request_kind":r.RequestKind,"dataset_id":datasetID,"status":"ok"}; for k,v:=range p { out[k]=v }; return out }
 func descriptor() map[string]any {
   project:=map[string]any{"id":"project","label":text("Project","项目")}
   hist:=map[string]any{"granularities":[]string{"day"},"group_by":[]any{nil,"project"},"periods":[]string{"7d","14d","30d"}}
-  return map[string]any{"revision":"example-activity-1","version":"0.1.0","default_metric_id":"events","dataset":map[string]any{"title":text("Example activity","示例活动"),"description":text("Minimal V2 Dataset","最小 V2 Dataset")},"metrics":[]any{map[string]any{"id":"events","title":text("Events","事件"),"description":text("Daily activity","每日活动"),"unit":unit(),"aggregation":"sum","summary":"total","capabilities":map[string]any{"group_by":[]any{project},"charts":map[string]any{"timeline":hist,"ranking":hist,"monitor":map[string]any{"window_seconds":60,"refresh_interval_seconds":10,"group_by":[]string{"project"}}}},"defaults":map[string]any{"timeline":map[string]any{"period":"14d","group_by":"project","top":5,"style":"line-points","theme":"nord"},"monitor":map[string]any{"style":"ranking","window":"6h"}}}},"environment":[]any{}}
+  ranking:=map[string]any{"group_by":[]any{nil,"project"},"periods":[]string{"7d","14d","30d"}}
+  return map[string]any{"revision":"example-activity-1","version":"0.1.0","default_metric_id":"events","dataset":map[string]any{"title":text("Example activity","示例活动"),"description":text("Minimal V2 Dataset","最小 V2 Dataset")},"metrics":[]any{map[string]any{"id":"events","title":text("Events","事件"),"description":text("Daily activity","每日活动"),"unit":unit(),"aggregation":"sum","summary":"total","capabilities":map[string]any{"group_by":[]any{project},"charts":map[string]any{"timeline":hist,"ranking":ranking,"monitor":map[string]any{"window_seconds":60,"refresh_interval_seconds":10,"group_by":[]string{"project"}}}},"defaults":map[string]any{"timeline":map[string]any{"period":"14d","group_by":"project","top":5,"style":"line-points","theme":"nord"},"monitor":map[string]any{"style":"ranking","window":"6h"}}}},"environment":[]any{}}
 }
 func handleChart(r Request) map[string]any {
-  start,_:=time.Parse("2006-01-02",r.Range["start_date"].(string)); end,_:=time.Parse("2006-01-02",r.Range["end_date"].(string)); points:=[]any{}
-  for day:=start; !day.After(end); day=day.AddDate(0,0,1) { points=append(points,map[string]string{"date":day.Format("2006-01-02"),"value":fmt.Sprintf("%d",1+day.Day()%5)}) }
-  return ok(r,map[string]any{"metric_id":"events","descriptor":descriptor(),"runtime":map[string]any{"filters":[]any{}},"data":map[string]any{"series":[]any{map[string]any{"id":"example","label":text("Example","示例"),"points":points}}}})
+  series:=[]any{}
+  if r.ChartKind=="ranking" {
+    series=[]any{map[string]any{"id":"example","label":text("Example","示例"),"value":"42"}}
+  } else {
+    start,_:=time.Parse("2006-01-02",r.Range["start_date"].(string)); end,_:=time.Parse("2006-01-02",r.Range["end_date"].(string)); points:=[]any{}
+    for day:=start; !day.After(end); day=day.AddDate(0,0,1) { points=append(points,map[string]string{"date":day.Format("2006-01-02"),"value":fmt.Sprintf("%d",1+day.Day()%5)}) }
+    series=[]any{map[string]any{"id":"example","label":text("Example","示例"),"points":points}}
+  }
+  return ok(r,map[string]any{"metric_id":"events","descriptor":descriptor(),"runtime":map[string]any{"filters":[]any{}},"data":map[string]any{"series":series}})
 }
 func main() {
   var r Request
@@ -63,7 +70,7 @@ func main() {
   switch r.RequestKind {
   case "probe": response=ok(r,map[string]any{"descriptor":descriptor()})
   case "chart": response=handleChart(r)
-  case "monitor": response=ok(r,map[string]any{"metric_id":"events","observation":map[string]any{"end_at":r.Range["end_at"],"total":"42","groups":[]any{}}})
+  case "monitor": response=ok(r,map[string]any{"metric_id":"events","descriptor":descriptor(),"runtime":map[string]any{"filters":[]any{}},"observation":map[string]any{"end_at":r.Range["end_at"],"total":"42","groups":[]any{}}})
   case "summary": response=ok(r,map[string]any{"metric_id":"events","summary":map[string]any{"metric":map[string]any{"id":"events","label":text("Events","事件"),"current":map[string]any{"value":"42","display":text("42 events","42 个事件")},"sequential":map[string]string{"status":"unavailable"},"year_over_year":map[string]string{"status":"unavailable"}}}})
   default: response=map[string]any{"protocol":protocol,"request_id":r.RequestID,"request_kind":r.RequestKind,"dataset_id":datasetID,"status":"error","error":map[string]any{"code":"invalid_request","message":text("Invalid request","无效请求")}}
   }
@@ -113,7 +120,7 @@ def descriptor():
           "group_by":[{"id":"project","label":text("Project","项目")}],
           "charts":{
             "timeline":{"granularities":["day"],"group_by":[None,"project"],"periods":["7d","14d","30d"]},
-            "ranking":{"granularities":["day"],"group_by":["project"]},
+            "ranking":{"group_by":["project"]},
             "monitor":{"window_seconds":60,"refresh_interval_seconds":10,"group_by":["project"]}
           }
         },
@@ -137,8 +144,12 @@ def main():
     kind=req.get("request_kind")
     if kind == "probe": response=ok(req, descriptor=descriptor())
     elif kind == "chart":
-        r=req["range"]; start=date.fromisoformat(r["start_date"]); end=date.fromisoformat(r["end_date"])
-        response=ok(req, metric_id="events", descriptor=descriptor(), runtime={"filters": []}, data={"series":[{"id":"example","label":text("Example","示例"),"points":daily_facts(start,end)}]})
+        if req["chart_kind"] == "ranking":
+            series=[{"id":"example","label":text("Example","示例"),"value":"42"}]
+        else:
+            r=req["range"]; start=date.fromisoformat(r["start_date"]); end=date.fromisoformat(r["end_date"])
+            series=[{"id":"example","label":text("Example","示例"),"points":daily_facts(start,end)}]
+        response=ok(req, metric_id="events", descriptor=descriptor(), runtime={"filters": []}, data={"series":series})
     elif kind == "monitor":
         end_at=datetime.fromisoformat(req["range"]["end_at"])
         response=ok(req, metric_id="events", descriptor=descriptor(), runtime={"filters": []}, observation={"end_at":end_at.isoformat(),"total":"42","groups":[{"id":"example","label":text("Example","示例"),"value":"42"}]})
@@ -177,17 +188,19 @@ Probe 只能返回元数据：不能获取收费业务数据、校验 secret、�
 
 按用户语义而不是传输便利性选择 Filter mode。对于互斥模式和可理解的范围，应优先使用 `single_select`，例如“7 天以内”“30 天以内”“不限”：同时组合多个范围既有歧义又不便展示。只有用户确实需要组合独立离散值时才用 `multi_select`，例如语言、分类、标签、作者或书架标签。只有确实想使用兼容的 `multi_select` 默认值时才省略 `mode`。ccuv 中 `single_select` 可以为空；若必须选择，Dataset 应在查询时校验并返回可操作的本地化错误，不要猜测一个值。
 
-历史 capability 声明 `granularities`、`group_by` 与可选有序 `periods`；若 Ranking 的源端永远无法提供更多原始排行项目，还可声明正整数 `max_items`。Ranking 可选 `comparison: "full" | "rank" | "none"`，默认 `full`；`rank` 保留前一等长周期请求与排名变化，但隐藏绝对增长；`none` 不请求前期且隐藏所有对比列。Metric 语义需要时，在 Ranking capability 声明 `sort_direction: "ascending" | "descending"`；省略即为降序。ccuv 用它处理 Ranking 顺序、Top N、Other 和排名对比，不提供宿主侧用户覆盖。数值越小越应先看的指标（如距上次更新天数）使用升序；Star、增长、评分或数量使用降序。为兼容旧版 Descriptor，Ranking 也可使用 `descriptions_default: "expanded" | "collapsed"`，但 ccuv 会忽略该字段。说明由密度决定：`full` 和 `detailed` 显示，`minimal`、`compact` 和 `normal` 隐藏。`group_by` 中的 JSON `null` 表示允许未分组总计。filter 不属于 Probe 的静态能力，而是在每一次成功查询的 `runtime.filters` 中声明。Monitor 必须声明固定正数 `window_seconds`，它定义每条 observation 的业务事实窗口；`refresh_interval_seconds` 只是建议采样频率。
+非 Ranking 历史 capability 声明 `granularities`、`group_by` 与可选有序 `periods`。Ranking 没有 granularity：新 capability、default 和请求都应省略它；遗留 Ranking capability/default 中即使携带，也只会被接受并忽略。若 Ranking 的源端永远无法提供更多原始排行项目，还可声明正整数 `max_items`。Ranking 可选 `comparison: "full" | "rank" | "none"`，默认 `full`；`rank` 保留前一等长周期请求与排名变化，但隐藏绝对增长；`none` 不请求前期且隐藏所有对比列。Metric 语义需要时，在 Ranking capability 声明 `sort_direction: "ascending" | "descending"`；省略即为降序。ccuv 用它处理 Ranking 顺序、Top N、Other 和排名对比，不提供宿主侧用户覆盖。数值越小越应先看的指标（如距上次更新天数）使用升序；Star、增长、评分或数量使用降序。Ranking 的 `periods` 可声明正整数 `Ns`、`Nm`、`Nh`；必须保留每个字符串的原始写法和声明顺序（`90s` 不得规范化），省略时使用 ccuv fallback 且不会新增亚日默认值。为兼容旧版 Descriptor，Ranking 也可使用 `descriptions_default: "expanded" | "collapsed"`，但 ccuv 会忽略该字段。说明由密度决定：`full` 和 `detailed` 显示，`minimal`、`compact` 和 `normal` 隐藏。`group_by` 中的 JSON `null` 表示允许未分组总计。filter 不属于 Probe 的静态能力，而是在每一次成功查询的 `runtime.filters` 中声明。Monitor 必须声明固定正数 `window_seconds`，它定义每条 observation 的业务事实窗口；`refresh_interval_seconds` 只是建议采样频率。
 
 ## 每种查询如何处理
 
-每个响应都必须原样回显请求的 `protocol`、`request_id`、`request_kind`、稳定 `dataset_id` 和 `status`。chart、monitor、summary 还必须回显相同的 `metric_id`。
+每个响应都必须原样回显请求的 `protocol`、`request_id`、`request_kind`、稳定 `dataset_id` 和 `status`。chart、monitor、summary 还必须回显相同的 `metric_id`。每个 V2 历史请求也显式携带顶层 `chart_kind`；应据此选择响应形状，不要从 grouping 猜测。刷新与响应匹配身份使用精确的数据源、Dataset/Metric、chart kind、时区、范围与 period 原始写法、filter、group、partition 和源端覆盖选择。时间戳按 UTC instant 比较；Ranking granularity 永不参与身份，不同精确亚日范围也绝不能合并。
 
 ### `chart`
 
-请求给出时区、含首尾的 `range.start_date/end_date`、可选 `period`，以及 `query.filters/group_by/granularity/top`。日期范围权威且包含两端；`period` 仅是滚动范围上下文。`query.top` 可选，它统一表示用户希望显示的 Top N 与请求的原始排行覆盖量；若为诚实计算 `Other` 需要更多原始项目，Dataset 可以返回更多。`null` 表示不限制 Top。只接受自己 capability 声明过的选择。
+请求显式给出 `chart_kind`、时区、范围、可选 `period`，以及 `query.filters/group_by/top`；非 Ranking 还会有 `query.granularity`。日期范围权威且包含两端；`period` 仅是滚动范围上下文。`query.top` 可选，它统一表示用户希望显示的 Top N 与请求的原始排行覆盖量；若为诚实计算 `Other` 需要更多原始项目，Dataset 可以返回更多。`null` 表示不限制 Top。只接受自己 capability 声明过的选择。
 
-成功响应包含完整 `descriptor`、`runtime:{"filters":[...]}` 和 `data.series`。每个 point 的 `date` 是 `YYYY-MM-DD`，`value` 是十进制字符串。Ranking series 还可使用与 `label` 相同的双语结构提供可选 `description` 与 `display`；ccuv 在 `full` 和 `detailed` 密度下将前者展示为最多两行、弱化颜色并带缩进的说明。description 支持 `[label](https://URL)`、`**粗体文字**` 与 `*斜体文字*`；链接显示为可点击的 `label`，其文字内也可使用星号格式。下划线格式、其他 Markdown 和不安全终端内容均按纯文本处理。`display` 是显示在数值列、由 Dataset 决定的总量文本；ccuv 仍根据十进制 point 计算排序、占比和比较。每个具体 Ranking 项还可提供一个可选 `link`，它必须是绝对 `https://` URL；ccuv 会在项目名后的操作区显示可点击的 `↗`（`项目 | ⊞ ↗`），并在复制该项目时附带 URL。对于非固定范围的 `full` / `detailed` Ranking，ccuv 会额外发起一次紧邻且等长的上一范围普通 chart 请求。请保持两次响应的 series ID 稳定，ccuv 据此自行计算绝对增长与排名变化；不要返回 delta 或前值字段。Timeline、Stack、Calendar 不得返回 `description`、`display` 或 `link`。有效范围没有事实时返回空 series，不要把未知事实伪造成零。
+成功响应包含完整 `descriptor`、`runtime:{"filters":[...]}` 和 `data.series`。Timeline、Stack、Calendar 的每个 point 仍使用 `YYYY-MM-DD` 日期和十进制字符串 `value`。Ranking 则为每个条目返回且只返回一个十进制字符串标量 `value`，绝不能返回 `points`、日期或时间戳，也不能混合两种数值来源。Dataset 负责计算完整请求范围的权威排行值，ccuv 不再汇总排行时序 point。Ranking series 还可使用与 `label` 相同的双语结构提供可选 `description` 与 `display`；ccuv 在 `full` 和 `detailed` 密度下将前者展示为最多两行、弱化颜色并带缩进的说明。description 支持 `[label](https://URL)`、`**粗体文字**` 与 `*斜体文字*`；链接显示为可点击的 `label`，其文字内也可使用星号格式。下划线格式、其他 Markdown 和不安全终端内容均按纯文本处理。`display` 是显示在数值列、由 Dataset 决定的总量文本；ccuv 仍根据十进制标量 value 计算排序、占比和比较。每个具体 Ranking 项还可提供一个可选 `link`，它必须是绝对 `https://` URL；ccuv 会在项目名后的操作区显示可点击的 `↗`（`项目 | ⊞ ↗`），并在复制该项目时附带 URL。对于非固定范围的 `full` / `detailed` Ranking，ccuv 会额外发起一次紧邻且等长的上一范围普通 chart 请求。平铺结果保持 item ID 稳定；分区结果按 `(group.id, series.id)` 匹配。上一周期缺失即为新增，不补零。ccuv 根据匹配的标量 value 自行计算绝对增长与排名变化；不要返回 delta 或前值字段。Timeline、Stack、Calendar 不得返回 `description`、`display` 或 `link`。有效范围没有事实时返回空 series，不要把未知事实伪造成零。
+
+只有 V2 Ranking 可以使用声明过的正整数 `Ns`、`Nm`、`Nh` 周期，例如 `15s`、`10m`、`6h` 或 `48h`。每一种此类周期都改用互斥的 aware 时间戳；`{"start_at":"...","end_at":"...","period":"15s"}` 精确表示左闭右开 `[start_at, end_at)`。不得自行重新计算“当前时间”。刷新会获得新的 aware 锚点；前期比较必须使用同一锚点之前紧邻的等长范围，不能有间隙或重叠。时间戳型 Ranking 没有日期 summary；日期型 `d`、`w`、`mo`、`q`、`y` 请求原有的含首尾范围和 summary 保持不变。
 
 ### `summary`
 

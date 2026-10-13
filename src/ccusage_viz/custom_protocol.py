@@ -9,6 +9,7 @@ from typing import Literal, TypeAlias
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from ccusage_viz.core.custom_ranking_time import parse_subday_period
 from ccusage_viz.core.time import parse_period
 from ccusage_viz.coverage import DateInterval
 from ccusage_viz.custom_models import (
@@ -213,8 +214,10 @@ class V2ChartRequest:
     dataset_id: str
     metric_id: str
     timezone: str
-    start_date: date
-    end_date: date
+    start_date: date | None = None
+    end_date: date | None = None
+    start_at: datetime | None = None
+    end_at: datetime | None = None
     period: str | None = None
     filters: tuple[tuple[str, tuple[str, ...]], ...] = ()
     group_by: str | None = None
@@ -232,8 +235,39 @@ class V2ChartRequest:
         _require_id(self.dataset_id, "dataset ID")
         _require_id(self.metric_id, "metric ID")
         _validate_timezone(self.timezone)
-        if self.end_date < self.start_date:
-            raise ValueError("v2 custom request range end date must not precede start date")
+        if self.chart_kind is None:
+            raise ValueError("v2 custom chart request requires chart_kind")
+        has_dates = self.start_date is not None or self.end_date is not None
+        has_timestamps = self.start_at is not None or self.end_at is not None
+        if has_dates == has_timestamps:
+            raise ValueError("v2 custom request requires exactly one range shape")
+        if has_dates:
+            if self.start_date is None or self.end_date is None:
+                raise ValueError("v2 custom request date bounds must be complete")
+            if self.end_date < self.start_date:
+                raise ValueError("v2 custom request range end date must not precede start date")
+        else:
+            if self.chart_kind != "ranking":
+                raise ValueError("v2 custom timestamp ranges are supported only by ranking")
+            if self.start_at is None or self.end_at is None:
+                raise ValueError("v2 custom request timestamp bounds must be complete")
+            if any(
+                value.tzinfo is None or value.utcoffset() is None
+                for value in (self.start_at, self.end_at)
+            ):
+                raise ValueError("v2 custom request timestamp bounds must be timezone aware")
+            if self.end_at.astimezone(UTC) <= self.start_at.astimezone(UTC):
+                raise ValueError("v2 custom request end_at must be after start_at")
+        if self.period is not None:
+            try:
+                if has_timestamps:
+                    parse_subday_period(self.period)
+                elif self.chart_kind == "ranking" and self.period == "all":
+                    pass
+                else:
+                    parse_period(self.period)
+            except ValueError as exc:
+                raise ValueError("v2 custom request period must be valid") from exc
         if self.top is not None and self.top < 1:
             raise ValueError("v2 custom request top must be positive")
         if not self.partition_declared and self.partition_by is not None:
@@ -254,13 +288,19 @@ class V2ChartRequest:
             "protocol": V2_PROTOCOL_VERSION,
             "request_id": self.request_id,
             "request_kind": self.request_kind,
-            **({"chart_kind": self.chart_kind} if self.chart_kind is not None else {}),
+            "chart_kind": self.chart_kind,
             "dataset_id": self.dataset_id,
             "metric_id": self.metric_id,
             "timezone": self.timezone,
             "range": {
-                "start_date": self.start_date.isoformat(),
-                "end_date": self.end_date.isoformat(),
+                **(
+                    {"start_at": self.start_at.isoformat(), "end_at": self.end_at.isoformat()}
+                    if self.start_at is not None and self.end_at is not None
+                    else {
+                        "start_date": self.start_date.isoformat(),
+                        "end_date": self.end_date.isoformat(),
+                    }
+                ),
                 "period": self.period,
             },
             "query": query,
@@ -456,8 +496,14 @@ def canonical_custom_request_key(request: CustomRequest) -> tuple[object, ...]:
     if isinstance(request, (CustomChartRequest, V2ChartRequest)):
         return common + (
             *((request.metric_id,) if isinstance(request, V2ChartRequest) else ()),
-            request.start_date.isoformat(),
-            request.end_date.isoformat(),
+            *(
+                (
+                    request.start_at.astimezone(UTC).isoformat(),
+                    request.end_at.astimezone(UTC).isoformat(),
+                )
+                if isinstance(request, V2ChartRequest) and request.start_at is not None
+                else (request.start_date.isoformat(), request.end_date.isoformat())
+            ),
             request.period,
             request.filters,
             request.group_by,
@@ -1003,7 +1049,13 @@ def _parse_v2_capabilities(value: object) -> V2MetricCapabilities:
             for period in periods:
                 if period != "all":
                     try:
-                        parse_period(period)
+                        if kind == "ranking":
+                            try:
+                                parse_subday_period(period)
+                            except ValueError:
+                                parse_period(period)
+                        else:
+                            parse_period(period)
                     except ValueError as exc:
                         raise CustomProtocolError(f"v2 chart {kind} period must be valid") from exc
             if kind != "ranking" and "all" in periods:
@@ -1127,7 +1179,7 @@ def _parse_v2_defaults(
         period = raw.get("period")
         if (
             not isinstance(period, str)
-            or (period != "all" and _valid_period(period) is False)
+            or (period != "all" and _valid_period(period, subday=kind == "ranking") is False)
             or (period == "all" and kind != "ranking")
         ):
             period = None
@@ -1176,11 +1228,16 @@ def _parse_v2_defaults(
     return defaults
 
 
-def _valid_period(value: str) -> bool:
+def _valid_period(value: str, *, subday: bool = False) -> bool:
     try:
         parse_period(value)
     except ValueError:
-        return False
+        if not subday:
+            return False
+        try:
+            parse_subday_period(value)
+        except ValueError:
+            return False
     return True
 
 

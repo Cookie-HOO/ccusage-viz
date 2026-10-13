@@ -12,6 +12,7 @@ from typing import cast
 
 import plotext as plt
 
+from ccusage_viz.core.custom_ranking_time import TimestampRange
 from ccusage_viz.custom_models import CustomPresentationDescriptor, LocalizedText
 from ccusage_viz.formatting import center_text, clip_width, display_width
 from ccusage_viz.options import CustomChartConfig
@@ -136,11 +137,25 @@ def custom_heading(
         labels.append(filters)
     labels.append(context.translator.text(f"label.{config.kind}"))
     title = " · ".join(labels)
-    heading = (
-        content_heading(title, config.date_range.since, config.date_range.until, context)
-        if context.title_content
-        else date_range_heading(title, config.date_range.since, config.date_range.until, context)
-    )
+    if isinstance(config.date_range, TimestampRange):
+        range_label = (
+            config.date_range.period
+            if config.date_range.relative_until and config.date_range.period is not None
+            else context.translator.text(
+                "label.timestamp_range",
+                start_at=config.date_range.start_at.isoformat(),
+                end_at=config.date_range.end_at.isoformat(),
+            )
+        )
+        heading = f"{title} · {range_label}"
+        if context.title_content:
+            heading = f"{context.title_content} · {heading}"
+    else:
+        heading = (
+            content_heading(title, config.date_range.since, config.date_range.until, context)
+            if context.title_content
+            else date_range_heading(title, config.date_range.since, config.date_range.until, context)
+        )
     return center_text(heading, context.width)
 
 

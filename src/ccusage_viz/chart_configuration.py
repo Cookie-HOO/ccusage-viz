@@ -7,6 +7,7 @@ import math
 import re
 import shlex
 from dataclasses import replace
+from datetime import datetime
 from typing import Any, Never, cast
 
 from ccusage_viz.core.time import resolve_date_range, system_timezone, validate_timezone
@@ -352,13 +353,39 @@ def custom_chart_from_namespace(
     )
     if style not in compatible_styles(kind, group_by):
         raise UsageError("error.style_incompatible", style=style, mode=group_by or "total")
-    date_range = resolve_date_range(
-        "timeline" if kind == "monitor" else kind,
-        period=getattr(namespace, "period", None),
-        since=getattr(namespace, "since", None),
-        until=getattr(namespace, "until", None),
-        timezone=timezone,
-    )
+    requested_period = getattr(namespace, "period", None)
+    if kind == "ranking" and namespace.metric is not None and requested_period is not None:
+        from ccusage_viz.core.custom_ranking_time import (
+            parse_subday_period,
+            resolve_custom_ranking_range,
+        )
+
+        try:
+            parse_subday_period(requested_period)
+        except ValueError:
+            date_range = resolve_date_range(
+                kind,
+                period=requested_period,
+                since=getattr(namespace, "since", None),
+                until=getattr(namespace, "until", None),
+                timezone=timezone,
+            )
+        else:
+            if getattr(namespace, "since", None) is not None or getattr(namespace, "until", None) is not None:
+                raise UsageError("error.date_conflict")
+            date_range = resolve_custom_ranking_range(
+                requested_period,
+                now=datetime.now().astimezone(),
+                timezone=timezone or system_timezone(),
+            )
+    else:
+        date_range = resolve_date_range(
+            "timeline" if kind == "monitor" else kind,
+            period=requested_period,
+            since=getattr(namespace, "since", None),
+            until=getattr(namespace, "until", None),
+            timezone=timezone,
+        )
     return CustomChartConfig(
         kind=kind,
         source=source,

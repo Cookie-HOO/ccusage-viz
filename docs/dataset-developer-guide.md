@@ -81,6 +81,7 @@ type Request struct {
     Protocol    string         `json:"protocol"`
     RequestID   string         `json:"request_id"`
     RequestKind string         `json:"request_kind"`
+    ChartKind   string         `json:"chart_kind"`
     MetricID    string         `json:"metric_id"`
     Range       map[string]any `json:"range"`
 }
@@ -115,6 +116,9 @@ func descriptor() map[string]any {
         "granularities": []string{"day"}, "group_by": []any{nil, "project"},
         "periods": []string{"7d", "14d", "30d"},
     }
+    ranking := map[string]any{
+        "group_by": []any{nil, "project"}, "periods": []string{"7d", "14d", "30d"},
+    }
     return map[string]any{
         "revision": "example-activity-1", "version": "0.1.0", "default_metric_id": "events",
         "dataset": map[string]any{"title": text("Example activity", "示例活动"), "description": text("Minimal V2 Dataset", "最小 V2 Dataset")},
@@ -124,7 +128,7 @@ func descriptor() map[string]any {
             "capabilities": map[string]any{
                 "group_by": []any{project},
                 "charts": map[string]any{
-                    "timeline": historical, "ranking": historical,
+                    "timeline": historical, "ranking": ranking,
                     "monitor": map[string]any{"window_seconds": 60, "refresh_interval_seconds": 10, "group_by": []string{"project"}},
                 },
             },
@@ -146,16 +150,23 @@ func fail(req Request, code, field, value string) map[string]any {
 }
 
 func handleChart(req Request) map[string]any {
-    start, err := time.Parse("2006-01-02", req.Range["start_date"].(string)); if err != nil { return fail(req, "invalid_request", "range.start_date", "") }
-    end, err := time.Parse("2006-01-02", req.Range["end_date"].(string)); if err != nil { return fail(req, "invalid_request", "range.end_date", "") }
-    points := []any{}
-    for day := start; !day.After(end); day = day.AddDate(0, 0, 1) {
-        points = append(points, map[string]string{"date": day.Format("2006-01-02"), "value": fmt.Sprintf("%d", 1+day.Day()%5)})
+    var series []any
+    if req.ChartKind == "ranking" {
+        // Ranking values are authoritative scalars for the whole requested range.
+        series = []any{map[string]any{"id": "example", "label": text("Example", "示例"), "value": "42"}}
+    } else {
+        start, err := time.Parse("2006-01-02", req.Range["start_date"].(string)); if err != nil { return fail(req, "invalid_request", "range.start_date", "") }
+        end, err := time.Parse("2006-01-02", req.Range["end_date"].(string)); if err != nil { return fail(req, "invalid_request", "range.end_date", "") }
+        points := []any{}
+        for day := start; !day.After(end); day = day.AddDate(0, 0, 1) {
+            points = append(points, map[string]string{"date": day.Format("2006-01-02"), "value": fmt.Sprintf("%d", 1+day.Day()%5)})
+        }
+        series = []any{map[string]any{"id": "example", "label": text("Example", "示例"), "points": points}}
     }
     return ok(req, map[string]any{
         "metric_id": "events",
         "descriptor": descriptor(), "runtime": map[string]any{"filters": []any{},},
-        "data": map[string]any{"series": []any{map[string]any{"id": "example", "label": text("Example", "示例"), "points": points}}},
+        "data": map[string]any{"series": series},
     })
 }
 
@@ -201,6 +212,13 @@ Every successful response contains exactly the request's `protocol`,
 `status: "ok"`. Chart, Monitor, and summary responses must also echo the
 requested `metric_id`. IDs must match exactly: ccuv rejects a response intended
 for a different request or Dataset.
+
+Every V2 historical request also carries explicit `chart_kind`; use it rather
+than inferring response shape from grouping. Refresh and response matching use
+the exact source, Dataset/Metric, chart kind, timezone, range and period spelling,
+filters, grouping, partition, and source-coverage choices. Timestamp boundaries
+are compared by UTC instant. Ranking granularity never participates; distinct
+exact subday ranges must remain distinct.
 
 Text is always bilingual:
 
@@ -251,8 +269,10 @@ authors, or shelf labels. Omit `mode` only when you intend the compatible
 any required selection in the Dataset query and return an actionable localized
 error rather than guessing a value.
 
-For historical charts, a Metric capability has `granularities`, `group_by`,
-and optionally ordered `periods`. A Ranking may also declare positive
+For non-Ranking historical charts, a Metric capability has `granularities`,
+`group_by`, and optionally ordered `periods`. Ranking has no granularity: omit
+it from new capabilities, defaults, and requests. Legacy Ranking capability or
+default granularity is accepted but ignored. A Ranking may also declare positive
 `max_items` when the source can never provide more raw ranking entries, plus
 legacy `descriptions_default: "expanded" | "collapsed"`, which ccuv accepts
 but ignores. Entry descriptions are visible at `full` and `detailed` density,
@@ -265,7 +285,9 @@ Ranking capability when Metric meaning requires it; omission is descending.
 ccuv applies it to Ranking order, Top N, Other, and rank comparison, with no
 host-side user override. Use ascending for values where smaller is better to
 see first, such as days since last update; use descending for Stars, growth,
-ratings, or counts.
+ratings, or counts. Ranking `periods` may contain positive-integer `Ns`, `Nm`,
+or `Nh` values. Preserve each spelling and declaration order (`90s` is not
+normalized); omission uses ccuv's fallback without adding subday defaults.
 `null` in `group_by` to permit an ungrouped total. For Monitor, declare fixed
 positive `window_seconds`; this is the business semantics of every observation.
 `refresh_interval_seconds` is advisory and ccuv warns when its actual sampling
@@ -280,23 +302,30 @@ ccuv sends historical data requests like this:
   "protocol":"ccuv.custom/v2",
   "request_id":"pane:1",
   "request_kind":"chart",
+  "chart_kind":"ranking",
   "dataset_id":"example-activity",
   "metric_id":"events",
   "timezone":"Asia/Shanghai",
   "range":{"start_date":"2026-10-01","end_date":"2026-10-08","period":"7d"},
-  "query":{"filters":{"category":["work"]},"group_by":"project","granularity":"day","top":10}
+  "query":{"filters":{"category":["work"]},"group_by":"project","top":10}
 }
 ```
 
-Treat `start_date` and `end_date` as inclusive and authoritative. `period` is
-extra rolling-range context and is `null` for fixed bounds. Apply only the
-accepted response's runtime filters and static groupings/granularities. `query.top` is optional and unifies
+Every V2 historical request has an explicit top-level `chart_kind`. Treat
+`start_date` and `end_date` as inclusive and authoritative. `period` is extra
+rolling-range context and is `null` for fixed bounds. Timeline, Stack, and
+Calendar keep dated points and granularity. Ranking omits `query.granularity`
+and returns scalar entries such as `{"id":"example","label":{...},"value":"42"}`—never
+`points`, dates, or timestamps. The Dataset computes each value for the complete
+requested range; ccuv does not aggregate Ranking time-series points. Apply only
+the accepted response's runtime filters and static groupings/granularities. `query.top` is optional and unifies
 the user's visible Top N with the requested ranking coverage. A Dataset may
 return additional raw rows when it needs them to form an honest `Other` row;
 `null` means no requested Top bound. Return a `chart` success with the complete
 Probe-shaped `descriptor`, `runtime: {"filters": [...]}`, and dated `data.series` points. Every point uses ISO
 `YYYY-MM-DD`; return an empty series list when the requested valid range has no
-facts. A Ranking series may additionally provide an optional bilingual
+facts. Each Ranking entry instead has exactly one decimal-string `value`; mixed
+`value` and `points` is invalid. A Ranking series may additionally provide an optional bilingual
 `description` with the same shape as `label`; ccuv renders it as at most two
 muted, indented rows at `full` and `detailed` density. Its supported markup is
 `[label](https://URL)`, `**bold text**`, and `*italic text*`; links render as
@@ -306,16 +335,25 @@ series may also provide optional localized `display`, which is the exact total
 string shown in its value column, and `comparison_display`, which is the exact
 absolute-change string shown in its prior-period comparison column. ccuv
 continues to calculate ordering, shares, comparison availability, colours, and
-rank movement from the decimal points. At `full` and `detailed`, a non-fixed
-Ranking also receives a second ordinary chart request for the contiguous,
-equal-duration prior range. Keep series IDs stable between those responses:
-ccuv uses them to calculate absolute growth and rank movement locally. Do not
+rank movement from scalar values. At `full` and `detailed`, a non-fixed Ranking
+also receives a second ordinary chart request for the contiguous, equal-duration
+prior range. Keep flat item IDs stable; for partitioned results, matching uses
+`(group.id, series.id)`. A missing prior item is new, not zero. ccuv uses the
+matched scalar values to calculate absolute growth and rank movement locally. Do not
 return delta or previous-value fields. A concrete Ranking series may also provide
 an optional `link` as one absolute `https://` URL. ccuv renders its clickable
 `↗` in the whole-project action group (`Project | ⊞ ↗`) and appends the URL when the project is
 copied. Do not return `description`, `display`, or `link` for Timeline, Stack,
-or Calendar. Do not invent zeros unless zero is a
-true source fact.
+or Calendar. Do not invent zeros unless zero is a true source fact.
+
+Only V2 Ranking may use a declared positive-integer `Ns`, `Nm`, or `Nh` period
+such as `15s`, `10m`, `6h`, or `48h`. Every such period uses mutually exclusive
+aware timestamps and exact half-open bounds:
+`{"start_at":"...","end_at":"...","period":"15s"}` means `[start_at, end_at)`.
+Do not recompute now. A refresh gets a new aware anchor; the prior comparison
+uses the same anchor, immediately before the current range. Timestamp-form
+Ranking has no date summary. Inclusive date ranges and summaries for date-form
+`d`, `w`, `mo`, `q`, and `y` requests remain unchanged.
 
 ### Summary request and response
 

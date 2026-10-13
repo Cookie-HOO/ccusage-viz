@@ -10,6 +10,7 @@ import pytest
 from ccusage_viz.animation import animation_spec, animation_style_choices
 from ccusage_viz.animation_overlay import OverlayConfig
 from ccusage_viz.configuration import apply_custom_probe_defaults
+from ccusage_viz.core.custom_ranking_time import TimestampRange
 from ccusage_viz.core.time import DateRange
 from ccusage_viz.custom_models import (
     CustomCapabilities,
@@ -197,6 +198,43 @@ def test_round_trip_preserves_monitor_attachment_configuration() -> None:
     assert custom.attachment_theme == original_custom.attachment_theme
 
 
+def test_custom_ranking_timestamp_preset_refreshes_relative_and_preserves_fixed() -> None:
+    relative = TimestampRange(NOW - timedelta(minutes=10), NOW, relative_until=True, period="10m")
+    fixed = TimestampRange(NOW - timedelta(minutes=5), NOW, fixed_bounds=True)
+    panes = (
+        CustomChartPaneConfig(
+            CustomChartConfig(
+                "ranking",
+                _installed_source("a"),
+                relative,
+                presentation=ChartPresentation(style="dot"),
+                metric_id="tokens",
+            )
+        ),
+        CustomChartPaneConfig(
+            CustomChartConfig(
+                "ranking",
+                _installed_source("b"),
+                fixed,
+                presentation=ChartPresentation(style="dot"),
+                metric_id="tokens",
+            )
+        ),
+    )
+    record = preset_from_launch("timestamps", _launch(panes=panes), now=NOW)
+    parsed = DashboardPresetDocument.parse(DashboardPresetDocument((record,)).to_wire()).presets[0]
+    fresh = NOW + timedelta(hours=2)
+
+    restored = materialize_preset(parsed, _installed_source, now=fresh)
+
+    relative_chart = restored.panes[0]
+    fixed_chart = restored.panes[1]
+    assert isinstance(relative_chart, CustomChartPaneConfig)
+    assert isinstance(fixed_chart, CustomChartPaneConfig)
+    assert relative_chart.chart.date_range.end_at == fresh  # type: ignore[union-attr]
+    assert fixed_chart.chart.date_range == fixed
+
+
 def test_custom_partition_round_trips_and_old_preset_remains_flat() -> None:
     chart = CustomChartConfig(
         "ranking",
@@ -236,7 +274,11 @@ def test_custom_partition_preset_rejects_non_ranking_chart_kinds(chart_kind: str
         partition_by="logical_model",
     )
     wire = DashboardPresetDocument(
-        (preset_from_launch("partitioned", _launch(panes=(CustomChartPaneConfig(chart),)), now=NOW),)
+        (
+            preset_from_launch(
+                "partitioned", _launch(panes=(CustomChartPaneConfig(chart),)), now=NOW
+            ),
+        )
     ).to_wire()
     wire["presets"][0]["panes"][0]["chart_kind"] = chart_kind
 
@@ -253,7 +295,11 @@ def test_custom_partition_preset_rejects_missing_or_equal_grouping() -> None:
         partition_by="logical_model",
     )
     wire = DashboardPresetDocument(
-        (preset_from_launch("partitioned", _launch(panes=(CustomChartPaneConfig(chart),)), now=NOW),)
+        (
+            preset_from_launch(
+                "partitioned", _launch(panes=(CustomChartPaneConfig(chart),)), now=NOW
+            ),
+        )
     ).to_wire()
 
     missing_group = deepcopy(wire)

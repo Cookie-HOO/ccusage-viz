@@ -16,6 +16,11 @@ from typing import TypeAlias, TypeVar, cast
 
 from ccusage_viz.animation import animation_spec
 from ccusage_viz.animation_overlay import OverlayConfig
+from ccusage_viz.core.custom_ranking_time import (
+    TimestampRange,
+    parse_subday_period,
+    resolve_custom_ranking_range,
+)
 from ccusage_viz.core.time import DateRange, parse_period, validate_timezone
 from ccusage_viz.dashboard_layout import layout_bands, parse_layout
 from ccusage_viz.options import (
@@ -252,7 +257,15 @@ def _presentation_parse(value: object, kind: str) -> ChartPresentation:
     )
 
 
-def _date_range_wire(value: DateRange) -> dict[str, object]:
+def _date_range_wire(value: DateRange | TimestampRange) -> dict[str, object]:
+    if isinstance(value, TimestampRange):
+        return {
+            "start_at": _timestamp_wire(value.start_at),
+            "end_at": _timestamp_wire(value.end_at),
+            "relative_until": value.relative_until,
+            "period": value.period,
+            "fixed_bounds": value.fixed_bounds,
+        }
     return {
         "since": _date_wire(value.since),
         "until": _date_wire(value.until),
@@ -263,9 +276,32 @@ def _date_range_wire(value: DateRange) -> dict[str, object]:
     }
 
 
-def _date_range_parse(value: object) -> DateRange:
+def _date_range_parse(value: object) -> DateRange | TimestampRange:
+    source = _expect_mapping(value, "date_range")
+    if "start_at" in source or "end_at" in source:
+        wire = _exact(
+            source,
+            frozenset(("start_at", "end_at", "relative_until", "period", "fixed_bounds")),
+            "date_range",
+        )
+        period = _optional_string(wire["period"], "date_range.period")
+        if period is not None:
+            try:
+                parse_subday_period(period)
+            except ValueError as exc:
+                raise DashboardPresetValidationError("invalid date_range.period") from exc
+        try:
+            return TimestampRange(
+                _timestamp(wire["start_at"], "date_range.start_at"),
+                _timestamp(wire["end_at"], "date_range.end_at"),
+                relative_until=_boolean(wire["relative_until"], "date_range.relative_until"),
+                period=period,
+                fixed_bounds=_boolean(wire["fixed_bounds"], "date_range.fixed_bounds"),
+            )
+        except ValueError as exc:
+            raise DashboardPresetValidationError(str(exc)) from exc
     wire = _exact(
-        value,
+        source,
         frozenset(("since", "until", "relative_until", "period", "fixed_bounds", "implicit_until")),
         "date_range",
     )
@@ -784,10 +820,15 @@ def _parse_pane(value: object) -> PaneConfig:
             raise DashboardPresetValidationError(
                 "custom.partition_by and custom.group_by must differ"
             )
+        date_range = _date_range_parse(custom_wire["date_range"])
+        if isinstance(date_range, TimestampRange) and not ranking:
+            raise DashboardPresetValidationError(
+                "timestamp date_range is supported only by v2 custom ranking"
+            )
         chart = CustomChartConfig(
             chart_kind,
             source,
-            _date_range_parse(custom_wire["date_range"]),
+            date_range,
             _custom_filters_parse(custom_wire["filters"]),
             _presentation_parse(custom_wire["presentation"], chart_kind),
             group_by,
@@ -981,25 +1022,42 @@ def preset_from_launch(
 
 
 def materialize_preset(
-    record: DashboardPresetRecord, source_resolver: DatasetSourceResolver
+    record: DashboardPresetRecord,
+    source_resolver: DatasetSourceResolver,
+    *,
+    now: datetime | None = None,
 ) -> DashboardLaunch:
     """Resolve durable Dataset IDs and return a fresh ordinary Dashboard launch."""
 
     panes: list[PaneConfig] = []
     for pane in record.panes:
         if isinstance(pane, CustomChartPaneConfig):
-            if pane.chart.source.source_kind == "command":
-                panes.append(pane)
-                continue
-            source = source_resolver(pane.chart.source.dataset_id)
+            chart = pane.chart
             if (
-                source.dataset_id != pane.chart.source.dataset_id
+                isinstance(chart.date_range, TimestampRange)
+                and chart.date_range.relative_until
+                and chart.date_range.period is not None
+            ):
+                timezone = record.host.timezone or "UTC"
+                anchor = now or datetime.now(UTC)
+                chart = replace(
+                    chart,
+                    date_range=resolve_custom_ranking_range(
+                        chart.date_range.period, now=anchor, timezone=timezone
+                    ),
+                )
+            if chart.source.source_kind == "command":
+                panes.append(replace(pane, chart=chart))
+                continue
+            source = source_resolver(chart.source.dataset_id)
+            if (
+                source.dataset_id != chart.source.dataset_id
                 or source.source_kind != "installed"
             ):
                 raise DashboardPresetValidationError(
                     "custom Dataset resolver returned an unsafe source"
                 )
-            panes.append(CustomChartPaneConfig(replace(pane.chart, source=source)))
+            panes.append(replace(pane, chart=replace(chart, source=source)))
         else:
             panes.append(pane)
     return DashboardLaunch(record.process, record.host, tuple(panes))  # type: ignore[arg-type]

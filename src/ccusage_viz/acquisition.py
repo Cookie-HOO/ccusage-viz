@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import cast
 
 from ccusage_viz.core.time import local_today
@@ -297,15 +297,29 @@ def custom_historical_query_intent(
 ) -> QueryIntent:
     """Plan one command-backed custom pane request without display-only fields."""
     process = process or ProcessConfig()
-    interval = DateInterval(config.date_range.since, config.date_range.until)
+    from ccusage_viz.core.custom_ranking_time import TimestampRange
+
+    timestamp_range = (
+        config.date_range if isinstance(config.date_range, TimestampRange) else None
+    )
+    if timestamp_range is not None and (config.metric_id is None or config.kind != "ranking"):
+        raise ValueError("timestamp ranges require a v2 custom ranking")
+    interval = (
+        None
+        if timestamp_range is not None
+        else DateInterval(config.date_range.since, config.date_range.until)
+    )
     request_type = V2ChartRequest if config.metric_id is not None else CustomChartRequest
     request = request_type(
         request_id=f"{owner_id}:{generation}{request_id_suffix}",
         dataset_id=config.source.dataset_id,
         **({"metric_id": config.metric_id} if config.metric_id is not None else {}),
         timezone=timezone,
-        start_date=interval.since,
-        end_date=interval.until,
+        **(
+            {"start_at": timestamp_range.start_at, "end_at": timestamp_range.end_at}
+            if timestamp_range is not None
+            else {"start_date": interval.since, "end_date": interval.until}
+        ),
         period=config.date_range.period if config.date_range.relative_until else None,
         filters=config.filters,
         group_by=config.group_by,
@@ -327,9 +341,17 @@ def custom_historical_query_intent(
         generation=generation,
         trigger=trigger,
         provider=ProviderRef("custom-command", config.source.dataset_id),
-        scope=DataScope((interval,)),
-        missing_intervals=(interval,),
-        resolution=DataResolution.DATE,
+        scope=DataScope(()) if interval is None else DataScope((interval,)),
+        missing_intervals=() if interval is None else (interval,),
+        resolution=DataResolution.TIMESTAMP if interval is None else DataResolution.DATE,
+        execution_options=(
+            (
+                ("end_at", timestamp_range.end_at.astimezone(UTC).isoformat()),
+                ("start_at", timestamp_range.start_at.astimezone(UTC).isoformat()),
+            )
+            if timestamp_range is not None
+            else ()
+        ),
         execution_context=ExecutionContext(
             config.source.command_argv[0],
             process.query_timeout,
@@ -395,6 +417,10 @@ def custom_v2_summary_query_intent(
     """Request one source-owned V2 summary with its explicitly resolved intervals."""
     if config.metric_id is None:
         raise ValueError("v2 summary requires a selected metric")
+    from ccusage_viz.core.custom_ranking_time import TimestampRange
+
+    if isinstance(config.date_range, TimestampRange):
+        raise ValueError("timestamp rankings do not support date-only summaries")
     process = process or ProcessConfig()
     request = V2SummaryRequest(
         request_id=f"{owner_id}:{generation}",

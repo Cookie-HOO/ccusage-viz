@@ -798,6 +798,7 @@ MESSAGES = {
     "label.model": "Model",
     "label.project": "Project",
     "label.date_range": "{since}–{until}",
+    "label.timestamp_range": "[{start_at}, {end_at})",
     "summary.line": "{comparisons}",
     "summary.separator": "; ",
     "summary.current.day": "Today’s tokens {value}",

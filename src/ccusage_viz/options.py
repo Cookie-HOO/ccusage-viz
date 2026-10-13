@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from datetime import date
-from typing import Literal, TypeAlias
+from datetime import date, datetime
+from typing import TYPE_CHECKING, Literal, TypeAlias
+
+if TYPE_CHECKING:
+    from ccusage_viz.core.custom_ranking_time import TimestampRange
 
 from ccusage_viz.animation import AnimationSpec
 from ccusage_viz.animation_overlay import OverlayConfig
@@ -200,7 +203,7 @@ class CustomChartConfig:
 
     kind: Literal["timeline", "calendar", "stack", "ranking", "monitor"]
     source: CustomCommandSource
-    date_range: DateRange
+    date_range: DateRange | TimestampRange
     filters: CustomFilters = ()
     presentation: ChartPresentation = ChartPresentation()
     group_by: str | None = None
@@ -547,7 +550,9 @@ def validate_custom_partition_selection(
         raise ValueError(str(exc)) from exc
 
 
-def adjust_custom_chart(chart: CustomChartConfig, key: str) -> CustomChartConfig:
+def adjust_custom_chart(
+    chart: CustomChartConfig, key: str, *, now: datetime | None = None, timezone: str = "UTC"
+) -> CustomChartConfig:
     """Apply a local custom chart adjustment."""
 
     if key in {"p", "P"}:
@@ -558,10 +563,16 @@ def adjust_custom_chart(chart: CustomChartConfig, key: str) -> CustomChartConfig
                 current if current in chart.metric_periods else chart.metric_periods[0],
                 1 if key == "p" else -1,
             )
-            return replace(
-                chart,
-                date_range=resolve_date_range(chart.kind, period=period, since=None, until=None),
-            )
+            if is_v2_custom_ranking(chart):
+                from ccusage_viz.core.custom_ranking_time import resolve_custom_ranking_range
+
+                anchor = now or datetime.now().astimezone()
+                date_range = resolve_custom_ranking_range(period, now=anchor, timezone=timezone)
+            else:
+                date_range = resolve_date_range(chart.kind, period=period, since=None, until=None)
+            return replace(chart, date_range=date_range)
+        if not isinstance(chart.date_range, DateRange):
+            return chart
         return replace(chart, date_range=_adjust_period(chart.date_range, key, kind=chart.kind))
     if key in {"d", "D"}:
         return replace(

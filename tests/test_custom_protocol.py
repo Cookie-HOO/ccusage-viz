@@ -2,6 +2,7 @@ import json
 from dataclasses import FrozenInstanceError, replace
 from datetime import UTC, date, datetime
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -49,6 +50,112 @@ def chart_request(**changes: object) -> CustomChartRequest:
     }
     values.update(changes)
     return CustomChartRequest(**values)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("period", ("1d", "all"))
+def test_v2_ranking_date_request_accepts_every_valid_ranking_period(period: str) -> None:
+    request = V2ChartRequest(
+        "chart-1",
+        "router",
+        "tokens",
+        "UTC",
+        start_date=date(2026, 1, 1),
+        end_date=date(2026, 1, 2),
+        period=period,
+        chart_kind="ranking",
+    )
+
+    assert request.to_wire()["range"]["period"] == period
+
+
+def test_v2_chart_request_requires_chart_kind() -> None:
+    with pytest.raises(ValueError, match="requires chart_kind"):
+        V2ChartRequest(
+            "chart-1",
+            "router",
+            "tokens",
+            "UTC",
+            start_date=date(2026, 1, 1),
+            end_date=date(2026, 1, 2),
+        )
+
+
+def test_v2_ranking_timestamp_request_uses_half_open_timestamp_wire_and_utc_key() -> None:
+    first = V2ChartRequest(
+        "chart-1",
+        "router",
+        "tokens",
+        "America/New_York",
+        start_at=datetime.fromisoformat("2026-11-01T01:30:00-04:00"),
+        end_at=datetime.fromisoformat("2026-11-01T01:30:00-05:00"),
+        period="1h",
+        chart_kind="ranking",
+    )
+    equivalent = replace(
+        first,
+        start_at=datetime(2026, 11, 1, 5, 30, tzinfo=UTC),
+        end_at=datetime(2026, 11, 1, 6, 30, tzinfo=UTC),
+    )
+
+    assert first.to_wire()["range"] == {
+        "start_at": "2026-11-01T01:30:00-04:00",
+        "end_at": "2026-11-01T01:30:00-05:00",
+        "period": "1h",
+    }
+    assert canonical_custom_request_key(first) == canonical_custom_request_key(equivalent)
+
+
+def test_v2_timestamp_request_dst_fold_instants_have_distinct_keys() -> None:
+    zone = ZoneInfo("America/New_York")
+    first = V2ChartRequest(
+        "chart-1",
+        "router",
+        "tokens",
+        "America/New_York",
+        start_at=datetime(2026, 11, 1, 0, 30, tzinfo=zone),
+        end_at=datetime(2026, 11, 1, 1, 30, tzinfo=zone, fold=0),
+        period="1h",
+        chart_kind="ranking",
+    )
+    second = replace(
+        first,
+        start_at=datetime(2026, 11, 1, 1, 30, tzinfo=zone, fold=0),
+        end_at=datetime(2026, 11, 1, 1, 30, tzinfo=zone, fold=1),
+    )
+
+    assert canonical_custom_request_key(first) != canonical_custom_request_key(second)
+
+
+@pytest.mark.parametrize(
+    "changes",
+    (
+        {"start_at": datetime(2026, 1, 1), "end_at": datetime(2026, 1, 2, tzinfo=UTC)},
+        {"start_at": datetime(2026, 1, 1, tzinfo=UTC), "end_at": None},
+        {
+            "start_date": date(2026, 1, 1),
+            "end_date": date(2026, 1, 2),
+            "start_at": datetime(2026, 1, 1, tzinfo=UTC),
+            "end_at": datetime(2026, 1, 2, tzinfo=UTC),
+        },
+        {
+            "start_at": datetime(2026, 1, 1, tzinfo=UTC),
+            "end_at": datetime(2026, 1, 2, tzinfo=UTC),
+            "chart_kind": "timeline",
+        },
+    ),
+)
+def test_v2_timestamp_request_rejects_invalid_or_out_of_scope_shapes(
+    changes: dict[str, object],
+) -> None:
+    values = {
+        "request_id": "chart-1",
+        "dataset_id": "router",
+        "metric_id": "tokens",
+        "timezone": "UTC",
+        "chart_kind": "ranking",
+    }
+    with pytest.raises(ValueError):
+        V2ChartRequest(**(values | changes))  # type: ignore[arg-type]
 
 
 def summary_request(**changes: object) -> CustomSummaryRequest:
@@ -217,10 +324,31 @@ def test_runtime_filter_rejects_unknown_selection_mode() -> None:
         )
 
 
+def test_v2_subday_periods_are_ranking_only_and_preserve_declaration_order() -> None:
+    value = v2_probe_descriptor()
+    metric = value["metrics"][0]
+    metric["capabilities"]["charts"] = {
+        "ranking": {"group_by": [None], "periods": ["90s", "15s", "2h", "1d", "all"]}
+    }
+    metric["defaults"] = {"ranking": {"period": "15s"}}
+
+    descriptor = parse_v2_probe_descriptor(value)
+    ranking = descriptor.metrics[0].capabilities.charts["ranking"]
+
+    assert ranking.periods == ("90s", "15s", "2h", "1d", "all")  # type: ignore[union-attr]
+    assert descriptor.metrics[0].defaults["ranking"].period == "15s"
+
+    metric["capabilities"]["charts"] = {
+        "timeline": {"granularities": ["day"], "group_by": [], "periods": ["15s"]}
+    }
+    with pytest.raises(CustomProtocolError, match="period"):
+        parse_v2_probe_descriptor(value)
+
+
 def test_v2_ranking_sort_direction_parses_and_round_trips() -> None:
     value = v2_probe_descriptor()
     value["metrics"][0]["capabilities"]["charts"] = {
-        "ranking": {"granularities": ["day"], "group_by": [None], "sort_direction": "ascending"}
+        "ranking": {"group_by": [None], "sort_direction": "ascending"}
     }
 
     descriptor = parse_v2_probe_descriptor(value)
@@ -394,6 +522,7 @@ def test_v2_request_omits_undeclared_partition_but_emits_declared_null() -> None
         "start_date": date(2026, 10, 1),
         "end_date": date(2026, 10, 8),
         "partition_by": None,
+        "chart_kind": "ranking",
     }
     old = V2ChartRequest(**common, partition_declared=False)
     aware = V2ChartRequest(**common, partition_declared=True)
@@ -417,6 +546,7 @@ def test_v2_request_rejects_partition_when_capability_is_undeclared() -> None:
             end_date=date(2026, 10, 8),
             partition_by="logical_model",
             partition_declared=False,
+            chart_kind="ranking",
         )
 
 
@@ -441,6 +571,7 @@ def partitioned_ranking_request(**changes: object) -> V2ChartRequest:
         "group_by": "real_model",
         "partition_by": "logical_model",
         "partition_declared": True,
+        "chart_kind": "ranking",
     }
     values.update(changes)
     return V2ChartRequest(**values)  # type: ignore[arg-type]
@@ -730,7 +861,7 @@ def test_grouped_v2_ranking_applies_max_items_globally() -> None:
 def test_v2_ranking_rejects_invalid_sort_direction() -> None:
     value = v2_probe_descriptor()
     value["metrics"][0]["capabilities"]["charts"] = {
-        "ranking": {"granularities": ["day"], "group_by": [None], "sort_direction": "sideways"}
+        "ranking": {"group_by": [None], "sort_direction": "sideways"}
     }
 
     with pytest.raises(CustomProtocolError, match="sort_direction"):
@@ -961,6 +1092,7 @@ def test_v2_query_response_requires_a_complete_descriptor_and_runtime_controls()
         "Asia/Shanghai",
         date(2026, 10, 1),
         date(2026, 10, 8),
+        chart_kind="timeline",
     )
     response = {
         "protocol": V2_PROTOCOL_VERSION,
@@ -1025,6 +1157,7 @@ def test_v2_chart_top_is_transmitted_and_distinguishes_request_identity() -> Non
         date(2026, 10, 8),
         group_by="project",
         top=12,
+        chart_kind="timeline",
     )
 
     assert request.to_wire()["query"]["top"] == 12
@@ -1038,6 +1171,7 @@ def test_v2_chart_top_is_transmitted_and_distinguishes_request_identity() -> Non
             date(2026, 10, 8),
             group_by="project",
             top=10,
+            chart_kind="timeline",
         )
     )
 
@@ -1076,7 +1210,6 @@ def test_v2_ranking_capability_accepts_a_description_default() -> None:
     descriptor = v2_probe_descriptor()
     descriptor["metrics"][0]["capabilities"]["charts"] = {  # type: ignore[index]
         "ranking": {
-            "granularities": ["day"],
             "group_by": ["real_model"],
             "descriptions_default": "expanded",
         }
@@ -1198,7 +1331,7 @@ def test_v2_probe_descriptor_rejects_invalid_metric_contract(mutate: object, mes
 def test_v2_ranking_default_all_is_allowed_and_invalid_defaults_are_ignored() -> None:
     descriptor = v2_probe_descriptor()
     descriptor["metrics"][0]["capabilities"]["charts"] = {
-        "ranking": {"granularities": ["day"], "group_by": [], "periods": ["all"]}
+        "ranking": {"group_by": [], "periods": ["all"]}
     }
     descriptor["metrics"][0]["defaults"] = {
         "ranking": {"period": "all", "group_by": None, "top": None}
@@ -1218,7 +1351,6 @@ def test_v2_ranking_capability_accepts_comparison_presentation(comparison: str) 
     descriptor = v2_probe_descriptor()
     descriptor["metrics"][0]["capabilities"]["charts"] = {  # type: ignore[index]
         "ranking": {
-            "granularities": ["day"],
             "group_by": [],
             "comparison": comparison,
         }
@@ -1232,7 +1364,7 @@ def test_v2_ranking_capability_accepts_comparison_presentation(comparison: str) 
 def test_v2_ranking_comparison_rejects_invalid_or_nonranking_values() -> None:
     descriptor = v2_probe_descriptor()
     descriptor["metrics"][0]["capabilities"]["charts"] = {  # type: ignore[index]
-        "ranking": {"granularities": ["day"], "group_by": [], "comparison": "growth"}
+        "ranking": {"group_by": [], "comparison": "growth"}
     }
     with pytest.raises(CustomProtocolError, match="comparison"):
         parse_v2_probe_descriptor(descriptor)

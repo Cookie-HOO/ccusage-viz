@@ -1,6 +1,6 @@
 import shlex
 from dataclasses import replace
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from typing import cast
 
 import pytest
@@ -13,6 +13,7 @@ from ccusage_viz.configuration import (
     default_pane,
     v2_metric_probe_descriptor,
 )
+from ccusage_viz.core.custom_ranking_time import TimestampRange
 from ccusage_viz.core.time import DateRange, local_today, refresh_date_range
 from ccusage_viz.custom_models import (
     CustomCapabilities,
@@ -174,11 +175,7 @@ def test_custom_probe_partition_default_does_not_overwrite_explicit_grouping() -
                 )
             },
         ),
-        {
-            "ranking": CustomChartDefaults(
-                "14d", "real_model", 10, partition_by="logical_model"
-            )
-        },
+        {"ranking": CustomChartDefaults("14d", "real_model", 10, partition_by="logical_model")},
         (),
     )
     initial = CustomChartConfig(
@@ -193,6 +190,35 @@ def test_custom_probe_partition_default_does_not_overwrite_explicit_grouping() -
 
     assert resolved.group_by == "logical_model"
     assert resolved.partition_by == "provider"
+
+
+def test_probe_capability_replaces_stale_explicit_partition_and_grouping() -> None:
+    text = LocalizedText("Router", "路由")
+    descriptor = CustomProbeDescriptor(
+        "router-2",
+        "1.0",
+        CustomDataset(text, text, CustomUnit("millisecond", text, "suffix", 2)),
+        CustomCapabilities(
+            (),
+            (),
+            {"ranking": CustomChartCapability((), ("adapter,real_model",), ())},
+        ),
+        {"ranking": CustomChartDefaults("1d", "adapter,real_model", 10)},
+        (),
+    )
+    initial = CustomChartConfig(
+        "ranking",
+        CustomCommandSource("router", ("router",)),
+        resolve_date_range("ranking", period="1d", since=None, until=None),
+        group_by="real_model",
+        partition_by="logical_model",
+        initial_explicit=frozenset({"group_by", "partition_by"}),
+    )
+
+    resolved = apply_custom_probe_defaults(initial, descriptor, timezone="UTC")
+
+    assert resolved.partition_by is None
+    assert resolved.group_by == "adapter,real_model"
 
 
 def test_absent_probe_defaults_preserve_valid_current_partition_and_grouping() -> None:
@@ -354,6 +380,59 @@ def test_custom_declared_periods_limit_every_historical_chart_cycle(kind: str) -
 
     assert adjust_custom_chart(chart, "p").date_range.period == "30d"
     assert adjust_custom_chart(chart, "P").date_range.period == "30d"
+
+
+def test_subday_ranking_command_preserves_period_without_dates_or_granularity() -> None:
+    end = datetime(2026, 10, 15, 12, tzinfo=UTC)
+    chart = CustomChartConfig(
+        "ranking",
+        CustomCommandSource("router", ("router",)),
+        TimestampRange(end - timedelta(minutes=10), end, relative_until=True, period="10m"),
+        metric_id="tokens",
+        granularity="legacy",
+    )
+    launch = StandaloneLaunch(ProcessConfig(), StandaloneHostConfig(), chart)
+
+    command = format_full_command(launch)
+
+    assert "--period 10m" in command
+    assert "--since" not in command
+    assert "--until" not in command
+    assert "--granularity" not in command
+
+
+def test_fixed_timestamp_range_command_copy_is_explicitly_unsupported() -> None:
+    end = datetime(2026, 10, 15, 12, tzinfo=UTC)
+    chart = CustomChartConfig(
+        "ranking",
+        CustomCommandSource("router", ("router",)),
+        TimestampRange(end - timedelta(minutes=10), end, fixed_bounds=True),
+        metric_id="tokens",
+    )
+    launch = StandaloneLaunch(ProcessConfig(), StandaloneHostConfig(), chart)
+
+    with pytest.raises(ValueError, match="CLI has no timestamp-bound flags"):
+        format_full_command(launch)
+
+
+def test_v2_custom_ranking_cycles_dataset_subday_periods_in_declaration_order() -> None:
+    chart = CustomChartConfig(
+        "ranking",
+        CustomCommandSource("router", ("router",)),
+        resolve_date_range("ranking", period="1d", since=None, until=None),
+        metric_id="tokens",
+        metric_periods=("15s", "90s", "1d", "all"),
+    )
+    now = datetime(2026, 10, 15, 12, tzinfo=UTC)
+
+    seconds = adjust_custom_chart(chart, "p", now=now, timezone="UTC")
+    previous = adjust_custom_chart(chart, "P", now=now, timezone="UTC")
+
+    assert seconds.date_range.period == "all"
+    assert previous.date_range.period == "90s"
+    wrapped = adjust_custom_chart(seconds, "p", now=now, timezone="UTC")
+    assert wrapped.date_range.period == "15s"
+    assert wrapped.date_range.end_at == now  # type: ignore[union-attr]
 
 
 def test_custom_pane_and_empty_pane_are_discriminated() -> None:

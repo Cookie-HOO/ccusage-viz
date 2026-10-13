@@ -1,6 +1,7 @@
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 
 from ccusage_viz.acquisition import custom_historical_query_intent
+from ccusage_viz.core.custom_ranking_time import TimestampRange
 from ccusage_viz.core.time import DateRange
 from ccusage_viz.custom_metric_switching import (
     cycle_switch_metric,
@@ -97,12 +98,20 @@ def test_cycles_only_same_group_metrics_that_support_the_active_kind() -> None:
         metric("forks", group_id=None, charts={"ranking": capability()}),
     )
 
-    assert [item.id for item in switch_candidates(source, current_metric_id="stars", kind="ranking")] == [
+    assert [
+        item.id for item in switch_candidates(source, current_metric_id="stars", kind="ranking")
+    ] == [
         "stars",
         "updated_days",
     ]
-    assert cycle_switch_metric(source, current_metric_id="stars", kind="ranking", step=1).id == "updated_days"  # type: ignore[union-attr]
-    assert cycle_switch_metric(source, current_metric_id="stars", kind="ranking", step=-1).id == "updated_days"  # type: ignore[union-attr]
+    assert (
+        cycle_switch_metric(source, current_metric_id="stars", kind="ranking", step=1).id
+        == "updated_days"
+    )  # type: ignore[union-attr]
+    assert (
+        cycle_switch_metric(source, current_metric_id="stars", kind="ranking", step=-1).id
+        == "updated_days"
+    )  # type: ignore[union-attr]
 
 
 def test_returns_none_when_group_has_no_alternate_metric() -> None:
@@ -130,13 +139,41 @@ def test_normalizes_target_period_and_filter_fields_from_metric_defaults() -> No
     assert normalize_switch_config(current, target, "filters").filters == (("kind", ("tool",)),)  # type: ignore[union-attr]
 
 
+def test_metric_switch_subday_period_uses_shared_anchor_and_active_timezone() -> None:
+    target = V2MetricDescriptor(
+        "recent",
+        TEXT,
+        TEXT,
+        UNIT,
+        "sum",
+        V2MetricCapabilities((), (), {"ranking": capability(periods=("10m",))}),
+        {"ranking": CustomChartDefaults("10m", None, None)},
+        group_id="github",
+    )
+    anchor = datetime(2026, 11, 1, 6, 30, tzinfo=UTC)
+
+    normalized = normalize_switch_config(
+        config(),
+        target,
+        "period",
+        now=anchor,
+        timezone="America/New_York",
+    )
+
+    assert normalized is not None
+    assert isinstance(normalized.date_range, TimestampRange)
+    assert normalized.date_range.end_at == anchor.astimezone(normalized.date_range.end_at.tzinfo)
+    assert normalized.date_range.end_at.fold == 1
+    assert normalized.date_range.end_at.astimezone(UTC) - normalized.date_range.start_at.astimezone(
+        UTC
+    ) == timedelta(minutes=10)
+
+
 def test_metric_switch_all_period_remains_relative_and_hides_anchor_in_heading() -> None:
     all_metric = metric(
         "all_time", group_id="github", charts={"ranking": capability(periods=("all",))}
     )
-    day_metric = metric(
-        "daily", group_id="github", charts={"ranking": capability(periods=("1d",))}
-    )
+    day_metric = metric("daily", group_id="github", charts={"ranking": capability(periods=("1d",))})
     initial = config(
         date_range=DateRange(
             date(1971, 1, 1),
@@ -347,7 +384,14 @@ def test_v2_ranking_ignores_unsupported_granularity_during_metric_switch() -> No
 
 def test_unknown_or_unchanged_default_does_not_normalize() -> None:
     target = V2MetricDescriptor(
-        "updated_days", TEXT, TEXT, UNIT, "sum", V2MetricCapabilities((), (), {"ranking": capability()}), {"ranking": CustomChartDefaults("14d", None, None)}, group_id="github"
+        "updated_days",
+        TEXT,
+        TEXT,
+        UNIT,
+        "sum",
+        V2MetricCapabilities((), (), {"ranking": capability()}),
+        {"ranking": CustomChartDefaults("14d", None, None)},
+        group_id="github",
     )
 
     assert normalization_category("query.combination") is None

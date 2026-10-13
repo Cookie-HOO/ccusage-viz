@@ -791,6 +791,7 @@ MESSAGES = {
     "label.model": "模型",
     "label.project": "项目",
     "label.date_range": "{since}–{until}",
+    "label.timestamp_range": "[{start_at}, {end_at})",
     "summary.line": "{comparisons}",
     "summary.separator": "，",
     "summary.current.day": "今日 Token {value}",
