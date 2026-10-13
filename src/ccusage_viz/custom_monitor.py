@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import datetime
@@ -11,6 +12,7 @@ from typing import Literal
 from zoneinfo import ZoneInfo
 
 from ccusage_viz.acquisition import custom_v2_monitor_query_intent, custom_v2_probe_query_intent
+from ccusage_viz.adjustment_timeout import AdjustmentIdleTimer, AdjustmentTimeout
 from ccusage_viz.bootstrap import build_query_runtime
 from ccusage_viz.custom_filter_draft import run_custom_filter_editor
 from ccusage_viz.custom_models import V2MonitorCapability
@@ -179,6 +181,18 @@ def _adjust(component: CustomMonitorComponent, key: str) -> bool:
         component.configure(updated, data_affecting=True)
         return updated != chart
     return False
+
+
+def _read_filter_editor_key(
+    read_key: Callable[[float], str | None], timer: AdjustmentIdleTimer
+) -> str | None:
+    """Use the adjustment deadline while the Custom Monitor filter modal is open."""
+    key = read_key(min(0.1, timer.remaining()))
+    if key is None:
+        timer.check()
+    else:
+        timer.record_input()
+    return key
 
 
 def _custom_monitor_actions(
@@ -363,29 +377,94 @@ def run_custom_monitor(options: StandaloneLaunch, translator: Translator) -> int
                         and component.runtime.filters
                     ):
                         filter_height = terminal.height
+                        first_filter_frame = True
 
                         def paint_filter_editor(
                             body: str, controls: str, *, height: int = filter_height
                         ) -> None:
+                            nonlocal first_filter_frame
                             screen.paint(
                                 compose_frame(
                                     body,
                                     translator.text("label.adjust_filters"),
                                     controls,
                                     height=height,
-                                )
+                                ),
+                                force=first_filter_frame,
                             )
+                            first_filter_frame = False
 
-                        edited = run_custom_filter_editor(
-                            component.candidate.filters,
-                            component.runtime.filters,
-                            translator,
-                            width=terminal.width,
-                            height=max(0, terminal.height - 2),
-                            paint=paint_filter_editor,
-                            read_key=lambda: read_key(5),
-                            color=terminal.color,
-                            color_scheme=component.candidate.presentation.theme,
+                        filter_timer = AdjustmentIdleTimer()
+
+                        try:
+                            edited = run_custom_filter_editor(
+                                component.candidate.filters,
+                                component.runtime.filters,
+                                translator,
+                                width=terminal.width,
+                                height=max(0, terminal.height - 2),
+                                paint=paint_filter_editor,
+                                read_key=lambda timer=filter_timer: _read_filter_editor_key(read_key, timer),
+                                color=terminal.color,
+                                color_scheme=component.candidate.presentation.theme,
+                            )
+                        except AdjustmentTimeout:
+                            screen.paint(
+                                compose_frame(
+                                    body,
+                                    translator.text("status.tui_adjust_monitor"),
+                                    adjustment_rows(
+                                        component.heading(language=translator.language),
+                                        translator.text(f"adjustment.page_{page}"),
+                                        tuple(
+                                            AdjustmentAction(
+                                                action_key,
+                                                translator.text(f"adjustment.{label}"),
+                                                priority,
+                                            )
+                                            for priority, (action_key, label) in enumerate(action_rows)
+                                        ),
+                                        width=terminal.width,
+                                        color=terminal.color,
+                                        switch_action=translator.text(
+                                            "adjustment.switch_advanced"
+                                            if page == "quick"
+                                            else "adjustment.switch_quick"
+                                        ),
+                                        finish_action=translator.text("adjustment.finish"),
+                                    ),
+                                    height=terminal.height,
+                                ),
+                                force=True,
+                            )
+                            break
+                        screen.paint(
+                            compose_frame(
+                                body,
+                                translator.text("status.tui_adjust_monitor"),
+                                adjustment_rows(
+                                    component.heading(language=translator.language),
+                                    translator.text(f"adjustment.page_{page}"),
+                                    tuple(
+                                        AdjustmentAction(
+                                            action_key,
+                                            translator.text(f"adjustment.{label}"),
+                                            priority,
+                                        )
+                                        for priority, (action_key, label) in enumerate(action_rows)
+                                    ),
+                                    width=terminal.width,
+                                    color=terminal.color,
+                                    switch_action=translator.text(
+                                        "adjustment.switch_advanced"
+                                        if page == "quick"
+                                        else "adjustment.switch_quick"
+                                    ),
+                                    finish_action=translator.text("adjustment.finish"),
+                                ),
+                                height=terminal.height,
+                            ),
+                            force=True,
                         )
                         if edited is not None and edited != component.candidate.filters:
                             component.configure(

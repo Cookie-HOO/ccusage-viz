@@ -4639,7 +4639,7 @@ def _run_custom_standalone_adjustment(
     timer = AdjustmentIdleTimer()
     last_size = None
 
-    def paint() -> None:
+    def paint(*, force: bool = False) -> None:
         nonlocal last_size
         size = get_terminal_size()
         last_size = size
@@ -4691,7 +4691,8 @@ def _run_custom_standalone_adjustment(
                     color_scheme=current.presentation.theme,
                 ),
                 height=terminal.height,
-            )
+            ),
+            force=force,
         )
 
     try:
@@ -4749,16 +4750,28 @@ def _run_custom_standalone_adjustment(
                     )
                 elif key == "f" and _custom_runtime_filters(component):
                     size = get_terminal_size()
+                    first_filter_frame = True
 
                     def paint_filter_editor(body: str, controls: str) -> None:
+                        nonlocal first_filter_frame
                         screen.paint(
                             compose_frame(
                                 body,
                                 translator.text("label.adjust_filters"),
                                 controls,
                                 height=size.lines,
-                            )
+                            ),
+                            force=first_filter_frame,
                         )
+                        first_filter_frame = False
+
+                    def read_filter_key() -> str | None:
+                        editor_key = read_key(min(0.1, timer.remaining()))
+                        if editor_key is None:
+                            timer.check()
+                        else:
+                            timer.record_input()
+                        return editor_key
 
                     edited = run_custom_filter_editor(
                         current.filters,
@@ -4767,10 +4780,11 @@ def _run_custom_standalone_adjustment(
                         width=size.columns,
                         height=max(0, size.lines - 2),
                         paint=paint_filter_editor,
-                        read_key=lambda: read_key(min(0.1, timer.remaining())),
+                        read_key=read_filter_key,
                         color=current.presentation.theme != "no-color",
                         color_scheme=current.presentation.theme,
                     )
+                    paint(force=True)
                     if edited is not None:
                         updated = replace(current, filters=edited)
                 if updated != current:
@@ -5737,7 +5751,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             timeout = min(timeout, remaining)
         if help_overlay is not None:
             event = read_event(decoder, timeout)
-            if isinstance(event, (KeyEvent, MouseEvent, WheelEvent)) and not (
+            if isinstance(event, (KeyEvent, MouseEvent, PasteEvent, WheelEvent)) and not (
                 isinstance(event, KeyEvent) and event.value == "\x03"
             ):
                 help_overlay.timer.record_input()
@@ -5747,7 +5761,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         if adjustment_timer is None:
             return read_event(decoder, timeout)
         event = read_event(decoder, min(timeout, adjustment_timer.remaining()))
-        if isinstance(event, (KeyEvent, MouseEvent, WheelEvent)):
+        if isinstance(event, (KeyEvent, MouseEvent, PasteEvent, WheelEvent)):
             adjustment_timer.record_input()
         elif event is None:
             adjustment_timer.check()
@@ -10142,16 +10156,20 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         ):
                             filters = _custom_runtime_filters(component)
                             size = get_terminal_size()
+                            first_filter_frame = True
 
                             def paint_custom_filter_editor(body: str, editor_controls: str) -> None:
+                                nonlocal first_filter_frame
                                 screen.paint(
                                     compose_frame(
                                         body,
                                         translator.text("label.adjust_filters"),
                                         editor_controls,
                                         height=size.lines,
-                                    )
+                                    ),
+                                    force=first_filter_frame,
                                 )
+                                first_filter_frame = False
 
                             def read_custom_filter_key() -> (
                                 KeyEvent | MouseEvent | PasteEvent | None
@@ -10180,8 +10198,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                 )
                             except AdjustmentTimeout:
                                 end_adjustment()
-                                paint()
+                                paint(force=True)
                                 continue
+                            paint(force=True)
                             if edited is not None and edited != base.filters:
                                 updated = replace(base, filters=edited)
                                 record_mutation(

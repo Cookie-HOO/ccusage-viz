@@ -10,6 +10,7 @@ from types import SimpleNamespace
 import pytest
 
 import ccusage_viz.tui as tui_module
+from ccusage_viz.adjustment_timeout import AdjustmentIdleTimer
 from ccusage_viz.animation import animation_spec, animation_style_choices
 from ccusage_viz.animation_overlay import OverlayConfig
 from ccusage_viz.bootstrap import build_query_runtime
@@ -87,7 +88,54 @@ from ccusage_viz.tui import (
     _query_affecting_adjustment,
     _update_monitor_attachment_activity,
 )
-from ccusage_viz.tui_input import KeyEvent, MouseEvent
+from ccusage_viz.tui_input import KeyEvent, MouseEvent, PasteEvent
+
+
+def test_dashboard_adjustment_paste_resets_idle_timer(monkeypatch: pytest.MonkeyPatch) -> None:
+    now = 0.0
+    timers: list[AdjustmentIdleTimer] = []
+
+    def new_timer(*_args: object, **_kwargs: object) -> AdjustmentIdleTimer:
+        timer = AdjustmentIdleTimer(clock=lambda: now)
+        timers.append(timer)
+        return timer
+
+    class Runtime:
+        def cancel(self) -> None:
+            pass
+
+    class Screen:
+        def __init__(self, _stream: object) -> None:
+            pass
+
+        def paint(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def finish(self) -> None:
+            pass
+
+    events = iter((KeyEvent("m"), PasteEvent("pasted text"), KeyEvent("\x03")))
+
+    def read_input(_decoder: object, _timeout: float) -> object:
+        nonlocal now
+        event = next(events)
+        if isinstance(event, PasteEvent):
+            now = 100.0
+        return event
+
+    options = _to_options(build_parser(load_translator("en")).parse_args(["dashboard", "--empty"]))
+    monkeypatch.setattr(tui_module, "AdjustmentIdleTimer", new_timer)
+    monkeypatch.setattr(tui_module, "build_query_runtime", Runtime)
+    monkeypatch.setattr(tui_module, "FramePainter", Screen)
+    monkeypatch.setattr(tui_module, "tui_input_mode", nullcontext)
+    monkeypatch.setattr(tui_module, "read_event", read_input)
+    monkeypatch.setattr(
+        tui_module, "get_terminal_size", lambda: __import__("os").terminal_size((80, 24))
+    )
+
+    assert tui_module.run_tui(options, load_translator("en")) == 0
+    assert len(timers) == 1
+    assert timers[0].remaining() == 180.0
 
 
 def test_empty_dashboard_pane_renders_localized_placeholder() -> None:

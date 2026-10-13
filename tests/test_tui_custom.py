@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 import ccusage_viz.tui as tui_module
+from ccusage_viz.adjustment_timeout import AdjustmentTimeout
 from ccusage_viz.bootstrap import build_query_runtime
 from ccusage_viz.cli import _to_options, build_parser
 from ccusage_viz.configuration import default_custom_pane
@@ -20,6 +21,8 @@ from ccusage_viz.custom_models import (
     CustomData,
     CustomDataset,
     CustomDimension,
+    CustomFilter,
+    CustomFilterOption,
     CustomMetric,
     CustomPaneSummary,
     CustomPoint,
@@ -695,6 +698,123 @@ def _accepted_metric_help_pane() -> tui_module.TuiCustomPane:
         LifecycleOperation("accepted-metric-help"),
         _to_options(build_parser(load_translator("en")).parse_args(["dashboard", "--empty"])).process,
     )
+
+
+@pytest.mark.parametrize("edited", (None, (("source", ("app",)),)), ids=("cancel", "apply"))
+def test_custom_filter_modal_forces_its_first_frame_and_standalone_restoration(
+    monkeypatch: pytest.MonkeyPatch, edited: object
+) -> None:
+    component = _accepted_metric_help_pane().component
+    choice = CustomFilter(
+        "source", LocalizedText("Source", "来源"), (CustomFilterOption("app", LocalizedText("App", "应用")),)
+    )
+    component.runtime = V2Runtime((choice,))
+    force_flags: list[bool] = []
+
+    class Screen:
+        def paint(self, _frame: object, *, force: bool = False, **_kwargs: object) -> None:
+            force_flags.append(force)
+
+    keys = iter(("a", "f", "\x1b"))
+
+    def editor(*_args: object, **kwargs: object) -> object:
+        kwargs["paint"]("filter body", "filter controls")  # type: ignore[index,operator]
+        return edited
+
+    monkeypatch.setattr(tui_module, "input_mode", nullcontext)
+    monkeypatch.setattr(tui_module, "read_key", lambda _timeout: next(keys))
+    monkeypatch.setattr(tui_module, "get_terminal_size", lambda: __import__("os").terminal_size((80, 24)))
+    monkeypatch.setattr(tui_module, "run_custom_filter_editor", editor)
+
+    assert tui_module._run_custom_standalone_adjustment(
+        component, load_translator("en"), Screen(), ascii=True
+    ) is None
+    assert force_flags[:4] == [False, False, True, True]
+    assert force_flags[4:] == ([False] if edited is not None else [])
+
+
+@pytest.mark.parametrize("edited", (None, (("source", ("app",)),)), ids=("cancel", "apply"))
+def test_dashboard_custom_filter_modal_forces_entry_and_restoration(
+    monkeypatch: pytest.MonkeyPatch, edited: object
+) -> None:
+    pane = _accepted_metric_help_pane()
+    choice = CustomFilter(
+        "source", LocalizedText("Source", "来源"), (CustomFilterOption("app", LocalizedText("App", "应用")),)
+    )
+    pane.component.runtime = V2Runtime((choice,))
+    force_flags: list[bool] = []
+
+    class Runtime:
+        def cancel(self) -> None:
+            pass
+
+    class Screen:
+        def __init__(self, _stream: object) -> None:
+            pass
+
+        def paint(self, _frame: object, *, force: bool = False, **_kwargs: object) -> None:
+            force_flags.append(force)
+
+        def finish(self) -> None:
+            pass
+
+    events = iter((KeyEvent("m"), KeyEvent("a"), KeyEvent("f"), KeyEvent("\x03")))
+
+    def editor(*_args: object, **kwargs: object) -> object:
+        kwargs["paint"]("filter body", "filter controls")  # type: ignore[index,operator]
+        return edited
+
+    options = _to_options(build_parser(load_translator("en")).parse_args(["dashboard", "--empty"]))
+    monkeypatch.setattr(tui_module, "build_query_runtime", Runtime)
+    monkeypatch.setattr(tui_module, "_new_pane", lambda *_args: pane)
+    monkeypatch.setattr(tui_module, "FramePainter", Screen)
+    monkeypatch.setattr(tui_module, "tui_input_mode", nullcontext)
+    monkeypatch.setattr(tui_module, "read_event", lambda _decoder, _timeout: next(events))
+    monkeypatch.setattr(tui_module, "get_terminal_size", lambda: __import__("os").terminal_size((80, 24)))
+    monkeypatch.setattr(tui_module, "run_custom_filter_editor", editor)
+
+    assert tui_module.run_tui(options, load_translator("en")) == 0
+    assert any(pair == (True, True) for pair in zip(force_flags, force_flags[1:], strict=False)), force_flags
+
+
+def test_dashboard_custom_filter_timeout_forces_restoration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pane = _accepted_metric_help_pane()
+    choice = CustomFilter(
+        "source", LocalizedText("Source", "来源"), (CustomFilterOption("app", LocalizedText("App", "应用")),)
+    )
+    pane.component.runtime = V2Runtime((choice,))
+    force_flags: list[bool] = []
+
+    class Runtime:
+        def cancel(self) -> None:
+            pass
+
+    class Screen:
+        def __init__(self, _stream: object) -> None:
+            pass
+
+        def paint(self, _frame: object, *, force: bool = False, **_kwargs: object) -> None:
+            force_flags.append(force)
+
+        def finish(self) -> None:
+            pass
+
+    events = iter((KeyEvent("m"), KeyEvent("a"), KeyEvent("f"), KeyEvent("\x03")))
+    options = _to_options(build_parser(load_translator("en")).parse_args(["dashboard", "--empty"]))
+    monkeypatch.setattr(tui_module, "build_query_runtime", Runtime)
+    monkeypatch.setattr(tui_module, "_new_pane", lambda *_args: pane)
+    monkeypatch.setattr(tui_module, "FramePainter", Screen)
+    monkeypatch.setattr(tui_module, "tui_input_mode", nullcontext)
+    monkeypatch.setattr(tui_module, "read_event", lambda _decoder, _timeout: next(events))
+    monkeypatch.setattr(tui_module, "get_terminal_size", lambda: __import__("os").terminal_size((80, 24)))
+    monkeypatch.setattr(
+        tui_module, "run_custom_filter_editor", lambda *_args, **_kwargs: (_ for _ in ()).throw(AdjustmentTimeout())
+    )
+
+    assert tui_module.run_tui(options, load_translator("en")) == 0
+    assert force_flags[-1] is True
 
 
 def test_accepted_custom_metric_help_uses_only_committed_v2_metric() -> None:

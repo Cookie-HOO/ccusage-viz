@@ -2,6 +2,10 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from decimal import Decimal
 
+import pytest
+
+import ccusage_viz.custom_monitor as custom_monitor_host
+from ccusage_viz.adjustment_timeout import AdjustmentTimeout
 from ccusage_viz.custom_models import (
     CustomChartDefaults,
     CustomUnit,
@@ -58,6 +62,14 @@ def probe() -> V2ProbeResponse:
     return V2ProbeResponse(
         "router", V2ProbeDescriptor("router-1", "0.1.0", V2Dataset(text, text), (metric,), ())
     )
+
+
+def test_custom_monitor_filter_reader_propagates_idle_timeout() -> None:
+    clock = iter((0.0, 180.0, 180.0))
+    timer = custom_monitor_host.AdjustmentIdleTimer(clock=lambda: next(clock))
+
+    with pytest.raises(AdjustmentTimeout):
+        custom_monitor_host._read_filter_editor_key(lambda _timeout: None, timer)
 
 
 def test_render_source_owned_observation_and_interval_mismatch_notice() -> None:
