@@ -206,6 +206,76 @@ def test_first_window_preserves_unwindowed_custom_body(density):
     assert actual.splitlines()[1:] == expected.splitlines()[1:]
 
 
+def _search_fact_projection() -> CustomChartProjection:
+    def item(
+        key: str,
+        value: int,
+        *,
+        previous: int,
+        description: str | None = None,
+    ) -> CustomProjectedSeries:
+        return CustomProjectedSeries(
+            key,
+            LocalizedText(key.title(), key),
+            (Decimal(value),),
+            previous_total=Decimal(previous),
+            comparison_ready=True,
+            description=LocalizedText(description, description) if description else None,
+            link=f"https://example.com/{key}",
+        )
+
+    return replace(
+        projection(0, comparison=True),
+        series=(
+            item("alpha", 50, previous=20),
+            item("beta", 30, previous=60),
+            item("claude", 20, previous=40, description="Release notes"),
+        ),
+        show_percentage=True,
+    )
+
+
+def _track(line: str, mark: str, empty: str) -> str:
+    return next(part for part in line.split() if mark in part and set(part) <= {mark, empty})
+
+
+def test_direct_search_preserves_rank_share_bar_count_and_link_matching() -> None:
+    model = _search_fact_projection()
+    ctx = replace(context(height=20, width=100), style="bar")
+
+    output = strip_ansi(
+        render_custom_ranking(
+            model,
+            ctx,
+            search_query="example.com/claude",
+            show_visible_count=True,
+        )
+    )
+    claude = next(line for line in output.splitlines() if "Claude" in line)
+    assert claude.lstrip().startswith("3 ")
+    assert "20.0%" in claude
+    assert "Showing 1/3 item(s)" in output
+    assert _track(claude, "█", "░").count("█") == 16
+
+    full = strip_ansi(render_custom_ranking(model, ctx))
+    alpha = next(line for line in full.splitlines() if "Alpha" in line)
+    assert _track(alpha, "█", "░").count("█") == 41
+
+
+def test_direct_and_viewport_search_render_the_same_row_facts() -> None:
+    model = _search_fact_projection()
+    ctx = replace(context(height=20, width=100), style="bar")
+    query = "example.com/claude"
+    direct = strip_ansi(
+        render_custom_ranking(model, ctx, search_query=query, show_visible_count=True)
+    )
+    windowed = strip_ansi(render(model, RankingViewport(), ctx, search=query))
+
+    direct_row = next(line for line in direct.splitlines() if "Claude" in line)
+    viewport_row = next(line for line in windowed.splitlines() if "Claude" in line)
+    assert direct_row == viewport_row
+
+
 def test_viewport_search_preserves_full_facts_and_anchor_after_refresh() -> None:
     def item(
         key: str,
@@ -224,20 +294,7 @@ def test_viewport_search_preserves_full_facts_and_anchor_after_refresh() -> None
             link=f"https://example.com/{key}",
         )
 
-    model = replace(
-        projection(0, comparison=True),
-        series=(
-            item("alpha", 50, previous=20),
-            item("beta", 30, previous=60),
-            item(
-                "claude",
-                20,
-                previous=40,
-                description="Release notes",
-            ),
-        ),
-        show_percentage=True,
-    )
+    model = _search_fact_projection()
     viewport = RankingViewport()
     ctx = context(height=20, width=100, density="detailed")
 
@@ -288,6 +345,45 @@ def test_refresh_restores_top_visible_entry_by_stable_id() -> None:
         index for index, entry in enumerate(viewport.entries) if str(entry.key) == anchor_id
     )
     assert viewport.offset == viewport.starts[refreshed_index]
+
+
+def test_refresh_missing_anchor_falls_back_to_nearest_surviving_row_start() -> None:
+    model = projection(30)
+    viewport = RankingViewport()
+    ctx = context(height=8)
+    render(model, viewport, ctx)
+    anchor_index = 12
+    viewport.offset = viewport.starts[anchor_index] + 1
+
+    refreshed = replace(
+        model,
+        series=tuple(
+            entry for index, entry in enumerate(model.series) if index not in {11, 12, 13}
+        ),
+    )
+    render(refreshed, viewport, ctx)
+
+    nearest_index = next(
+        index for index, entry in enumerate(viewport.entries) if str(entry.key) == "14"
+    )
+    assert viewport.offset == viewport.starts[nearest_index]
+
+
+def test_geometry_change_restores_stable_anchor_at_new_row_start() -> None:
+    model = projection(30, descriptions=True)
+    viewport = RankingViewport()
+    detailed = context(height=14, density="detailed")
+    render(model, viewport, detailed, spacing="line")
+    anchor_index = 12
+    viewport.offset = viewport.starts[anchor_index] + 1
+    anchor_id = str(viewport.entries[anchor_index].key)
+
+    render(model, viewport, replace(detailed, density="minimal"), spacing="compact")
+
+    new_index = next(
+        index for index, entry in enumerate(viewport.entries) if str(entry.key) == anchor_id
+    )
+    assert viewport.offset == viewport.starts[new_index]
 
 
 def test_search_reset_and_hit_identity_and_feedback():
@@ -430,7 +526,7 @@ def test_cached_geometry_matches_first_render_at_each_width() -> None:
     narrow = replace(wide, width=98)
 
     render(model, viewport, wide, spacing="line", scrollbar=True, copied="5")
-    viewport.offset = 17
+    viewport.offset = viewport.starts[5]
 
     def capture(ctx: RenderContext):
         output = render(model, viewport, ctx, spacing="line", scrollbar=True, copied="5")
@@ -654,18 +750,21 @@ def test_style_and_theme_changes_reuse_data_and_geometry(monkeypatch):
     assert viewport.offset == 40
 
 
-def test_density_change_reuses_data_and_preserves_offset_then_clamps():
+def test_density_change_reuses_data_and_preserves_stable_anchor():
     model = projection(100, descriptions=True)
     viewport = RankingViewport()
     render(model, viewport, context(height=16, density="detailed"))
     entries, starts = viewport.entries, viewport.starts
     viewport.offset = 100
+    anchor_index = max(0, next(index for index, start in enumerate(starts) if start > 100) - 1)
+    anchor_id = str(entries[anchor_index].key)
 
     render(model, viewport, context(height=16, density="minimal"))
 
     assert viewport.entries is entries
     assert viewport.starts is not starts
-    assert viewport.offset == min(100, viewport.total_rows - viewport.visible_rows)
+    new_index = next(index for index, entry in enumerate(entries) if str(entry.key) == anchor_id)
+    assert viewport.offset == viewport.starts[new_index]
 
 
 def test_standalone_custom_ranking_does_not_use_dashboard_viewport(monkeypatch):

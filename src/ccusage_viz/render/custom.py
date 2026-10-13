@@ -7,6 +7,7 @@ charts without adapting measurements into token-domain models.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from decimal import Decimal
 from typing import cast
 
@@ -423,21 +424,6 @@ def render_custom_ranking(
                 (_heading(projection, context), context.translator.text("message.custom_no_data"))
             )
         )
-    matching = (
-        projection.series
-        if not search_query
-        else tuple(
-            entry
-            for entry in projection.series
-            if search_query.casefold()
-            in f"{_label(entry, context)} {_localized(entry.description, context) if entry.description else ''}".casefold()
-        )
-    )
-    visible = (
-        matching[entry_offset:]
-        if entry_limit is None
-        else matching[entry_offset : entry_offset + max(0, entry_limit)]
-    )
     presentation_entries = tuple(
         RankingPresentationEntry(
             entry.id,
@@ -456,9 +442,30 @@ def render_custom_ranking(
             ),
             copy_marker=None if entry.is_other else "✓" if entry.id == copied_entry_id else "⊞",
             project_link=None if entry.is_other else entry.link,
+            rank=entry.rank or rank,
         )
-        for entry in visible
+        for rank, entry in enumerate(projection.series, 1)
     )
+    prior = {
+        entry.key: rank
+        for rank, entry in enumerate(
+            sorted(
+                (
+                    entry
+                    for entry in presentation_entries
+                    if entry.previous is not None and not entry.is_other
+                ),
+                key=lambda entry: (-cast(Decimal, entry.previous), str(entry.key)),
+            ),
+            1,
+        )
+    }
+    presentation_entries = tuple(
+        replace(entry, previous_rank=entry.previous_rank or prior.get(entry.key))
+        for entry in presentation_entries
+    )
+    total = sum((entry.current for entry in presentation_entries), start=Decimal())
+    maximum = max((entry.current for entry in presentation_entries), default=Decimal())
     return render_historical_ranking(
         presentation_entries,
         heading=_heading(projection, context).strip(),
@@ -479,12 +486,11 @@ def render_custom_ranking(
         show_new_entries=True,
         compact_labels=False,
         label_max_width=48,
-        entry_offset=0,
-        entry_limit=None,
-        total_entry_count=len(matching),
-        rank_offset=entry_offset,
-        total=sum((entry.total for entry in matching), start=Decimal()),
-        maximum=max((entry.total for entry in matching), default=Decimal()),
+        entry_offset=entry_offset,
+        entry_limit=entry_limit,
+        total_entry_count=len(presentation_entries),
+        total=total,
+        maximum=maximum,
         show_percentage=projection.show_percentage,
     )
 

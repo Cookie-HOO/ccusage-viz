@@ -76,6 +76,23 @@ def render_custom_ranking_viewport(
         item_spacing,
     )
     rebuild_geometry = rebuild_data or viewport.geometry_key != geometry_key
+    anchor_id: str | None = None
+    fallback_ids: tuple[str, ...] = ()
+    if rebuild_geometry and not reset_changed and viewport.entries:
+        anchor_index = max(
+            0,
+            min(
+                len(viewport.entries) - 1,
+                bisect_right(viewport.starts, viewport.offset) - 1,
+            ),
+        )
+        anchor_id = str(viewport.entries[anchor_index].key)
+        fallback_ids = tuple(
+            str(viewport.entries[index].key)
+            for distance in range(1, len(viewport.entries))
+            for index in (anchor_index + distance, anchor_index - distance)
+            if 0 <= index < len(viewport.entries)
+        )
 
     def value(number: int | Decimal) -> str:
         return format_custom_value(
@@ -161,17 +178,6 @@ def render_custom_ranking_viewport(
                 ),
             )
 
-        anchor_id: str | None = None
-        if not reset_changed and viewport.entries:
-            anchor_index = max(
-                0,
-                min(
-                    len(viewport.entries) - 1,
-                    bisect_right(viewport.starts, viewport.offset) - 1,
-                ),
-            )
-            anchor_id = str(viewport.entries[anchor_index].key)
-
         full_entries = tuple(
             replace(prepare_entry(entry), rank=entry.rank or rank)
             for rank, entry in enumerate(projection.series, 1)
@@ -218,18 +224,15 @@ def render_custom_ranking_viewport(
                     columns=viewport.columns,
                 )
             viewport.prepare_lines(descriptions=descriptions_visible, spacing=item_spacing)
-            if rebuild_data and anchor_id is not None:
-                anchor_index = next(
-                    (
-                        index
-                        for index, entry in enumerate(viewport.entries)
-                        if str(entry.key) == anchor_id
-                    ),
-                    None,
-                )
-                if anchor_index is not None:
-                    viewport.offset = viewport.starts[anchor_index]
             viewport.remember_geometry(geometry_key)
+        if anchor_id is not None:
+            new_indexes = {str(entry.key): index for index, entry in enumerate(viewport.entries)}
+            surviving_id = next(
+                (entry_id for entry_id in (anchor_id, *fallback_ids) if entry_id in new_indexes),
+                None,
+            )
+            if surviving_id is not None:
+                viewport.offset = viewport.starts[new_indexes[surviving_id]]
         # render() clamps only after deriving visible_rows from the current
         # chrome and context height; the previous viewport size may be stale.
         viewport.geometry_key = geometry_key
