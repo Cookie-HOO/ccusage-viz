@@ -8,6 +8,7 @@ from ccusage_viz.animation import AnimationSpec
 from ccusage_viz.animation_overlay import OverlayConfig
 from ccusage_viz.core.time import DateRange, local_today, natural_period_start
 from ccusage_viz.core.time import parse_period as parse_core_period
+from ccusage_viz.custom_models import V2HistoricalChartCapability
 from ccusage_viz.errors import UsageError
 from ccusage_viz.project_identity import ProjectAggregation
 
@@ -213,6 +214,7 @@ class CustomChartConfig:
     metric_periods: tuple[str, ...] = ()
     metric_titles: tuple[str, str] | None = None
     ranking_comparison: Literal["full", "rank", "none"] = "full"
+    partition_by: str | None = None
 
 
 HistoricalChartConfig: TypeAlias = TimelineConfig | CalendarConfig | StackConfig | RankingConfig
@@ -523,6 +525,21 @@ def adjust_chart(chart: ChartConfig, key: str, *, demo: bool = False) -> ChartCo
             distribution_granularity=_cycle(values, chart.distribution_granularity, 1),
         )
     return chart
+
+
+def validate_custom_partition_selection(
+    partition_by: str | None,
+    group_by: str | None,
+    capability: V2HistoricalChartCapability,
+) -> None:
+    """Validate locally constructed V2 Ranking partition state."""
+
+    from ccusage_viz.custom_protocol import validate_partition_selection
+
+    try:
+        validate_partition_selection(partition_by, group_by, capability)
+    except ValueError as exc:
+        raise ValueError(str(exc)) from exc
 
 
 def adjust_custom_chart(chart: CustomChartConfig, key: str) -> CustomChartConfig:

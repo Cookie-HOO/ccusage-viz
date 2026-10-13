@@ -219,6 +219,8 @@ class V2ChartRequest:
     command_argv: tuple[str, ...] = ()
     execution_context: tuple[tuple[str, str], ...] = ()
     request_kind: Literal["chart"] = "chart"
+    partition_by: str | None = None
+    partition_declared: bool = False
 
     def __post_init__(self) -> None:
         _require_id(self.request_id, "request ID")
@@ -232,6 +234,14 @@ class V2ChartRequest:
         object.__setattr__(self, "filters", _canonical_filters(self.filters))
 
     def to_wire(self) -> dict[str, object]:
+        query: dict[str, object] = {
+            "filters": {key: list(values) for key, values in self.filters},
+            "group_by": self.group_by,
+            "granularity": self.granularity,
+            "top": self.top,
+        }
+        if self.partition_declared:
+            query["partition_by"] = self.partition_by
         return {
             "protocol": V2_PROTOCOL_VERSION,
             "request_id": self.request_id,
@@ -244,12 +254,7 @@ class V2ChartRequest:
                 "end_date": self.end_date.isoformat(),
                 "period": self.period,
             },
-            "query": {
-                "filters": {key: list(values) for key, values in self.filters},
-                "group_by": self.group_by,
-                "granularity": self.granularity,
-                "top": self.top,
-            },
+            "query": query,
         }
 
     def to_json_bytes(self) -> bytes:
@@ -449,6 +454,11 @@ def canonical_custom_request_key(request: CustomRequest) -> tuple[object, ...]:
             request.group_by,
             request.granularity,
             request.top if isinstance(request, V2ChartRequest) else None,
+            *(
+                (request.partition_declared, request.partition_by)
+                if isinstance(request, V2ChartRequest)
+                else ()
+            ),
         )
     if isinstance(request, V2MonitorRequest):
         return common + (
@@ -679,9 +689,8 @@ def _parse_capabilities(value: object) -> CustomCapabilities:
         }:
             raise CustomProtocolError("ranking comparison must be full, rank, or none")
         show_percentage = chart.get("show_percentage", True)
-        if (
-            (kind != "ranking" and "show_percentage" in chart)
-            or not isinstance(show_percentage, bool)
+        if (kind != "ranking" and "show_percentage" in chart) or not isinstance(
+            show_percentage, bool
         ):
             raise CustomProtocolError("ranking show_percentage must be a boolean")
         if "sort_direction" in chart:
@@ -849,8 +858,8 @@ def _parse_v2_metric(value: object) -> V2MetricDescriptor:
         _parse_localized(source.get("description"), "v2 metric description"),
         _parse_unit(source.get("unit")),
         aggregation,  # type: ignore[arg-type]
-        _parse_v2_capabilities(source.get("capabilities")),
-        _parse_v2_defaults(source.get("defaults")),
+        capabilities := _parse_v2_capabilities(source.get("capabilities")),
+        _parse_v2_defaults(source.get("defaults"), capabilities),
         summary,  # type: ignore[arg-type]
         group_id,
     )
@@ -862,12 +871,27 @@ def _parse_v2_capabilities(value: object) -> V2MetricCapabilities:
         _parse_dimension(item, "v2 group-by dimension")
         for item in _sequence(source.get("group_by"), "v2 capabilities group_by")
     )
+    partition_dimensions = (
+        tuple(
+            _parse_dimension(item, "v2 partition-by dimension")
+            for item in _sequence(source.get("partition_by"), "v2 capabilities partition_by")
+        )
+        if "partition_by" in source
+        else None
+    )
     if "filters" in source:
         raise CustomProtocolError("v2 metric capabilities must not declare filters")
     charts: dict[str, V2HistoricalChartCapability | V2MonitorCapability] = {}
     for kind, raw in _mapping(source.get("charts"), "v2 capabilities charts").items():
         chart = _mapping(raw, f"v2 chart capability {kind}")
         group_by = _group_by_tuple(chart.get("group_by"), f"v2 chart {kind} group_by")
+        partition_by = (
+            _group_by_tuple(chart.get("partition_by"), f"v2 chart {kind} partition_by")
+            if "partition_by" in chart
+            else None
+        )
+        if partition_by is not None and kind != "ranking":
+            raise CustomProtocolError("v2 partition_by is supported only by ranking")
         if "filters" in chart:
             raise CustomProtocolError(f"v2 chart {kind} must not declare filters")
         if kind == "monitor":
@@ -930,9 +954,8 @@ def _parse_v2_capabilities(value: object) -> V2MetricCapabilities:
             }:
                 raise CustomProtocolError("v2 ranking comparison must be full, rank, or none")
             show_percentage = chart.get("show_percentage", True)
-            if (
-                (kind != "ranking" and "show_percentage" in chart)
-                or not isinstance(show_percentage, bool)
+            if (kind != "ranking" and "show_percentage" in chart) or not isinstance(
+                show_percentage, bool
             ):
                 raise CustomProtocolError("v2 ranking show_percentage must be a boolean")
             sort_direction = chart.get("sort_direction", "descending")
@@ -963,14 +986,54 @@ def _parse_v2_capabilities(value: object) -> V2MetricCapabilities:
                 show_percentage,
                 refresh_interval_seconds,
                 sort_direction,  # type: ignore[arg-type]
+                partition_by,
             )
         else:
             raise CustomProtocolError(f"unsupported v2 chart capability: {kind}")
     _unique_ids(dimensions, "v2 group-by dimensions")
-    return V2MetricCapabilities(dimensions, (), charts)
+    if partition_dimensions is not None:
+        _unique_ids(partition_dimensions, "v2 partition-by dimensions")
+    partition_ids = {
+        item.id
+        for item in (partition_dimensions if partition_dimensions is not None else dimensions)
+    }
+    for capability in charts.values():
+        if not isinstance(capability, V2HistoricalChartCapability):
+            continue
+        if capability.partition_by is not None:
+            for identifier in capability.partition_by:
+                if identifier is not None and identifier not in partition_ids:
+                    raise CustomProtocolError(
+                        "v2 ranking partition_by must reference a declared partition dimension"
+                    )
+    return V2MetricCapabilities(dimensions, (), charts, partition_dimensions)
 
 
-def _parse_v2_defaults(value: object) -> dict[str, CustomChartDefaults]:
+def validate_partition_selection(
+    partition_by: str | None,
+    group_by: str | None,
+    capability: V2HistoricalChartCapability | CustomChartCapability,
+) -> None:
+    """Validate one Ranking partition/group selection."""
+
+    supported = capability.partition_by
+    if supported is None:
+        if partition_by is not None:
+            raise CustomProtocolError("partition_by is not supported by this capability")
+        return
+    if partition_by not in supported:
+        if partition_by is None:
+            raise CustomProtocolError("partition_by is required by this capability")
+        raise CustomProtocolError("partition_by is not supported by this capability")
+    if partition_by is not None and group_by is None:
+        raise CustomProtocolError("active partition_by requires a non-null group_by")
+    if partition_by is not None and partition_by == group_by:
+        raise CustomProtocolError("partition_by and group_by must differ")
+
+
+def _parse_v2_defaults(
+    value: object, capabilities: V2MetricCapabilities
+) -> dict[str, CustomChartDefaults]:
     defaults: dict[str, CustomChartDefaults] = {}
     for kind, raw in _mapping(value, "v2 metric defaults").items():
         if kind not in {"timeline", "calendar", "stack", "ranking", "monitor"}:
@@ -988,6 +1051,21 @@ def _parse_v2_defaults(value: object) -> dict[str, CustomChartDefaults]:
         group_by = raw.get("group_by")
         if group_by is not None and not isinstance(group_by, str):
             group_by = None
+        partition_by = raw.get("partition_by")
+        if "partition_by" in raw:
+            if kind != "ranking":
+                raise CustomProtocolError("v2 default partition_by is supported only by ranking")
+            if partition_by is not None and not isinstance(partition_by, str):
+                raise CustomProtocolError("v2 default partition_by must be a string or null")
+            capability = capabilities.charts.get(kind)
+            if not isinstance(capability, V2HistoricalChartCapability):
+                raise CustomProtocolError("v2 default partition_by requires a ranking capability")
+            try:
+                validate_partition_selection(partition_by, group_by, capability)
+            except CustomProtocolError as exc:
+                raise CustomProtocolError(f"v2 default {exc}") from exc
+        else:
+            partition_by = None
         top = raw.get("top")
         if not isinstance(top, int) or isinstance(top, bool) or top < 1:
             top = None
@@ -1010,6 +1088,7 @@ def _parse_v2_defaults(value: object) -> dict[str, CustomChartDefaults]:
             theme,
             window_seconds,
             declared,
+            partition_by,
         )
     return defaults
 
@@ -1169,6 +1248,9 @@ def v2_probe_descriptor_to_wire(descriptor: V2ProbeDescriptor) -> dict[str, obje
         return {
             **common,
             "granularities": list(value.granularities),
+            **(
+                {"partition_by": list(value.partition_by)} if value.partition_by is not None else {}
+            ),
             **({"periods": list(value.periods)} if value.periods else {}),
             **({"max_items": value.max_items} if value.max_items is not None else {}),
             **(
@@ -1220,6 +1302,16 @@ def v2_probe_descriptor_to_wire(descriptor: V2ProbeDescriptor) -> dict[str, obje
                         {"id": item.id, "label": localized(item.label)}
                         for item in metric.capabilities.group_by
                     ],
+                    **(
+                        {
+                            "partition_by": [
+                                {"id": item.id, "label": localized(item.label)}
+                                for item in metric.capabilities.partition_by
+                            ]
+                        }
+                        if metric.capabilities.partition_by is not None
+                        else {}
+                    ),
                     "charts": {
                         kind: capability(item) for kind, item in metric.capabilities.charts.items()
                     },
@@ -1257,6 +1349,7 @@ def _defaults_to_wire(value: CustomChartDefaults) -> dict[str, object]:
     for name, item in (
         ("period", value.period),
         ("group_by", value.group_by),
+        ("partition_by", value.partition_by),
         ("top", value.top),
         ("granularity", value.granularity),
         ("other", value.other),

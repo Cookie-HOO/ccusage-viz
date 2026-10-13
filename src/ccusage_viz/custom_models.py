@@ -76,6 +76,7 @@ class CustomChartCapability:
     show_percentage: bool = True
     refresh_interval_seconds: int | None = None
     sort_direction: Literal["ascending", "descending"] = "descending"
+    partition_by: tuple[str | None, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,6 +91,7 @@ class CustomChartDefaults:
     theme: str | None = None
     window_seconds: int | None = None
     declared: frozenset[str] = frozenset()
+    partition_by: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,6 +123,7 @@ class CustomCapabilities:
     group_by: tuple[CustomDimension, ...]
     filters: tuple[CustomFilter, ...]
     charts: Mapping[str, CustomChartCapability]
+    partition_by: tuple[CustomDimension, ...] | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "charts", MappingProxyType(dict(self.charts)))
@@ -147,6 +150,7 @@ class V2HistoricalChartCapability:
     show_percentage: bool = True
     refresh_interval_seconds: int | None = None
     sort_direction: Literal["ascending", "descending"] = "descending"
+    partition_by: tuple[str | None, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -166,6 +170,7 @@ class V2MetricCapabilities:
     group_by: tuple[CustomDimension, ...]
     filters: tuple[CustomFilter, ...]
     charts: Mapping[str, V2ChartCapability]
+    partition_by: tuple[CustomDimension, ...] | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "charts", MappingProxyType(dict(self.charts)))

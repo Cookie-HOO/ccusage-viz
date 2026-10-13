@@ -57,6 +57,7 @@ from ccusage_viz.options import (
     pane_kind,
     replace_chart_filters,
     resolve_date_range,
+    validate_custom_partition_selection,
 )
 
 
@@ -80,6 +81,50 @@ def _probe_descriptor() -> CustomProbeDescriptor:
         },
         (),
     )
+
+
+def test_custom_partition_selection_validation_rejects_invalid_combinations() -> None:
+    capability = V2HistoricalChartCapability(
+        ("day",),
+        (None, "logical_model", "real_model"),
+        (),
+        partition_by=(None, "logical_model"),
+    )
+
+    validate_custom_partition_selection(None, None, capability)
+    validate_custom_partition_selection("logical_model", "real_model", capability)
+    with pytest.raises(ValueError, match="requires.*group_by"):
+        validate_custom_partition_selection("logical_model", None, capability)
+    with pytest.raises(ValueError, match="must differ"):
+        validate_custom_partition_selection("logical_model", "logical_model", capability)
+    with pytest.raises(ValueError, match="supported"):
+        validate_custom_partition_selection("missing", "real_model", capability)
+
+
+def test_custom_chart_config_appends_partition_without_breaking_positional_fields() -> None:
+    source = CustomCommandSource("weread", ("reader", "ccuv"))
+    chart = CustomChartConfig(
+        "ranking",
+        source,
+        resolve_date_range("ranking", period="14d", since=None, until=None),
+        (),
+        ChartPresentation(),
+        "real_model",
+        3,
+        "show",
+        "day",
+        "show",
+        frozenset(),
+        "tokens",
+        "comparisons",
+        (),
+        None,
+        "full",
+        "logical_model",
+    )
+
+    assert chart.group_by == "real_model"
+    assert chart.partition_by == "logical_model"
 
 
 def test_custom_source_requires_dataset_and_nonempty_argv() -> None:
@@ -255,7 +300,9 @@ def test_custom_ranking_top_adjusts_without_an_explicit_grouping() -> None:
 
 def test_stack_defaults_to_composition_and_cycles_native_groupings() -> None:
     date_range = resolve_date_range("stack", period="14d", since=None, until=None)
-    source = StandaloneLaunch(ProcessConfig(), StandaloneHostConfig(), StackConfig("stack", date_range))
+    source = StandaloneLaunch(
+        ProcessConfig(), StandaloneHostConfig(), StackConfig("stack", date_range)
+    )
 
     assert source.chart.by == "composition"
     assert adjust_standalone(source, "b").chart.by == "agent"
@@ -265,7 +312,9 @@ def test_ranking_period_cycle_includes_today_only() -> None:
     source = StandaloneLaunch(
         ProcessConfig(),
         StandaloneHostConfig(),
-        RankingConfig("ranking", resolve_date_range("ranking", period="7d", since=None, until=None)),
+        RankingConfig(
+            "ranking", resolve_date_range("ranking", period="7d", since=None, until=None)
+        ),
     )
 
     adjusted = adjust_standalone(source, "P")
@@ -275,10 +324,16 @@ def test_ranking_period_cycle_includes_today_only() -> None:
 
 
 def test_ranking_period_cycle_includes_all_with_unix_epoch_anchor() -> None:
-    chart = RankingConfig("ranking", resolve_date_range("ranking", period="1y", since=None, until=None))
+    chart = RankingConfig(
+        "ranking", resolve_date_range("ranking", period="1y", since=None, until=None)
+    )
 
-    all_time = adjust_standalone(StandaloneLaunch(ProcessConfig(), StandaloneHostConfig(), chart), "p").chart
-    back_to_year = adjust_standalone(StandaloneLaunch(ProcessConfig(), StandaloneHostConfig(), all_time), "P").chart
+    all_time = adjust_standalone(
+        StandaloneLaunch(ProcessConfig(), StandaloneHostConfig(), chart), "p"
+    ).chart
+    back_to_year = adjust_standalone(
+        StandaloneLaunch(ProcessConfig(), StandaloneHostConfig(), all_time), "P"
+    ).chart
 
     assert all_time.date_range.period == "all"
     assert all_time.date_range.since == date(1971, 1, 1)
@@ -604,19 +659,30 @@ def test_period_keys_adjust_through_the_shared_historical_cycle() -> None:
     assert weekly.chart.date_range.period == "8w"
     assert adjust_standalone(weekly, "P").chart.date_range.period == "8w"
     week_to_date = adjust_standalone(
-        replace(source, chart=replace(source.chart, date_range=replace(source.chart.date_range, period="365d"))),
+        replace(
+            source,
+            chart=replace(source.chart, date_range=replace(source.chart.date_range, period="365d")),
+        ),
         "p",
     )
     assert week_to_date.chart.date_range.period == "1w"
     assert week_to_date.chart.date_range.since == date(2026, 9, 7)
     assert adjust_standalone(week_to_date, "p").chart.date_range.period == "1mo"
-    assert adjust_standalone(
-        adjust_standalone(week_to_date, "p"), "p"
-    ).chart.date_range.period == "1y"
-    assert adjust_standalone(
-        replace(source, chart=replace(source.chart, date_range=replace(source.chart.date_range, period="7d"))),
-        "P",
-    ).chart.date_range.period == "1y"
+    assert (
+        adjust_standalone(adjust_standalone(week_to_date, "p"), "p").chart.date_range.period == "1y"
+    )
+    assert (
+        adjust_standalone(
+            replace(
+                source,
+                chart=replace(
+                    source.chart, date_range=replace(source.chart.date_range, period="7d")
+                ),
+            ),
+            "P",
+        ).chart.date_range.period
+        == "1y"
+    )
     assert adjust_standalone(timeline(rolling=False), "P") == timeline(rolling=False)
 
 

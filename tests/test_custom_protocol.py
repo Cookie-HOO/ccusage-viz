@@ -227,7 +227,183 @@ def test_v2_ranking_sort_direction_parses_and_round_trips() -> None:
     ranking = descriptor.metrics[0].capabilities.charts["ranking"]
 
     assert ranking.sort_direction == "ascending"  # type: ignore[union-attr]
-    assert v2_probe_descriptor_to_wire(descriptor)["metrics"][0]["capabilities"]["charts"]["ranking"]["sort_direction"] == "ascending"  # type: ignore[index]
+    assert (
+        v2_probe_descriptor_to_wire(descriptor)["metrics"][0]["capabilities"]["charts"]["ranking"][
+            "sort_direction"
+        ]
+        == "ascending"
+    )  # type: ignore[index]
+
+
+def test_v2_ranking_parses_partition_catalog_capability_and_default() -> None:
+    value = v2_probe_descriptor()
+    metric = value["metrics"][0]
+    metric["capabilities"]["partition_by"] = [
+        {"id": "logical_model", "label": text("Logical model", "逻辑模型")}
+    ]
+    metric["capabilities"]["charts"] = {
+        "ranking": {
+            "granularities": ["day"],
+            "group_by": ["real_model"],
+            "partition_by": [None, "logical_model"],
+        }
+    }
+    metric["defaults"] = {
+        "ranking": {
+            "period": "14d",
+            "group_by": "real_model",
+            "partition_by": "logical_model",
+            "top": 3,
+        }
+    }
+
+    descriptor = parse_v2_probe_descriptor(value)
+    parsed = descriptor.metrics[0]
+
+    assert parsed.capabilities.partition_by[0].id == "logical_model"
+    assert parsed.capabilities.charts["ranking"].partition_by == (None, "logical_model")
+    assert parsed.defaults["ranking"].partition_by == "logical_model"
+
+
+def test_v2_ranking_partition_catalog_falls_back_to_grouping_catalog() -> None:
+    value = v2_probe_descriptor()
+    metric = value["metrics"][0]
+    metric["capabilities"]["group_by"].append(
+        {"id": "logical_model", "label": text("Logical model", "逻辑模型")}
+    )
+    metric["capabilities"]["charts"] = {
+        "ranking": {
+            "granularities": ["day"],
+            "group_by": ["real_model"],
+            "partition_by": [None, "logical_model"],
+        }
+    }
+
+    parsed = parse_v2_probe_descriptor(value).metrics[0]
+
+    assert parsed.capabilities.partition_by is None
+    assert parsed.capabilities.charts["ranking"].partition_by == (None, "logical_model")
+
+
+def test_v2_ranking_explicit_partition_catalog_takes_precedence() -> None:
+    value = v2_probe_descriptor()
+    metric = value["metrics"][0]
+    metric["capabilities"]["group_by"].append(
+        {"id": "group_only", "label": text("Group only", "仅分组")}
+    )
+    metric["capabilities"]["partition_by"] = [
+        {"id": "partition_only", "label": text("Partition only", "仅分区")}
+    ]
+    metric["capabilities"]["charts"] = {
+        "ranking": {
+            "granularities": ["day"],
+            "group_by": ["real_model"],
+            "partition_by": ["group_only"],
+        }
+    }
+
+    with pytest.raises(CustomProtocolError, match="partition_by.*declared"):
+        parse_v2_probe_descriptor(value)
+
+
+def test_v2_partition_rejects_unknown_ids_and_nonranking_declarations() -> None:
+    value = v2_probe_descriptor()
+    value["metrics"][0]["capabilities"]["charts"] = {
+        "ranking": {
+            "granularities": ["day"],
+            "group_by": ["real_model"],
+            "partition_by": ["missing"],
+        }
+    }
+    with pytest.raises(CustomProtocolError, match="partition_by.*declared"):
+        parse_v2_probe_descriptor(value)
+
+    value = v2_probe_descriptor()
+    value["metrics"][0]["capabilities"]["charts"] = {
+        "timeline": {
+            "granularities": ["day"],
+            "group_by": ["real_model"],
+            "partition_by": [None],
+        }
+    }
+    with pytest.raises(CustomProtocolError, match="partition_by.*ranking"):
+        parse_v2_probe_descriptor(value)
+
+
+def test_v2_ranking_rejects_invalid_partition_defaults() -> None:
+    value = v2_probe_descriptor()
+    metric = value["metrics"][0]
+    metric["capabilities"]["group_by"].append(
+        {"id": "logical_model", "label": text("Logical model", "逻辑模型")}
+    )
+    metric["capabilities"]["charts"] = {
+        "ranking": {
+            "granularities": ["day"],
+            "group_by": [None, "real_model", "logical_model"],
+            "partition_by": ["logical_model"],
+        }
+    }
+
+    metric["defaults"] = {"ranking": {"partition_by": "logical_model", "group_by": None}}
+    with pytest.raises(CustomProtocolError, match="requires.*group_by"):
+        parse_v2_probe_descriptor(value)
+
+    metric["defaults"] = {"ranking": {"partition_by": "logical_model", "group_by": "logical_model"}}
+    with pytest.raises(CustomProtocolError, match="must differ"):
+        parse_v2_probe_descriptor(value)
+
+    metric["defaults"] = {"ranking": {"partition_by": "missing", "group_by": "real_model"}}
+    with pytest.raises(CustomProtocolError, match="partition_by.*supported"):
+        parse_v2_probe_descriptor(value)
+
+
+def test_v2_required_partition_rejects_null_default_and_nonranking_default() -> None:
+    value = v2_probe_descriptor()
+    metric = value["metrics"][0]
+    metric["capabilities"]["group_by"].append(
+        {"id": "logical_model", "label": text("Logical model", "逻辑模型")}
+    )
+    metric["capabilities"]["charts"] = {
+        "ranking": {
+            "granularities": ["day"],
+            "group_by": ["real_model"],
+            "partition_by": ["logical_model"],
+        }
+    }
+    metric["defaults"] = {"ranking": {"partition_by": None, "group_by": "real_model"}}
+    with pytest.raises(CustomProtocolError, match="partition_by.*required"):
+        parse_v2_probe_descriptor(value)
+
+    value = v2_probe_descriptor()
+    value["metrics"][0]["capabilities"]["charts"] = {
+        "timeline": {"granularities": ["day"], "group_by": ["real_model"]}
+    }
+    value["metrics"][0]["defaults"] = {
+        "timeline": {"partition_by": "real_model", "group_by": "real_model"}
+    }
+    with pytest.raises(CustomProtocolError, match="partition_by.*ranking"):
+        parse_v2_probe_descriptor(value)
+
+
+def test_v2_request_omits_undeclared_partition_but_emits_declared_null() -> None:
+    common = {
+        "request_id": "chart-v2-partition",
+        "dataset_id": "router",
+        "metric_id": "tokens",
+        "timezone": "Asia/Shanghai",
+        "start_date": date(2026, 10, 1),
+        "end_date": date(2026, 10, 8),
+        "partition_by": None,
+    }
+    old = V2ChartRequest(**common, partition_declared=False)
+    aware = V2ChartRequest(**common, partition_declared=True)
+
+    assert "partition_by" not in old.to_wire()["query"]
+    assert aware.to_wire()["query"]["partition_by"] is None
+    assert canonical_custom_request_key(old) != canonical_custom_request_key(aware)
+    assert canonical_custom_request_key(aware) != canonical_custom_request_key(
+        V2ChartRequest(**{**common, "partition_by": "logical_model"}, partition_declared=True)
+    )
 
 
 def test_v2_ranking_rejects_invalid_sort_direction() -> None:
@@ -242,9 +418,7 @@ def test_v2_ranking_rejects_invalid_sort_direction() -> None:
 
 def test_v2_metric_groups_and_references_round_trip() -> None:
     value = v2_probe_descriptor()
-    value["metric_groups"] = [
-        {"id": "router-throughput", "title": text("Throughput", "吞吐量")}
-    ]
+    value["metric_groups"] = [{"id": "router-throughput", "title": text("Throughput", "吞吐量")}]
     value["metrics"][0]["group_id"] = "router-throughput"
 
     descriptor = parse_v2_probe_descriptor(value)
@@ -312,7 +486,10 @@ def test_v2_probe_and_monitor_wire_round_trip() -> None:
 
 def test_v2_monitor_response_parses_optional_group_description() -> None:
     request = V2MonitorRequest(
-        "monitor-desc", "router", "tokens", "Asia/Shanghai",
+        "monitor-desc",
+        "router",
+        "tokens",
+        "Asia/Shanghai",
         datetime(2026, 10, 7, 14, 0, tzinfo=UTC),
     )
     response = {
@@ -339,13 +516,18 @@ def test_v2_monitor_response_parses_optional_group_description() -> None:
     }
     parsed = parse_custom_response(json.dumps(response).encode(), request)
     assert isinstance(parsed, V2MonitorResponse)
-    assert parsed.observation.groups[0].description == LocalizedText("Release validation", "发布验证")
+    assert parsed.observation.groups[0].description == LocalizedText(
+        "Release validation", "发布验证"
+    )
     assert parsed.observation.groups[0].display is None
 
 
 def test_v2_monitor_response_parses_optional_group_display() -> None:
     request = V2MonitorRequest(
-        "monitor-disp", "router", "tokens", "Asia/Shanghai",
+        "monitor-disp",
+        "router",
+        "tokens",
+        "Asia/Shanghai",
         datetime(2026, 10, 7, 14, 0, tzinfo=UTC),
     )
     response = {
@@ -378,7 +560,10 @@ def test_v2_monitor_response_parses_optional_group_display() -> None:
 
 def test_v2_monitor_response_normalizes_empty_group_description() -> None:
     request = V2MonitorRequest(
-        "monitor-norm", "router", "tokens", "Asia/Shanghai",
+        "monitor-norm",
+        "router",
+        "tokens",
+        "Asia/Shanghai",
         datetime(2026, 10, 7, 14, 0, tzinfo=UTC),
     )
     response = {
@@ -410,7 +595,10 @@ def test_v2_monitor_response_normalizes_empty_group_description() -> None:
 
 def test_v2_monitor_response_rejects_malformed_group_description() -> None:
     request = V2MonitorRequest(
-        "monitor-mal", "router", "tokens", "Asia/Shanghai",
+        "monitor-mal",
+        "router",
+        "tokens",
+        "Asia/Shanghai",
         datetime(2026, 10, 7, 14, 0, tzinfo=UTC),
     )
     response = {
