@@ -1,5 +1,5 @@
 import json
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, replace
 from datetime import UTC, date, datetime
 from decimal import Decimal
 
@@ -570,6 +570,30 @@ def test_grouped_v2_ranking_errors_include_the_complete_failing_path() -> None:
     group["description"] = {"en": "English only"}
     root["data"] = {"groups": [group]}
     with pytest.raises(CustomProtocolError, match=r"data\.groups\[0\]\.description zh-CN"):
+        parse_custom_response(json.dumps(root).encode(), request)
+
+
+def test_flat_v2_ranking_applies_max_items_with_multiple_historical_capabilities() -> None:
+    request = partitioned_ranking_request(
+        partition_by=None,
+        partition_declared=False,
+        chart_kind="ranking",
+    )
+    assert "partition_by" not in request.to_wire()["query"]
+    assert "chart_kind" not in request.to_wire()
+    assert canonical_custom_request_key(request) != canonical_custom_request_key(
+        replace(request, chart_kind="timeline")
+    )
+
+    root = v2_ranking_response_root(request, max_items=2)
+    metric = root["descriptor"]["metrics"][0]  # type: ignore[index]
+    metric["capabilities"]["charts"]["timeline"] = {  # type: ignore[index]
+        "granularities": ["day"],
+        "group_by": ["real_model"],
+    }
+    root["data"] = {"series": [ranking_series("a"), ranking_series("b"), ranking_series("c")]}
+
+    with pytest.raises(CustomProtocolError, match="data must not contain more than 2 series"):
         parse_custom_response(json.dumps(root).encode(), request)
 
 

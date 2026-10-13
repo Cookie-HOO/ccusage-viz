@@ -222,6 +222,7 @@ class V2ChartRequest:
     request_kind: Literal["chart"] = "chart"
     partition_by: str | None = None
     partition_declared: bool = False
+    chart_kind: Literal["timeline", "calendar", "stack", "ranking"] | None = None
 
     def __post_init__(self) -> None:
         _require_id(self.request_id, "request ID")
@@ -456,7 +457,7 @@ def canonical_custom_request_key(request: CustomRequest) -> tuple[object, ...]:
             request.granularity,
             request.top if isinstance(request, V2ChartRequest) else None,
             *(
-                (request.partition_declared, request.partition_by)
+                (request.partition_declared, request.partition_by, request.chart_kind)
                 if isinstance(request, V2ChartRequest)
                 else ()
             ),
@@ -503,7 +504,9 @@ def parse_custom_response(raw: bytes, request: CustomRequest) -> CustomResponse:
     if isinstance(request, V2ChartRequest):
         metric_id = _response_metric_id(root, request.metric_id)
         descriptor = parse_v2_probe_descriptor(root.get("descriptor"))
-        metric, _capability = _validate_v2_query_descriptor(descriptor, metric_id, "chart")
+        metric, _capability = _validate_v2_query_descriptor(
+            descriptor, metric_id, request.chart_kind or "chart"
+        )
         ranking_capability = (
             metric.capabilities.charts.get("ranking")
             if _is_ranking_request(request, metric)
@@ -623,11 +626,16 @@ def _validate_v2_query_descriptor(
 def _is_ranking_request(request: V2ChartRequest, metric: V2MetricDescriptor) -> bool:
     """Identify Ranking from request-only fields and the response descriptor.
 
-    V2 chart requests intentionally have no chart-kind field. Partition declaration is
-    Ranking-only; for old flat requests, Ranking is unambiguous only when it is the sole
-    historical capability. This preserves old multi-chart response behavior.
+    The optional in-process chart kind disambiguates flat requests without changing the
+    wire format. Legacy callers without it retain descriptor-based inference.
     """
 
+    if request.chart_kind is not None:
+        if (
+            request.partition_declared or request.partition_by is not None
+        ) and request.chart_kind != "ranking":
+            raise CustomProtocolError("partitioned data requires a v2 ranking request")
+        return request.chart_kind == "ranking"
     if request.partition_declared or request.partition_by is not None:
         if not isinstance(metric.capabilities.charts.get("ranking"), V2HistoricalChartCapability):
             raise CustomProtocolError("partitioned data requires a v2 ranking capability")
