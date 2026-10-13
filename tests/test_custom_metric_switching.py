@@ -184,7 +184,7 @@ def test_uses_the_only_declared_period_when_target_has_no_default() -> None:
     assert normalize_switch_config(config(), target, "period").date_range.period == "all"  # type: ignore[union-attr]
 
 
-def test_normalizes_partition_and_group_without_collisions() -> None:
+def test_normalizes_partition_and_group_atomically_without_collisions() -> None:
     target = V2MetricDescriptor(
         "updated_days",
         TEXT,
@@ -209,10 +209,34 @@ def test_normalizes_partition_and_group_without_collisions() -> None:
     assert normalization_category("query.partition_by") == "partition_by"
     partitioned = normalize_switch_config(current, target, "partition_by")
     assert partitioned is not None
-    assert partitioned.partition_by == "logical"
-    grouped = normalize_switch_config(partitioned, target, "group_by")
-    assert grouped is not None
-    assert grouped.group_by == "real"
+    assert (partitioned.partition_by, partitioned.group_by) == ("logical", "real")
+
+
+def test_required_partition_without_defaults_chooses_first_legal_pair() -> None:
+    target = V2MetricDescriptor(
+        "updated_days",
+        TEXT,
+        TEXT,
+        UNIT,
+        "sum",
+        V2MetricCapabilities(
+            (),
+            (),
+            {
+                "ranking": capability(
+                    group_by=("logical", "real"),
+                    partition_by=("logical",),
+                )
+            },
+        ),
+        {},
+        group_id="github",
+    )
+
+    normalized = normalize_switch_config(config(), target, "partition_by")
+
+    assert normalized is not None
+    assert (normalized.partition_by, normalized.group_by) == ("logical", "real")
 
 
 def test_unknown_or_unchanged_default_does_not_normalize() -> None:

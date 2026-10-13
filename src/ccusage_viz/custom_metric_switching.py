@@ -95,43 +95,41 @@ def normalize_switch_config(
             else resolve_date_range(config.kind, period=period, since=None, until=None)
         )
         updated = replace(config, date_range=date_range)
-    elif category == "partition_by":
+    elif category in {"partition_by", "group_by"}:
         capability = target.capabilities.charts.get(config.kind)
         if not isinstance(capability, V2HistoricalChartCapability):
             return None
-        choices = capability.partition_by
-        if choices is None:
-            partition_by = None
+        partition_choices = capability.partition_by
+        if partition_choices is None:
+            partition_candidates: tuple[str | None, ...] = (None,)
         else:
-            preferred = defaults.partition_by if defaults is not None else None
-            if preferred in choices:
-                partition_by = preferred
-            elif None in choices:
-                partition_by = None
-            else:
-                partition_by = next((choice for choice in choices if choice is not None), None)
-                if partition_by is None:
-                    return None
-        updated = replace(config, partition_by=partition_by)
-    elif category == "group_by":
-        capability = target.capabilities.charts.get(config.kind)
-        if not isinstance(capability, V2HistoricalChartCapability):
-            return None
-        preferred = defaults.group_by if defaults is not None else None
-        if preferred in capability.group_by and preferred != config.partition_by:
-            group_by = preferred
-        else:
+            preferred_partition = defaults.partition_by if defaults is not None else None
+            partition_candidates = tuple(
+                dict.fromkeys(
+                    choice
+                    for choice in (preferred_partition, config.partition_by, *partition_choices)
+                    if choice in partition_choices
+                )
+            )
+        preferred_group = defaults.group_by if defaults is not None else None
+        for partition_by in partition_candidates:
             group_by = next(
                 (
                     choice
-                    for choice in capability.group_by
-                    if choice is not None and choice != config.partition_by
+                    for choice in dict.fromkeys(
+                        (preferred_group, config.group_by, *capability.group_by)
+                    )
+                    if choice in capability.group_by
+                    and (partition_by is None or choice != partition_by)
+                    and (partition_by is None or choice is not None)
                 ),
                 None,
             )
-            if config.partition_by is not None and group_by is None:
-                return None
-        updated = replace(config, group_by=group_by)
+            if partition_by is None or group_by is not None:
+                updated = replace(config, partition_by=partition_by, group_by=group_by)
+                break
+        else:
+            return None
     elif defaults is None:
         return None
     elif category == "granularity" and defaults.granularity is not None:

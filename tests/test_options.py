@@ -156,6 +156,77 @@ def test_custom_probe_defaults_apply_to_an_unconfigured_ranking_chart() -> None:
     assert resolved.top == 10
 
 
+def test_custom_probe_partition_default_does_not_overwrite_explicit_grouping() -> None:
+    text = LocalizedText("Router", "路由")
+    descriptor = CustomProbeDescriptor(
+        "router-1",
+        "1.0",
+        CustomDataset(text, text, CustomUnit("token", text, "suffix", 0)),
+        CustomCapabilities(
+            (),
+            (),
+            {
+                "ranking": CustomChartCapability(
+                    ("day",),
+                    ("logical_model", "real_model"),
+                    (),
+                    partition_by=("logical_model", "provider"),
+                )
+            },
+        ),
+        {
+            "ranking": CustomChartDefaults(
+                "14d", "real_model", 10, partition_by="logical_model"
+            )
+        },
+        (),
+    )
+    initial = CustomChartConfig(
+        "ranking",
+        CustomCommandSource("router", ("router",)),
+        resolve_date_range("ranking", period="14d", since=None, until=None),
+        group_by="logical_model",
+        initial_explicit=frozenset({"group_by"}),
+    )
+
+    resolved = apply_custom_probe_defaults(initial, descriptor, timezone="UTC")
+
+    assert resolved.group_by == "logical_model"
+    assert resolved.partition_by == "provider"
+
+
+def test_required_partition_capability_without_defaults_chooses_legal_pair() -> None:
+    text = LocalizedText("Router", "路由")
+    descriptor = CustomProbeDescriptor(
+        "router-1",
+        "1.0",
+        CustomDataset(text, text, CustomUnit("token", text, "suffix", 0)),
+        CustomCapabilities(
+            (),
+            (),
+            {
+                "ranking": CustomChartCapability(
+                    ("day",),
+                    ("logical_model", "real_model"),
+                    (),
+                    partition_by=("logical_model",),
+                )
+            },
+        ),
+        {},
+        (),
+    )
+    initial = CustomChartConfig(
+        "ranking",
+        CustomCommandSource("router", ("router",)),
+        resolve_date_range("ranking", period="14d", since=None, until=None),
+    )
+
+    resolved = apply_custom_probe_defaults(initial, descriptor, timezone="UTC")
+
+    assert (resolved.partition_by, resolved.group_by) == ("logical_model", "real_model")
+
+
 def test_custom_probe_defaults_preserve_explicit_range_grouping_and_top() -> None:
     source = CustomCommandSource("weread", ("reader", "ccuv"))
     initial = CustomChartConfig(

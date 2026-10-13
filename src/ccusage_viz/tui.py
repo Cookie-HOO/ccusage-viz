@@ -4875,10 +4875,7 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
             trigger=query_trigger(operation.trigger),
             process=options.process,
             request_id_suffix=":comparison" if purpose == "comparison" else "",
-            partition_declared=(
-                component.capability is not None
-                and component.capability.partition_by is not None
-            ),
+            partition_declared=component.partition_declared_for_request,
         )
         handle = runtime.submit(intent)
         return (
@@ -5218,10 +5215,7 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
                             trigger=query_trigger(LifecycleTrigger.CONFIGURATION),
                             process=options.process,
                             request_id_suffix=":comparison",
-                            partition_declared=(
-                                component.capability is not None
-                                and component.capability.partition_by is not None
-                            ),
+                            partition_declared=component.partition_declared_for_request,
                         )
                         comparison_outcome = _await_custom_submission(
                             runtime.submit(intent), operation.generation, "comparison"
@@ -5922,10 +5916,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             trigger=query_trigger(operation.trigger),
             process=pane.process,
             request_id_suffix=":comparison" if purpose == "comparison" else "",
-            partition_declared=(
-                pane.component.capability is not None
-                and pane.component.capability.partition_by is not None
-            ),
+            partition_declared=pane.component.partition_declared_for_request,
         )
         handle = runtime.submit(intent)
         return (

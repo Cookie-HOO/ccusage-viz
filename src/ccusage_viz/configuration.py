@@ -76,41 +76,60 @@ def apply_custom_probe_defaults(
     """Apply compatible Dataset suggestions to an initial historical chart."""
     defaults = descriptor.defaults.get(config.kind)
     capability = descriptor.capabilities.charts.get(config.kind)
-    if defaults is None or capability is None:
+    if capability is None:
         return config
 
     explicit = config.initial_explicit
-    partition_by = config.partition_by
     partition_choices = getattr(capability, "partition_by", None)
-    if (
-        "partition_by" not in explicit
-        and partition_choices is not None
-        and _declared(defaults, "partition_by")
-        and defaults.partition_by in partition_choices
-    ):
-        partition_by = defaults.partition_by
-    group_by = config.group_by
-    if (
-        "group_by" not in explicit
-        and _declared(defaults, "group_by")
-        and defaults.group_by in capability.group_by
-        and defaults.group_by != partition_by
-    ):
-        group_by = defaults.group_by
-    if partition_by is not None and group_by == partition_by:
-        group_by = next(
-            (
-                choice
-                for choice in capability.group_by
-                if choice is not None and choice != partition_by
-            ),
-            None,
+    if "partition_by" in explicit:
+        partition_candidates = (config.partition_by,)
+    elif partition_choices is None:
+        partition_candidates = (None,)
+    else:
+        preferred_partition = (
+            defaults.partition_by
+            if defaults is not None and _declared(defaults, "partition_by")
+            else None
         )
-    if partition_by is not None and group_by is None:
-        partition_by = None
+        partition_candidates = tuple(
+            dict.fromkeys(
+                choice
+                for choice in (preferred_partition, config.partition_by, *partition_choices)
+                if choice in partition_choices
+            )
+        )
+    if "group_by" in explicit:
+        group_candidates = (config.group_by,)
+    else:
+        preferred_group = (
+            defaults.group_by
+            if defaults is not None and _declared(defaults, "group_by")
+            else None
+        )
+        fallback_groups = capability.group_by if any(
+            choice is not None for choice in partition_candidates
+        ) else ()
+        group_candidates = tuple(
+            dict.fromkeys(
+                choice
+                for choice in (preferred_group, config.group_by, *fallback_groups)
+                if choice in capability.group_by
+            )
+        )
+    partition_by, group_by = next(
+        (
+            (partition, group)
+            for partition in partition_candidates
+            for group in group_candidates
+            if (partition is None or partition != group)
+            and (partition is None or group is not None)
+        ),
+        (config.partition_by, config.group_by),
+    )
     top = config.top
     if (
-        "top" not in explicit
+        defaults is not None
+        and "top" not in explicit
         and _declared(defaults, "top")
         and defaults.top is not None
         and group_by is not None
@@ -120,7 +139,8 @@ def apply_custom_probe_defaults(
     date_range = config.date_range
     supported_periods = getattr(capability, "periods", ())
     if (
-        not explicit & {"period", "since", "until"}
+        defaults is not None
+        and not explicit & {"period", "since", "until"}
         and defaults.period is not None
         and (defaults.period != "all" or defaults.period in supported_periods)
         and (not supported_periods or defaults.period in supported_periods)
@@ -135,14 +155,16 @@ def apply_custom_probe_defaults(
             )
     granularity = config.granularity
     if (
-        "granularity" not in explicit
+        defaults is not None
+        and "granularity" not in explicit
         and _declared(defaults, "granularity")
         and defaults.granularity in capability.granularities
     ):
         granularity = defaults.granularity
     other = config.other
     if (
-        config.kind in {"timeline", "stack", "ranking"}
+        defaults is not None
+        and config.kind in {"timeline", "stack", "ranking"}
         and "other" not in explicit
         and _declared(defaults, "other")
         and defaults.other is not None
@@ -150,14 +172,16 @@ def apply_custom_probe_defaults(
         other = defaults.other
     theme = config.presentation.theme
     if (
-        "color_scheme" not in explicit
+        defaults is not None
+        and "color_scheme" not in explicit
         and _declared(defaults, "theme")
         and defaults.theme in COLOR_SCHEMES
     ):
         theme = defaults.theme
     style = config.presentation.style
     if (
-        "style" not in explicit
+        defaults is not None
+        and "style" not in explicit
         and _declared(defaults, "style")
         and defaults.style in compatible_styles(config.kind, group_by)
     ):

@@ -756,19 +756,30 @@ def _parse_pane(value: object) -> PaneConfig:
             raise DashboardPresetValidationError(
                 "custom.metric_titles must contain exactly two strings"
             )
+        chart_kind = _choice(
+            custom_wire["chart_kind"],
+            ("timeline", "calendar", "stack", "ranking", "monitor"),
+            "custom.chart_kind",
+        )
+        group_by = _optional_string(custom_wire["group_by"], "custom.group_by")
+        partition_by = _optional_string(
+            custom_wire.get("partition_by"), "custom.partition_by"
+        )
+        if partition_by is not None and group_by is None:
+            raise DashboardPresetValidationError(
+                "custom.partition_by requires a non-null custom.group_by"
+            )
+        if partition_by is not None and partition_by == group_by:
+            raise DashboardPresetValidationError(
+                "custom.partition_by and custom.group_by must differ"
+            )
         chart = CustomChartConfig(
-            _choice(
-                custom_wire["chart_kind"],
-                ("timeline", "calendar", "stack", "ranking", "monitor"),
-                "custom.chart_kind",
-            ),
+            chart_kind,
             source,
             _date_range_parse(custom_wire["date_range"]),
             _custom_filters_parse(custom_wire["filters"]),
-            _presentation_parse(
-                custom_wire["presentation"], _string(custom_wire["chart_kind"], "custom.chart_kind")
-            ),
-            _optional_string(custom_wire["group_by"], "custom.group_by"),
+            _presentation_parse(custom_wire["presentation"], chart_kind),
+            group_by,
             _optional_int(custom_wire["top"], "custom.top", minimum=1),
             _choice(custom_wire["other"], ("show", "hide"), "custom.other"),
             _choice(custom_wire["granularity"], GRANULARITIES, "custom.granularity"),
@@ -782,7 +793,7 @@ def _parse_pane(value: object) -> PaneConfig:
             ),
             metric_periods=_string_list(custom_wire["metric_periods"], "custom.metric_periods"),
             metric_titles=titles,
-            partition_by=_optional_string(custom_wire.get("partition_by"), "custom.partition_by"),
+            partition_by=partition_by,
         )
         return CustomChartPaneConfig(chart, *attachment)
     if kind == "animation":

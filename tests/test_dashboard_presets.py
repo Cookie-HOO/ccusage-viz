@@ -226,6 +226,29 @@ def test_custom_partition_round_trips_and_old_preset_remains_flat() -> None:
     assert old.chart.partition_by is None
 
 
+def test_custom_partition_preset_rejects_missing_or_equal_grouping() -> None:
+    chart = CustomChartConfig(
+        "ranking",
+        _installed_source(),
+        RANGE,
+        group_by="real_model",
+        partition_by="logical_model",
+    )
+    wire = DashboardPresetDocument(
+        (preset_from_launch("partitioned", _launch(panes=(CustomChartPaneConfig(chart),)), now=NOW),)
+    ).to_wire()
+
+    missing_group = deepcopy(wire)
+    missing_group["presets"][0]["panes"][0]["group_by"] = None
+    with pytest.raises(DashboardPresetValidationError, match="requires"):
+        DashboardPresetDocument.parse(missing_group)
+
+    equal = deepcopy(wire)
+    equal["presets"][0]["panes"][0]["group_by"] = "logical_model"
+    with pytest.raises(DashboardPresetValidationError, match="must differ"):
+        DashboardPresetDocument.parse(equal)
+
+
 def test_loaded_custom_preset_preserves_its_configuration_over_probe_defaults() -> None:
     saved_chart = CustomChartConfig(
         "ranking",

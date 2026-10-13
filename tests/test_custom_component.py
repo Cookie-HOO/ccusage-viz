@@ -7,6 +7,7 @@ from typing import Literal, cast
 import pytest
 
 import ccusage_viz.custom_component as custom_component_module
+from ccusage_viz.acquisition import custom_historical_query_intent
 from ccusage_viz.core.time import DateRange
 from ccusage_viz.custom_component import (
     CustomCompletion,
@@ -58,6 +59,7 @@ from ccusage_viz.processing.custom_historical import (
     CustomProjectionError,
     process_custom_historical,
 )
+from ccusage_viz.query.models import QueryTrigger
 from ccusage_viz.render import custom
 from ccusage_viz.render.base import RenderContext
 from ccusage_viz.render.custom import render_custom_projection
@@ -125,6 +127,60 @@ def response(
         data,
         CustomPaneSummary(metric),
     )
+
+
+def test_metric_switch_request_wire_uses_target_partition_declaration() -> None:
+    declared = V2HistoricalChartCapability(
+        ("day",), (None,), (), partition_by=(None, "logical_model")
+    )
+    undeclared = V2HistoricalChartCapability(("day",), (None,), ())
+    metrics = (
+        V2MetricDescriptor(
+            "declared",
+            LocalizedText("Declared", "已声明"),
+            LocalizedText("Declared", "已声明"),
+            UNIT,
+            "sum",
+            V2MetricCapabilities((), (), {"ranking": declared}),
+            {},
+        ),
+        V2MetricDescriptor(
+            "undeclared",
+            LocalizedText("Undeclared", "未声明"),
+            LocalizedText("Undeclared", "未声明"),
+            UNIT,
+            "sum",
+            V2MetricCapabilities((), (), {"ranking": undeclared}),
+            {},
+        ),
+    )
+    descriptor = V2ProbeDescriptor(
+        "revision", "1", V2Dataset(LocalizedText("Data", "数据"), LocalizedText("Data", "数据")), metrics, ()
+    )
+
+    def switch_wire(source: str, target: str) -> dict[str, object]:
+        component = CustomHistoricalComponent(
+            config(kind="ranking", group_by=None, top=None, metric_id=source)
+        )
+        component.v2_descriptor = descriptor
+        component.capability = (
+            CustomChartCapability(("day",), (None,), (), partition_by=(None, "logical_model"))
+            if source == "declared"
+            else CustomChartCapability(("day",), (None,), ())
+        )
+        component.begin_metric_switch(replace(component.candidate, metric_id=target))
+        intent = custom_historical_query_intent(
+            component.request_config,
+            timezone="UTC",
+            owner_id="pane",
+            generation=component.generation,
+            trigger=QueryTrigger.REFRESH,
+            partition_declared=component.partition_declared_for_request,
+        )
+        return intent.payload.to_wire()["query"]  # type: ignore[no-any-return,union-attr]
+
+    assert switch_wire("undeclared", "declared")["partition_by"] is None
+    assert "partition_by" not in switch_wire("declared", "undeclared")
 
 
 def test_primary_response_retains_its_protocol_warnings() -> None:

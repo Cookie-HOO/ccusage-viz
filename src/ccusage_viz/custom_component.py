@@ -206,6 +206,22 @@ class CustomHistoricalComponent:
         return self.switch_target_config or self.candidate
 
     @property
+    def partition_declared_for_request(self) -> bool:
+        """Resolve partition support from the active request Metric, not accepted state."""
+
+        config = self.request_config
+        if config.metric_id is not None and self.v2_descriptor is not None:
+            metric = next(
+                (item for item in self.v2_descriptor.metrics if item.id == config.metric_id), None
+            )
+            capability = None if metric is None else metric.capabilities.charts.get(config.kind)
+            return (
+                isinstance(capability, V2HistoricalChartCapability)
+                and capability.partition_by is not None
+            )
+        return self.capability is not None and self.capability.partition_by is not None
+
+    @property
     def comparison_is_pending(self) -> bool:
         return self.comparison_pending_generation == self.generation
 
