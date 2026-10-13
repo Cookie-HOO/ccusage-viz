@@ -26,7 +26,14 @@ from ccusage_viz.custom_monitor_component import (
 )
 from ccusage_viz.custom_protocol import V2MonitorResponse, V2ProbeResponse
 from ccusage_viz.i18n import load_translator
-from ccusage_viz.options import CustomChartConfig, CustomCommandSource, resolve_date_range
+from ccusage_viz.options import (
+    ChartPresentation,
+    CustomChartConfig,
+    CustomCommandSource,
+    resolve_date_range,
+)
+from ccusage_viz.render.base import RenderContext
+from ccusage_viz.render.custom_monitor import render_custom_monitor
 from ccusage_viz.terminal import Terminal
 
 
@@ -122,3 +129,108 @@ def test_standalone_adjustment_uses_dataset_monitor_style_and_window_contract() 
     )
     assert _adjust(component, "w")
     assert "yesterday · hourly" in component.heading(language="en")
+
+
+def described_monitor_component(style: str | None = None) -> CustomMonitorComponent:
+    """Build an accepted Custom Monitor component with a description and display."""
+    presentation = ChartPresentation(style=style or "ranking", density="detailed")
+    chart = replace(config(), group_by="model", presentation=presentation)
+    component = CustomMonitorComponent(chart)
+    component.accept(
+        CustomMonitorCompletion(
+            0,
+            chart,
+            V2MonitorResponse(
+                "tokens",
+                V2MonitorObservation(
+                    datetime(2026, 10, 8, 12, 0, tzinfo=UTC),
+                    Decimal("11"),
+                    (
+                        V2MetricValue(
+                            "fast",
+                            LocalizedText("Fast", "快"),
+                            Decimal("9"),
+                            description=LocalizedText("Release validation", "发布验证"),
+                            display=LocalizedText("90%", "90%"),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+        accepted_at=datetime.now(UTC),
+    )
+    return component
+
+
+def test_custom_monitor_ranking_renders_descriptions_only_at_complete_density() -> None:
+    component = described_monitor_component()
+
+    detailed_ctx = RenderContext(34, 20, load_translator("en"), color=False, ascii=True, density="detailed")
+    normal_ctx = RenderContext(34, 20, load_translator("en"), color=False, ascii=True, density="normal")
+
+    detailed = render_custom_monitor(component, detailed_ctx)
+    normal = render_custom_monitor(component, normal_ctx)
+
+    assert "Release validation" in detailed
+    assert "Release validation" not in normal
+
+
+def test_custom_monitor_ranking_renders_display_as_value_text() -> None:
+    component = described_monitor_component()
+    ctx = RenderContext(50, 20, load_translator("en"), color=False, ascii=True, density="detailed")
+
+    rendered = render_custom_monitor(component, ctx)
+
+    assert "90%" in rendered
+
+
+def test_custom_monitor_list_renders_display_without_description() -> None:
+    component = described_monitor_component(style="list")
+    ctx = RenderContext(
+        50, 20, load_translator("en"), color=False, ascii=True, density="detailed", style="list"
+    )
+
+    rendered = render_custom_monitor(component, ctx)
+
+    assert "90%" in rendered
+    assert "Release validation" not in rendered
+
+
+@pytest.mark.parametrize("style", ("line", "bars"))
+def test_custom_monitor_time_based_views_hide_presentation_metadata(style: str) -> None:
+    component = described_monitor_component(style=style)
+    ctx = RenderContext(
+        50, 20, load_translator("en"), color=False, ascii=True, density="detailed", style=style
+    )
+
+    rendered = render_custom_monitor(component, ctx)
+
+    assert "90%" not in rendered
+    assert "Release validation" not in rendered
+
+
+def test_custom_monitor_description_free_output_unchanged() -> None:
+    """Regression: description-free responses render exactly as before."""
+    component = CustomMonitorComponent(config())
+    component.accept(
+        CustomMonitorCompletion(0, config(), V2MonitorResponse(
+            "tokens",
+            V2MonitorObservation(
+                datetime(2026, 10, 8, 12, 0, tzinfo=UTC),
+                Decimal("175"),
+                (V2MetricValue("terra", LocalizedText("Terra", "Terra"), Decimal("175")),),
+            ),
+        )),
+        accepted_at=datetime.now(UTC),
+    )
+
+    rendered = _render(
+        component,
+        _metric_capability(probe(), config()),
+        load_translator("en"),
+        Terminal(80, 20, False, True),
+        15,
+    )
+
+    assert "175" in rendered
+    assert "Release validation" not in rendered

@@ -174,6 +174,15 @@ calculates its declared fixed window ending there and returns its source-owned
 total and groups. If the source cannot answer that window, it returns
 `range_not_available`; ccuv shows that error and never replaces it with zero.
 
+Each observation group may include optional localized `description` and
+`display` fields, matching Custom Ranking series metadata. In Monitor `ranking`,
+`description` appears below the row only at `full` or `detailed` density;
+Monitor `list` never shows it. `display` replaces the row's numeric value text
+in `ranking` and `list`. The numeric `value` remains authoritative for sorting,
+bar lengths, Top/Other projection, and time-based charts. Bars and timeline
+views use neither field. Empty localized fields are treated as absent; malformed
+supplied localized fields reject the response.
+
 ```json
 {
   "protocol": "ccuv.custom/v2",

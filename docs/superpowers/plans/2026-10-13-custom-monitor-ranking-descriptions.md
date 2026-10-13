@@ -1,10 +1,10 @@
-# Custom Monitor Ranking Descriptions Implementation Plan
+# Custom Monitor Ranking Descriptions and Displays Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Let Custom Dataset Monitor groups supply localized descriptions that render beneath their rows only in a detailed/full ranking.
+**Goal:** Let Custom Dataset Monitor groups supply localized descriptions beneath detailed/full ranking rows and localized display text as the numeric value in ranking and list rows.
 
-**Architecture:** Add optional localized description metadata to the existing V2 monitor group value, preserving it through the custom Monitor ranking projection and shared scalar ranking model. Extend the observed-ranking renderer with the same safe, muted, width-bounded description treatment used by historical custom ranking, gated by ranking style and complete density. List and time-based Monitor renderers will retain their current scalar entries but never render descriptions.
+**Architecture:** Add optional localized `description` and `display` metadata to the existing V2 monitor group value, preserving both through the custom Monitor ranking projection and shared scalar ranking model. Extend the observed-ranking renderer with the same safe, muted, width-bounded description treatment used by historical custom ranking, gated by ranking style and complete density; its list mode uses display text but never descriptions. Time-based Monitor renderers retain their current numeric facts and never render either field.
 
 **Tech Stack:** Python 3.12+, dataclasses, Decimal, pytest, existing terminal rendering and localization utilities.
 
@@ -12,11 +12,12 @@
 
 ## Global Constraints
 
-- `description` is optional localized text in a V2 Monitor observation group; omitted groups remain valid.
+- `description` and `display` are optional localized text in a V2 Monitor observation group; omitted fields remain valid.
 - Empty localized text is normalized to absent; malformed present localized values raise `CustomProtocolError`.
 - Descriptions render only for Custom Monitor `ranking` at `full` and `detailed` density.
-- Descriptions never render in Custom Monitor `list`, bars, or timeline views.
-- Synthetic `Other` and ungrouped `total` entries have no description.
+- Display text replaces the row's numeric value only in Custom Monitor `ranking` and `list`.
+- Descriptions never render in Custom Monitor `list`, bars, or timeline views; display text never renders in bars or timeline views.
+- Synthetic `Other` and ungrouped `total` entries have neither field.
 - Reuse existing safe description text handling: no terminal escape interpretation and wrapping bounded to terminal width.
 - Do not change built-in Monitor behavior, Monitor aggregation, ordering, windowing, or request semantics.
 
@@ -27,14 +28,14 @@
 - `src/ccusage_viz/custom_models.py` — V2 Monitor group value transport type gains its optional source description.
 - `src/ccusage_viz/custom_protocol.py` — parses and normalizes the additive observation-group field.
 - `src/ccusage_viz/custom_monitor_component.py` — carries a group description from accepted observation into the sorted ranking entries and scalar view model.
-- `src/ccusage_viz/chart_models.py` — lets a generic observed scalar ranking entry carry optional descriptive presentation metadata.
-- `src/ccusage_viz/render/ranking.py` — renders scalar descriptions below observed ranking rows only when the active observed view is ranking at complete density.
+- `src/ccusage_viz/chart_models.py` — lets a generic observed scalar ranking entry carry optional description and display presentation metadata.
+- `src/ccusage_viz/render/ranking.py` — uses scalar display text in observed ranking/list rows and renders scalar descriptions below ranking rows only at complete density.
 - `docs/custom-command-protocol.md` and `docs/custom-command-protocol.zh-CN.md` — document the additive Monitor group field and presentation limit.
 - `tests/test_custom_protocol.py` — protocol parsing, omission, normalization, and malformed-field tests.
 - `tests/test_custom_monitor_component.py` — verifies retention/localization/sorting through the Custom Monitor ranking model.
 - `tests/test_custom_monitor.py` — verifies standalone ranking output and non-ranking output behavior.
 
-### Task 1: Parse and model optional Monitor group descriptions
+### Task 1: Parse and model optional Monitor group descriptions and displays
 
 **Files:**
 - Modify: `src/ccusage_viz/custom_models.py:208-219`
@@ -42,9 +43,9 @@
 - Test: `tests/test_custom_protocol.py:296-305` and nearby V2 Monitor response tests
 
 **Interfaces:**
-- Produces: `V2MetricValue(id: str, label: LocalizedText, value: Decimal, description: LocalizedText | None = None)`.
-- Produces: `_parse_v2_monitor_observation(value: object) -> V2MonitorObservation`, where a supplied `groups[*].description` is parsed using the existing localized schema.
-- Consumed by Task 2: each accepted `V2MonitorObservation.groups` item exposes `.description`.
+- Produces: `V2MetricValue(id: str, label: LocalizedText, value: Decimal, description: LocalizedText | None = None, display: LocalizedText | None = None)`.
+- Produces: `_parse_v2_monitor_observation(value: object) -> V2MonitorObservation`, where supplied `groups[*].description` and `groups[*].display` are parsed using the existing localized schema.
+- Consumed by Task 2: each accepted `V2MonitorObservation.groups` item exposes `.description` and `.display`.
 
 - [ ] **Step 1: Write failing parsing tests**
 

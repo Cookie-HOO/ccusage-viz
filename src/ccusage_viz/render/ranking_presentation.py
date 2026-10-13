@@ -125,7 +125,7 @@ def copyable_description_text(value: str) -> str:
     ).strip()
 
 
-def _description_visible_text(value: str) -> str:
+def description_visible_text(value: str) -> str:
     """Return only the text rendered for a description, excluding link targets."""
     return "".join(_description_visible_text_part(part.text) for part in _description_parts(value))
 
@@ -801,7 +801,7 @@ def render_historical_ranking(
             if descriptions_visible and entry.description:
                 indent = " " * min(context.width, rank_column_width + 1)
                 available = max(1, context.width - display_width(indent))
-                description = _description_visible_text(entry.description)
+                description = description_visible_text(entry.description)
                 description_rows = wrap_width(
                     description,
                     available,
@@ -891,7 +891,7 @@ def render_historical_ranking(
             # Keep explanations aligned with the label column, not the chart track.
             indent = " " * min(context.width, rank_width + 5)
             available = max(1, context.width - display_width(indent))
-            description = _description_visible_text(entry.description)
+            description = description_visible_text(entry.description)
             description_rows = wrap_width(description, available)
             for index, row in enumerate(description_rows[:2]):
                 if index == 1 and len(description_rows) > 2:

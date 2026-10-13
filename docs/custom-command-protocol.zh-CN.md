@@ -79,6 +79,8 @@ V2 指标可以声明 `monitor`。它声明固定业务口径 `window_seconds`�
 
 Custom Monitor 请求包含带时区的 `range.end_at`。Dataset 按声明的固定窗口计算该截止点的总值和分组；无法回答时返回 `range_not_available`，ccuv 显示错误，绝不替换成零。
 
+每个 observation group 可提供可选的本地化 `description` 和 `display` 字段，语义与 Custom Ranking series 的同名元数据一致。Monitor `ranking` 仅在 `full` 或 `detailed` 密度下将 `description` 显示在对应行下方；Monitor `list` 绝不显示说明。`display` 替换 `ranking` 和 `list` 行中的数值文本。数值 `value` 仍是排序、柱长、Top/Other 投影和时序图计算的权威数据；bars 与 timeline 都不使用这两个字段。空本地化字段视为未提供，已提供但格式错误的字段会使响应校验失败。
+
 ```json
 {
   "protocol": "ccuv.custom/v2",

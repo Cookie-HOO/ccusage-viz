@@ -9,6 +9,7 @@ from ccusage_viz.formatting import (
     pad_width,
     truncate_middle_width,
     truncate_width,
+    wrap_width,
 )
 from ccusage_viz.project_identity import exact_project_agent
 from ccusage_viz.render.base import (
@@ -22,6 +23,7 @@ from ccusage_viz.render.base import (
 from ccusage_viz.render.palette import get_color_scheme
 from ccusage_viz.render.ranking_presentation import (
     RankingPresentationEntry,
+    description_visible_text,
     render_historical_ranking,
 )
 from ccusage_viz.render.summary import render_summary, render_summary_placeholder
@@ -226,7 +228,11 @@ def render_ranking(
 
     total = None if model.is_observed or pending else model.percentage_total.total
     formatted_values = [
-        "??" if pending else format_tokens(round(_entry_value(entry))) for entry in entries
+        "??" if pending else (
+            entry.display if isinstance(entry, ScalarRankingEntry) and entry.display is not None
+            else format_tokens(round(_entry_value(entry)))
+        )
+        for entry in entries
     ]
     agents = [_entry_agent(entry) for entry in entries]
     separate_fields = model.project_aggregation == "exact" and not model.is_observed
@@ -335,4 +341,27 @@ def render_ranking(
                 f"{prefix}{label_text} {mark} "
                 f"{pad_width(formatted, value_width, align='right')} {value_marker}{percentage}"
             )
+        show_description = (
+            model.is_observed
+            and context.style != "list"
+            and context.density in {"full", "detailed"}
+            and isinstance(entry, ScalarRankingEntry)
+            and entry.description
+            and not entry.is_other
+        )
+        if show_description:
+            indent = " " * min(context.width, display_width(prefix) + value_width + 1)
+            available = max(1, context.width - display_width(indent))
+            desc = description_visible_text(entry.description)
+            desc_rows = wrap_width(desc, available)
+            for index, row in enumerate(desc_rows[:2]):
+                if index == 1 and len(desc_rows) > 2:
+                    row = row.rstrip() + "…"
+                lines.append(
+                    styled_text(
+                        f"{indent}{row}",
+                        scheme.muted,
+                        context,
+                    )
+                )
     return "\n".join(lines)

@@ -128,7 +128,7 @@ class RankingViewport:
         self.columns = RankingColumns()
 
     def prepare_lines(self, *, descriptions: bool, spacing: str) -> None:
-        from ccusage_viz.render.ranking_presentation import _description_visible_text
+        from ccusage_viz.render.ranking_presentation import description_visible_text
 
         heights = []
         starts = [0]
@@ -139,7 +139,7 @@ class RankingViewport:
                     2,
                     len(
                         wrap_width(
-                            _description_visible_text(entry.description),
+                            description_visible_text(entry.description),
                             self.columns.description_width,
                         )
                     ),
