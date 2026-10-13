@@ -195,7 +195,7 @@ def run_custom_filter_editor(
             help_visible = True
         elif key == "\x1b[D":
             draft = draft.move_filter(-1, choices)
-        elif key == "\x1b[C":
+        elif key in {"\t", "\x1b[C"}:
             draft = draft.move_filter(1, choices)
         elif key in {"k", "\x1b[A"}:
             draft = draft.move_option(-1, choices, translator)

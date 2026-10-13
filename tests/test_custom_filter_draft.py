@@ -206,9 +206,9 @@ def test_custom_filter_editor_toggles_declared_option_ids_and_drops_empty_filter
     assert result == (("source", ("app",)),)
 
 
-def test_custom_filter_editor_switches_tabs_only_with_horizontal_arrows() -> None:
+def test_custom_filter_editor_switches_tabs_with_horizontal_arrows() -> None:
     arrow_events = iter(("\x1b[C", " ", "\r"))
-    non_arrow_events = iter(("l", "\t", " ", "\r"))
+    non_arrow_events = iter(("l", " ", "\r"))
 
     arrow_result = run_custom_filter_editor(
         (), CHOICES, load_translator("en"), width=80,
@@ -221,6 +221,17 @@ def test_custom_filter_editor_switches_tabs_only_with_horizontal_arrows() -> Non
 
     assert arrow_result == (("source", ("app",)),)
     assert non_arrow_result == (("category", ("fiction",)),)
+
+
+def test_custom_filter_editor_tab_switches_to_next_filter_dimension() -> None:
+    events = iter((KeyEvent("\t"), KeyEvent(" "), KeyEvent("\r")))
+
+    result = run_custom_filter_editor(
+        (), CHOICES, load_translator("en"), width=80, height=12,
+        paint=lambda _body, _controls: None, read_key=lambda: next(events),
+    )
+
+    assert result == (("source", ("app",)),)
 
 
 def test_custom_filter_help_ignores_inputs_and_preserves_the_complete_draft() -> None:
