@@ -1673,7 +1673,7 @@ def _parse_https_url(value: object, name: str) -> str:
     if (
         parsed.scheme != "https"
         or not parsed.netloc
-        or any(ord(character) < 32 or ord(character) == 127 for character in url)
+        or any(ord(character) < 32 or 0x7F <= ord(character) <= 0x9F for character in url)
     ):
         raise CustomProtocolError(f"{name} must be an absolute https URL")
     return url

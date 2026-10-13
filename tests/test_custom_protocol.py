@@ -576,6 +576,10 @@ def test_grouped_v2_ranking_rejects_duplicate_ids_dates_and_unsafe_metadata() ->
     with pytest.raises(CustomProtocolError, match=r"data\.groups\[0\]\.link.*https"):
         parse_custom_response(json.dumps(root).encode(), request)
 
+    unsafe["link"] = "https://example.com/one\x9c\x9d8;;https://evil.example"
+    with pytest.raises(CustomProtocolError, match=r"data\.groups\[0\]\.link.*https"):
+        parse_custom_response(json.dumps(root).encode(), request)
+
 
 def test_grouped_v2_ranking_errors_include_the_complete_failing_path() -> None:
     request = partitioned_ranking_request()
@@ -1026,6 +1030,10 @@ def test_ranking_response_accepts_only_absolute_https_project_links() -> None:
         parse_custom_response(json.dumps(payload).encode(), chart_request())
 
     payload["data"]["series"][0]["link"] = "https://example.com/\x1b]8;;evil"  # type: ignore[index]
+    with pytest.raises(CustomProtocolError, match="absolute https"):
+        parse_custom_response(json.dumps(payload).encode(), chart_request())
+
+    payload["data"]["series"][0]["link"] = "https://example.com/book\x9c\x9d8;;evil"  # type: ignore[index]
     with pytest.raises(CustomProtocolError, match="absolute https"):
         parse_custom_response(json.dumps(payload).encode(), chart_request())
 

@@ -13,6 +13,7 @@ from ccusage_viz.formatting import (
     clip_width,
     display_width,
     pad_width,
+    sanitize_terminal_text,
     strip_ansi,
     truncate_middle_width,
     truncate_width,
@@ -78,9 +79,7 @@ def _description_visible_text_part(value: str) -> str:
 
 def _description_parts(value: str) -> tuple[_DescriptionPart, ...]:
     """Parse the one safe inline description construct without executing source controls."""
-    # Preserve Dataset-authored line breaks. Automatic wrapping is applied only
-    # within each source line by the terminal layout below.
-    sanitized = strip_ansi(value).replace("\x1b", "").strip()
+    sanitized = sanitize_terminal_text(value).strip()
     parts: list[_DescriptionPart] = []
     position = 0
     for match in _DESCRIPTION_LINK.finditer(sanitized):

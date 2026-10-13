@@ -2687,6 +2687,32 @@ def test_historical_ranking_description_links_reject_unsafe_markup_and_controls(
     assert "\x1b[2J" not in output
 
 
+def test_historical_ranking_description_sanitizes_c1_osc_and_dcs_before_parsing() -> None:
+    context = RenderContext(100, 24, load_translator("en"), color=True, style="dot")
+    entry = RankingPresentationEntry(
+        "api",
+        "API",
+        10,
+        description=(
+            "Safe **bold** \x9d52;c;attack\x9c"
+            "[*release notes*](https://example.com/release)"
+            "\x90malicious payload\x9c tail"
+        ),
+    )
+    output = render_historical_ranking(
+        (entry,), heading="Ranking", value_formatter=str, context=context, descriptions_visible=True
+    )
+
+    visible = strip_ansi(output)
+    assert "Safe bold release notes ↗ tail" in visible
+    assert "attack" not in visible
+    assert "malicious payload" not in visible
+    assert not any(0x7F <= ord(character) <= 0x9F for character in output)
+    assert "\x1b[2;1mbold\x1b[0m" in output
+    assert "\x1b[4;2;3mrelease notes\x1b[0m" in output
+    assert output.count("\x1b]8;;https://example.com/release\x1b\\") == 2
+
+
 def test_historical_ranking_description_supports_star_emphasis_only() -> None:
     context = RenderContext(80, 24, load_translator("en"), color=True, style="dot")
     entry = RankingPresentationEntry(
