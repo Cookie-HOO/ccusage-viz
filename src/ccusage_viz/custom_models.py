@@ -37,11 +37,13 @@ class CustomPresentationDescriptor:
     group_labels: Mapping[str, LocalizedText]
     filter_labels: Mapping[str, LocalizedText] = field(default_factory=dict)
     filter_values: Mapping[tuple[str, str], LocalizedText] = field(default_factory=dict)
+    partition_labels: Mapping[str, LocalizedText] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "group_labels", MappingProxyType(dict(self.group_labels)))
         object.__setattr__(self, "filter_labels", MappingProxyType(dict(self.filter_labels)))
         object.__setattr__(self, "filter_values", MappingProxyType(dict(self.filter_values)))
+        object.__setattr__(self, "partition_labels", MappingProxyType(dict(self.partition_labels)))
 
 
 @dataclass(frozen=True, slots=True)

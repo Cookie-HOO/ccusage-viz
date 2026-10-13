@@ -334,12 +334,12 @@ def _render_highlighted_description(value: str, query: str, context: RenderConte
                     styles.append("1")
                 if part.style == "italic":
                     styles.append("3")
-                pieces.append(
-                    f"\x1b[38;5;{color}m\x1b[{';'.join(styles)}m{text}\x1b[0m"
-                )
+                pieces.append(f"\x1b[38;5;{color}m\x1b[{';'.join(styles)}m{text}\x1b[0m")
             return "".join(pieces)
 
-        text = "".join(render_emphasis(part, link=description_part.url is not None) for part in emphasis)
+        text = "".join(
+            render_emphasis(part, link=description_part.url is not None) for part in emphasis
+        )
         if description_part.url is None:
             rendered.append(text)
             continue
@@ -394,7 +394,11 @@ def measure_ranking_columns(
             desired_right_width = max(
                 desired_right_width,
                 value_width
-                + (display_width(f"{entry.current / total:>5.1%}") if show_percentage and total else 0)
+                + (
+                    display_width(f"{entry.current / total:>5.1%}")
+                    if show_percentage and total
+                    else 0
+                )
                 + 3,
             )
         columns.width("right", desired_right_width)
@@ -413,7 +417,10 @@ def measure_ranking_columns(
     prior_rank = {
         entry.key: rank
         for rank, entry in enumerate(
-            sorted(previous_entries, key=lambda item: (-cast(RankingNumber, item.previous), str(item.key))),
+            sorted(
+                previous_entries,
+                key=lambda item: (-cast(RankingNumber, item.previous), str(item.key)),
+            ),
             start=1,
         )
     }
@@ -430,7 +437,11 @@ def measure_ranking_columns(
             share_width = max(share_width, display_width(f"{entry.current / total:>5.1%}"))
         if not (entry.comparison_ready and entry.previous is not None and not entry.is_other):
             if growth_visible:
-                delta = context.translator.text("label.ranking_new") if show_new_entries and not entry.is_other else "—"
+                delta = (
+                    context.translator.text("label.ranking_new")
+                    if show_new_entries and not entry.is_other
+                    else "—"
+                )
                 delta_width = max(delta_width, display_width(delta))
             if rank_comparison_visible:
                 rank_change_width = max(
@@ -461,14 +472,61 @@ def measure_ranking_columns(
             rank_delta = (entry.previous_rank or prior_rank.get(entry.key, rank)) - rank
             rank_change_width = max(
                 rank_change_width,
-                display_width("·" if rank_delta == 0 else trend_glyph(rank_delta, ascii=context.ascii)),
+                display_width(
+                    "·" if rank_delta == 0 else trend_glyph(rank_delta, ascii=context.ascii)
+                ),
             )
     columns.width("delta", delta_width)
     columns.width("current", current_width)
     columns.width("share", share_width)
     columns.width("rank_change", rank_change_width)
-    rank_column_width = max(rank_width + 4, display_width(context.translator.text("label.ranking_column_rank")))
+    rank_column_width = max(
+        rank_width + 4, display_width(context.translator.text("label.ranking_column_rank"))
+    )
     columns.description_width = max(1, context.width - min(context.width, rank_column_width + 1))
+
+
+def render_ranking_heading_row(
+    *,
+    label: str,
+    value: str,
+    delta: str,
+    share: str,
+    description: str | None,
+    context: RenderContext,
+    link: str | None = None,
+    descriptions_visible: bool = False,
+    comparison_visible: bool = True,
+) -> tuple[str, ...]:
+    """Render a secondary Ranking heading without a rank or scale column."""
+    scheme = get_color_scheme(context.color_scheme)
+    marker = f" · {_terminal_link('→', link)}" if link is not None else ""
+    right_fields = [value]
+    if comparison_visible and delta:
+        right_fields.append(delta)
+    if share:
+        right_fields.append(share)
+    right = "  ".join(field for field in right_fields if field)
+    right_width = min(display_width(right), max(1, context.width // 2))
+    label_width = max(1, context.width - right_width - int(bool(right)))
+    visible_label = truncate_width(f"{strip_ansi(label).replace(chr(27), '')}{marker}", label_width)
+    row = pad_width(visible_label, label_width)
+    if right:
+        row = f"{row} {truncate_width(right, right_width)}"
+    rows = [styled_text(row, scheme.muted, context, bold=True)]
+    if descriptions_visible and context.density != "minimal" and description:
+        visible = description_visible_text(description)
+        wrapped = wrap_width(visible, max(1, context.width - 2))
+        for index, text in enumerate(wrapped[:2]):
+            if index == 1 and len(wrapped) > 2:
+                text = clip_width(text, max(0, context.width - 3)) + "…"
+            rows.append(
+                "  "
+                + _render_highlighted_description(
+                    _description_row_markup(text, description), "", context
+                )
+            )
+    return tuple(rows)
 
 
 def render_historical_ranking(
@@ -542,8 +600,8 @@ def render_historical_ranking(
         for entry in entries
     ]
     rank_width = max(2, display_width(str(total_entry_count)))
-    maximum = maximum if maximum is not None else max(
-        (entry.current for entry in entries), default=1
+    maximum = (
+        maximum if maximum is not None else max((entry.current for entry in entries), default=1)
     )
     # Callers that precompute extrema can legitimately supply Decimal(0) when
     # a growth window contains only unchanged projects. A zero scale still
@@ -602,7 +660,8 @@ def render_historical_ranking(
                 visible=len(entries) if matched_entry_count is None else matched_entry_count,
                 total=total_entry_count,
                 count=(total_entry_count if not search_query else len(entries))
-                if matched_entry_count is None else matched_entry_count,
+                if matched_entry_count is None
+                else matched_entry_count,
             )
         )
     if search_query and not entries:
@@ -624,7 +683,9 @@ def render_historical_ranking(
     rows: list[tuple[int, RankingPresentationEntry, str, str, str, str, str, str, str, str]] = []
     for (rank, entry), label, value in zip(ranked_entries, labels, values, strict=True):
         rank_marker, activity, value_marker = (
-            (" ", " ", " ") if measure_only else _refresh_markers(
+            (" ", " ", " ")
+            if measure_only
+            else _refresh_markers(
                 entry,
                 context=context,
                 deltas=deltas,
@@ -682,11 +743,15 @@ def render_historical_ranking(
         else:
             rank_color = scheme.trend_increase if rank_delta > 0 else scheme.trend_decrease
             rank_comparison = (
-                trend_glyph(rank_delta, ascii=context.ascii) if measure_only else styled_text(
+                trend_glyph(rank_delta, ascii=context.ascii)
+                if measure_only
+                else styled_text(
                     trend_glyph(rank_delta, ascii=context.ascii), rank_color, context, bold=True
                 )
             )
-        share = f"{entry.current / total:>5.1%}" if show_percentage and total and not pending else ""
+        share = (
+            f"{entry.current / total:>5.1%}" if show_percentage and total and not pending else ""
+        )
         rows.append(
             (
                 rank,
@@ -708,7 +773,9 @@ def render_historical_ranking(
         scale_heading = context.translator.text("label.ranking_column_scale")
         current_heading = context.translator.text("label.ranking_column_current")
         delta_heading = _comparison_heading(context)
-        share_heading = context.translator.text("label.ranking_column_share") if show_percentage else ""
+        share_heading = (
+            context.translator.text("label.ranking_column_share") if show_percentage else ""
+        )
         rank_change_heading = context.translator.text("label.ranking_column_rank_change")
         rank_column_width = max(rank_width + 4, display_width(rank_heading))
         delta_width = (
@@ -739,13 +806,7 @@ def render_historical_ranking(
         if context.style == "list":
             # List removes the graph column as a whole. Give its space to the
             # label and count only separators between fields that are rendered.
-            fixed_width = (
-                rank_column_width
-                + current_width
-                + optional_width
-                + 2
-                + optional_count
-            )
+            fixed_width = rank_column_width + current_width + optional_width + 2 + optional_count
             label_width = min(label_width, max(1, context.width - fixed_width))
             bar_width = 0
             header_fields = [
@@ -754,13 +815,7 @@ def render_historical_ranking(
                 pad_width(current_heading, current_width, align="right"),
             ]
         else:
-            fixed_width = (
-                rank_column_width
-                + current_width
-                + optional_width
-                + 4
-                + optional_count
-            )
+            fixed_width = rank_column_width + current_width + optional_width + 4 + optional_count
             available = max(2, context.width - fixed_width)
             label_width = min(label_width, max(1, available - 2))
             bar_width = max(1, available - label_width - 1)
@@ -778,7 +833,9 @@ def render_historical_ranking(
             header_fields.append(pad_width(share_heading, share_width, align="right"))
         lines.append(" ".join(header_fields))
         if columns is not None:
-            columns.description_width = max(1, context.width - min(context.width, rank_column_width + 1))
+            columns.description_width = max(
+                1, context.width - min(context.width, rank_column_width + 1)
+            )
         if measure_only:
             return "\n".join(lines)
         for (
@@ -842,8 +899,10 @@ def render_historical_ranking(
 
     desired_right_width = max(
         (
-            display_width(row[3]) + display_width(row[6])
-            + (display_width(row[9]) if show_percentage else 0) + 2
+            display_width(row[3])
+            + display_width(row[6])
+            + (display_width(row[9]) if show_percentage else 0)
+            + 2
             for row in rows
         ),
         default=1,

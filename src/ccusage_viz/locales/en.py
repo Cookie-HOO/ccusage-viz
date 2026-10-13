@@ -710,6 +710,7 @@ MESSAGES = {
     "status.monitor_adjust_advanced_keys": "l legend · a switch to Quick · y copy command · Enter apply · Esc cancel",
     "message.no_data": "No token usage found for the selected range.",
     "message.custom_no_data": "No data found for the selected range.",
+    "message.grouped_ranking_no_data": "No data in this group.",
     "message.data_loading": "Loading data…",
     "message.monitor_empty": "No observed token data yet.",
     "label.data": "Data",

@@ -420,6 +420,13 @@ class CustomHistoricalComponent:
                 for filter in completion.response.capabilities.filters
                 for option in filter.options
             },
+            {
+                dimension.id: dimension.label
+                for dimension in (
+                    completion.response.capabilities.partition_by
+                    or completion.response.capabilities.group_by
+                )
+            },
         )
         self.capability = completion.response.capabilities.charts.get(self.candidate.kind)
         self.comparison_config = None

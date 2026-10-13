@@ -27,6 +27,7 @@ from ccusage_viz.render.base import (
 )
 from ccusage_viz.render.calendar_body import render_calendar_footer, render_calendar_grid
 from ccusage_viz.render.custom_ranking_preparation import prepare_custom_ranking
+from ccusage_viz.render.grouped_ranking import render_grouped_custom_ranking
 from ccusage_viz.render.palette import categorical_colors, get_color_scheme
 from ccusage_viz.render.ranking_presentation import render_historical_ranking
 from ccusage_viz.render.stack_presentation import (
@@ -103,12 +104,26 @@ def custom_heading(
         labels.append(dataset.zh_cn if context.translator.language == "zh" else dataset.en)
     if config.kind in {"stack", "ranking"}:
         if config.group_by is None:
-            labels.append(context.translator.text("label.total"))
+            grouping = context.translator.text("label.total")
         elif descriptor is not None and config.group_by in descriptor.group_labels:
             group = descriptor.group_labels[config.group_by]
-            labels.append(group.zh_cn if context.translator.language == "zh" else group.en)
+            grouping = group.zh_cn if context.translator.language == "zh" else group.en
         else:
-            labels.append(config.group_by)
+            grouping = config.group_by
+        if config.kind == "ranking" and config.partition_by is not None:
+            partition = (
+                descriptor.partition_labels.get(config.partition_by)
+                if descriptor is not None
+                else None
+            )
+            partition_label = (
+                (partition.zh_cn if context.translator.language == "zh" else partition.en)
+                if partition is not None
+                else config.partition_by
+            )
+            labels.append(f"{partition_label} → {grouping}")
+        else:
+            labels.append(grouping)
     if filters := _filter_summary(config, context, descriptor):
         labels.append(filters)
     labels.append(context.translator.text(f"label.{config.kind}"))
@@ -413,6 +428,14 @@ def render_custom_ranking(
     entry_offset: int = 0,
     entry_limit: int | None = None,
 ) -> str:
+    if projection.groups is not None:
+        return render_grouped_custom_ranking(
+            projection,
+            context,
+            heading=_heading(projection, context).strip(),
+            summary=_summary(projection, context),
+            descriptions_visible=descriptions_visible,
+        )
     if not projection.series:
         return (
             render_custom_empty(projection.config, context, projection.presentation)

@@ -4,6 +4,7 @@ import subprocess
 import sys
 from dataclasses import replace
 from datetime import date, datetime, timedelta
+from decimal import Decimal
 
 import plotext as plt
 import pytest
@@ -33,6 +34,12 @@ from ccusage_viz.chart_models import (
     TimeOfDaySeries,
 )
 from ccusage_viz.core.time import DateRange
+from ccusage_viz.custom_models import (
+    CustomDataset,
+    CustomPresentationDescriptor,
+    CustomUnit,
+    LocalizedText,
+)
 from ccusage_viz.domain import TokenUsage
 from ccusage_viz.errors import UsageError
 from ccusage_viz.formatting import display_width, strip_ansi
@@ -42,6 +49,8 @@ from ccusage_viz.i18n import load_translator
 from ccusage_viz.options import (
     CalendarConfig,
     ChartPresentation,
+    CustomChartConfig,
+    CustomCommandSource,
     Filters,
     ProcessConfig,
     RankingConfig,
@@ -49,6 +58,11 @@ from ccusage_viz.options import (
     StandaloneHostConfig,
     StandaloneLaunch,
     TimelineConfig,
+)
+from ccusage_viz.processing.custom_historical import (
+    CustomChartProjection,
+    CustomProjectedRankingGroup,
+    CustomProjectedSeries,
 )
 from ccusage_viz.render.base import (
     RenderAudit,
@@ -59,6 +73,7 @@ from ccusage_viz.render.base import (
     render_audit,
 )
 from ccusage_viz.render.calendar import render_calendar
+from ccusage_viz.render.custom import render_custom_projection
 from ccusage_viz.render.filters import active_filter_summary
 from ccusage_viz.render.monitor_distribution import render_monitor_distribution
 from ccusage_viz.render.observation import render_observation
@@ -85,6 +100,175 @@ from ccusage_viz.render.surfaces import (
 )
 from ccusage_viz.render.timeline import render_timeline
 from ccusage_viz.terminal import Terminal
+
+
+def _grouped_ranking_projection(
+    *,
+    groups: tuple[CustomProjectedRankingGroup, ...] | None = None,
+    period: str = "14d",
+    show_percentage: bool = True,
+    comparison_available: bool = True,
+) -> CustomChartProjection:
+    unit = CustomUnit("request", LocalizedText("requests", "次请求"), "suffix", 0)
+    dataset = CustomDataset(LocalizedText("Router", "路由"), LocalizedText("", ""), unit)
+    source = CustomCommandSource("router", ("router-dataset",))
+    date_range = DateRange(date(2026, 10, 1), date(2026, 10, 14), period=period)
+    config = CustomChartConfig(
+        "ranking",
+        source,
+        date_range,
+        group_by="real_model",
+        partition_by="logical_model",
+    )
+    presentation = CustomPresentationDescriptor(
+        dataset,
+        {"real_model": LocalizedText("Real Model", "真实模型")},
+        partition_labels={"logical_model": LocalizedText("Logical Model", "逻辑模型")},
+    )
+    if groups is None:
+        groups = (
+            CustomProjectedRankingGroup(
+                "coding",
+                LocalizedText("Coding Model", "代码模型"),
+                (
+                    CustomProjectedSeries(
+                        "coding-a",
+                        LocalizedText("coding-a", "编码-a"),
+                        (Decimal("8"),),
+                        rank=1,
+                        description=LocalizedText(
+                            "Read [safe docs](https://example.com/coding)",
+                            "阅读文档",
+                        ),
+                    ),
+                    CustomProjectedSeries(
+                        "coding-b", LocalizedText("coding-b", "编码-b"), (Decimal("-2"),), rank=2
+                    ),
+                ),
+                Decimal("6"),
+                Decimal("4"),
+                True,
+                Decimal("8"),
+                description=LocalizedText("Routes coding workloads", "路由编码工作负载"),
+                display=LocalizedText("source-owned total", "来源总计"),
+                comparison_display=LocalizedText("+2 requests", "+2 次请求"),
+                link="https://example.com/groups/coding",
+            ),
+            CustomProjectedRankingGroup(
+                "general",
+                LocalizedText("General Model", "通用模型"),
+                (
+                    CustomProjectedSeries(
+                        "general-a", LocalizedText("general-a", "通用-a"), (Decimal("800"),), rank=1
+                    ),
+                ),
+                Decimal("800"),
+                None,
+                False,
+                Decimal("800"),
+            ),
+        )
+    return CustomChartProjection(
+        "ranking",
+        (date(2026, 10, 1),),
+        (),
+        unit,
+        date_range,
+        "day",
+        config,
+        presentation,
+        comparison_available,
+        show_percentage,
+        groups,
+    )
+
+
+def test_grouped_custom_ranking_renders_dataset_order_arrow_heading_and_independent_rows() -> None:
+    output = render_custom_projection(
+        _grouped_ranking_projection(),
+        RenderContext(
+            100,
+            30,
+            load_translator("en"),
+            color=False,
+            ascii=True,
+            style="bars",
+            density="detailed",
+        ),
+        descriptions_visible=True,
+    )
+    lines = output.splitlines()
+
+    assert "Router · Logical Model → Real Model · Ranking" in output
+    assert lines.index(next(line for line in lines if "Coding Model" in line)) < lines.index(
+        next(line for line in lines if "General Model" in line)
+    )
+    coding_heading = next(line for line in lines if "Coding Model" in line)
+    assert "#" not in coding_heading and not coding_heading.lstrip().startswith("1 ")
+    assert sum(line.lstrip().startswith("1 ") for line in lines) == 2
+    coding_row = next(line for line in lines if "coding-a" in line)
+    general_row = next(line for line in lines if "general-a" in line)
+    assert coding_row.count("#") == general_row.count("#")
+    assert "source-owned total" in coding_heading
+    assert "+2 requests" in coding_heading
+    assert "Routes coding workloads" in output
+    assert "safe docs" in strip_ansi(output)
+    assert "https://example.com/coding" not in strip_ansi(output)
+
+
+def test_grouped_custom_ranking_handles_empty_zero_signed_and_hidden_shares() -> None:
+    groups = (
+        CustomProjectedRankingGroup(
+            "zero",
+            LocalizedText("Zero", "零"),
+            (
+                CustomProjectedSeries(
+                    "positive", LocalizedText("Positive", "正"), (Decimal("5"),), rank=1
+                ),
+                CustomProjectedSeries(
+                    "negative", LocalizedText("Negative", "负"), (Decimal("-5"),), rank=2
+                ),
+            ),
+            Decimal(),
+            None,
+            False,
+            Decimal("5"),
+        ),
+        CustomProjectedRankingGroup(
+            "empty", LocalizedText("Empty", "空"), (), Decimal(), None, False, Decimal()
+        ),
+    )
+    output = render_custom_projection(
+        _grouped_ranking_projection(groups=groups),
+        RenderContext(80, 24, load_translator("en"), color=False, ascii=True),
+    )
+    without_shares = render_custom_projection(
+        _grouped_ranking_projection(groups=groups, show_percentage=False),
+        RenderContext(80, 24, load_translator("en"), color=False, ascii=True),
+    )
+
+    assert "Zero" in output and "Empty" in output
+    assert "No data in this group." in output
+    assert "nan" not in output.lower() and "inf" not in output.lower()
+    assert "%" not in output
+    assert "%" not in without_shares
+
+
+def test_grouped_custom_ranking_all_period_and_narrow_density_hide_comparison_and_descriptions() -> (
+    None
+):
+    output = render_custom_projection(
+        _grouped_ranking_projection(period="all"),
+        RenderContext(
+            38, 20, load_translator("en"), color=False, ascii=True, density="minimal", period="all"
+        ),
+        descriptions_visible=True,
+    )
+
+    assert "Coding Model" in output and "coding-a" in output
+    assert "+2 requests" not in output
+    assert "Routes coding workloads" not in output
+    assert all(display_width(line) <= 38 for line in output.splitlines())
 
 
 def test_timeline_surfaces_have_independent_axis_and_control_budgets() -> None:
@@ -1186,9 +1370,7 @@ def test_monitor_ranking_dot_replaces_the_middle_bar_with_a_single_dot_track() -
     )
     ascii_dotted = render_ranking(
         model,
-        RenderContext(
-            80, 24, load_translator("en"), color=False, ascii=True, style="ranking-dot"
-        ),
+        RenderContext(80, 24, load_translator("en"), color=False, ascii=True, style="ranking-dot"),
     )
     ranking = render_ranking(
         model,

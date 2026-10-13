@@ -334,6 +334,12 @@ def _presentation_descriptor(response: CustomChartResponse) -> CustomPresentatio
             for filter in response.capabilities.filters
             for option in filter.options
         },
+        {
+            dimension.id: dimension.label
+            for dimension in (
+                response.capabilities.partition_by or response.capabilities.group_by
+            )
+        },
     )
 
 

@@ -703,6 +703,7 @@ MESSAGES = {
     "status.monitor_adjust_advanced_keys": "l 图例 · a 切换到快捷 · y 复制命令 · Enter 应用 · Esc 取消",
     "message.no_data": "所选范围内没有 Token 用量。",
     "message.custom_no_data": "所选范围内没有数据。",
+    "message.grouped_ranking_no_data": "此分组暂无数据。",
     "message.data_loading": "正在加载数据…",
     "message.monitor_empty": "尚未观测到 Token 数据。",
     "label.data": "数据",
