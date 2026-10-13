@@ -216,6 +216,77 @@ def test_grouped_custom_ranking_renders_dataset_order_arrow_heading_and_independ
     assert "https://example.com/coding" not in strip_ansi(output)
 
 
+def test_grouped_custom_ranking_centers_main_heading_and_aligns_shared_value_columns() -> None:
+    groups = (
+        CustomProjectedRankingGroup(
+            "first",
+            LocalizedText("First", "第一"),
+            (CustomProjectedSeries("a", LocalizedText("a", "甲"), (Decimal("9"),), rank=1),),
+            Decimal("9"),
+            Decimal("4"),
+            True,
+            Decimal("9"),
+            display=LocalizedText("9 requests", "9 次请求"),
+            comparison_display=LocalizedText("+5 requests", "+5 次请求"),
+        ),
+        CustomProjectedRankingGroup(
+            "second",
+            LocalizedText("Second", "第二"),
+            (
+                CustomProjectedSeries(
+                    "long", LocalizedText("long", "长"), (Decimal("12345"),), rank=1
+                ),
+            ),
+            Decimal("12345"),
+            Decimal("12000"),
+            True,
+            Decimal("12345"),
+            display=LocalizedText("12.3K requests", "1.23万 次请求"),
+            comparison_display=LocalizedText("+345 requests", "+345 次请求"),
+        ),
+    )
+    context = RenderContext(
+        100, 30, load_translator("en"), color=False, ascii=True, density="detailed"
+    )
+    output = strip_ansi(
+        render_custom_projection(_grouped_ranking_projection(groups=groups), context)
+    )
+    lines = output.splitlines()
+    assert lines[0] == lines[0].strip().center(context.width).rstrip()
+
+    first_heading = next(line for line in lines if "First" in line)
+    second_heading = next(line for line in lines if "Second" in line)
+    first_row = next(line for line in lines if " a " in line)
+    second_row = next(line for line in lines if " long " in line)
+    assert first_heading.index("9 requests") + len("9 requests") == second_heading.index(
+        "12.3K requests"
+    ) + len("12.3K requests")
+    assert first_heading.index("+5 requests") + len("+5 requests") == second_heading.index(
+        "+345 requests"
+    ) + len("+345 requests")
+    assert first_heading.rindex("0.1%") + len("0.1%") == second_heading.rindex("99.9%") + len(
+        "99.9%"
+    )
+    assert first_heading.index("9 requests") + len("9 requests") == first_row.index(
+        "9 requests"
+    ) + len("9 requests")
+    assert second_heading.index("12.3K requests") + len("12.3K requests") == second_row.index(
+        "12345 requests"
+    ) + len("12345 requests")
+
+
+def test_grouped_custom_ranking_rank_mode_suppresses_group_value_delta() -> None:
+    projection = _grouped_ranking_projection()
+    assert projection.config is not None
+    output = render_custom_projection(
+        replace(projection, config=replace(projection.config, ranking_comparison="rank")),
+        RenderContext(100, 30, load_translator("en"), color=False, ascii=True, density="detailed"),
+    )
+
+    assert "+2 requests" not in output
+    assert "Rank Δ" in output
+
+
 def test_grouped_custom_ranking_handles_empty_zero_signed_and_hidden_shares() -> None:
     groups = (
         CustomProjectedRankingGroup(
@@ -252,6 +323,37 @@ def test_grouped_custom_ranking_handles_empty_zero_signed_and_hidden_shares() ->
     assert "nan" not in output.lower() and "inf" not in output.lower()
     assert "%" not in output
     assert "%" not in without_shares
+
+
+def test_grouped_custom_ranking_negative_item_with_nonzero_total_stays_within_terminal_width() -> (
+    None
+):
+    groups = (
+        CustomProjectedRankingGroup(
+            "signed",
+            LocalizedText("Signed", "有符号"),
+            (
+                CustomProjectedSeries(
+                    "positive", LocalizedText("Positive", "正"), (Decimal("8"),), rank=1
+                ),
+                CustomProjectedSeries(
+                    "negative", LocalizedText("Negative", "负"), (Decimal("-2"),), rank=2
+                ),
+            ),
+            Decimal("6"),
+            None,
+            False,
+            Decimal("8"),
+        ),
+    )
+    context = RenderContext(58, 20, load_translator("en"), color=False, ascii=True, style="bars")
+    output = render_custom_projection(_grouped_ranking_projection(groups=groups), context)
+    negative = next(line for line in output.splitlines() if "Negative" in line)
+
+    assert "-2 requests" in negative
+    assert "-33.3%" in negative
+    assert display_width(negative) <= context.width
+    assert "#" not in negative
 
 
 def test_grouped_custom_ranking_all_period_and_narrow_density_hide_comparison_and_descriptions() -> (

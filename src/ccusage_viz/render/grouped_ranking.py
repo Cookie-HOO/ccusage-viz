@@ -7,6 +7,7 @@ from decimal import Decimal
 from typing import cast
 
 from ccusage_viz.custom_models import LocalizedText
+from ccusage_viz.formatting import center_text, display_width
 from ccusage_viz.processing.custom_historical import (
     CustomChartProjection,
     CustomProjectedRankingGroup,
@@ -108,33 +109,69 @@ def render_grouped_custom_ranking(
     prepared = tuple(
         _prepare_group(group, projection, context, global_total=global_total) for group in groups
     )
-    lines = [line for line in (summary, heading) if line]
+    lines = [line for line in (summary, center_text(heading, context.width)) if line]
     if not prepared:
         lines.append(context.translator.text("message.custom_no_data"))
         return "\n".join(lines)
     columns = RankingColumns()
     all_entries = tuple(entry for group in prepared for entry in group.entries)
+    comparison_mode = (
+        projection.config.ranking_comparison if projection.config is not None else "full"
+    )
+    total_entry_count = max((len(group.entries) for group in prepared), default=0)
+    comparison_visible = (
+        context.density in {"full", "detailed"}
+        and context.width >= 58
+        and context.period != "all"
+        and projection.comparison_available
+        and comparison_mode != "none"
+    )
     if all_entries and context.width >= 58 and context.density in {"full", "detailed"}:
         measure_ranking_columns(
             all_entries,
             context=context,
             total=max((group.total for group in prepared), default=Decimal()),
             show_percentage=projection.show_percentage,
-            comparison_mode=(
-                projection.config.ranking_comparison if projection.config is not None else "full"
-            ),
+            comparison_mode=comparison_mode,
             comparison_available=projection.comparison_available,
             show_new_entries=True,
-            total_entry_count=max((len(group.entries) for group in prepared), default=0),
+            total_entry_count=total_entry_count,
             columns=columns,
         )
-    comparison_visible = (
-        context.density in {"full", "detailed"}
-        and context.width >= 58
-        and context.period != "all"
-        and projection.comparison_available
-        and (projection.config is None or projection.config.ranking_comparison != "none")
-    )
+        # Include every heading before rendering so later groups cannot shift
+        # columns already used by earlier groups.
+        if comparison_visible:
+            columns.widths["current"] = max(
+                columns.widths.get("current", 0),
+                *(display_width(group.display) + 2 for group in prepared),
+            )
+            if comparison_mode == "full":
+                columns.widths["delta"] = max(
+                    columns.widths.get("delta", 0),
+                    *(display_width(group.comparison_display) for group in prepared),
+                )
+            if projection.show_percentage:
+                columns.widths["share"] = max(
+                    columns.widths.get("share", 0),
+                    *(
+                        display_width(f"{group.share:>5.1%}") if group.share is not None else 0
+                        for group in prepared
+                    ),
+                )
+        else:
+            columns.widths["right"] = max(
+                columns.widths.get("right", 1),
+                *(
+                    display_width(group.display)
+                    + (
+                        display_width(f"{group.share:>5.1%}")
+                        if projection.show_percentage and group.share is not None
+                        else 0
+                    )
+                    + 3
+                    for group in prepared
+                ),
+            )
     for index, group in enumerate(prepared):
         if index and lines and lines[-1]:
             lines.append("")
@@ -153,6 +190,10 @@ def render_grouped_custom_ranking(
                 link=group.link,
                 descriptions_visible=descriptions_visible,
                 comparison_visible=comparison_visible,
+                comparison_mode=comparison_mode,
+                show_percentage=projection.show_percentage,
+                total_entry_count=total_entry_count,
+                columns=columns,
             )
         )
         if not group.entries:
@@ -167,14 +208,12 @@ def render_grouped_custom_ranking(
             ),
             context=context,
             descriptions_visible=descriptions_visible,
-            comparison_mode=(
-                projection.config.ranking_comparison if projection.config is not None else "full"
-            ),
+            comparison_mode=comparison_mode,
             comparison_available=projection.comparison_available,
             show_new_entries=True,
             compact_labels=False,
             label_max_width=48,
-            total_entry_count=len(group.entries),
+            total_entry_count=total_entry_count,
             total=group.total,
             maximum=group.maximum,
             show_percentage=projection.show_percentage,

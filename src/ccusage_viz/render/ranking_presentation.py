@@ -497,22 +497,70 @@ def render_ranking_heading_row(
     link: str | None = None,
     descriptions_visible: bool = False,
     comparison_visible: bool = True,
+    comparison_mode: str = "full",
+    show_percentage: bool = True,
+    total_entry_count: int = 0,
+    columns: RankingColumns | None = None,
 ) -> tuple[str, ...]:
-    """Render a secondary Ranking heading without a rank or scale column."""
+    """Render a secondary Ranking heading on the shared Ranking column grid."""
     scheme = get_color_scheme(context.color_scheme)
     marker = f" · {_terminal_link('→', link)}" if link is not None else ""
-    right_fields = [value]
-    if comparison_visible and delta:
-        right_fields.append(delta)
-    if share:
-        right_fields.append(share)
-    right = "  ".join(field for field in right_fields if field)
-    right_width = min(display_width(right), max(1, context.width // 2))
-    label_width = max(1, context.width - right_width - int(bool(right)))
-    visible_label = truncate_width(f"{strip_ansi(label).replace(chr(27), '')}{marker}", label_width)
-    row = pad_width(visible_label, label_width)
-    if right:
-        row = f"{row} {truncate_width(right, right_width)}"
+    heading_label = f"{strip_ansi(label).replace(chr(27), '')}{marker}"
+    growth_visible = comparison_visible and comparison_mode == "full"
+    rank_comparison_visible = (
+        comparison_visible and context.density == "detailed" and context.width >= 75
+    )
+    if comparison_visible and columns is not None:
+        rank_width = max(2, display_width(str(total_entry_count)))
+        rank_column_width = max(
+            rank_width + 4,
+            display_width(context.translator.text("label.ranking_column_rank")),
+        )
+        current_width = columns.widths.get("current", max(1, display_width(value)))
+        delta_width = columns.widths.get("delta", 0) if growth_visible else 0
+        share_width = columns.widths.get("share", 0) if show_percentage else 0
+        rank_change_width = columns.widths.get("rank_change", 0) if rank_comparison_visible else 0
+        optional_width = delta_width + share_width + rank_change_width
+        optional_count = sum((growth_visible, rank_comparison_visible, show_percentage))
+        if context.style == "list":
+            fixed_width = rank_column_width + current_width + optional_width + 2 + optional_count
+            label_width = min(48, max(1, context.width - fixed_width))
+            prefix_width = rank_column_width + 1 + label_width
+        else:
+            fixed_width = rank_column_width + current_width + optional_width + 4 + optional_count
+            available = max(2, context.width - fixed_width)
+            label_width = min(48, max(1, available - 2))
+            bar_width = max(1, available - label_width - 1)
+            prefix_width = rank_column_width + 1 + label_width + 1 + bar_width
+        fields = [
+            pad_width(truncate_width(heading_label, prefix_width), prefix_width),
+            pad_width(value, current_width, align="right"),
+        ]
+        if growth_visible:
+            fields.append(pad_width(delta, delta_width, align="right"))
+        if rank_comparison_visible:
+            fields.append(" " * rank_change_width)
+        if show_percentage:
+            fields.append(pad_width(share, share_width, align="right"))
+        row = " ".join(fields)
+    else:
+        right_fields = [value]
+        if growth_visible and delta:
+            right_fields.append(delta)
+        if show_percentage and share:
+            right_fields.append(share)
+        right = "  ".join(field for field in right_fields if field)
+        measured_right = (
+            columns.widths.get("right", display_width(right)) if columns else display_width(right)
+        )
+        right_width = min(measured_right, max(1, context.width // 2))
+        label_width = max(1, context.width - right_width - int(bool(right)))
+        visible_label = truncate_width(heading_label, label_width)
+        row = pad_width(visible_label, label_width)
+        if right:
+            row = (
+                f"{row} {pad_width(truncate_width(right, right_width), right_width, align='right')}"
+            )
     rows = [styled_text(row, scheme.muted, context, bold=True)]
     if descriptions_visible and context.density != "minimal" and description:
         visible = description_visible_text(description)
@@ -850,7 +898,7 @@ def render_historical_ranking(
             rank_comparison,
             share,
         ) in rows:
-            length = round(entry.current / maximum * bar_width)
+            length = min(bar_width, max(0, round(entry.current / maximum * bar_width)))
             color = scheme.other if entry.is_other or entry.is_fallback else scheme.highlight
             if context.style == "dot":
                 dot_length = max(1, length)
@@ -933,7 +981,7 @@ def render_historical_ranking(
         _rank_comparison,
         share,
     ) in rows:
-        length = round(entry.current / maximum * bar_width)
+        length = min(bar_width, max(0, round(entry.current / maximum * bar_width)))
         color = scheme.other if entry.is_other or entry.is_fallback else scheme.highlight
         if context.style == "dot":
             # A scaled value can round to zero in a one-cell narrow track;
