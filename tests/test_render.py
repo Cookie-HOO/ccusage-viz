@@ -216,6 +216,103 @@ def test_grouped_custom_ranking_renders_dataset_order_arrow_heading_and_independ
     assert "https://example.com/coding" not in strip_ansi(output)
 
 
+def test_grouped_custom_ranking_sanitizes_scalar_metadata_and_keeps_trusted_group_link() -> None:
+    controls = "\x1b[2J\x1b]52;c;YXR0YWNr\x07"
+    groups = (
+        CustomProjectedRankingGroup(
+            "unsafe-group",
+            LocalizedText(f"Group {controls}visible", "组"),
+            (
+                CustomProjectedSeries(
+                    "unsafe-entry",
+                    LocalizedText("Entry", "项"),
+                    (Decimal("9"),),
+                    previous_total=Decimal("4"),
+                    comparison_ready=True,
+                    display=LocalizedText(f"Entry {controls}display", "值"),
+                    comparison_display=LocalizedText(f"Delta {controls}display", "差"),
+                    rank=1,
+                ),
+            ),
+            Decimal("9"),
+            Decimal("4"),
+            True,
+            Decimal("9"),
+            display=LocalizedText(f"Group {controls}display", "值"),
+            comparison_display=LocalizedText(f"Group delta {controls}display", "差"),
+            link="https://example.com/groups/safe",
+        ),
+    )
+    output = render_custom_projection(
+        _grouped_ranking_projection(groups=groups),
+        RenderContext(100, 20, load_translator("en"), color=True, ascii=True, density="detailed"),
+    )
+
+    assert "\x1b[2J" not in output
+    assert "\x1b]52;" not in output
+    assert "Group visible" in strip_ansi(output)
+    assert "Entry display" in strip_ansi(output)
+    assert "Delta display" in strip_ansi(output)
+    assert "\x1b]8;;https://example.com/groups/safe\x1b\\" in output
+
+
+def test_grouped_custom_ranking_bounds_adversarial_scalar_columns() -> None:
+    huge = "界" * 100
+    groups = (
+        CustomProjectedRankingGroup(
+            "huge",
+            LocalizedText("Huge", "大"),
+            (
+                CustomProjectedSeries(
+                    "huge-entry",
+                    LocalizedText("Entry", "项"),
+                    (Decimal("100"),),
+                    previous_total=Decimal("1"),
+                    comparison_ready=True,
+                    display=LocalizedText(huge, huge),
+                    comparison_display=LocalizedText(huge, huge),
+                    rank=1,
+                ),
+            ),
+            Decimal("100"),
+            Decimal("1"),
+            True,
+            Decimal("100"),
+            display=LocalizedText(huge, huge),
+            comparison_display=LocalizedText(huge, huge),
+        ),
+    )
+    context = RenderContext(
+        58, 20, load_translator("en"), color=False, ascii=True, density="detailed"
+    )
+    output = render_custom_projection(_grouped_ranking_projection(groups=groups), context)
+
+    assert all(display_width(line) <= context.width for line in output.splitlines())
+    assert any("…" in line for line in output.splitlines())
+
+
+def test_flat_custom_ranking_bounds_adversarial_scalar_columns() -> None:
+    huge = "X" * 200
+    projection = _grouped_ranking_projection()
+    entry = CustomProjectedSeries(
+        "huge-entry",
+        LocalizedText("Entry", "项"),
+        (Decimal("100"),),
+        previous_total=Decimal("1"),
+        comparison_ready=True,
+        display=LocalizedText(huge, huge),
+        comparison_display=LocalizedText(huge, huge),
+    )
+    context = RenderContext(
+        58, 20, load_translator("en"), color=False, ascii=True, density="detailed"
+    )
+    output = render_custom_projection(
+        replace(projection, series=(entry,), groups=None), context
+    )
+
+    assert all(display_width(line) <= context.width for line in output.splitlines())
+
+
 def test_grouped_custom_ranking_centers_main_heading_and_aligns_shared_value_columns() -> None:
     groups = (
         CustomProjectedRankingGroup(

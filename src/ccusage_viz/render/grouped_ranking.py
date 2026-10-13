@@ -7,7 +7,7 @@ from decimal import Decimal
 from typing import cast
 
 from ccusage_viz.custom_models import LocalizedText
-from ccusage_viz.formatting import center_text, display_width
+from ccusage_viz.formatting import center_text, display_width, sanitize_terminal_text
 from ccusage_viz.processing.custom_historical import (
     CustomChartProjection,
     CustomProjectedRankingGroup,
@@ -61,7 +61,7 @@ def _prepare_group(
         replace(projection, series=group.series, groups=None), context
     )
     display = (
-        _localized(group.display, context)
+        sanitize_terminal_text(_localized(group.display, context))
         if group.display
         else _value(group.total, projection, context)
     )
@@ -78,13 +78,13 @@ def _prepare_group(
             comparison_display = (
                 "0"
                 if delta == 0
-                else _localized(group.comparison_display, context)
+                else sanitize_terminal_text(_localized(group.comparison_display, context))
                 if group.comparison_display is not None
                 else f"{'+' if delta > 0 else '-'}{_value(abs(delta), projection, context)}"
             )
     return GroupedRankingPresentationGroup(
         group.id,
-        _localized(group.label, context).replace("\n", "\\n"),
+        sanitize_terminal_text(_localized(group.label, context)).replace("\n", "\\n"),
         _localized(group.description, context) if group.description else None,
         group.link,
         display,

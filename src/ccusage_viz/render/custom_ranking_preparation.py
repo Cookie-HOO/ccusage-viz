@@ -8,7 +8,7 @@ from decimal import Decimal
 from typing import cast
 
 from ccusage_viz.custom_models import LocalizedText
-from ccusage_viz.formatting import display_width
+from ccusage_viz.formatting import display_width, sanitize_terminal_text
 from ccusage_viz.processing.custom_historical import CustomChartProjection, CustomProjectedSeries
 from ccusage_viz.render.base import RenderContext
 from ccusage_viz.render.ranking_presentation import (
@@ -50,10 +50,12 @@ def prepare_custom_ranking(
 
     def prepare_entry(entry: CustomProjectedSeries, rank: int) -> RankingPresentationEntry:
         display = (
-            localized(entry.display) if entry.display and not entry.is_other else value(entry.total)
+            sanitize_terminal_text(localized(entry.display))
+            if entry.display and not entry.is_other
+            else value(entry.total)
         )
         comparison_display = (
-            localized(entry.comparison_display)
+            sanitize_terminal_text(localized(entry.comparison_display))
             if entry.comparison_display and not entry.is_other
             else (
                 f"{'+' if entry.total > entry.previous_total else '-'}"
@@ -66,7 +68,7 @@ def prepare_custom_ranking(
             entry.id,
             context.translator.text("label.other")
             if entry.is_other
-            else localized(entry.label).replace("\n", "\\n"),
+            else sanitize_terminal_text(localized(entry.label)).replace("\n", "\\n"),
             entry.total,
             entry.previous_total,
             entry.comparison_ready,

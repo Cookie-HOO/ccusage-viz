@@ -8,6 +8,72 @@ _OSC8 = re.compile(r"\x1b]8;;[^\x1b\x07]*(?:\x1b\\|\x07)")
 _TERMINAL_CONTROL = re.compile(r"(?:\x1b\[[0-?]*[ -/]*[@-~]|\x1b]8;;[^\x1b\x07]*(?:\x1b\\|\x07))")
 
 
+def sanitize_terminal_text(value: str) -> str:
+    """Remove terminal control sequences and control characters from untrusted text.
+
+    Unlike :func:`strip_ansi`, this is an input-boundary sanitizer.  It removes
+    arbitrary CSI and OSC sequences (including OSC clipboard commands), the
+    other string controls terminated by ST, and standalone C0/C1 controls.
+    """
+    output: list[str] = []
+    position = 0
+    length = len(value)
+    while position < length:
+        code = ord(value[position])
+        if code == 0x1B:
+            position += 1
+            if position >= length:
+                break
+            introducer = value[position]
+            if introducer == "[":
+                position += 1
+                while position < length:
+                    final = ord(value[position])
+                    position += 1
+                    if 0x40 <= final <= 0x7E:
+                        break
+                continue
+            if introducer in "]PX^_":
+                position += 1
+                while position < length:
+                    if value[position] == "\x07":
+                        position += 1
+                        break
+                    if value.startswith("\x1b\\", position):
+                        position += 2
+                        break
+                    position += 1
+                continue
+            # A two-byte escape sequence is itself a terminal command.
+            position += 1
+            continue
+        if code == 0x9B:  # 8-bit CSI
+            position += 1
+            while position < length:
+                final = ord(value[position])
+                position += 1
+                if 0x40 <= final <= 0x7E:
+                    break
+            continue
+        if code in {0x90, 0x9D, 0x98, 0x9E, 0x9F}:  # DCS/OSC/SOS/PM/APC
+            position += 1
+            while position < length:
+                if value[position] in {"\x07", "\x9c"}:
+                    position += 1
+                    break
+                if value.startswith("\x1b\\", position):
+                    position += 2
+                    break
+                position += 1
+            continue
+        if code < 0x20 or 0x7F <= code <= 0x9F:
+            position += 1
+            continue
+        output.append(value[position])
+        position += 1
+    return "".join(output)
+
+
 def format_tokens(value: int) -> str:
     """Format token counts with decimal K/M/B suffixes."""
     absolute = abs(value)

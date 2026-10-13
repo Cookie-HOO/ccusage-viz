@@ -486,6 +486,42 @@ def measure_ranking_columns(
     columns.description_width = max(1, context.width - min(context.width, rank_column_width + 1))
 
 
+def _fit_comparison_widths(
+    *,
+    context: RenderContext,
+    rank_column_width: int,
+    current_width: int,
+    delta_width: int,
+    share_width: int,
+    rank_change_width: int,
+    growth_visible: bool,
+    rank_comparison_visible: bool,
+    show_percentage: bool,
+) -> tuple[int, int, int, int]:
+    """Contract shared scalar columns to the terminal's finite cell budget."""
+    widths = [
+        max(1, current_width),
+        max(1, delta_width) if growth_visible else 0,
+        max(1, rank_change_width) if rank_comparison_visible else 0,
+        max(1, share_width) if show_percentage else 0,
+    ]
+    field_count = 3 + sum((growth_visible, rank_comparison_visible, show_percentage))
+    content_minimum = 1 if context.style == "list" else 2
+    scalar_budget = max(
+        len([width for width in widths if width]),
+        context.width - rank_column_width - (field_count - 1) - content_minimum,
+    )
+    overflow = max(0, sum(widths) - scalar_budget)
+    # Preserve the current value first; optional columns contract in stable
+    # lowest-priority order before the mandatory current column does.
+    for index in (2, 3, 1, 0):
+        reducible = max(0, widths[index] - 1)
+        reduction = min(overflow, reducible)
+        widths[index] -= reduction
+        overflow -= reduction
+    return widths[0], widths[1], widths[2], widths[3]
+
+
 def render_ranking_heading_row(
     *,
     label: str,
@@ -520,6 +556,17 @@ def render_ranking_heading_row(
         delta_width = columns.widths.get("delta", 0) if growth_visible else 0
         share_width = columns.widths.get("share", 0) if show_percentage else 0
         rank_change_width = columns.widths.get("rank_change", 0) if rank_comparison_visible else 0
+        current_width, delta_width, rank_change_width, share_width = _fit_comparison_widths(
+            context=context,
+            rank_column_width=rank_column_width,
+            current_width=current_width,
+            delta_width=delta_width,
+            share_width=share_width,
+            rank_change_width=rank_change_width,
+            growth_visible=growth_visible,
+            rank_comparison_visible=rank_comparison_visible,
+            show_percentage=show_percentage,
+        )
         optional_width = delta_width + share_width + rank_change_width
         optional_count = sum((growth_visible, rank_comparison_visible, show_percentage))
         if context.style == "list":
@@ -534,15 +581,19 @@ def render_ranking_heading_row(
             prefix_width = rank_column_width + 1 + label_width + 1 + bar_width
         fields = [
             pad_width(truncate_width(heading_label, prefix_width), prefix_width),
-            pad_width(value, current_width, align="right"),
+            pad_width(truncate_width(value, current_width), current_width, align="right"),
         ]
         if growth_visible:
-            fields.append(pad_width(delta, delta_width, align="right"))
+            fields.append(
+                pad_width(truncate_width(delta, delta_width), delta_width, align="right")
+            )
         if rank_comparison_visible:
             fields.append(" " * rank_change_width)
         if show_percentage:
-            fields.append(pad_width(share, share_width, align="right"))
-        row = " ".join(fields)
+            fields.append(
+                pad_width(truncate_width(share, share_width), share_width, align="right")
+            )
+        row = clip_width(" ".join(fields), context.width)
     else:
         right_fields = [value]
         if growth_visible and delta:
@@ -849,6 +900,17 @@ def render_historical_ranking(
             current_width = columns.width("current", current_width)
             share_width = columns.width("share", share_width)
             rank_change_width = columns.width("rank_change", rank_change_width)
+        current_width, delta_width, rank_change_width, share_width = _fit_comparison_widths(
+            context=context,
+            rank_column_width=rank_column_width,
+            current_width=current_width,
+            delta_width=delta_width,
+            share_width=share_width,
+            rank_change_width=rank_change_width,
+            growth_visible=growth_visible,
+            rank_comparison_visible=rank_comparison_visible,
+            show_percentage=show_percentage,
+        )
         optional_width = delta_width + share_width + rank_change_width
         optional_count = sum((growth_visible, rank_comparison_visible, show_percentage))
         if context.style == "list":
@@ -859,8 +921,10 @@ def render_historical_ranking(
             bar_width = 0
             header_fields = [
                 pad_width(rank_heading, rank_column_width, align="right"),
-                pad_width(project_heading, label_width),
-                pad_width(current_heading, current_width, align="right"),
+                pad_width(truncate_width(project_heading, label_width), label_width),
+                pad_width(
+                    truncate_width(current_heading, current_width), current_width, align="right"
+                ),
             ]
         else:
             fixed_width = rank_column_width + current_width + optional_width + 4 + optional_count
@@ -869,17 +933,29 @@ def render_historical_ranking(
             bar_width = max(1, available - label_width - 1)
             header_fields = [
                 pad_width(rank_heading, rank_column_width, align="right"),
-                pad_width(project_heading, label_width),
-                pad_width(scale_heading, bar_width),
-                pad_width(current_heading, current_width, align="right"),
+                pad_width(truncate_width(project_heading, label_width), label_width),
+                pad_width(truncate_width(scale_heading, bar_width), bar_width),
+                pad_width(
+                    truncate_width(current_heading, current_width), current_width, align="right"
+                ),
             ]
         if growth_visible:
-            header_fields.append(pad_width(delta_heading, delta_width, align="right"))
+            header_fields.append(
+                pad_width(truncate_width(delta_heading, delta_width), delta_width, align="right")
+            )
         if rank_comparison_visible:
-            header_fields.append(pad_width(rank_change_heading, rank_change_width, align="right"))
+            header_fields.append(
+                pad_width(
+                    truncate_width(rank_change_heading, rank_change_width),
+                    rank_change_width,
+                    align="right",
+                )
+            )
         if show_percentage:
-            header_fields.append(pad_width(share_heading, share_width, align="right"))
-        lines.append(" ".join(header_fields))
+            header_fields.append(
+                pad_width(truncate_width(share_heading, share_width), share_width, align="right")
+            )
+        lines.append(clip_width(" ".join(header_fields), context.width))
         if columns is not None:
             columns.description_width = max(
                 1, context.width - min(context.width, rank_column_width + 1)
@@ -920,15 +996,25 @@ def render_historical_ranking(
                 pad_width(rank_value, rank_column_width, align="right"),
                 label,
                 *(() if context.style == "list" else (mark,)),
-                pad_width(current, current_width, align="right"),
+                pad_width(truncate_width(current, current_width), current_width, align="right"),
             ]
             if growth_visible:
-                fields.append(pad_width(delta, delta_width, align="right"))
+                fields.append(
+                    pad_width(truncate_width(delta, delta_width), delta_width, align="right")
+                )
             if rank_comparison_visible:
-                fields.append(pad_width(rank_comparison, rank_change_width, align="right"))
+                fields.append(
+                    pad_width(
+                        truncate_width(rank_comparison, rank_change_width),
+                        rank_change_width,
+                        align="right",
+                    )
+                )
             if show_percentage:
-                fields.append(pad_width(share, share_width, align="right"))
-            lines.append(" ".join(fields))
+                fields.append(
+                    pad_width(truncate_width(share, share_width), share_width, align="right")
+                )
+            lines.append(clip_width(" ".join(fields), context.width))
             if descriptions_visible and entry.description:
                 indent = " " * min(context.width, rank_column_width + 1)
                 available = max(1, context.width - display_width(indent))

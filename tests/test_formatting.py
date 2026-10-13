@@ -5,6 +5,7 @@ from ccusage_viz.formatting import (
     display_width,
     format_summary_tokens,
     format_tokens,
+    sanitize_terminal_text,
     slice_width,
     truncate_width,
     wrap_width,
@@ -38,6 +39,12 @@ def test_decimal_token_formatting(value: int, expected: str) -> None:
 )
 def test_summary_token_formatting_has_at_most_two_decimals(value: int, expected: str) -> None:
     assert format_summary_tokens(value) == expected
+
+
+def test_terminal_text_sanitizer_removes_csi_osc_and_controls_but_keeps_unicode() -> None:
+    value = "正常 café\x1b[2Jvisible\x1b]52;c;YXR0YWNr\x07tail\x9b31m!\x00"
+
+    assert sanitize_terminal_text(value) == "正常 cafévisibletail!"
 
 
 def test_unicode_width_and_truncation() -> None:
