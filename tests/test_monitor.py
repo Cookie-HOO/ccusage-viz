@@ -1,4 +1,5 @@
 from contextlib import nullcontext
+from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from os import terminal_size
 from typing import Literal
@@ -633,6 +634,92 @@ def test_standalone_monitor_localizes_schema_errors(
     assert any(
         "Unsupported ccusage data at $.projects: expected object" in frame for frame in painted
     )
+
+
+@pytest.mark.parametrize(
+    ("style", "expects_window"),
+    (("ranking", False), ("ranking-dot", False), ("list", False), ("line", True)),
+)
+def test_monitor_adjustment_window_visibility_follows_presentation_style(
+    monkeypatch: pytest.MonkeyPatch,
+    style: str,
+    expects_window: bool,
+) -> None:
+    launch = monitor_options()
+    launch = replace(
+        launch,
+        chart=replace(launch.chart, presentation=replace(launch.chart.presentation, style=style)),
+    )
+    painted: list[str] = []
+
+    class Runtime:
+        def cancel(self) -> None:
+            pass
+
+    class Submission:
+        generation = 0
+        options = launch
+        handle: "Submission"
+
+        def __init__(self) -> None:
+            self.handle = self
+
+        def done(self) -> bool:
+            return False
+
+        def cancel(self) -> None:
+            pass
+
+    class Component:
+        def __init__(self, selected: StandaloneLaunch, **_kwargs: object) -> None:
+            self.candidate = selected
+            self.accepted_options = None
+            self.accepted_records = ()
+            self.error = None
+            self.accepted_at = None
+            self.last_elapsed = None
+            self.deltas = {}
+            self.rank_deltas = {}
+            self.generation = 0
+
+        def submit(self, *_args: object, **_kwargs: object) -> Submission:
+            return Submission()
+
+        def preview(self, selected: StandaloneLaunch) -> "Component":
+            self.candidate = selected
+            return self
+
+        def render(self, *_args: object, **_kwargs: object) -> str:
+            return "monitor chart"
+
+        def fail(self, *_args: object, **_kwargs: object) -> bool:
+            return True
+
+    class Screen:
+        def paint(self, frame: object, **_kwargs: object) -> None:
+            painted.append("\n".join(frame.rows))
+
+        def finish(self) -> None:
+            pass
+
+    keys = iter(("m", "\x03"))
+    monkeypatch.setattr(monitor_host, "build_query_runtime", Runtime)
+    monkeypatch.setattr(monitor_host, "build_chart_registry", lambda: object())
+    monkeypatch.setattr(monitor_host, "MonitorComponent", Component)
+    monkeypatch.setattr(monitor_host, "FramePainter", Screen)
+    monkeypatch.setattr(monitor_host, "input_mode", nullcontext)
+    monkeypatch.setattr(monitor_host, "read_key", lambda _timeout: next(keys))
+    monkeypatch.setattr(monitor_host, "get_terminal_size", lambda: terminal_size((100, 30)))
+    monkeypatch.setattr(
+        monitor_host,
+        "inspect_terminal",
+        lambda *_args, **_kwargs: Terminal(100, 30, False, True),
+    )
+
+    assert monitor_host.run_monitor(launch, load_translator("en")) == 0
+    picker_frame = next(frame for frame in painted if "DENSITY" in frame)
+    assert ("WINDOW" in picker_frame) is expects_window
+    assert ("w window" in picker_frame) is expects_window
 
 
 @pytest.mark.parametrize("text_view", (False, True))

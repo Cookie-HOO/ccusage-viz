@@ -3066,3 +3066,16 @@ def test_monitor_attachment_adjustment_actions_are_localized() -> None:
             "monitor", "quick", load_translator("en"), chart=ranking, attachment_available=True
         )
     )
+
+    for style in ("ranking", "ranking-dot", "list"):
+        chart = replace(ranking, presentation=replace(ranking.presentation, style=style))
+        actions = tui_module._pane_adjustment_actions(
+            "monitor", "quick", load_translator("en"), chart=chart
+        )
+        assert not any(action.text.startswith("w window") for action in actions)
+
+    line = replace(ranking, presentation=replace(ranking.presentation, style="line"))
+    line_actions = tui_module._pane_adjustment_actions(
+        "monitor", "quick", load_translator("en"), chart=line
+    )
+    assert any(action.text.startswith("w window") for action in line_actions)

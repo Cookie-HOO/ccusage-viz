@@ -479,7 +479,7 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                         f"label.monitor_distribution_{chart.distribution_granularity}"
                     ),
                 )
-            else:
+            elif monitor_shows_window_control(chart):
                 quick_values.update(window=window)
             values = (
                 quick_values
@@ -507,7 +507,9 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                 "status.monitor_adjust_advanced"
                 if adjustment_page == "advanced"
                 else "status.monitor_distribution_adjust_quick"
-                if adjustment_page == "quick" and is_monitor_distribution(chart)
+                if is_monitor_distribution(chart)
+                else "status.monitor_adjust_quick_no_window"
+                if not monitor_shows_window_control(chart)
                 else f"status.monitor_adjust_{adjustment_page}"
             )
             adjustment_controls = adjustment_rows(

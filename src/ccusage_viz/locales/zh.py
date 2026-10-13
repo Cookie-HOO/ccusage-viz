@@ -699,6 +699,7 @@ MESSAGES = {
     "status.monitor_sampling_active": "采样中",
     "status.monitor_source": "{source} · 每 {interval} 秒采样{state}",
     "status.monitor_adjust_quick": "密度 {density} · 窗口 {window} · 每 {interval}秒 · 分组 {mode} · TOP {top} · {theme} · {style}",
+    "status.monitor_adjust_quick_no_window": "密度 {density} · 每 {interval}秒 · 分组 {mode} · TOP {top} · {theme} · {style}",
     "status.monitor_distribution_adjust_quick": "密度 {density} · 日期 {day_window} · 粒度 {granularity} · 每 {interval}秒 · 分组 {mode} · TOP {top} · {theme} · {style}",
     "status.monitor_adjust_advanced": "图例 {legend_position}{animation_settings}",
     "status.monitor_adjust_advanced_nonproject": "图例 {legend_position}{animation_settings}",

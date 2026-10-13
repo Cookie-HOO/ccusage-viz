@@ -706,6 +706,7 @@ MESSAGES = {
     "status.monitor_sampling_active": "sampling",
     "status.monitor_source": "{source} · every {interval}s sample{state}",
     "status.monitor_adjust_quick": "DENSITY {density} · WINDOW {window} · EVERY {interval}s · BY {mode} · TOP {top} · {theme} · {style}",
+    "status.monitor_adjust_quick_no_window": "DENSITY {density} · EVERY {interval}s · BY {mode} · TOP {top} · {theme} · {style}",
     "status.monitor_distribution_adjust_quick": "DENSITY {density} · DAY {day_window} · GRANULARITY {granularity} · EVERY {interval}s · BY {mode} · TOP {top} · {theme} · {style}",
     "status.monitor_adjust_advanced": "LEGEND {legend_position}{animation_settings}",
     "status.monitor_adjust_advanced_nonproject": "LEGEND {legend_position}{animation_settings}",
