@@ -262,6 +262,7 @@ MESSAGES = {
     "error.custom_command_protocol": "自定义命令返回了无效的协议响应：{detail}",
     "error.custom_command_output_limit": "自定义命令返回的数据超过 {limit} 字节限制。",
     "error.ccusage_codex_date_attribution": "为确保日期归属准确，Codex 项目用量必须按单日查询。",
+    "error.ccusage_project_fallback_incomplete": "代理 {agent} 的项目归属回退数据不完整。",
     "error.dsh_missing": "找不到 dsh-token-collector 可执行文件：{binary}。请运行：cargo install --path /Users/bytedance/Projects/rust/dsh-token-collector。",
     "error.dsh_start": "无法启动 DSH {query}：{detail}",
     "error.dsh_failed": "DSH {query} 执行失败，退出码 {code}：{stderr}",

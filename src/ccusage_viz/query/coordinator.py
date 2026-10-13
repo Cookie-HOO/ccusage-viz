@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError, as_completed
-from dataclasses import dataclass, field
+from concurrent.futures import FIRST_COMPLETED, Future, wait
+from dataclasses import dataclass, field, replace
 from threading import BoundedSemaphore, Event, Lock, Thread
 from typing import Generic, TypeVar
 
@@ -19,8 +19,20 @@ _Result = TypeVar("_Result")
 class _InFlightQuery:
     key: _WorkKey
     future: Future[PhysicalResult]
+    scheduling: tuple[str, int] | None
+    group: BoundedSemaphore | None
     cancelled: Event = field(default_factory=Event)
+    started: Event = field(default_factory=Event)
+    launched: bool = False
     subscribers: int = 0
+
+
+@dataclass(slots=True, eq=False)
+class _QuerySubscription:
+    entry: _InFlightQuery
+    query: PhysicalQuery
+    group: BoundedSemaphore | None
+    detached: bool = False
 
 
 @dataclass(slots=True, eq=False)
@@ -53,10 +65,16 @@ class QueryHandle(Generic[_Result]):
 
 
 class QueryCoordinator:
-    """Execute immutable physical plans with bounded, in-flight-only sharing."""
+    """Execute immutable plans with process-wide in-flight and group sharing.
+
+    Any subscriber may launch shared physical work. The coordinator that atomically
+    launches an entry contributes its ``max_parallel`` execution limit.
+    """
 
     _inflight_lock = Lock()
     _inflight: dict[_WorkKey, _InFlightQuery] = {}
+    _group_lock = Lock()
+    _group_limits: dict[str, tuple[int, BoundedSemaphore]] = {}
 
     def __init__(self, *, max_parallel: int = 2) -> None:
         if max_parallel < 1:
@@ -124,76 +142,252 @@ class QueryCoordinator:
     ) -> ProviderResult:
         if not plan.queries:
             return provider.assemble(plan, ())
-        if any(
-            query.provider.provider_id != provider.provider.provider_id for query in plan.queries
-        ):
-            raise ValueError("physical plan contains a query for another provider")
+        self._validate_queries(plan.queries, provider)
 
-        workers = min(self.max_parallel, len(plan.queries))
-        executor = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="provider-query")
-        futures = {
-            executor.submit(self._run_one, run, provider, query): index
-            for index, query in enumerate(plan.queries)
-        }
-        results: list[PhysicalResult | None] = [None] * len(plan.queries)
+        subscriptions: list[_QuerySubscription] = []
         try:
-            for future in as_completed(futures):
-                index = futures[future]
-                try:
-                    results[index] = future.result()
-                except BaseException:
-                    if (
-                        run.cancelled.is_set()
-                        or self._shutdown.is_set()
-                        or plan.queries[index].required
-                    ):
-                        raise
-        except BaseException:
-            self._detach_run(run)
-            for future in futures:
-                future.cancel()
-            executor.shutdown(wait=False, cancel_futures=True)
-            raise
-        else:
-            executor.shutdown(wait=True)
-        ordered = tuple(result for result in results if result is not None)
-        fragments = tuple(provider.normalize(result) for result in ordered)
+            # Subscribe the whole batch before any entry can complete and leave the registry.
+            initial = self._register_batch(run, provider, plan.queries)
+            subscriptions.extend(initial)
+            self._launch_initial_batch(initial, provider)
+            resolver = getattr(provider, "resolve_queries", None)
+            if resolver is None:
+                return self._execute_legacy_plan(run, plan, provider, initial)
+
+            primary = [item for item in initial if not item.query.speculative]
+            primary_results = self._await_many(run, primary)
+            primary_fragments = tuple(
+                provider.normalize(result) for result in primary_results if result is not None
+            )
+            required_queries = tuple(resolver(plan, primary_fragments))
+            self._validate_queries(required_queries, provider)
+            if any(not query.required for query in required_queries):
+                raise ValueError("query resolver returned a non-required query")
+
+            speculative: dict[str, _QuerySubscription] = {
+                provider.fingerprint(item.query): item for item in initial if item.query.speculative
+            }
+            required: list[_QuerySubscription | None] = []
+            dynamic_queries: list[PhysicalQuery] = []
+            for query in required_queries:
+                match = speculative.get(provider.fingerprint(query))
+                if match is None:
+                    required.append(None)
+                    dynamic_queries.append(query)
+                else:
+                    required.append(self._duplicate_subscription(run, match, query))
+
+            dynamic = self._register_batch(run, provider, tuple(dynamic_queries))
+            subscriptions.extend(dynamic)
+            self._launch_batch(dynamic, provider)
+            dynamic_iter = iter(dynamic)
+            resolved = [next(dynamic_iter) if item is None else item for item in required]
+            subscriptions.extend(item for item in resolved if item not in subscriptions)
+
+            retained_entries = {item.entry for item in resolved}
+            for item in initial:
+                if item.query.speculative and item.entry not in retained_entries:
+                    self._detach_subscription(run, item)
+
+            required_results = self._await_many(run, resolved)
+            required_fragments = tuple(
+                provider.normalize(result) for result in required_results if result is not None
+            )
+            return provider.assemble(plan, primary_fragments + required_fragments)
+        finally:
+            for subscription in subscriptions:
+                self._detach_subscription(run, subscription)
+
+    def _execute_legacy_plan(
+        self,
+        run: _PlanRun,
+        plan: PhysicalPlan,
+        provider: Provider,
+        initial: list[_QuerySubscription],
+    ) -> ProviderResult:
+        results = self._await_many(run, initial)
+        fragments = tuple(provider.normalize(result) for result in results if result is not None)
         supplemental = getattr(provider, "supplemental_queries", lambda _plan, _fragments: ())(
             plan, fragments
         )
-        for query in supplemental:
-            try:
-                fragments += (provider.normalize(self._run_one(run, provider, query)),)
-            except BaseException:
-                if query.required or run.cancelled.is_set() or self._shutdown.is_set():
-                    raise
+        supplemental_queries = tuple(supplemental)
+        self._validate_queries(supplemental_queries, provider)
+        supplemental_subscriptions = self._register_batch(run, provider, supplemental_queries)
+        self._launch_batch(supplemental_subscriptions, provider)
+        try:
+            supplemental_results = self._await_many(run, supplemental_subscriptions)
+            fragments += tuple(
+                provider.normalize(result) for result in supplemental_results if result is not None
+            )
+        finally:
+            for subscription in supplemental_subscriptions:
+                self._detach_subscription(run, subscription)
         return provider.assemble(plan, fragments)
 
-    def _run_one(self, run: _PlanRun, provider: Provider, query: PhysicalQuery) -> PhysicalResult:
-        if run.cancelled.is_set() or self._shutdown.is_set():
-            raise _cancelled(query)
-        key = (provider.provider.provider_id, provider.fingerprint(query))
-        entry, owner = self._subscribe(run, key, query)
-        if owner:
-            Thread(
-                target=self._execute_bounded,
-                args=(key, entry, provider, query),
-                name="provider-query-execution",
-                daemon=True,
-            ).start()
+    @staticmethod
+    def _validate_queries(queries: tuple[PhysicalQuery, ...], provider: Provider) -> None:
+        if any(query.provider.provider_id != provider.provider.provider_id for query in queries):
+            raise ValueError("physical plan contains a query for another provider")
+
+    def _register_batch(
+        self,
+        run: _PlanRun,
+        provider: Provider,
+        queries: tuple[PhysicalQuery, ...],
+    ) -> list[_QuerySubscription]:
+        subscriptions: list[_QuerySubscription] = []
         try:
-            return self._await(run, entry, query)
-        finally:
-            self._unsubscribe(run, entry)
+            for query in queries:
+                if run.cancelled.is_set() or self._shutdown.is_set():
+                    raise _cancelled(query)
+                key = (provider.provider.provider_id, provider.fingerprint(query))
+                entry, _created = self._subscribe(run, key, query)
+                subscriptions.append(_QuerySubscription(entry, query, entry.group))
+        except BaseException:
+            for subscription in subscriptions:
+                self._detach_subscription(run, subscription)
+            raise
+        return subscriptions
+
+    def _duplicate_subscription(
+        self,
+        run: _PlanRun,
+        subscription: _QuerySubscription,
+        query: PhysicalQuery,
+    ) -> _QuerySubscription:
+        entry = subscription.entry
+        with self._inflight_lock:
+            entry.subscribers += 1
+        with run.lock:
+            if run.cancelled.is_set() or self._shutdown.is_set():
+                self._release(entry.key, entry)
+                raise _cancelled(query)
+            run.subscriptions[entry] = run.subscriptions.get(entry, 0) + 1
+        return _QuerySubscription(entry, query, subscription.group)
+
+    def _launch_initial_batch(
+        self, subscriptions: list[_QuerySubscription], provider: Provider
+    ) -> None:
+        primaries = [item for item in subscriptions if not item.query.speculative]
+        self._launch_batch(primaries, provider)
+        primary_entries = tuple(dict.fromkeys(item.entry for item in primaries))
+        target = min(len(primary_entries), self.max_parallel)
+        while (
+            sum(
+                entry.started.is_set() or entry.future.done() or entry.cancelled.is_set()
+                for entry in primary_entries
+            )
+            < target
+        ):
+            pending = next(
+                (
+                    entry
+                    for entry in primary_entries
+                    if not entry.started.is_set()
+                    and not entry.future.done()
+                    and not entry.cancelled.is_set()
+                ),
+                None,
+            )
+            if pending is None:
+                break
+            pending.started.wait(_WAIT_INTERVAL)
+        self._launch_batch([item for item in subscriptions if item.query.speculative], provider)
+
+    def _launch_batch(self, subscriptions: list[_QuerySubscription], provider: Provider) -> None:
+        for subscription in subscriptions:
+            self._ensure_launched(subscription, provider)
+
+    def _ensure_launched(self, subscription: _QuerySubscription, provider: Provider) -> None:
+        entry = subscription.entry
+        with self._inflight_lock:
+            if entry.launched or entry.subscribers == 0 or entry.future.done():
+                return
+            entry.launched = True
+        Thread(
+            target=self._execute_bounded,
+            args=(
+                entry.key,
+                entry,
+                provider,
+                subscription.query,
+                subscription.group,
+            ),
+            name="provider-query-execution",
+            daemon=True,
+        ).start()
+
+    def _await_many(
+        self,
+        run: _PlanRun,
+        subscriptions: list[_QuerySubscription],
+    ) -> list[PhysicalResult | None]:
+        results: list[PhysicalResult | None] = [None] * len(subscriptions)
+        pending = set(range(len(subscriptions)))
+        while pending:
+            if run.cancelled.is_set() or self._shutdown.is_set():
+                raise _cancelled(subscriptions[next(iter(pending))].query)
+            futures = {subscriptions[index].entry.future for index in pending}
+            done, _ = wait(futures, timeout=_WAIT_INTERVAL, return_when=FIRST_COMPLETED)
+            if not done:
+                continue
+            for index in tuple(pending):
+                subscription = subscriptions[index]
+                if subscription.entry.future not in done:
+                    continue
+                pending.remove(index)
+                try:
+                    shared = subscription.entry.future.result()
+                    results[index] = replace(shared, query=subscription.query)
+                except BaseException:
+                    if (
+                        subscription.query.required
+                        or run.cancelled.is_set()
+                        or self._shutdown.is_set()
+                    ):
+                        raise
+        return results
+
+    def _detach_subscription(self, run: _PlanRun, subscription: _QuerySubscription) -> None:
+        if subscription.detached:
+            return
+        subscription.detached = True
+        self._unsubscribe(run, subscription.entry)
+
+    def _register_group(self, query: PhysicalQuery) -> BoundedSemaphore | None:
+        if query.scheduling_group is None:
+            return None
+        assert query.scheduling_limit is not None
+        with type(self)._group_lock:
+            registered = type(self)._group_limits.get(query.scheduling_group)
+            if registered is None:
+                semaphore = BoundedSemaphore(query.scheduling_limit)
+                type(self)._group_limits[query.scheduling_group] = (
+                    query.scheduling_limit,
+                    semaphore,
+                )
+                return semaphore
+            limit, semaphore = registered
+            if limit != query.scheduling_limit:
+                raise ValueError(
+                    f"conflicting scheduling limits for group {query.scheduling_group!r}"
+                )
+            return semaphore
 
     def _subscribe(
         self, run: _PlanRun, key: _WorkKey, query: PhysicalQuery
     ) -> tuple[_InFlightQuery, bool]:
         with self._inflight_lock:
             entry = self._inflight.get(key)
-            owner = entry is None
+            created = entry is None
             if entry is None:
-                entry = _InFlightQuery(key, Future())
+                if query.scheduling_group is None:
+                    scheduling = None
+                else:
+                    assert query.scheduling_limit is not None
+                    scheduling = (query.scheduling_group, query.scheduling_limit)
+                group = self._register_group(query)
+                entry = _InFlightQuery(key, Future(), scheduling, group)
                 self._inflight[key] = entry
             entry.subscribers += 1
         with run.lock:
@@ -201,7 +395,7 @@ class QueryCoordinator:
                 self._release(key, entry)
                 raise _cancelled(query)
             run.subscriptions[entry] = run.subscriptions.get(entry, 0) + 1
-        return entry, owner
+        return entry, created
 
     def _unsubscribe(self, run: _PlanRun, entry: _InFlightQuery) -> None:
         with run.lock:
@@ -249,9 +443,39 @@ class QueryCoordinator:
         entry: _InFlightQuery,
         provider: Provider,
         query: PhysicalQuery,
+        group: BoundedSemaphore | None,
     ) -> None:
-        with self._execution_slots:
+        acquired_group = False
+        acquired_global = False
+        try:
+            # Group capacity is acquired first. Timed acquisition keeps detached
+            # launch threads from becoming permanent semaphore waiters.
+            if group is not None:
+                while not group.acquire(timeout=_WAIT_INTERVAL):
+                    if self._entry_detached(entry):
+                        return
+                acquired_group = True
+                if self._entry_detached(entry):
+                    return
+            while not self._execution_slots.acquire(timeout=_WAIT_INTERVAL):
+                if self._entry_detached(entry):
+                    return
+            acquired_global = True
+            if self._entry_detached(entry):
+                return
+            entry.started.set()
             self._execute(key, entry, provider, query)
+        finally:
+            if acquired_global:
+                self._execution_slots.release()
+            if acquired_group:
+                assert group is not None
+                group.release()
+
+    @classmethod
+    def _entry_detached(cls, entry: _InFlightQuery) -> bool:
+        with cls._inflight_lock:
+            return entry.subscribers == 0
 
     @classmethod
     def _execute(
@@ -290,22 +514,6 @@ class QueryCoordinator:
             else:
                 assert result is not None
                 entry.future.set_result(result)
-
-    def _await(self, run: _PlanRun, entry: _InFlightQuery, query: PhysicalQuery) -> PhysicalResult:
-        while True:
-            if run.cancelled.is_set() or self._shutdown.is_set():
-                raise _cancelled(query)
-            try:
-                result = entry.future.result(timeout=_WAIT_INTERVAL)
-            except TimeoutError:
-                continue
-            except BaseException:
-                if run.cancelled.is_set() or self._shutdown.is_set():
-                    raise _cancelled(query) from None
-                raise
-            if run.cancelled.is_set() or self._shutdown.is_set():
-                raise _cancelled(query)
-            return result
 
 
 def _cancelled(query: PhysicalQuery) -> QueryError:

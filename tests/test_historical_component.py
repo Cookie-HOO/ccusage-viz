@@ -1,5 +1,7 @@
+import json
 from dataclasses import replace
 from datetime import UTC, date, datetime
+from threading import Event
 from typing import cast
 
 import pytest
@@ -14,6 +16,7 @@ from ccusage_viz.domain import (
     TokenUsage,
     UsageRecord,
 )
+from ccusage_viz.errors import QueryError
 from ccusage_viz.historical_component import (
     HistoricalChartComponent,
     HistoricalCompletion,
@@ -30,7 +33,12 @@ from ccusage_viz.options import (
     StandaloneLaunch,
     TimelineConfig,
 )
-from ccusage_viz.query.models import QueryTrigger
+from ccusage_viz.providers.ccusage import CcusageProvider
+from ccusage_viz.query.coordinator import QueryCoordinator
+from ccusage_viz.query.models import PhysicalQuery, PhysicalResult, QueryTrigger
+from ccusage_viz.query.provider import ProviderDefinition
+from ccusage_viz.query.registry import ProviderRegistry
+from ccusage_viz.query.runtime import QueryRuntime
 
 
 def options() -> StandaloneLaunch:
@@ -51,6 +59,88 @@ def component() -> HistoricalChartComponent:
         owner_id="test:chart",
         runtime=build_query_runtime(),
         registry=build_chart_registry(),
+    )
+
+
+class _AtomicProjectProvider(CcusageProvider):
+    """In-process ccusage boundary fake; compile/normalize/assemble stay real."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        object.__setattr__(self, "fallback_total", 20)
+        object.__setattr__(self, "observation_has_exception", True)
+        object.__setattr__(self, "fallback_fails", False)
+        object.__setattr__(self, "operations", [])
+
+    def execute(self, query: PhysicalQuery, cancelled: Event) -> PhysicalResult:
+        del cancelled
+        self.operations.append(query.operation)
+        day = query.coverage.intervals[0].until.isoformat()
+        if query.operation == "unified_daily_agent_observation":
+            agents = (
+                [
+                    {
+                        "agent": "future-agent",
+                        "project": "relative/project",
+                        "inputTokens": 20,
+                        "outputTokens": 0,
+                        "cacheReadTokens": 0,
+                        "cacheCreationTokens": 0,
+                        "totalTokens": 20,
+                    }
+                ]
+                if self.observation_has_exception
+                else []
+            )
+            payload = {"daily": [{"date": day, "agents": agents}]}
+        elif query.operation.startswith("project_fallback_sessions:"):
+            if self.fallback_fails:
+                raise QueryError("error.ccusage_failed", query=query.operation, code=1, stderr="")
+            payload = {
+                "sessions": [
+                    {
+                        "sessionId": "accepted-session",
+                        "projectPath": "/workspace/attributed",
+                        "inputTokens": self.fallback_total,
+                        "outputTokens": 0,
+                        "cacheReadTokens": 0,
+                        "cacheCreationTokens": 0,
+                        "totalTokens": self.fallback_total,
+                    }
+                ]
+            }
+        elif query.operation == "claude_daily_projects":
+            payload = {"daily": []}
+        elif query.operation == "codex_ranking_sessions":
+            payload = {"sessions": []}
+        else:  # pragma: no cover - protects this focused fake from planner drift
+            raise AssertionError(f"unexpected operation: {query.operation}")
+        return PhysicalResult(query, json.dumps(payload).encode())
+
+
+def _atomic_project_component() -> tuple[HistoricalChartComponent, _AtomicProjectProvider]:
+    provider = _AtomicProjectProvider()
+    providers = ProviderRegistry()
+    providers.register(ProviderDefinition(provider))
+    providers.freeze()
+    runtime = QueryRuntime(providers, QueryCoordinator(max_parallel=4))
+    selected = replace(
+        options(),
+        host=StandaloneHostConfig(provider="ccusage"),
+        chart=RankingConfig(
+            "ranking",
+            options().chart.date_range,
+            presentation=ChartPresentation(theme="no-color", style="bar"),
+        ),
+    )
+    return (
+        HistoricalChartComponent(
+            selected,
+            owner_id="test:atomic-project-ranking",
+            runtime=runtime,
+            registry=build_chart_registry(),
+        ),
+        provider,
     )
 
 
@@ -76,6 +166,106 @@ def test_historical_replacement_classifier_ignores_granularity_and_presentation(
         ),
     )
     assert not historical_replacement_required(previous, changed_presentation)
+
+
+def test_project_ranking_provider_result_is_accepted_atomically_after_reconciliation() -> None:
+    chart, provider = _atomic_project_component()
+    assert chart.runtime is not None
+    old_record = UsageRecord(
+        date(2026, 1, 7),
+        "future-agent",
+        TokenUsage(7, 7, 0, 0, 0),
+        SourceKind.PROJECT_SESSIONS,
+        ProjectRef("future-agent", "/workspace/previous", "previous", True),
+    )
+    old_snapshot = UsageSnapshot(
+        (old_record,),
+        (),
+        0.1,
+        includes_project_attribution=True,
+        coverage=chart.display_coverage(),
+    )
+    old_accepted_at = datetime(2026, 1, 8, tzinfo=UTC)
+    chart.seed(chart.candidate, old_snapshot, accepted_at=old_accepted_at)
+    old_model = chart.model
+    old_options = chart.accepted_options
+
+    changed = replace(
+        chart.candidate,
+        chart=replace(
+            chart.candidate.chart,
+            date_range=DateRange(date(2026, 2, 1), date(2026, 2, 7)),
+        ),
+    )
+    chart.configure(changed, data_affecting=True)
+    object.__setattr__(provider, "fallback_total", 19)
+    failed = chart.submit(QueryTrigger.REFRESH)
+
+    with pytest.raises(QueryError, match="error.ccusage_project_fallback_incomplete") as caught:
+        failed.result()
+    assert chart.fail(caught.value, generation=failed.generation)
+    assert chart.snapshot is old_snapshot
+    assert chart.model is old_model
+    assert chart.accepted_options is old_options
+    assert chart.accepted_at is old_accepted_at
+    assert chart.snapshot.records == (old_record,)
+    assert all(record.project.display_name != "Unassigned" for record in chart.snapshot.records)
+
+    object.__setattr__(provider, "fallback_total", 20)
+    retry = chart.submit(QueryTrigger.REFRESH)
+    completion = retry.result()
+    retry_accepted_at = datetime(2026, 2, 8, tzinfo=UTC)
+    assert chart.accept(completion, accepted_at=retry_accepted_at)
+
+    assert chart.snapshot is completion.snapshot
+    assert chart.accepted_options == changed
+    assert chart.accepted_at is retry_accepted_at
+    assert chart.error is None
+    assert len(chart.snapshot.records) == 1
+    (accepted_record,) = chart.snapshot.records
+    assert accepted_record.project is not None
+    assert accepted_record.project.raw_id == "/workspace/attributed"
+    assert accepted_record.attribution is None
+    assert accepted_record.project.display_name != "Unassigned"
+    chart.runtime.cancel()
+
+
+def test_period_switch_drops_failed_prefetch_when_observation_no_longer_requires_it() -> None:
+    chart, provider = _atomic_project_component()
+    assert chart.runtime is not None
+    try:
+        learned = chart.submit(QueryTrigger.STARTUP).result()
+        assert chart.accept(learned)
+        assert provider.operations.count("project_fallback_sessions:future-agent") == 1
+
+        object.__setattr__(provider, "observation_has_exception", False)
+        object.__setattr__(provider, "fallback_fails", True)
+        switched = replace(
+            chart.candidate,
+            chart=replace(
+                chart.candidate.chart,
+                date_range=DateRange(date(2026, 2, 1), date(2026, 2, 7)),
+            ),
+        )
+        chart.configure(switched, data_affecting=True)
+        completion = chart.submit(QueryTrigger.REFRESH).result()
+        assert chart.accept(completion)
+        assert completion.snapshot.records == ()
+        assert provider.operations.count("project_fallback_sessions:future-agent") == 2
+
+        following = replace(
+            chart.candidate,
+            chart=replace(
+                chart.candidate.chart,
+                date_range=DateRange(date(2026, 3, 1), date(2026, 3, 7)),
+            ),
+        )
+        chart.configure(following, data_affecting=True)
+        completion = chart.submit(QueryTrigger.REFRESH).result()
+        assert chart.accept(completion)
+        assert provider.operations.count("project_fallback_sessions:future-agent") == 2
+    finally:
+        chart.runtime.cancel()
 
 
 def test_component_acquires_and_accepts_provider_snapshot() -> None:

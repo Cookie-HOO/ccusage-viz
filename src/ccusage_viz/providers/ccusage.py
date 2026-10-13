@@ -1,15 +1,16 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import signal
 import subprocess
 import time
 from contextlib import suppress
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import timedelta
-from threading import Event, Thread
-from typing import Any, Final
+from threading import Event, Lock, Thread
+from typing import Any, Final, Literal, cast
 
 from ccusage_viz.codex_sessions import resolve_codex_session_cwds
 from ccusage_viz.coverage import DateCoverage, DateInterval
@@ -23,6 +24,7 @@ from ccusage_viz.project_identity import (
 )
 from ccusage_viz.query.models import (
     DataResolution,
+    ExecutionContext,
     PhysicalPlan,
     PhysicalQuery,
     PhysicalResult,
@@ -48,6 +50,49 @@ _OPERATION_SOURCES = {
 }
 _PROJECT_ATTRIBUTION_SUPPORTED_AGENTS = frozenset({"claude", "codex"})
 _PROJECT_ATTRIBUTION_UNSUPPORTED_AGENTS = frozenset({"antigravity", "opencode"})
+_FALLBACK_SCHEDULING_GROUP: Final = "ccusage-project-fallback"
+_FALLBACK_SCHEDULING_LIMIT: Final = 4
+
+
+@dataclass(frozen=True, slots=True)
+class _FallbackSourceKey:
+    source_id: str | None
+    executable: str
+    environment_digest: str
+
+
+@dataclass(frozen=True, slots=True)
+class _CcusageQueryMetadata:
+    source: _FallbackSourceKey
+    revision: int
+    role: Literal["project-observation", "project-fallback"]
+    observation_id: str
+    agent: str | None = None
+
+
+class _ProjectFallbackMemory:
+    def __init__(self) -> None:
+        self._lock = Lock()
+        self._revisions: dict[_FallbackSourceKey, tuple[int, int]] = {}
+        self._agents: dict[_FallbackSourceKey, frozenset[str]] = {}
+
+    def begin(self, source: _FallbackSourceKey) -> tuple[int, frozenset[str]]:
+        with self._lock:
+            next_revision, accepted_revision = self._revisions.get(source, (0, 0))
+            next_revision += 1
+            self._revisions[source] = (next_revision, accepted_revision)
+            return next_revision, self._agents.get(source, frozenset())
+
+    def replace(self, source: _FallbackSourceKey, revision: int, agents: frozenset[str]) -> None:
+        with self._lock:
+            next_revision, accepted_revision = self._revisions.get(source, (0, 0))
+            if revision < accepted_revision:
+                return
+            self._revisions[source] = (max(next_revision, revision), revision)
+            if agents:
+                self._agents[source] = agents
+            else:
+                self._agents.pop(source, None)
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,6 +103,9 @@ class CcusageProvider:
         dimensions=("agent", "model", "project"),
         execution_options=("chart_kind",),
         dependencies=("ccusage",),
+    )
+    _fallback_memory: _ProjectFallbackMemory = field(
+        default_factory=_ProjectFallbackMemory, compare=False, repr=False
     )
 
     def compile(self, intent: QueryIntent) -> PhysicalPlan:
@@ -77,8 +125,13 @@ class CcusageProvider:
             else "unified_daily"
         )
         queries: list[PhysicalQuery] = []
+        fallback_state: tuple[_FallbackSourceKey, int, frozenset[str]] | None = None
+        if mode in {"project_daily", "project_ranking"}:
+            source = _fallback_source(intent.provider, intent.execution_context)
+            revision, agents = self._fallback_memory.begin(source)
+            fallback_state = source, revision, agents
         for interval in intent.missing_intervals:
-            queries.extend(self._compile_interval(intent, interval, mode))
+            queries.extend(self._compile_interval(intent, interval, mode, fallback_state))
         notices = (
             (Notice("notice.daily_project_omitted", {"agent": "Codex"}),)
             if mode == "claude_daily_projects"
@@ -88,7 +141,10 @@ class CcusageProvider:
 
     @staticmethod
     def _compile_interval(
-        intent: QueryIntent, interval: DateInterval, mode: str
+        intent: QueryIntent,
+        interval: DateInterval,
+        mode: str,
+        fallback_state: tuple[_FallbackSourceKey, int, frozenset[str]] | None = None,
     ) -> tuple[PhysicalQuery, ...]:
         since = interval.since.isoformat()
         until = interval.until.isoformat()
@@ -114,25 +170,12 @@ class CcusageProvider:
                 ),
             )
         if mode == "project_daily":
+            observation = _project_observation_query(intent, since, until, coverage, fallback_state)
+            fallbacks = _remembered_fallback_queries(observation, fallback_state)
             return (
                 *CcusageProvider._compile_interval(intent, interval, "claude_daily_projects"),
-                PhysicalQuery(
-                    intent.provider,
-                    "unified_daily_agent_observation",
-                    (
-                        "daily",
-                        "--by-agent",
-                        "--json",
-                        "--since",
-                        since,
-                        "--until",
-                        until,
-                        "--offline",
-                        "--no-cost",
-                    ),
-                    intent.execution_context,
-                    coverage,
-                ),
+                observation,
+                *fallbacks,
                 *tuple(
                     PhysicalQuery(
                         intent.provider,
@@ -155,23 +198,7 @@ class CcusageProvider:
                 ),
             )
         if mode == "project_ranking":
-            observation = PhysicalQuery(
-                intent.provider,
-                "unified_daily_agent_observation",
-                (
-                    "daily",
-                    "--by-agent",
-                    "--json",
-                    "--since",
-                    since,
-                    "--until",
-                    until,
-                    "--offline",
-                    "--no-cost",
-                ),
-                intent.execution_context,
-                coverage,
-            )
+            observation = _project_observation_query(intent, since, until, coverage, fallback_state)
             codex = PhysicalQuery(
                 intent.provider,
                 "codex_ranking_sessions",
@@ -192,6 +219,7 @@ class CcusageProvider:
             return (
                 *CcusageProvider._compile_interval(intent, interval, "claude_daily_projects"),
                 observation,
+                *_remembered_fallback_queries(observation, fallback_state),
                 codex,
             )
         if mode != "unified_daily":
@@ -306,17 +334,23 @@ class CcusageProvider:
             if len(intervals) != 1:
                 raise QueryError("error.ccusage_codex_date_attribution")
             cwds = _fallback_session_cwds(fallback_agent, records)
-            records = tuple(
-                replace(
-                    record,
-                    day=intervals[0].until,
-                    project=make_project_ref(fallback_agent, cwd, path_backed=True),
-                    attribution=None,
+            normalized: list[UsageRecord] = []
+            for record in records:
+                candidate = cwds.get(record.session_id or "") or record.source_project
+                path = (
+                    normalized_absolute_project_path(candidate) if candidate is not None else None
                 )
-                if (cwd := cwds.get(record.session_id or "")) is not None
-                else record
-                for record in records
-            )
+                normalized.append(
+                    replace(
+                        record,
+                        day=intervals[0].until,
+                        project=make_project_ref(fallback_agent, path, path_backed=True),
+                        attribution=None,
+                    )
+                    if path is not None
+                    else replace(record, day=intervals[0].until)
+                )
+            records = tuple(normalized)
         if result.query.operation == "unified_daily_agent_observation":
             records = _fixed_project_observation_records(data, records)
         return ProviderResultFragment(
@@ -326,8 +360,44 @@ class CcusageProvider:
             DateCoverage()
             if result.query.operation == "unified_daily_agent_observation"
             else result.query.coverage,
-            provider_metadata=(),
+            provider_metadata=_normalized_query_metadata(result.query),
         )
+
+    def resolve_queries(
+        self,
+        plan: PhysicalPlan,
+        primary_fragments: tuple[ProviderResultFragment, ...],
+    ) -> tuple[PhysicalQuery, ...]:
+        observations = {
+            metadata.observation_id: (metadata, fragment)
+            for fragment in primary_fragments
+            if (metadata := _fragment_query_metadata(fragment)) is not None
+            and metadata.role == "project-observation"
+        }
+        by_revision: dict[tuple[_FallbackSourceKey, int], set[str]] = {}
+        required: list[PhysicalQuery] = []
+        for observation_id, (metadata, fragment) in observations.items():
+            agents = _exception_agents(fragment.records)
+            by_revision.setdefault((metadata.source, metadata.revision), set()).update(agents)
+            observation = next(
+                (
+                    query
+                    for query in plan.queries
+                    if (query_metadata := _query_metadata(query)) is not None
+                    and query_metadata.role == "project-observation"
+                    and query_metadata.observation_id == observation_id
+                ),
+                None,
+            )
+            if observation is None:
+                continue
+            required.extend(
+                _project_fallback_query(observation, metadata, agent, speculative=False)
+                for agent in sorted(agents, key=str.casefold)
+            )
+        for (source, revision), agents in by_revision.items():
+            self._fallback_memory.replace(source, revision, frozenset(agents))
+        return tuple(required)
 
     def supplemental_queries(
         self, plan: PhysicalPlan, fragments: tuple[ProviderResultFragment, ...]
@@ -360,7 +430,7 @@ class CcusageProvider:
         )
         return tuple(
             PhysicalQuery(
-                self.provider,
+                observation.provider,
                 f"project_fallback_sessions:{agent}",
                 (
                     agent,
@@ -383,16 +453,22 @@ class CcusageProvider:
     def assemble(
         self, plan: PhysicalPlan, fragments: tuple[ProviderResultFragment, ...]
     ) -> ProviderResult:
+        tagged = any(_fragment_query_metadata(fragment) is not None for fragment in fragments)
         records: tuple[UsageRecord, ...] = ()
         provenance = ()
         coverage = DateCoverage()
         notices = plan.notices
+        if tagged:
+            records = _strict_project_fallback_records(fragments)
         for fragment in fragments:
-            records += fragment.records
+            metadata = _fragment_query_metadata(fragment)
+            if not tagged or metadata is None:
+                records += fragment.records
             provenance += fragment.provenance
             coverage = coverage.merge(fragment.coverage)
             notices += fragment.notices
-        records = _replace_unverified_records(records)
+        if not tagged:
+            records = _replace_unverified_records(records)
         return ProviderResult(
             records,
             provenance,
@@ -411,6 +487,229 @@ class CcusageProvider:
             )
             or any(record.project is not None for record in records),
         )
+
+
+def _fallback_source(provider: ProviderRef, context: ExecutionContext | None) -> _FallbackSourceKey:
+    if context is None:
+        executable = ""
+        environment: tuple[tuple[str, str], ...] = ()
+    else:
+        executable = context.executable
+        environment = context.environment
+    encoded = json.dumps(environment, ensure_ascii=True, separators=(",", ":"))
+    return _FallbackSourceKey(
+        provider.source_id,
+        executable,
+        hashlib.sha256(encoded.encode("utf-8")).hexdigest(),
+    )
+
+
+def _project_observation_query(
+    intent: QueryIntent,
+    since: str,
+    until: str,
+    coverage: DateCoverage,
+    fallback_state: tuple[_FallbackSourceKey, int, frozenset[str]] | None,
+) -> PhysicalQuery:
+    if fallback_state is None:
+        raise ValueError("project observations require fallback state")
+    source, revision, _ = fallback_state
+    query = PhysicalQuery(
+        intent.provider,
+        "unified_daily_agent_observation",
+        (
+            "daily",
+            "--by-agent",
+            "--json",
+            "--since",
+            since,
+            "--until",
+            until,
+            "--offline",
+            "--no-cost",
+        ),
+        intent.execution_context,
+        coverage,
+    )
+    return replace(
+        query,
+        payload=_CcusageQueryMetadata(source, revision, "project-observation", query.fingerprint),
+    )
+
+
+def _remembered_fallback_queries(
+    observation: PhysicalQuery,
+    fallback_state: tuple[_FallbackSourceKey, int, frozenset[str]] | None,
+) -> tuple[PhysicalQuery, ...]:
+    if fallback_state is None:
+        return ()
+    source, revision, agents = fallback_state
+    metadata = _CcusageQueryMetadata(
+        source, revision, "project-observation", observation.fingerprint
+    )
+    return tuple(
+        _project_fallback_query(observation, metadata, agent, speculative=True)
+        for agent in sorted(agents, key=str.casefold)
+    )
+
+
+def _project_fallback_query(
+    observation: PhysicalQuery,
+    observation_metadata: _CcusageQueryMetadata,
+    agent: str,
+    *,
+    speculative: bool,
+) -> PhysicalQuery:
+    since, until = _query_dates(observation.coverage)
+    if since is None or until is None:
+        raise ValueError("project fallback requires one coverage interval")
+    return PhysicalQuery(
+        observation.provider,
+        f"project_fallback_sessions:{agent}",
+        (
+            agent,
+            "session",
+            "--json",
+            "--since",
+            since,
+            "--until",
+            until,
+            "--offline",
+            "--no-cost",
+        ),
+        observation.execution_context,
+        observation.coverage,
+        required=not speculative,
+        payload=_CcusageQueryMetadata(
+            observation_metadata.source,
+            observation_metadata.revision,
+            "project-fallback",
+            observation_metadata.observation_id,
+            agent,
+        ),
+        scheduling_group=_FALLBACK_SCHEDULING_GROUP,
+        scheduling_limit=_FALLBACK_SCHEDULING_LIMIT,
+        speculative=speculative,
+    )
+
+
+def _query_metadata(query: PhysicalQuery) -> _CcusageQueryMetadata | None:
+    return query.payload if isinstance(query.payload, _CcusageQueryMetadata) else None
+
+
+def _normalized_query_metadata(query: PhysicalQuery):
+    metadata = _query_metadata(query)
+    if metadata is None:
+        return ()
+    return (
+        ("ccusage_role", metadata.role),
+        ("ccusage_source_id", metadata.source.source_id),
+        ("ccusage_executable", metadata.source.executable),
+        ("ccusage_environment_digest", metadata.source.environment_digest),
+        ("ccusage_revision", metadata.revision),
+        ("ccusage_observation_id", metadata.observation_id),
+        ("ccusage_agent", metadata.agent),
+    )
+
+
+def _fragment_query_metadata(
+    fragment: ProviderResultFragment,
+) -> _CcusageQueryMetadata | None:
+    values = dict(fragment.provider_metadata)
+    role_value = values.get("ccusage_role")
+    revision = values.get("ccusage_revision")
+    observation_id = values.get("ccusage_observation_id")
+    if (
+        role_value not in {"project-observation", "project-fallback"}
+        or not isinstance(revision, int)
+        or not isinstance(observation_id, str)
+    ):
+        return None
+    source_id = values.get("ccusage_source_id")
+    executable = values.get("ccusage_executable")
+    environment_digest = values.get("ccusage_environment_digest")
+    agent = values.get("ccusage_agent")
+    if (
+        source_id is not None
+        and not isinstance(source_id, str)
+        or not isinstance(executable, str)
+        or not isinstance(environment_digest, str)
+        or agent is not None
+        and not isinstance(agent, str)
+    ):
+        return None
+    role = cast(Literal["project-observation", "project-fallback"], role_value)
+    return _CcusageQueryMetadata(
+        _FallbackSourceKey(source_id, executable, environment_digest),
+        revision,
+        role,
+        observation_id,
+        agent,
+    )
+
+
+def _exception_agents(records: tuple[UsageRecord, ...]) -> frozenset[str]:
+    return frozenset(
+        record.agent.casefold()
+        for record in records
+        if record.source is SourceKind.UNIFIED_DAILY
+        and record.attribution in {"unassigned", "unverified"}
+    )
+
+
+def _strict_project_fallback_records(
+    fragments: tuple[ProviderResultFragment, ...],
+) -> tuple[UsageRecord, ...]:
+    observations = tuple(
+        (metadata, fragment)
+        for fragment in fragments
+        if (metadata := _fragment_query_metadata(fragment)) is not None
+        and metadata.role == "project-observation"
+    )
+    fallbacks = {
+        (metadata.source, metadata.revision, metadata.observation_id, metadata.agent): fragment
+        for fragment in fragments
+        if (metadata := _fragment_query_metadata(fragment)) is not None
+        and metadata.role == "project-fallback"
+    }
+    reconciled: list[UsageRecord] = []
+    for metadata, observation in observations:
+        exceptions = _exception_agents(observation.records)
+        reconciled.extend(
+            record
+            for record in observation.records
+            if not (
+                record.agent.casefold() in exceptions
+                and record.source is SourceKind.UNIFIED_DAILY
+                and record.attribution in {"unassigned", "unverified"}
+            )
+        )
+        for agent in sorted(exceptions):
+            fallback = fallbacks.get(
+                (metadata.source, metadata.revision, metadata.observation_id, agent)
+            )
+            observations_for_agent = tuple(
+                record
+                for record in observation.records
+                if record.agent.casefold() == agent
+                and record.source is SourceKind.UNIFIED_DAILY
+                and record.attribution in {"unassigned", "unverified"}
+            )
+            sessions = () if fallback is None else fallback.records
+            if (
+                not sessions
+                or any(
+                    record.agent.casefold() != agent
+                    or record.attribution is not None
+                    or record.project is None
+                    for record in sessions
+                )
+                or sum(record.usage.total for record in observations_for_agent)
+                != sum(record.usage.total for record in sessions)
+            ):
+                raise QueryError("error.ccusage_project_fallback_incomplete", agent=agent)
+            reconciled.extend(sessions)
+    return tuple(reconciled)
 
 
 def _days(interval: DateInterval):
@@ -521,8 +820,8 @@ def _enrich_codex_project_rows(data: object) -> object:
     if not isinstance(data, dict):
         return data
     rows: list[dict[str, Any]] = []
-    for field in ("sessions", "session", "data"):
-        value = data.get(field)
+    for row_field in ("sessions", "session", "data"):
+        value = data.get(row_field)
         if isinstance(value, list):
             rows = [row for row in value if isinstance(row, dict)]
             break
