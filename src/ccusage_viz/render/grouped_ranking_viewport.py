@@ -75,31 +75,34 @@ class GroupedRankingViewport:
     )
 
     def _group_heading(self, offset: int) -> int | None:
+        """Return the heading whose physical-row interval contains ``offset``."""
         if not 0 <= offset < len(self.rows):
             return None
-        group_id = self.rows[offset].group_id
         return next(
             (
                 index
-                for index, row in enumerate(self.rows)
-                if row.kind == "group" and row.group_id == group_id
+                for index in range(offset, -1, -1)
+                if self.rows[index].kind == "group"
             ),
             None,
         )
 
     def _sticky_required(self, offset: int) -> bool:
-        """Keep the offset's group sticky until the offset reaches another heading."""
+        """Keep the preceding group sticky until its interval's next heading."""
         if self.visible_rows < 2 or not self.rows or offset >= len(self.rows):
             return False
         heading = self._group_heading(offset)
-        return (
-            heading is not None
-            and heading < offset
-            and any(
-                row.kind == "series" and row.group_id == self.rows[offset].group_id
-                for row in self.rows
-            )
+        if heading is None or heading == offset:
+            return False
+        next_heading = next(
+            (
+                index
+                for index in range(heading + 1, len(self.rows))
+                if self.rows[index].kind == "group"
+            ),
+            len(self.rows),
         )
+        return any(row.kind == "series" for row in self.rows[heading:next_heading])
 
     def effective_capacity(self, offset: int | None = None) -> int:
         position = self.offset if offset is None else offset
@@ -450,11 +453,7 @@ def render_grouped_custom_ranking_viewport(
             records: list[GroupedRankingRow] = []
             for group_index, (group, entries) in enumerate(visible):
                 if group_index:
-                    # The inter-group separator closes the preceding interval;
-                    # the sticky transition occurs only at the next heading.
-                    records.append(
-                        GroupedRankingRow("separator", visible[group_index - 1][0].id, None, 0)
-                    )
+                    records.append(GroupedRankingRow("separator", group.id, None, 0))
                 for line_index, _ in enumerate(heading_lines(group, measure=True)):
                     records.append(
                         GroupedRankingRow(
@@ -581,7 +580,12 @@ def render_grouped_custom_ranking_viewport(
 
     body = [source_line(viewport.rows[index]) for index in source_indexes]
     if sticky and viewport.offset < len(viewport.rows):
-        group = group_by_id.get(viewport.rows[viewport.offset].group_id)
+        heading_index = viewport._group_heading(viewport.offset)
+        group = (
+            group_by_id.get(viewport.rows[heading_index].group_id)
+            if heading_index is not None
+            else None
+        )
         if group is not None:
             body.insert(
                 0,

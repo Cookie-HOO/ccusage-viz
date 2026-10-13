@@ -196,31 +196,24 @@ def test_grouped_sticky_heading_is_label_only_and_has_no_hit() -> None:
     assert not any(row == viewport.body_top for row in viewport.hits)
 
 
-def test_grouped_sticky_remains_until_offset_reaches_next_original_heading() -> None:
+def test_grouped_sticky_transition_uses_heading_offset_intervals() -> None:
     viewport = GroupedRankingViewport()
     ctx = context(height=8)
     model = grouped_projection()
     render_grouped(model, viewport, ctx)
-    viewport.offset = next(
-        index
-        for index, row in enumerate(viewport.rows)
-        if row.kind == "series" and row.group_id == "coding"
-    )
-
-    output = strip_ansi(render_grouped(model, viewport, ctx))
-    assert output.splitlines()[viewport.body_top].strip() == "Coding Model"
-    assert any(
-        row.kind == "group" and row.group_id == "general"
-        # The next original heading has entered the unreserved window, but the
-        # current group remains sticky until that heading itself is the offset.
-        for row in viewport.rows[viewport.offset : viewport.offset + viewport.visible_rows]
-    )
-
-    viewport.offset = next(
+    next_heading = next(
         index
         for index, row in enumerate(viewport.rows)
         if row.kind == "group" and row.group_id == "general"
     )
+
+    viewport.offset = next_heading - 1
+    output = strip_ansi(render_grouped(model, viewport, ctx))
+    assert viewport.rows[viewport.offset].kind == "separator"
+    assert output.splitlines()[viewport.body_top].strip() == "Coding Model"
+    assert viewport.sticky_rows == 1
+
+    viewport.offset = next_heading
     output = strip_ansi(render_grouped(model, viewport, ctx))
     assert output.splitlines()[viewport.body_top].lstrip().startswith("General Model |")
     assert viewport.sticky_rows == 0
@@ -429,6 +422,27 @@ def test_grouped_tiny_height_clips_chrome_and_targets_only_rendered_count(
         row, _ = viewport.copy_all_hit
         assert "item(s)" in output.splitlines()[row]
     assert viewport.copy_all_hit is None or viewport.copy_all_hit[0] not in {0, 1 if search else -1}
+
+
+def test_grouped_copy_all_requires_a_rendered_nonminimal_count_row() -> None:
+    model = grouped_projection()
+    for density, show_visible_count in (("minimal", True), ("normal", False)):
+        viewport = GroupedRankingViewport()
+        output = render_grouped_custom_ranking_viewport(
+            model,
+            context(height=8, density=density),
+            viewport,
+            heading="Grouped Ranking",
+            descriptions_visible=False,
+            search_query="",
+            search_editing=False,
+            show_visible_count=show_visible_count,
+            copied_entry_id=None,
+            item_spacing="compact",
+            copy_all_action=True,
+        )
+        assert viewport.copy_all_hit is None
+        assert "item(s) total |" not in strip_ansi(output)
 
 
 def test_grouped_other_only_has_zero_match_count_and_no_copy_all_payload() -> None:
