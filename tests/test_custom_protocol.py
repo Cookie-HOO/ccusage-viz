@@ -406,6 +406,187 @@ def test_v2_request_omits_undeclared_partition_but_emits_declared_null() -> None
     )
 
 
+def partitioned_ranking_request(**changes: object) -> V2ChartRequest:
+    values: dict[str, object] = {
+        "request_id": "chart-v2-grouped",
+        "dataset_id": "router",
+        "metric_id": "tokens",
+        "timezone": "Asia/Shanghai",
+        "start_date": date(2026, 10, 1),
+        "end_date": date(2026, 10, 8),
+        "group_by": "real_model",
+        "partition_by": "logical_model",
+        "partition_declared": True,
+    }
+    values.update(changes)
+    return V2ChartRequest(**values)  # type: ignore[arg-type]
+
+
+def ranking_series(
+    identifier: str = "model", value: object = "7", *, date_value: str = "2026-10-08"
+) -> dict[str, object]:
+    return {
+        "id": identifier,
+        "label": text(identifier.title(), identifier),
+        "points": [{"date": date_value, "value": value}],
+    }
+
+
+def ranking_group(
+    identifier: str, label: str, series: list[dict[str, object]]
+) -> dict[str, object]:
+    return {"id": identifier, "label": text(label, label), "series": series}
+
+
+def v2_ranking_response_root(
+    request: V2ChartRequest, *, max_items: int | None = None
+) -> dict[str, object]:
+    descriptor = v2_probe_descriptor()
+    metric = descriptor["metrics"][0]
+    metric["capabilities"]["partition_by"] = [
+        {"id": "logical_model", "label": text("Logical model", "逻辑模型")}
+    ]
+    ranking: dict[str, object] = {
+        "granularities": ["day"],
+        "group_by": ["real_model"],
+        "partition_by": [None, "logical_model"],
+    }
+    if max_items is not None:
+        ranking["max_items"] = max_items
+    metric["capabilities"]["charts"] = {"ranking": ranking}
+    metric["defaults"] = {}
+    return {
+        "protocol": V2_PROTOCOL_VERSION,
+        "request_id": request.request_id,
+        "request_kind": "chart",
+        "dataset_id": request.dataset_id,
+        "metric_id": request.metric_id,
+        "status": "ok",
+        "descriptor": descriptor,
+        "runtime": {"filters": []},
+        "data": {"groups": []},
+    }
+
+
+def test_partitioned_v2_ranking_parses_ordered_groups_and_repeated_inner_ids() -> None:
+    request = partitioned_ranking_request()
+    root = v2_ranking_response_root(request)
+    root["data"] = {
+        "groups": [
+            ranking_group("coding", "Coding", [ranking_series("shared", "7")]),
+            ranking_group("general", "General", [ranking_series("shared", "5")]),
+        ]
+    }
+
+    response = parse_custom_response(json.dumps(root).encode(), request)
+
+    assert response.data.groups is not None  # type: ignore[union-attr]
+    assert [group.id for group in response.data.groups] == ["coding", "general"]  # type: ignore[union-attr]
+    assert response.data.groups[0].series[0].id == response.data.groups[1].series[0].id  # type: ignore[union-attr]
+    assert response.data.series == ()  # type: ignore[union-attr]
+
+
+def test_partitioned_v2_ranking_parses_group_metadata_and_empty_groups() -> None:
+    request = partitioned_ranking_request()
+    root = v2_ranking_response_root(request)
+    group = ranking_group("coding", "Coding", [])
+    group.update(
+        description=text("Routes coding workloads", "路由代码任务"),
+        display=text("12 requests", "12 次请求"),
+        comparison_display=text("+2 requests", "+2 次请求"),
+        link="https://example.com/router/coding",
+    )
+    root["data"] = {"groups": [group]}
+
+    response = parse_custom_response(json.dumps(root).encode(), request)
+    parsed = response.data.groups[0]  # type: ignore[union-attr,index]
+
+    assert parsed.description == LocalizedText("Routes coding workloads", "路由代码任务")
+    assert parsed.display == LocalizedText("12 requests", "12 次请求")
+    assert parsed.comparison_display == LocalizedText("+2 requests", "+2 次请求")
+    assert parsed.link == "https://example.com/router/coding"
+    assert parsed.series == ()
+
+
+def test_v2_ranking_response_enforces_flat_or_grouped_shape_from_request() -> None:
+    partitioned = partitioned_ranking_request()
+    grouped_root = v2_ranking_response_root(partitioned)
+    grouped_root["data"] = {"series": []}
+    with pytest.raises(CustomProtocolError, match="data groups"):
+        parse_custom_response(json.dumps(grouped_root).encode(), partitioned)
+
+    flat = partitioned_ranking_request(partition_by=None)
+    flat_root = v2_ranking_response_root(flat)
+    flat_root["data"] = {"groups": []}
+    with pytest.raises(CustomProtocolError, match="data series"):
+        parse_custom_response(json.dumps(flat_root).encode(), flat)
+
+    flat_root["data"] = {"series": [], "groups": []}
+    with pytest.raises(CustomProtocolError, match="mutually exclusive"):
+        parse_custom_response(json.dumps(flat_root).encode(), flat)
+
+
+def test_grouped_v2_ranking_rejects_duplicate_ids_dates_and_unsafe_metadata() -> None:
+    request = partitioned_ranking_request()
+    root = v2_ranking_response_root(request)
+    root["data"] = {"groups": [ranking_group("same", "One", []), ranking_group("same", "Two", [])]}
+    with pytest.raises(CustomProtocolError, match="data groups IDs must be unique"):
+        parse_custom_response(json.dumps(root).encode(), request)
+
+    duplicate = ranking_series("same")
+    root["data"] = {"groups": [ranking_group("one", "One", [duplicate, ranking_series("same")])]}
+    with pytest.raises(CustomProtocolError, match=r"data\.groups\[0\]\.series IDs must be unique"):
+        parse_custom_response(json.dumps(root).encode(), request)
+
+    duplicate_points = ranking_series()
+    duplicate_points["points"].append(duplicate_points["points"][0].copy())  # type: ignore[union-attr]
+    root["data"] = {"groups": [ranking_group("one", "One", [duplicate_points])]}
+    with pytest.raises(
+        CustomProtocolError, match=r"data\.groups\[0\]\.series\[0\]\.points dates must be unique"
+    ):
+        parse_custom_response(json.dumps(root).encode(), request)
+
+    unsafe = ranking_group("one", "One", [])
+    unsafe["link"] = "http://example.com/one"
+    root["data"] = {"groups": [unsafe]}
+    with pytest.raises(CustomProtocolError, match=r"data\.groups\[0\]\.link.*https"):
+        parse_custom_response(json.dumps(root).encode(), request)
+
+
+def test_grouped_v2_ranking_errors_include_the_complete_failing_path() -> None:
+    request = partitioned_ranking_request()
+    root = v2_ranking_response_root(request)
+    malformed = ranking_series()
+    malformed["points"] = [{"date": "2026-10-08", "value": 7}]
+    root["data"] = {"groups": [ranking_group("one", "One", [malformed])]}
+
+    with pytest.raises(
+        CustomProtocolError,
+        match=r"data\.groups\[0\]\.series\[0\]\.points\[0\]\.value must be a decimal string",
+    ):
+        parse_custom_response(json.dumps(root).encode(), request)
+
+    group = ranking_group("one", "One", [])
+    group["description"] = {"en": "English only"}
+    root["data"] = {"groups": [group]}
+    with pytest.raises(CustomProtocolError, match=r"data\.groups\[0\]\.description zh-CN"):
+        parse_custom_response(json.dumps(root).encode(), request)
+
+
+def test_grouped_v2_ranking_applies_max_items_globally() -> None:
+    request = partitioned_ranking_request()
+    root = v2_ranking_response_root(request, max_items=2)
+    root["data"] = {
+        "groups": [
+            ranking_group("one", "One", [ranking_series("a"), ranking_series("b")]),
+            ranking_group("two", "Two", [ranking_series("a")]),
+        ]
+    }
+
+    with pytest.raises(CustomProtocolError, match="data must not contain more than 2 series"):
+        parse_custom_response(json.dumps(root).encode(), request)
+
+
 def test_v2_ranking_rejects_invalid_sort_direction() -> None:
     value = v2_probe_descriptor()
     value["metrics"][0]["capabilities"]["charts"] = {

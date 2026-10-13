@@ -251,8 +251,20 @@ class CustomSeries:
 
 
 @dataclass(frozen=True, slots=True)
-class CustomData:
+class CustomRankingGroup:
+    id: str
+    label: LocalizedText
     series: tuple[CustomSeries, ...]
+    description: LocalizedText | None = None
+    display: LocalizedText | None = None
+    comparison_display: LocalizedText | None = None
+    link: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class CustomData:
+    series: tuple[CustomSeries, ...] = ()
+    groups: tuple[CustomRankingGroup, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)
