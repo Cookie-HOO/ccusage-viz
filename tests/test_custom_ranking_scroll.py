@@ -18,6 +18,7 @@ from ccusage_viz.render.base import RenderContext
 from ccusage_viz.render.custom import render_custom_ranking
 from ccusage_viz.render.custom_ranking_viewport import render_custom_ranking_viewport
 from ccusage_viz.render.grouped_ranking_viewport import (
+    GroupedRankingRow,
     GroupedRankingViewport,
     render_grouped_custom_ranking_viewport,
 )
@@ -198,7 +199,7 @@ def test_grouped_sticky_heading_is_label_only_and_has_no_hit() -> None:
 
 def test_grouped_sticky_transition_uses_heading_offset_intervals() -> None:
     viewport = GroupedRankingViewport()
-    ctx = context(height=8)
+    ctx = context(height=5)
     model = grouped_projection()
     render_grouped(model, viewport, ctx)
     next_heading = next(
@@ -207,11 +208,17 @@ def test_grouped_sticky_transition_uses_heading_offset_intervals() -> None:
         if row.kind == "group" and row.group_id == "general"
     )
 
-    viewport.offset = next_heading - 1
+    viewport.offset = next_heading - viewport.visible_rows
     output = strip_ansi(render_grouped(model, viewport, ctx))
-    assert viewport.rows[viewport.offset].kind == "separator"
+    assert next_heading == viewport.offset + viewport.visible_rows
     assert output.splitlines()[viewport.body_top].strip() == "Coding Model"
     assert viewport.sticky_rows == 1
+
+    viewport.offset += 1
+    output = strip_ansi(render_grouped(model, viewport, ctx))
+    assert next_heading < viewport.offset + viewport.visible_rows
+    assert viewport.sticky_rows == 0
+    assert "General Model" in output
 
     viewport.offset = next_heading
     output = strip_ansi(render_grouped(model, viewport, ctx))
@@ -533,6 +540,58 @@ def test_grouped_sticky_capacity_reaches_final_row_and_sets_truthful_scrollbar_m
     assert viewport.scrollbar.thumb_top + viewport.scrollbar.thumb_size == (
         viewport.scrollbar.top + viewport.scrollbar.height
     )
+
+
+def test_grouped_maximum_offset_is_stable_when_base_lands_before_final_heading() -> None:
+    model = grouped_projection()
+    viewport = GroupedRankingViewport()
+    ctx = context(height=5)
+    render_grouped(model, viewport, ctx, scrollbar=True)
+    base = viewport.total_rows - viewport.visible_rows
+    final_heading = viewport.group_headings[-1]
+    assert viewport.rows[base].kind == "separator"
+    assert final_heading == base + 1
+
+    viewport.offset = 10_000
+    output = strip_ansi(render_grouped(model, viewport, ctx, scrollbar=True))
+    assert viewport.offset == base
+    assert viewport.effective_capacity(viewport.offset) == viewport.visible_rows
+    assert viewport.offset + viewport.effective_capacity() == viewport.total_rows
+    assert output.splitlines()[-1].strip().startswith("No data")
+    assert viewport.scrollbar is not None
+    assert viewport.scrollbar.maximum_offset == base
+    assert viewport.scrollbar.thumb_top + viewport.scrollbar.thumb_size == (
+        viewport.scrollbar.top + viewport.scrollbar.height
+    )
+
+
+def test_grouped_sticky_lookup_uses_precomputed_group_intervals(monkeypatch) -> None:
+    import ccusage_viz.render.grouped_ranking_viewport as module
+
+    group_count = 10_000
+    viewport = GroupedRankingViewport(
+        visible_rows=3,
+        total_rows=group_count * 3,
+        rows=tuple(
+            GroupedRankingRow(kind, str(index), None, 0)
+            for index in range(group_count)
+            for kind in ("group", "series", "separator")
+        ),
+        group_headings=tuple(range(0, group_count * 3, 3)),
+        group_has_series=(True,) * group_count,
+    )
+    calls = 0
+    original = module.bisect_right
+
+    def counted(headings, offset):
+        nonlocal calls
+        calls += 1
+        return original(headings, offset)
+
+    monkeypatch.setattr(module, "bisect_right", counted)
+    assert viewport._sticky_required(viewport.total_rows - 2)
+    assert viewport._group_heading(viewport.total_rows - 2) == viewport.total_rows - 3
+    assert calls == 2
 
 
 def test_dashboard_partition_mode_switch_clears_incompatible_viewport_state() -> None:
