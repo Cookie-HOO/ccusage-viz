@@ -489,6 +489,7 @@ MESSAGES = {
     "status.tui_help_mode_pages": "{active} {page}; {other} {other_page} · a switch page",
     "status.tui_help_mode_pages_detail": "In a Dashboard Pane adjustment, a shortcut available only on the other page switches there and applies it; shared shortcuts keep the current page meaning.",
     "status.tui_help_pane_settings": "Pane parameter adjustment",
+    "status.tui_help_pane_settings_empty": "No parameters are available for this Pane",
     "status.tui_help_pane_content": "Pane content",
     "status.tui_help_pane_structure": "Structure adjustment",
     "status.tui_help_dashboard_settings": "Dashboard parameter adjustment",

@@ -613,6 +613,33 @@ def test_custom_dashboard_adjustment_uses_native_footer() -> None:
     assert ("L", "custom_logs") in tui_module._custom_pane_adjustment_bindings(pane, "advanced")
 
 
+def test_custom_metric_switch_binding_requires_declared_group() -> None:
+    pane = _accepted_metric_help_pane()
+    descriptor = pane.component.v2_descriptor
+    assert isinstance(descriptor, V2ProbeDescriptor)
+
+    assert ("m/M", "metric") not in tui_module._custom_pane_adjustment_bindings(pane, "quick")
+
+    pane.component.v2_descriptor = replace(
+        descriptor,
+        metrics=(replace(descriptor.metrics[0], group_id="github"), *descriptor.metrics[1:]),
+        metric_groups=(V2MetricGroup("github", LocalizedText("GitHub", "GitHub")),),
+    )
+
+    assert ("m/M", "metric") in tui_module._custom_pane_adjustment_bindings(pane, "quick")
+
+
+def test_custom_metric_switch_binding_omits_undeclared_group() -> None:
+    pane = _accepted_metric_help_pane()
+    descriptor = pane.component.v2_descriptor
+    assert isinstance(descriptor, V2ProbeDescriptor)
+    pane.component.v2_descriptor = replace(
+        descriptor, metrics=(replace(descriptor.metrics[0], group_id="missing"),)
+    )
+
+    assert ("m/M", "metric") not in tui_module._custom_pane_adjustment_bindings(pane, "quick")
+
+
 def _accepted_metric_help_pane() -> tui_module.TuiCustomPane:
     text = LocalizedText("Dataset", "数据集")
     unit = CustomUnit("count", text, "suffix", 0)
@@ -768,6 +795,15 @@ def test_dashboard_help_overlay_shows_committed_localized_v2_metric_and_omits_v1
     assert "当前指标" in v2_help
     assert "星标" in v2_help
     assert "GitHub 星标总数" in v2_help
+    visible_lines = [strip_ansi(line) for line in v2_help.splitlines()]
+    current_metric_index = next(
+        index for index, line in enumerate(visible_lines) if line.strip(" |") == "当前指标"
+    )
+    controls_index = next(
+        index for index, line in enumerate(visible_lines) if line.strip(" |") == "操作"
+    )
+    assert current_metric_index < controls_index
+    assert "当前 Pane 没有可调整参数" not in v2_help
 
     pane = _accepted_metric_help_pane()
     assert pane.component.apply_provider_result(
@@ -872,7 +908,8 @@ def test_dashboard_help_overlay_wraps_metric_description_at_tree_continuation_in
     first = next(index for index, line in enumerate(lines) if "A description long" in line)
 
     assert "└─ A description long" in lines[first]
-    assert lines[first + 1].index("ap through") == lines[first].index("A description long") + 3
+    continuation = next(line for line in lines[first + 1 :] if "through the" in line)
+    assert continuation.index("through the") == lines[first].index("A description long") + 3
 
 
 def _custom_monitor_component(*, grouped: bool = True, total: str = "90") -> CustomMonitorComponent:

@@ -482,6 +482,7 @@ MESSAGES = {
     "status.tui_help_mode_pages": "{active} {page}；{other} {other_page} · a 切换页面",
     "status.tui_help_mode_pages_detail": "在 Dashboard 子图调整中，仅另一页可用的快捷键会自动切换并执行；两页共用的快捷键按当前页面含义执行。",
     "status.tui_help_pane_settings": "Pane 参数调整",
+    "status.tui_help_pane_settings_empty": "当前 Pane 没有可调整参数",
     "status.tui_help_pane_content": "Pane 内容",
     "status.tui_help_pane_structure": "结构调整",
     "status.tui_help_dashboard_settings": "仪表盘参数调整",

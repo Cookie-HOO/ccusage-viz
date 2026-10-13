@@ -629,6 +629,25 @@ def _accepted_custom_metric_help_node(
     )
 
 
+def _custom_metric_group_switch_available(pane: TuiCustomPane) -> bool:
+    """Whether the accepted V2 Metric belongs to one declared Metric Group."""
+
+    accepted_config = pane.component.accepted_config
+    descriptor = pane.component.v2_descriptor
+    if (
+        accepted_config is None
+        or accepted_config.metric_id is None
+        or not isinstance(descriptor, V2ProbeDescriptor)
+    ):
+        return False
+    metric = next(
+        (item for item in descriptor.metrics if item.id == accepted_config.metric_id), None
+    )
+    return metric is not None and metric.group_id is not None and any(
+        group.id == metric.group_id for group in descriptor.metric_groups
+    )
+
+
 def _custom_metric_periods(
     metric: V2MetricDescriptor, kind: str
 ) -> tuple[str, ...]:
@@ -2831,6 +2850,8 @@ def _custom_pane_adjustment_bindings(pane: TuiCustomPane, page: str) -> tuple[tu
     if isinstance(pane.component, CustomMonitorComponent):
         if page == "quick":
             actions: list[tuple[str, str]] = []
+            if _custom_metric_group_switch_available(pane):
+                actions.append(("m/M", "metric"))
             config = pane.component.accepted_config or pane.component.candidate
             if config.presentation.style not in {"ranking", "list"}:
                 actions.append(("w", "window"))
@@ -2849,7 +2870,9 @@ def _custom_pane_adjustment_bindings(pane: TuiCustomPane, page: str) -> tuple[tu
             actions.extend((("t/T", "animation_theme"), ("s/S", "animation_style")))
         return tuple(actions)
     if page == "quick":
-        actions: list[tuple[str, str]] = [("m/M", "metric"), ("p/P", "period")]
+        actions: list[tuple[str, str]] = [("p/P", "period")]
+        if _custom_metric_group_switch_available(pane):
+            actions.insert(0, ("m/M", "metric"))
         if chart.kind == "ranking":
             actions.append(("g/G", "spacing"))
         if capability is not None:
@@ -7531,6 +7554,14 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     parameter_children.append(
                         (translator.text("status.tui_help_interval_monitor"), ())
                     )
+            elif isinstance(focused_pane, TuiCustomPane) and focused_pane.body_view == "chart":
+                parameter_children.extend(
+                    (_pane_help_action_text(page_name, action, translator), ())
+                    for page_name in ("quick", "advanced")
+                    for action in _custom_pane_adjustment_actions(
+                        focused_pane, page_name, translator
+                    )
+                )
             elif isinstance(focused_pane, TuiAnimationPane):
                 parameter_children.extend(
                     (
@@ -7554,10 +7585,13 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 if isinstance(focused_pane, TuiCustomPane)
                 else None
             )
+            if not parameter_children:
+                parameter_children.append(
+                    (translator.text("status.tui_help_pane_settings_empty"), ())
+                )
             control_nodes = (
                 (translator.text("status.tui_help_mode"), mode_pages()),
                 (translator.text("status.tui_help_pane_settings"), tuple(parameter_children)),
-                *((current_metric_node,) if current_metric_node is not None else ()),
                 (translator.text("status.tui_help_pane_structure"), tuple(structure_children)),
                 (translator.text("status.tui_help_common"), tuple(common_children)),
                 *text_navigation,
@@ -7606,6 +7640,11 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         )
         sections = (
             ("status.tui_help_section_modes", mode_nodes),
+            *(
+                (("status.tui_help_current_metric", current_metric_node[1]),)
+                if current_metric_node is not None
+                else ()
+            ),
             ("status.tui_help_section_controls", control_nodes),
         )
         rows: list[str] = []
