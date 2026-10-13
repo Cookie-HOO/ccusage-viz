@@ -177,7 +177,9 @@ def test_grouped_search_matches_only_inner_fields_and_preserves_full_facts() -> 
     output = strip_ansi(render_grouped(grouped_projection(), viewport, search="sonnet"))
     assert "Coding Model" in output and "General Model" in output
     assert "Empty Unmatched Group" not in output
-    coding = next(line for line in output.splitlines() if "Sonnet" in line and "General" not in line)
+    coding = next(
+        line for line in output.splitlines() if "Sonnet" in line and "General" not in line
+    )
     assert coding.lstrip().startswith("2 ")
     assert "30.0%" in coding
     assert all(identity[0] != "group" or identity[1] != "empty" for identity in viewport.by_id)
@@ -187,9 +189,7 @@ def test_grouped_sticky_heading_is_label_only_and_has_no_hit() -> None:
     viewport = GroupedRankingViewport()
     ctx = context(height=5)
     render_grouped(grouped_projection(), viewport, ctx)
-    viewport.offset = next(
-        index for index, row in enumerate(viewport.rows) if row.kind == "series"
-    )
+    viewport.offset = next(index for index, row in enumerate(viewport.rows) if row.kind == "series")
     output = strip_ansi(render_grouped(grouped_projection(), viewport, ctx))
     sticky_row = output.splitlines()[viewport.body_top]
     assert sticky_row.strip() == "Coding Model"
@@ -208,8 +208,146 @@ def test_grouped_identity_scrollbar_and_copy_payloads() -> None:
     assert all(identity[0] != "other" for identity, *_ in viewport.hits.values())
     payload = viewport.clipboard_all_text()
     assert payload.index("Coding Model") < payload.index("Seed") < payload.index("General Model")
-    assert viewport.clipboard_text(("series", "coding", "shared")).startswith(
-        "Coding Model\nSeed"
+    assert viewport.clipboard_text(("series", "coding", "shared")).startswith("Coding Model\nSeed")
+
+
+def test_grouped_spacing_starts_between_series_not_after_group_heading() -> None:
+    viewport = GroupedRankingViewport()
+    render_grouped(grouped_projection(), viewport, context(density="detailed"), spacing="line")
+    coding = [row for row in viewport.rows if row.group_id == "coding"]
+    first_series = next(index for index, row in enumerate(coding) if row.kind == "series")
+    assert coding[first_series - 1].kind == "description"
+    second_series = next(
+        index
+        for index, row in enumerate(coding[first_series + 1 :], first_series + 1)
+        if row.kind == "series"
+    )
+    assert coding[second_series - 1].kind == "separator"
+
+
+def test_grouped_idle_repaint_preserves_arbitrary_physical_offset() -> None:
+    viewport = GroupedRankingViewport()
+    model = grouped_projection()
+    ctx = context(height=6, density="detailed")
+    render_grouped(model, viewport, ctx, spacing="line")
+    viewport.offset = next(
+        index for index, row in enumerate(viewport.rows) if row.kind == "description"
+    )
+    expected = viewport.offset
+    render_grouped(model, viewport, ctx, spacing="line")
+    assert viewport.offset == expected
+
+
+def test_grouped_missing_anchor_searches_old_series_outward_forward_on_tie() -> None:
+    viewport = GroupedRankingViewport()
+    model = grouped_projection()
+    ctx = context(height=6)
+    render_grouped(model, viewport, ctx)
+    viewport.offset = next(
+        index
+        for index, row in enumerate(viewport.rows)
+        if row.kind == "series" and row.group_id == "coding" and row.series_id == "sonnet"
+    )
+    coding, general, empty = model.groups or ()
+    refreshed = replace(
+        model,
+        groups=(replace(coding, series=coding.series[:1]), general, empty),
+    )
+    render_grouped(refreshed, viewport, ctx)
+    # Seed and General/shared are equally distant in old series order. The
+    # documented outward tie direction is forward, so General/shared wins.
+    assert (viewport.rows[viewport.offset].group_id, viewport.rows[viewport.offset].series_id) == (
+        "general",
+        "shared",
+    )
+
+
+def test_grouped_missing_series_then_falls_back_to_nearest_old_group() -> None:
+    viewport = GroupedRankingViewport()
+    model = grouped_projection()
+    ctx = context(height=6)
+    render_grouped(model, viewport, ctx)
+    viewport.offset = next(
+        index
+        for index, row in enumerate(viewport.rows)
+        if row.kind == "series" and row.group_id == "coding"
+    )
+    coding, general, empty = model.groups or ()
+    refreshed = replace(
+        model,
+        groups=(replace(coding, series=()), replace(general, series=()), empty),
+    )
+    render_grouped(refreshed, viewport, ctx)
+    assert viewport.rows[viewport.offset].kind == "group"
+    assert viewport.rows[viewport.offset].group_id == "coding"
+
+
+def test_grouped_premeasures_every_visible_group_before_rendering(monkeypatch) -> None:
+    import ccusage_viz.render.grouped_ranking_viewport as module
+
+    events: list[str] = []
+    original_measure = module.measure_ranking_columns
+    original_render = module.render_historical_ranking
+
+    def measure(*args, **kwargs):
+        events.append(f"measure:{args[0][0].key if args[0] else 'empty'}")
+        return original_measure(*args, **kwargs)
+
+    def render_rows(*args, **kwargs):
+        events.append(f"render:{args[0][0].key}")
+        return original_render(*args, **kwargs)
+
+    monkeypatch.setattr(module, "measure_ranking_columns", measure)
+    monkeypatch.setattr(module, "render_historical_ranking", render_rows)
+    render_grouped(grouped_projection(), GroupedRankingViewport(), context(density="detailed"))
+    first_render = next(index for index, event in enumerate(events) if event.startswith("render:"))
+    assert events[:first_render] == ["measure:shared", "measure:shared", "measure:empty"]
+
+
+def test_grouped_other_primary_row_is_explicit_series_without_copy_hit() -> None:
+    model = grouped_projection()
+    coding = (model.groups or ())[0]
+    other = replace(coding.series[0], id="other", is_other=True, link=None)
+    model = replace(model, groups=(replace(coding, series=(other,)),))
+    viewport = GroupedRankingViewport()
+    render_grouped(model, viewport)
+    row = next(row for row in viewport.rows if row.series_id == "other")
+    assert row.kind == "series"
+    assert all(hit[0] != ("series", "coding", "other") for hit in viewport.hits.values())
+
+
+def test_grouped_other_only_has_zero_match_count_and_no_copy_all_payload() -> None:
+    model = grouped_projection()
+    coding = (model.groups or ())[0]
+    other = replace(coding.series[0], id="other", is_other=True, link=None)
+    model = replace(model, groups=(replace(coding, series=(other,)),))
+    viewport = GroupedRankingViewport()
+    output = strip_ansi(render_grouped(model, viewport, copy_all_action=True))
+    assert "0 item(s) total" in output
+    assert viewport.copy_all_hit is None
+    assert viewport.clipboard_all_text() == ""
+
+
+def test_grouped_sticky_capacity_reaches_final_row_and_sets_truthful_scrollbar_max() -> None:
+    model = grouped_projection()
+    coding = (model.groups or ())[0]
+    series = tuple(
+        replace(coding.series[0], id=str(index), label=LocalizedText(f"Item {index}", "项目"))
+        for index in range(8)
+    )
+    model = replace(model, groups=(replace(coding, series=series),))
+    viewport = GroupedRankingViewport()
+    ctx = context(height=5)
+    render_grouped(model, viewport, ctx, scrollbar=True)
+    viewport.offset = 10_000
+    output = strip_ansi(render_grouped(model, viewport, ctx, scrollbar=True))
+    assert viewport.reserved_rows == 1
+    assert viewport.offset == viewport.total_rows - viewport.effective_capacity()
+    assert "Item 7" in output
+    assert viewport.scrollbar is not None
+    assert viewport.scrollbar.maximum_offset == viewport.offset
+    assert viewport.scrollbar.thumb_top + viewport.scrollbar.thumb_size == (
+        viewport.scrollbar.top + viewport.scrollbar.height
     )
 
 
