@@ -6,6 +6,7 @@ from ccusage_viz.custom_filter_draft import (
     _filter_index_at,
     _matching_options,
     _render_custom_filter_draft,
+    _render_custom_filter_help,
     _tab_layout,
     filter_tab_counts,
     run_custom_filter_editor,
@@ -13,7 +14,7 @@ from ccusage_viz.custom_filter_draft import (
 from ccusage_viz.custom_models import CustomFilter, CustomFilterOption, LocalizedText
 from ccusage_viz.formatting import display_width, strip_ansi
 from ccusage_viz.i18n import load_translator
-from ccusage_viz.tui_input import KeyEvent, MouseEvent
+from ccusage_viz.tui_input import KeyEvent, MouseEvent, PasteEvent
 
 CHOICES = (
     CustomFilter(
@@ -76,6 +77,20 @@ def test_custom_filter_controls_very_narrow_fallback_is_one_bounded_line() -> No
 
     assert "\n" not in controls
     assert display_width(controls) <= 12
+
+
+def test_custom_filter_help_lists_every_active_shortcut() -> None:
+    help_body = _render_custom_filter_help(load_translator("en"), 100, 20)
+
+    assert help_body.splitlines() == [
+        "Custom filter help",
+        "←/→ switch filter",
+        "↑/↓ or j/k select",
+        "/ search · Type · Backspace · Enter done · Esc clear",
+        "Space toggle · c clear current · C columns",
+        "Enter apply · Esc cancel",
+        "h/Esc back",
+    ]
 
 
 def test_custom_filter_tabs_wrap_without_splitting_and_share_mouse_geometry() -> None:
@@ -177,7 +192,7 @@ def test_tab_counts_describe_accepted_filters_not_draft_filters() -> None:
 
 
 def test_custom_filter_editor_toggles_declared_option_ids_and_drops_empty_filters() -> None:
-    events = iter((" ", "l", " ", "\r"))
+    events = iter((" ", "\x1b[C", " ", "\r"))
 
     result = run_custom_filter_editor(
         (("category", ("fiction",)),),
@@ -189,6 +204,111 @@ def test_custom_filter_editor_toggles_declared_option_ids_and_drops_empty_filter
     )
 
     assert result == (("source", ("app",)),)
+
+
+def test_custom_filter_editor_switches_tabs_only_with_horizontal_arrows() -> None:
+    arrow_events = iter(("\x1b[C", " ", "\r"))
+    non_arrow_events = iter(("l", "\t", " ", "\r"))
+
+    arrow_result = run_custom_filter_editor(
+        (), CHOICES, load_translator("en"), width=80,
+        paint=lambda _body, _controls: None, read_key=lambda: next(arrow_events),
+    )
+    non_arrow_result = run_custom_filter_editor(
+        (), CHOICES, load_translator("en"), width=80,
+        paint=lambda _body, _controls: None, read_key=lambda: next(non_arrow_events),
+    )
+
+    assert arrow_result == (("source", ("app",)),)
+    assert non_arrow_result == (("category", ("fiction",)),)
+
+
+def test_custom_filter_help_ignores_inputs_and_preserves_the_complete_draft() -> None:
+    choice = CustomFilter(
+        "many",
+        LocalizedText("Many", "多个"),
+        tuple(
+            CustomFilterOption(f"option-{index}", LocalizedText(f"option-{index}", f"选项-{index}"))
+            for index in range(8)
+        ),
+    )
+    frames: list[tuple[str, str]] = []
+    events = iter(
+        (
+            "\x1b[C", "C", "j", "j", "j", " ", "/", PasteEvent("option"), "\r", "h",
+            KeyEvent(" "), MouseEvent(0, 2, 3, True, 0), PasteEvent("c"), PasteEvent("\x03"),
+            "h", "\r",
+        )
+    )
+
+    result = run_custom_filter_editor(
+        (), (CHOICES[0], choice), load_translator("en"), width=48, height=6,
+        paint=lambda body, controls: frames.append((body, controls)),
+        read_key=lambda: next(events),
+    )
+
+    help_frames = [frame for frame in frames if "Custom filter help" in frame[0]]
+    first_help_index = next(
+        index for index, (body, _controls) in enumerate(frames) if "Custom filter help" in body
+    )
+    assert result == (("many", ("option-6",)),)
+    assert frames[first_help_index - 1][0] == frames[-1][0]
+    assert help_frames
+    assert all(controls == "h/Esc back" for _body, controls in help_frames)
+    assert all("\n" not in controls and display_width(controls) <= 48 for _, controls in frames)
+    help_body = help_frames[0][0]
+    assert "←/→ switch filter" in help_body
+    assert "↑/↓ or j/k select" in help_body
+    assert "/ search" in help_body
+    assert "Space toggle · c clear current · C columns" in help_body
+    assert "Enter apply · Esc cancel" in help_body
+
+
+def test_custom_filter_editor_pasted_ctrl_c_raises_keyboard_interrupt() -> None:
+    with pytest.raises(KeyboardInterrupt):
+        run_custom_filter_editor(
+            (), CHOICES, load_translator("en"), width=80,
+            paint=lambda _body, _controls: None, read_key=lambda: PasteEvent("\x03"),
+        )
+
+
+def test_custom_filter_help_ignores_pasted_ctrl_c() -> None:
+    events = iter(("h", PasteEvent("\x03"), "h", "\r"))
+
+    result = run_custom_filter_editor(
+        (), CHOICES, load_translator("en"), width=80,
+        paint=lambda _body, _controls: None, read_key=lambda: next(events),
+    )
+
+    assert result == ()
+
+
+def test_custom_filter_editor_search_h_does_not_open_help() -> None:
+    frames: list[str] = []
+    events = iter(("/", "h", "\r", "\r"))
+
+    result = run_custom_filter_editor(
+        (), CHOICES, load_translator("en"), width=80,
+        paint=lambda body, _controls: frames.append(body), read_key=lambda: next(events),
+    )
+
+    assert result == ()
+    assert any("Search: h" in frame for frame in frames)
+    assert all("Custom filter help" not in frame for frame in frames)
+
+
+def test_custom_filter_help_escape_returns_before_editor_escape_cancels() -> None:
+    frames: list[str] = []
+    events = iter(("h", "\x1b", "\x1b"))
+
+    result = run_custom_filter_editor(
+        (), CHOICES, load_translator("en"), width=80,
+        paint=lambda body, _controls: frames.append(body), read_key=lambda: next(events),
+    )
+
+    assert result is None
+    assert any("Custom filter help" in frame for frame in frames)
+    assert "[Category 0/2]" in frames[-1]
 
 
 def test_custom_filter_editor_renders_protocol_localized_labels() -> None:

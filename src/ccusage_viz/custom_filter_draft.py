@@ -116,10 +116,13 @@ def run_custom_filter_editor(
     """Edit protocol-declared Dataset filters locally until the draft is applied."""
 
     draft = CustomFilterDraft(filters)
+    help_visible = False
     while True:
-        draft = _normalise_draft(draft, choices, translator, width, height, filters)
-        paint(
-            _render_custom_filter_draft(
+        if help_visible:
+            body = _render_custom_filter_help(translator, width, height)
+        else:
+            draft = _normalise_draft(draft, choices, translator, width, height, filters)
+            body = _render_custom_filter_draft(
                 draft,
                 choices,
                 translator,
@@ -128,10 +131,20 @@ def run_custom_filter_editor(
                 accepted=filters,
                 color=color,
                 color_scheme=color_scheme,
-            ),
-            _custom_filter_controls(translator, width),
-        )
+            )
+        paint(body, _custom_filter_controls(translator, width, help_visible=help_visible))
         event = read_key()
+        key = event.value if isinstance(event, (KeyEvent, PasteEvent)) else event
+        if help_visible:
+            if isinstance(event, PasteEvent):
+                continue
+            if key == "\x03":
+                raise KeyboardInterrupt
+            if key in {"h", "\x1b"}:
+                help_visible = False
+            continue
+        if key == "\x03":
+            raise KeyboardInterrupt
         if isinstance(event, MouseEvent):
             if event.pressed and event.button == 0:
                 tab_index = _filter_index_at(
@@ -157,9 +170,6 @@ def run_custom_filter_editor(
                     draft = draft.toggle(current, options[option_index].id)
                     draft = replace(draft, option_index=option_index)
             continue
-        key = event.value if isinstance(event, (KeyEvent, PasteEvent)) else event
-        if key == "\x03":
-            raise KeyboardInterrupt
         if key is None:
             continue
         if draft.search_editing:
@@ -181,9 +191,11 @@ def run_custom_filter_editor(
             return draft.filters
         if key == "/":
             draft = replace(draft, search_editing=True)
-        elif key in {"h", "\x1b[D"}:
+        elif key == "h":
+            help_visible = True
+        elif key == "\x1b[D":
             draft = draft.move_filter(-1, choices)
-        elif key in {"l", "\x1b[C", "\t"}:
+        elif key == "\x1b[C":
             draft = draft.move_filter(1, choices)
         elif key in {"k", "\x1b[A"}:
             draft = draft.move_option(-1, choices, translator)
@@ -221,6 +233,21 @@ def _custom_filter_controls(
     if display_width(compact) <= width:
         return compact
     return truncate_middle_width(f"{left} · {right}", width)
+
+
+def _render_custom_filter_help(translator: Translator, width: int, height: int) -> str:
+    """Render the localized, geometry-bounded Custom filter key reference."""
+    keys = (
+        "status.custom_filter_help_title",
+        "status.custom_filter_help_filters",
+        "status.custom_filter_help_options",
+        "status.custom_filter_help_search",
+        "status.custom_filter_help_selection",
+        "status.custom_filter_help_complete",
+        "status.custom_filter_help_back",
+    )
+    rows = (clip_width(translator.text(key), width) for key in keys)
+    return "\n".join(list(rows)[: max(0, height)])
 
 
 def _localized(value: object, translator: Translator) -> str:
