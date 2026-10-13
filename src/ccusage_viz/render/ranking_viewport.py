@@ -210,7 +210,7 @@ class RankingViewport:
         body = rows[leading : leading + self.visible_rows]
         for row, entry in primary:
             screen_row = row - leading
-            if entry.is_other or not 0 <= screen_row < len(body):
+            if context.style == "list" or entry.is_other or not 0 <= screen_row < len(body):
                 continue
             line = strip_ansi(body[screen_row])
             marker_index = max(line.rfind("✓"), line.rfind("⊞"))

@@ -27,9 +27,7 @@ from ccusage_viz.render.ranking_viewport import RankingViewport, ranking_separat
 
 @pytest.mark.parametrize("width", (1, 2, 5, 6, 12))
 @pytest.mark.parametrize("ascii_mode", (False, True), ids=("unicode", "ascii"))
-def test_dashed_separator_uses_scheme_muted_across_widths(
-    width: int, ascii_mode: bool
-) -> None:
+def test_dashed_separator_uses_scheme_muted_across_widths(width: int, ascii_mode: bool) -> None:
     scheme_name = "vivid"
     expected = ("- " * ((width + 1) // 2)).rstrip()
     colored_context = replace(
@@ -41,10 +39,13 @@ def test_dashed_separator_uses_scheme_muted_across_widths(
     assert f"\x1b[38;5;{get_color_scheme(scheme_name).muted}m" in colored
     assert "\x1b[2m" in colored
     assert strip_ansi(colored) == expected
-    assert ranking_separator(
-        "dashed",
-        replace(context(width=width), color=False, ascii=ascii_mode, color_scheme="no-color"),
-    ) == expected
+    assert (
+        ranking_separator(
+            "dashed",
+            replace(context(width=width), color=False, ascii=ascii_mode, color_scheme="no-color"),
+        )
+        == expected
+    )
 
 
 def test_flat_and_grouped_dash_rendering_share_muted_separator() -> None:
@@ -186,6 +187,7 @@ def render_grouped(
     search: str = "",
     spacing: str = "compact",
     scrollbar: bool = False,
+    scrollbar_hovered: bool = False,
     copy_all_action: bool = False,
 ) -> str:
     return render_grouped_custom_ranking_viewport(
@@ -200,6 +202,7 @@ def render_grouped(
         copied_entry_id=None,
         item_spacing=spacing,
         scrollbar=scrollbar,
+        scrollbar_hovered=scrollbar_hovered,
         copy_all_action=copy_all_action,
         copied_all=False,
     )
@@ -222,9 +225,7 @@ def test_grouped_zero_match_search_keeps_empty_width_measurement_renderable() ->
     viewport = GroupedRankingViewport()
 
     output = strip_ansi(
-        render_grouped(
-            grouped_projection(), viewport, context(density="detailed"), search="gpt4"
-        )
+        render_grouped(grouped_projection(), viewport, context(density="detailed"), search="gpt4")
     )
 
     assert "Showing 0/3 item(s)" in output
@@ -257,8 +258,7 @@ def test_grouped_identity_scrollbar_and_copy_payloads() -> None:
     assert ("series", "coding", "shared") in viewport.by_id
     assert ("series", "general", "shared") in viewport.by_id
     assert any(
-        identity == ("series", "coding", "shared")
-        for identity, *_ in viewport.hits.values()
+        identity == ("series", "coding", "shared") for identity, *_ in viewport.hits.values()
     )
     assert all(identity != ("series", "coding", "other") for identity, *_ in viewport.hits.values())
     payload = viewport.clipboard_all_text()
@@ -299,10 +299,7 @@ def test_grouped_copy_all_preserves_empty_groups_and_visible_other_exactly() -> 
         "Other"
     )
     assert viewport.clipboard_text(("group", "general")) == (
-        "General Model\n"
-        "About General Model\n"
-        "https://example.com/general\n\n"
-        "Other"
+        "General Model\nAbout General Model\nhttps://example.com/general\n\nOther"
     )
     assert viewport.clipboard_text(("series", "general", "other")) == ""
 
@@ -513,9 +510,7 @@ def test_grouped_empty_only_has_copy_all_action_and_exact_heading_payload() -> N
     assert "0 item(s) total | ⊞" in output
     assert viewport.copy_all_hit is not None
     assert viewport.clipboard_all_text() == (
-        "Empty Unmatched Group\n"
-        "About Empty Unmatched Group\n"
-        "https://example.com/empty"
+        "Empty Unmatched Group\nAbout Empty Unmatched Group\nhttps://example.com/empty"
     )
 
 
@@ -591,10 +586,7 @@ def test_grouped_other_only_has_copy_all_payload_but_no_individual_hit() -> None
     assert viewport.copy_all_hit is not None
     assert all(hit[0] != ("series", "coding", "other") for hit in viewport.hits.values())
     assert viewport.clipboard_all_text() == (
-        "Coding Model\n"
-        "About Coding Model\n"
-        "https://example.com/coding\n\n"
-        "Other"
+        "Coding Model\nAbout Coding Model\nhttps://example.com/coding\n\nOther"
     )
 
     searched = strip_ansi(render_grouped(model, viewport, search="Other", copy_all_action=True))
@@ -724,7 +716,9 @@ def test_grouped_top_series_description_keeps_its_series_on_source_change() -> N
         and row.series_id == "shared"
     )
     coding, general, empty = model.groups or ()
-    refreshed = replace(model, groups=(coding, replace(general, label=LocalizedText("Changed", "Changed")), empty))
+    refreshed = replace(
+        model, groups=(coding, replace(general, label=LocalizedText("Changed", "Changed")), empty)
+    )
     render_grouped(refreshed, viewport, detailed)
     top = viewport.rows[viewport.offset]
     assert (top.group_id, top.series_id) == ("coding", "shared")
@@ -745,6 +739,7 @@ def render(
     spacing="compact",
     copied=None,
     scrollbar=False,
+    scrollbar_hovered=False,
     copy_all_action=False,
     copied_all=False,
     search_editing=False,
@@ -762,9 +757,28 @@ def render(
         copied_entry_id=copied,
         item_spacing=spacing,
         scrollbar=scrollbar,
+        scrollbar_hovered=scrollbar_hovered,
         copy_all_action=copy_all_action,
         copied_all=copied_all,
     )
+
+
+def test_list_viewport_has_no_copy_actions_and_expands_labels() -> None:
+    viewport = RankingViewport()
+
+    output = strip_ansi(
+        render(
+            projection(20),
+            viewport,
+            replace(context(height=30), style="list"),
+            copy_all_action=True,
+        )
+    )
+
+    assert viewport.copy_all_hit is None
+    assert viewport.hits == {}
+    assert "⊞" not in output and "→" not in output
+    assert "Project 19" in output
 
 
 def test_copy_all_marker_follows_count_row_and_hides_without_it():
@@ -1362,21 +1376,28 @@ def test_tiny_viewports_and_empty_comparison(height):
     assert not viewport.scroll(1)
 
 
-def test_style_and_theme_changes_reuse_data_and_geometry(monkeypatch):
+def test_style_and_theme_changes_reuse_data_and_rebuild_style_geometry() -> None:
     model = projection(100)
     viewport = RankingViewport()
-    render(model, viewport)
+    dot = context()
+    render(model, viewport, dot)
     viewport.offset = 40
-    entries, starts = viewport.entries, viewport.starts
-    monkeypatch.setattr(
-        RankingViewport, "prepare_lines", lambda *a, **kw: pytest.fail("rebuilt layout")
-    )
-    styled = replace(context(), style="list")
-    render(model, viewport, styled, copied="1")
+    entries = viewport.entries
+    dot_geometry_key = viewport.geometry_key
+
+    styled = replace(dot, style="list")
+    render(model, viewport, styled, copied="1", copy_all_action=True)
+
+    assert viewport.entries is entries
+    assert viewport.geometry_key != dot_geometry_key
+    assert viewport.copy_all_hit is None
+    assert viewport.hits == {}
+    assert viewport.offset > 0
+
+    list_starts = viewport.starts
     render(model, viewport, replace(styled, color=True, color_scheme="dracula"))
     assert viewport.entries is entries
-    assert viewport.starts is starts
-    assert viewport.offset == 40
+    assert viewport.starts is list_starts
 
 
 def test_density_change_reuses_data_and_preserves_stable_anchor():
@@ -1444,15 +1465,33 @@ def test_scrollbar_persists_on_overflow_and_tracks_wheel_offset(ascii):
     assert viewport.scrollbar.thumb_top > bar.thumb_top
     rows = moved.splitlines()
     for row in range(bar.top, bar.top + bar.height):
-        expected = (
-            ("#" if ascii else "█") if viewport.scrollbar.on_thumb(row) else ("|" if ascii else "│")
-        )
-        assert strip_ansi(rows[row])[-1] == expected
+        assert strip_ansi(rows[row])[-1] == ("|" if ascii else "│")
     assert rows[: bar.top] == initial.splitlines()[: bar.top]
     viewport.offset = 9999
     render(model, viewport, ctx, scrollbar=True)
     bar = viewport.scrollbar
     assert bar.thumb_top + bar.thumb_size == bar.top + bar.height
+
+
+@pytest.mark.parametrize("grouped", (False, True))
+@pytest.mark.parametrize("ascii", (False, True))
+def test_scrollbar_expands_thumb_only_while_hovered(grouped, ascii):
+    ctx = replace(context(height=5), ascii=ascii, color=False)
+    viewport = GroupedRankingViewport() if grouped else RankingViewport()
+    model = grouped_projection() if grouped else projection(100)
+    renderer = render_grouped if grouped else render
+    compact = renderer(model, viewport, ctx, scrollbar=True)
+    bar = viewport.scrollbar
+    assert bar is not None
+    hovered = renderer(model, viewport, ctx, scrollbar=True, scrollbar_hovered=True)
+    assert viewport.scrollbar == bar
+    compact_rows = strip_ansi(compact).splitlines()
+    hovered_rows = strip_ansi(hovered).splitlines()
+    line, thumb = ("|", "#") if ascii else ("│", "█")
+    assert compact_rows[bar.thumb_top][-1] == line
+    assert hovered_rows[bar.thumb_top][-1] == thumb
+    track = next(row for row in range(bar.top, bar.top + bar.height) if not bar.on_thumb(row))
+    assert compact_rows[track][-1] == hovered_rows[track][-1] == line
 
 
 @pytest.mark.parametrize("spacing", ("compact", "space", "line", "dashed"))

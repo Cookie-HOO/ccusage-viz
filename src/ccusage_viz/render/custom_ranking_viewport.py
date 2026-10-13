@@ -34,6 +34,7 @@ def render_custom_ranking_viewport(
     copied_entry_id: str | None,
     item_spacing: str,
     scrollbar: bool = False,
+    scrollbar_hovered: bool = False,
     copy_all_action: bool = False,
     copied_all: bool = False,
 ) -> str:
@@ -59,9 +60,11 @@ def render_custom_ranking_viewport(
     data_key = (context.translator.language, projection.unit, search_query)
     rebuild_data = viewport.source is not projection.series or viewport.data_key != data_key
     # These facts can alter column widths, chrome height, wrapping, or row
-    # spacing. Styles and themes intentionally do not: they only change marks.
+    # spacing. List style has its own label-prioritized row layout; themes only
+    # change marks.
     geometry_key = (
         context.width,
+        context.style,
         context.density,
         context.period,
         context.pending,
@@ -197,7 +200,8 @@ def render_custom_ranking_viewport(
         spacing=item_spacing,
     )
     if (
-        copy_all_action
+        context.style != "list"
+        and copy_all_action
         and context.density != "minimal"
         and any(not entry.is_other for entry in viewport.entries)
         and viewport.body_top > 0
@@ -228,15 +232,15 @@ def render_custom_ranking_viewport(
         rows = rendered.splitlines()
         rows.extend("" for _ in range(context.height - len(rows)))
         for row in range(bar.top, bar.top + bar.height):
-            thumb = bar.on_thumb(row)
-            mark = ("#" if context.ascii else "█") if thumb else ("|" if context.ascii else "│")
+            mark, color, bold = bar.mark_at(
+                row,
+                ascii=context.ascii,
+                hovered=scrollbar_hovered,
+                highlight=scheme.highlight,
+                muted=scheme.muted,
+            )
             rows[row] = pad_width(
                 clip_width(rows[row], context.width), context.width
-            ) + styled_text(
-                mark,
-                scheme.highlight if thumb else scheme.muted,
-                context,
-                bold=thumb,
-            )
+            ) + styled_text(mark, color, context, bold=bold)
         rendered = "\n".join(rows)
     return rendered
