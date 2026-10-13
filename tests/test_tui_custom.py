@@ -1204,6 +1204,30 @@ def test_custom_ranking_adjustment_state_exposes_top_and_other_projection() -> N
     assert "Other show" in advanced
 
 
+def test_grouped_custom_ranking_dispatch_uses_grouped_viewport_and_clears_flat_state() -> None:
+    from test_custom_ranking_scroll import grouped_projection
+
+    model = grouped_projection()
+    flat = tui_module.RankingViewport(offset=4)
+    grouped = tui_module.GroupedRankingViewport()
+    rendered = tui_module._render_custom_projection(
+        model,
+        model.config,
+        load_translator("en"),
+        Terminal(80, 10, color=False, ascii=True),
+        accepted_at=None,
+        interval=None,
+        pending=False,
+        surface=dashboard_pane_surface("ranking"),
+        ranking_viewport=flat,
+        grouped_ranking_viewport=grouped,
+    )
+
+    assert grouped.active and grouped.rows and grouped.hits
+    assert not flat.active and flat.offset == 0
+    assert "Coding Model" in rendered.chart
+
+
 def test_custom_ranking_viewport_preserves_renderer_column_padding() -> None:
     chart = "    Centered ranking\n 1     API       ···● 10  60%\n 2     Longer API ·●··  5  40%"
 

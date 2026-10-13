@@ -196,6 +196,36 @@ def test_grouped_sticky_heading_is_label_only_and_has_no_hit() -> None:
     assert not any(row == viewport.body_top for row in viewport.hits)
 
 
+def test_grouped_sticky_remains_until_offset_reaches_next_original_heading() -> None:
+    viewport = GroupedRankingViewport()
+    ctx = context(height=8)
+    model = grouped_projection()
+    render_grouped(model, viewport, ctx)
+    viewport.offset = next(
+        index
+        for index, row in enumerate(viewport.rows)
+        if row.kind == "series" and row.group_id == "coding"
+    )
+
+    output = strip_ansi(render_grouped(model, viewport, ctx))
+    assert output.splitlines()[viewport.body_top].strip() == "Coding Model"
+    assert any(
+        row.kind == "group" and row.group_id == "general"
+        # The next original heading has entered the unreserved window, but the
+        # current group remains sticky until that heading itself is the offset.
+        for row in viewport.rows[viewport.offset : viewport.offset + viewport.visible_rows]
+    )
+
+    viewport.offset = next(
+        index
+        for index, row in enumerate(viewport.rows)
+        if row.kind == "group" and row.group_id == "general"
+    )
+    output = strip_ansi(render_grouped(model, viewport, ctx))
+    assert output.splitlines()[viewport.body_top].lstrip().startswith("General Model |")
+    assert viewport.sticky_rows == 0
+
+
 def test_grouped_identity_scrollbar_and_copy_payloads() -> None:
     viewport = GroupedRankingViewport()
     ctx = context(height=8, density="detailed")
@@ -298,6 +328,26 @@ def test_grouped_missing_series_then_falls_back_to_nearest_old_group() -> None:
     assert viewport.rows[viewport.offset].group_id == "coding"
 
 
+def test_grouped_warm_scroll_and_repaint_reuse_preparation_and_geometry(monkeypatch) -> None:
+    import ccusage_viz.render.grouped_ranking_viewport as module
+
+    viewport = GroupedRankingViewport()
+    model = grouped_projection()
+    ctx = context(height=6, density="detailed")
+    render_grouped(model, viewport, ctx)
+
+    monkeypatch.setattr(module, "_prepare_group", lambda *a, **k: pytest.fail("prepared again"))
+    monkeypatch.setattr(
+        module, "filter_ranking_entries", lambda *a, **k: pytest.fail("filtered again")
+    )
+    monkeypatch.setattr(
+        module, "measure_ranking_columns", lambda *a, **k: pytest.fail("measured again")
+    )
+    assert viewport.scroll(1)
+    render_grouped(model, viewport, ctx)
+    render_grouped(model, viewport, ctx)
+
+
 def test_grouped_premeasures_every_visible_group_before_rendering(monkeypatch) -> None:
     import ccusage_viz.render.grouped_ranking_viewport as module
 
@@ -346,6 +396,39 @@ def test_grouped_empty_only_has_copy_all_action_and_exact_heading_payload() -> N
         "About Empty Unmatched Group\n"
         "https://example.com/empty"
     )
+
+
+@pytest.mark.parametrize(
+    ("height", "density", "search", "expected_hit"),
+    (
+        (0, "normal", "", None),
+        (1, "normal", "", None),
+        (2, "normal", "", 1),
+        (3, "normal", "Seed", 2),
+        (3, "minimal", "", None),
+        (2, "normal", "Seed", None),
+    ),
+)
+def test_grouped_tiny_height_clips_chrome_and_targets_only_rendered_count(
+    height, density, search, expected_hit
+) -> None:
+    viewport = GroupedRankingViewport()
+    output = strip_ansi(
+        render_grouped(
+            grouped_projection(),
+            viewport,
+            context(height=height, density=density),
+            search=search,
+            copy_all_action=True,
+        )
+    )
+    assert len(output.splitlines()) <= height
+    assert (viewport.copy_all_hit[0] if viewport.copy_all_hit else None) == expected_hit
+    assert all(row < height for row in viewport.hits)
+    if viewport.copy_all_hit is not None:
+        row, _ = viewport.copy_all_hit
+        assert "item(s)" in output.splitlines()[row]
+    assert viewport.copy_all_hit is None or viewport.copy_all_hit[0] not in {0, 1 if search else -1}
 
 
 def test_grouped_other_only_has_zero_match_count_and_no_copy_all_payload() -> None:

@@ -2074,15 +2074,7 @@ def _render_custom_projection(
                 - active_viewport.reserved_rows,
             ),
         )
-        render_viewport = (
-            render_grouped_custom_ranking_viewport
-            if grouped
-            else render_custom_ranking_viewport
-        )
-        rendered = render_viewport(
-            replace(projection, config=config),
-            context,
-            active_viewport,
+        render_args = dict(
             heading=custom_heading(config, context, projection.presentation).strip(),
             descriptions_visible=config.presentation.density in {"full", "detailed"},
             search_query=search_query,
@@ -2094,6 +2086,17 @@ def _render_custom_projection(
             copy_all_action=True,
             copied_all=copied_all,
         )
+        current_projection = replace(projection, config=config)
+        if grouped:
+            assert isinstance(active_viewport, GroupedRankingViewport)
+            rendered = render_grouped_custom_ranking_viewport(
+                current_projection, context, active_viewport, **render_args
+            )
+        else:
+            assert isinstance(active_viewport, RankingViewport)
+            rendered = render_custom_ranking_viewport(
+                current_projection, context, active_viewport, **render_args
+            )
         active_viewport.hits = {
             row + summary_rows: hit for row, hit in active_viewport.hits.items()
         }
@@ -7546,6 +7549,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     (translator.text("status.tui_help_text_navigation"), tuple(text_children)),
                 )
 
+        current_metric_node = None
         common_children = [
             (translator.text("status.tui_help_history"), ()),
             (translator.text("status.tui_help_help"), ()),

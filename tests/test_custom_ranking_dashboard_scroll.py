@@ -6,7 +6,7 @@ from os import terminal_size
 from time import monotonic
 
 import pytest
-from test_custom_ranking_scroll import projection
+from test_custom_ranking_scroll import grouped_projection, projection
 
 import ccusage_viz.tui as tui
 from ccusage_viz.cli import _to_options, build_parser
@@ -113,6 +113,47 @@ def dashboard(monkeypatch):
     run.monkeypatch = monkeypatch
     run.new_pane = original_new_pane
     return run, panes, frames, focuses, geometries, decoder, copied, opened, size
+
+
+def test_grouped_dashboard_dispatch_wheel_and_hit_translation(dashboard):
+    run, panes, frames, focuses, layouts, decoder, copied, opened, size = dashboard
+    del frames, decoder, opened
+    size[:] = [160, 12]
+    for pane in panes:
+        model = grouped_projection()
+        config = replace(model.config, date_range=replace(model.date_range, fixed_bounds=True))
+        pane.component.candidate = pane.component.accepted_config = config
+        pane.component.model = replace(model, config=config)
+
+    target = []
+
+    def click_visible():
+        pane = panes[0]
+        assert pane.grouped_ranking_viewport.active
+        assert not pane.ranking_viewport.active
+        row, (identity, column, _) = next(
+            (row, hit)
+            for row, hit in pane.ranking_copy_rows.items()
+            if hit[0][0] == "group"
+        )
+        target.append(identity)
+        rect = layouts[-1].pane(0)
+        framed = focuses[-1] == 0
+        return MouseEvent(
+            0,
+            rect.left + column + 1 + framed,
+            rect.top + row + 1 + framed,
+            True,
+            0,
+        )
+
+    def verify():
+        assert panes[0].grouped_ranking_viewport.offset == 1
+        assert target[0][0] == "group"
+        assert copied == [panes[0].grouped_ranking_viewport.clipboard_text(target[0])]
+        return KeyEvent("\x03")
+
+    run([WheelEvent(1, 2, 3), click_visible, verify])
 
 
 def test_copy_all_uses_every_filtered_entry_without_focus_or_query_work(dashboard):
