@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from decimal import Decimal
-from typing import Literal
+from typing import Any, Literal
 
 from ccusage_viz.core.time import DateRange
 from ccusage_viz.custom_models import (
@@ -23,6 +23,8 @@ from ccusage_viz.custom_models import (
 from ccusage_viz.custom_protocol import CustomChartResponse
 from ccusage_viz.options import CustomChartConfig
 from ccusage_viz.processing.summaries import period_end, period_start
+
+SortDirection = Literal["ascending", "descending"]
 
 
 class CustomProjectionError(ValueError):
@@ -114,6 +116,10 @@ def process_custom_historical(
     if comparison_response is not None:
         if comparison_config is None:
             raise ValueError("comparison response requires its query configuration")
+        if (response.data.groups is None) != (comparison_response.data.groups is None):
+            raise CustomProjectionError(
+                "custom current and comparison responses have incompatible comparison shapes"
+            )
         _validate_capability(comparison_response, comparison_config)
         _validate_dates(comparison_response, comparison_config)
 
@@ -128,77 +134,19 @@ def process_custom_historical(
             ),
         )
 
-    indexes = {day: index for index, day in enumerate(days)}
-    candidates: list[CustomProjectedSeries] = []
-    for source in response.data.series:
-        values = [Decimal()] * len(days)
-        for point in source.points:
-            bucket = _bucket_start(point.date, config.granularity)
-            if not _bucket_overlaps(bucket, config):
-                raise CustomProjectionError(
-                    "custom response contains a point outside the requested range"
-                )
-            values[indexes[bucket]] += point.value
-        candidates.append(
-            CustomProjectedSeries(
-                source.id,
-                source.label,
-                tuple(values),
-                description=source.description,
-                display=source.display,
-                comparison_display=source.comparison_display,
-                link=source.link,
-            )
-        )
-
     sort_direction = response.capabilities.charts[config.kind].sort_direction
-    ranking_key = (
-        (lambda item: (item.total, item.id))
-        if sort_direction == "ascending"
-        else (lambda item: (-item.total, item.id))
+    selected, _, _ = _project_source_series(
+        response.data.series,
+        config,
+        days=days,
+        sort_direction=sort_direction,
+        previous=(
+            {source.id: source for source in comparison_response.data.series}
+            if comparison_response is not None
+            else None
+        ),
+        include_rank=False,
     )
-    previous_totals: dict[str, Decimal] = {}
-    previous_ranks: dict[str, int] = {}
-    if comparison_response is not None:
-        previous_totals = {
-            source.id: sum((point.value for point in source.points), start=Decimal())
-            for source in comparison_response.data.series
-        }
-        previous_ranks = {
-            series_id: rank
-            for rank, (series_id, _) in enumerate(
-                sorted(
-                    previous_totals.items(),
-                    key=(
-                        (lambda item: (item[1], item[0]))
-                        if sort_direction == "ascending"
-                        else (lambda item: (-item[1], item[0]))
-                    ),
-                ),
-                start=1,
-            )
-        }
-        candidates = [
-            CustomProjectedSeries(
-                series.id,
-                series.label,
-                series.values,
-                previous_total=previous_totals.get(series.id),
-                comparison_ready=series.id in previous_totals,
-                previous_rank=previous_ranks.get(series.id),
-                description=series.description,
-                display=series.display,
-                comparison_display=series.comparison_display,
-                link=series.link,
-            )
-            for series in candidates
-        ]
-
-    # Stable deterministic ranking by requested-range sum, with ID as tiebreaker.
-    candidates.sort(key=ranking_key)
-    selected, discarded = _select_top(candidates, config.top)
-    if discarded and config.other == "show":
-        selected.append(_other(discarded, len(days)))
     return CustomChartProjection(
         config.kind,
         days,
@@ -207,16 +155,7 @@ def process_custom_historical(
         config.date_range,
         config.granularity,
         config,
-        CustomPresentationDescriptor(
-            response.dataset,
-            {dimension.id: dimension.label for dimension in response.capabilities.group_by},
-            {filter.id: filter.label for filter in response.capabilities.filters},
-            {
-                (filter.id, option.id): option.label
-                for filter in response.capabilities.filters
-                for option in filter.options
-            },
-        ),
+        _presentation_descriptor(response),
         comparison_response is not None,
         response.capabilities.charts[config.kind].show_percentage
         if config.kind == "ranking"
@@ -244,16 +183,7 @@ def _process_grouped_ranking(
         config.date_range,
         config.granularity,
         config,
-        CustomPresentationDescriptor(
-            response.dataset,
-            {dimension.id: dimension.label for dimension in response.capabilities.group_by},
-            {filter.id: filter.label for filter in response.capabilities.filters},
-            {
-                (filter.id, option.id): option.label
-                for filter in response.capabilities.filters
-                for option in filter.options
-            },
-        ),
+        _presentation_descriptor(response),
         comparison_response is not None,
         response.capabilities.charts["ranking"].show_percentage,
         groups,
@@ -264,80 +194,36 @@ def _project_source_series(
     sources: tuple[CustomSeries, ...],
     config: CustomChartConfig,
     *,
-    sort_direction: str,
+    days: tuple[date, ...],
+    sort_direction: SortDirection,
     previous: dict[str, CustomSeries] | None,
+    include_rank: bool,
 ) -> tuple[tuple[CustomProjectedSeries, ...], Decimal, Decimal]:
     """Return visible Top/Other entries, full returned total, and full returned maximum."""
-    days = _period_axis(config.date_range.since, config.date_range.until, config.granularity)
-    indexes = {day: index for index, day in enumerate(days)}
-
-    def values_for(source: CustomSeries) -> tuple[Decimal, ...]:
-        values = [Decimal()] * len(days)
-        for point in source.points:
-            bucket = _bucket_start(point.date, config.granularity)
-            if not _bucket_overlaps(bucket, config):
-                raise CustomProjectionError(
-                    "custom response contains a point outside the requested range"
-                )
-            values[indexes[bucket]] += point.value
-        return tuple(values)
-
-    previous_totals = (
-        {
-            source.id: sum((point.value for point in source.points), start=Decimal())
-            for source in previous.values()
-        }
-        if previous is not None
-        else {}
-    )
-    previous_ranks = {
-        series_id: rank
-        for rank, (series_id, _) in enumerate(
-            sorted(
-                previous_totals.items(),
-                key=(
-                    (lambda item: (item[1], item[0]))
-                    if sort_direction == "ascending"
-                    else (lambda item: (-item[1], item[0]))
-                ),
-            ),
-            start=1,
-        )
-    }
+    previous_totals, previous_ranks = _previous_facts(previous, sort_direction)
     candidates = [
         CustomProjectedSeries(
-            source.id,
-            source.label,
-            values_for(source),
+            id=source.id,
+            label=source.label,
+            values=_bucket_values(source, days, config),
             previous_total=previous_totals.get(source.id),
             comparison_ready=previous is not None and source.id in previous,
             previous_rank=previous_ranks.get(source.id),
-            description=source.description,
-            display=source.display,
-            comparison_display=source.comparison_display,
-            link=source.link,
+            **_series_metadata(source),
         )
         for source in sources
     ]
-    ranking_key = (
-        (lambda item: (item.total, item.id))
-        if sort_direction == "ascending"
-        else (lambda item: (-item.total, item.id))
-    )
-    candidates.sort(key=ranking_key)
+    candidates.sort(key=lambda item: _ranking_key(item.total, item.id, sort_direction))
     ranked = [
         CustomProjectedSeries(
-            item.id,
-            item.label,
-            item.values,
+            id=item.id,
+            label=item.label,
+            values=item.values,
             previous_total=item.previous_total,
             comparison_ready=item.comparison_ready,
             previous_rank=item.previous_rank,
-            description=item.description,
-            display=item.display,
-            comparison_display=item.comparison_display,
-            link=item.link,
-            rank=rank,
+            rank=rank if include_rank else None,
+            **_series_metadata(item),
         )
         for rank, item in enumerate(candidates, start=1)
     ]
@@ -354,7 +240,7 @@ def _project_groups(
     previous: tuple[CustomRankingGroup, ...] | None,
     config: CustomChartConfig,
     *,
-    sort_direction: str,
+    sort_direction: SortDirection,
 ) -> tuple[CustomProjectedRankingGroup, ...]:
     """Preserve current group order and independently project every group."""
     previous_by_id = {group.id: group for group in previous or ()}
@@ -369,36 +255,96 @@ def _project_groups(
         series, total, maximum = _project_source_series(
             group.series,
             config,
+            days=_period_axis(config.date_range.since, config.date_range.until, config.granularity),
             sort_direction=sort_direction,
             previous=previous_series,
+            include_rank=True,
         )
         projected.append(
             CustomProjectedRankingGroup(
-                group.id,
-                group.label,
-                series,
-                total,
-                (
+                id=group.id,
+                label=group.label,
+                series=series,
+                total=total,
+                previous_total=(
                     sum(
-                        (
-                            point.value
-                            for source in previous_group.series
-                            for point in source.points
-                        ),
-                        start=Decimal(),
+                        (_series_total(source) for source in previous_group.series), start=Decimal()
                     )
                     if previous_group is not None
                     else None
                 ),
-                previous_group is not None,
-                maximum,
-                group.description,
-                group.display,
-                group.comparison_display,
-                group.link,
+                comparison_ready=previous_group is not None,
+                maximum=maximum,
+                **_series_metadata(group),
             )
         )
     return tuple(projected)
+
+
+def _presentation_descriptor(response: CustomChartResponse) -> CustomPresentationDescriptor:
+    return CustomPresentationDescriptor(
+        response.dataset,
+        {dimension.id: dimension.label for dimension in response.capabilities.group_by},
+        {filter.id: filter.label for filter in response.capabilities.filters},
+        {
+            (filter.id, option.id): option.label
+            for filter in response.capabilities.filters
+            for option in filter.options
+        },
+    )
+
+
+def _series_total(source: CustomSeries) -> Decimal:
+    return sum((point.value for point in source.points), start=Decimal())
+
+
+def _ranking_key(
+    total: Decimal, identifier: str, sort_direction: SortDirection
+) -> tuple[Decimal, str]:
+    return (total, identifier) if sort_direction == "ascending" else (-total, identifier)
+
+
+def _previous_facts(
+    previous: dict[str, CustomSeries] | None,
+    sort_direction: SortDirection,
+) -> tuple[dict[str, Decimal], dict[str, int]]:
+    totals = (
+        {identifier: _series_total(source) for identifier, source in previous.items()}
+        if previous is not None
+        else {}
+    )
+    ranks = {
+        identifier: rank
+        for rank, (identifier, total) in enumerate(
+            sorted(totals.items(), key=lambda item: _ranking_key(item[1], item[0], sort_direction)),
+            start=1,
+        )
+    }
+    return totals, ranks
+
+
+def _bucket_values(
+    source: CustomSeries, days: tuple[date, ...], config: CustomChartConfig
+) -> tuple[Decimal, ...]:
+    indexes = {day: index for index, day in enumerate(days)}
+    values = [Decimal()] * len(days)
+    for point in source.points:
+        bucket = _bucket_start(point.date, config.granularity)
+        if not _bucket_overlaps(bucket, config):
+            raise CustomProjectionError(
+                "custom response contains a point outside the requested range"
+            )
+        values[indexes[bucket]] += point.value
+    return tuple(values)
+
+
+def _series_metadata(source: Any) -> dict[str, Any]:
+    return {
+        "description": source.description,
+        "display": source.display,
+        "comparison_display": source.comparison_display,
+        "link": source.link,
+    }
 
 
 def _validate_capability(response: CustomChartResponse, config: CustomChartConfig) -> None:

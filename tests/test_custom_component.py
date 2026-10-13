@@ -481,6 +481,26 @@ def test_grouped_projection_keeps_full_facts_when_other_is_hidden_and_supports_s
     assert [item.id for item in hidden_group.series] == ["positive"]
 
 
+def test_grouped_projection_preserves_zero_totals_and_deterministic_ranks() -> None:
+    projection = process_custom_historical(
+        _grouped_response((("zeroes", (("b", "0"), ("a", "0"))),)),
+        config(
+            kind="ranking",
+            partition_by="logical_model",
+            group_by="real_model",
+            top=None,
+        ),
+    )
+
+    assert projection.groups is not None
+    group = projection.groups[0]
+    assert [(item.id, item.total, item.rank) for item in group.series] == [
+        ("a", Decimal(), 1),
+        ("b", Decimal(), 2),
+    ]
+    assert group.total == group.maximum == Decimal()
+
+
 def test_grouped_projection_sorts_ties_and_ascending_values_independently() -> None:
     projection = process_custom_historical(
         _grouped_response(
@@ -537,6 +557,35 @@ def test_grouped_projection_matches_previous_within_group_and_treats_moves_as_ne
     assert not two.series[0].comparison_ready
 
 
+def test_grouped_projection_scopes_repeated_inner_ids_to_their_group() -> None:
+    current = _grouped_response((("one", (("shared", "5"),)), ("two", (("shared", "7"),))))
+    previous = _grouped_response(
+        (("one", (("shared", "2"),)), ("two", (("shared", "11"),))),
+        point_date=date(2026, 8, 30),
+    )
+    chart = config(
+        kind="ranking",
+        partition_by="logical_model",
+        group_by="real_model",
+        top=None,
+    )
+
+    projection = process_custom_historical(
+        current,
+        chart,
+        comparison_response=previous,
+        comparison_config=replace(
+            chart, date_range=DateRange(date(2026, 8, 30), date(2026, 8, 31))
+        ),
+    )
+
+    assert projection.groups is not None
+    assert [group.series[0].previous_total for group in projection.groups] == [
+        Decimal("2"),
+        Decimal("11"),
+    ]
+
+
 def test_grouped_projection_period_all_retains_dated_totals_without_comparison() -> None:
     source = _grouped_response((("one", (("a", "2"),)),))
     group = source.data.groups[0]  # type: ignore[index]
@@ -580,6 +629,58 @@ def test_grouped_data_is_rejected_for_non_ranking_projection() -> None:
         process_custom_historical(
             _grouped_response((("one", (("a", "1"),)),)),
             config(kind="timeline", partition_by=None, group_by=None),
+        )
+
+
+@pytest.mark.parametrize("current_grouped", (False, True))
+def test_ranking_rejects_incompatible_current_and_comparison_shapes(
+    current_grouped: bool,
+) -> None:
+    flat = response((("a", "1"),))
+    grouped = _grouped_response((("one", (("a", "1"),)),))
+    current, previous = (grouped, flat) if current_grouped else (flat, grouped)
+    chart = config(
+        kind="ranking",
+        partition_by="logical_model" if current_grouped else None,
+        group_by="real_model" if current_grouped else "book",
+        top=None,
+    )
+    comparison_chart = replace(
+        chart,
+        date_range=DateRange(date(2026, 8, 30), date(2026, 8, 31)),
+        partition_by=None if current_grouped else "logical_model",
+        group_by="book" if current_grouped else "real_model",
+    )
+
+    with pytest.raises(CustomProjectionError, match="comparison shape"):
+        process_custom_historical(
+            current,
+            chart,
+            comparison_response=previous,
+            comparison_config=comparison_chart,
+        )
+
+
+def test_comparison_response_is_validated_against_its_own_query_capability() -> None:
+    current = response((("a", "1"),))
+    previous = replace(
+        response((("a", "2"),), point_date=date(2026, 8, 30)),
+        capabilities=CustomCapabilities(
+            (), (), {"ranking": CustomChartCapability(("day",), (None,), ())}
+        ),
+    )
+    chart = config(kind="ranking", top=None)
+    comparison_chart = replace(
+        chart,
+        date_range=DateRange(date(2026, 8, 30), date(2026, 8, 31)),
+    )
+
+    with pytest.raises(CustomProjectionError, match="grouping by book"):
+        process_custom_historical(
+            current,
+            chart,
+            comparison_response=previous,
+            comparison_config=comparison_chart,
         )
 
 
