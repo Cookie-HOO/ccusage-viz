@@ -6,6 +6,7 @@ from typing import Literal
 
 NAMED_LAYOUTS = frozenset(("auto", "spotlight-wide", "spotlight-wide2"))
 MIN_WEIGHT_SHARES = 24
+MIN_PANE_WIDTH = 4
 MIN_PANE_HEIGHT = 3
 
 RenderedLayout = Literal["grid", "spotlight-wide", "spotlight-wide2"]
@@ -194,8 +195,8 @@ def resolve_pane_layout(
     topology, rendered = _build_topology(configured, pane_count)
     resolved_columns = _resolve_weights(column_weights, topology.columns)
     resolved_rows = _resolve_weights(row_weights, topology.rows)
-    column_sizes = _allocate_axis(width, resolved_columns, gutter)
-    row_sizes = _allocate_axis(height, resolved_rows, gutter)
+    column_sizes = _allocate_axis(width, resolved_columns, gutter, minimum=MIN_PANE_WIDTH)
+    row_sizes = _allocate_axis(height, resolved_rows, gutter, minimum=MIN_PANE_HEIGHT)
     panes = _pane_rectangles(topology, column_sizes, row_sizes, gutter)
     return PaneLayout(
         configured=configured,
@@ -262,14 +263,22 @@ def _rendered_name(configured: str) -> RenderedLayout:
     return "grid"
 
 
-def _allocate_axis(total: int, weights: tuple[int, ...], gutter: int) -> tuple[int, ...]:
+def _allocate_axis(
+    total: int, weights: tuple[int, ...], gutter: int, *, minimum: int
+) -> tuple[int, ...]:
     available = total - gutter * (len(weights) - 1)
-    if available < len(weights):
-        raise ValueError("viewport is too small for the configured Dashboard layout")
-    distributable = available - len(weights)
+    if available >= minimum * len(weights):
+        base = minimum
+    elif available >= len(weights):
+        base = 1
+    else:
+        # There is not enough physical space to display every logical band.
+        # Keep exact geometry and let Dashboard rendering skip zero rectangles.
+        return tuple(0 for _ in weights)
+    distributable = available - base * len(weights)
     weight_total = sum(weights)
     products = [distributable * weight for weight in weights]
-    sizes = [1 + product // weight_total for product in products]
+    sizes = [base + product // weight_total for product in products]
     remainder = available - sum(sizes)
     priorities = sorted(
         range(len(weights)),

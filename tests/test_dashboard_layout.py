@@ -5,6 +5,7 @@ import inspect
 import pytest
 
 from ccusage_viz.dashboard_layout import (
+    MIN_PANE_WIDTH,
     PaneRect,
     adjust_weight,
     layout_bands,
@@ -204,10 +205,42 @@ def test_weighted_geometry_allocates_shared_logical_bands() -> None:
         row_weights=(2, 1),
     )
 
-    assert layout.column_sizes == (4, 8)
-    assert layout.row_sizes == (8, 4)
-    assert layout.pane(1).width == layout.pane(3).width == 8
-    assert layout.pane(0).height == layout.pane(1).height == 8
+    assert layout.column_sizes == (5, 7)
+    assert layout.row_sizes == (7, 5)
+    assert layout.pane(1).width == layout.pane(3).width == 7
+    assert layout.pane(0).height == layout.pane(1).height == 7
+
+
+def test_weighted_layout_keeps_each_feasible_dashboard_band_at_its_minimum() -> None:
+    layout = resolve_pane_layout(
+        layout="1x2",
+        pane_count=2,
+        width=80,
+        height=3,
+        column_weights=(1, 1_000),
+        row_weights=(1,),
+    )
+
+    assert layout.column_sizes[0] == MIN_PANE_WIDTH
+    assert layout.column_sizes == (MIN_PANE_WIDTH, 75)
+    assert layout.row_sizes == (3,)
+
+
+def test_layout_recovers_when_physical_viewport_cannot_fit_all_bands() -> None:
+    layout = resolve_pane_layout(
+        layout="1x2",
+        pane_count=2,
+        width=1,
+        height=1,
+        divider_style="line",
+    )
+
+    assert layout.width == 1
+    assert layout.height == 1
+    assert sum(layout.column_sizes) + layout.gutter == 1
+    assert sum(layout.row_sizes) == 1
+    assert layout.column_sizes == (0, 0)
+    assert layout.row_sizes == (1,)
 
 
 def test_layout_bands_describe_configured_spotlight_topology() -> None:
