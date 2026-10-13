@@ -427,28 +427,27 @@ def render_grouped_custom_ranking_viewport(
                     )
                 if comparison_visible:
                     viewport.columns.widths["current"] = max(
-                        viewport.columns.widths.get("current", 0),
-                        *(display_width(group.display) + 2 for group, _ in visible),
+                        (display_width(group.display) + 2 for group, _ in visible),
+                        default=viewport.columns.widths.get("current", 0),
                     )
                     if comparison == "full":
                         viewport.columns.widths["delta"] = max(
-                            viewport.columns.widths.get("delta", 0),
-                            *(display_width(group.comparison_display) for group, _ in visible),
+                            (display_width(group.comparison_display) for group, _ in visible),
+                            default=viewport.columns.widths.get("delta", 0),
                         )
                     if projection.show_percentage:
                         viewport.columns.widths["share"] = max(
-                            viewport.columns.widths.get("share", 0),
-                            *(
+                            (
                                 display_width(f"{group.share:>5.1%}")
                                 if group.share is not None
                                 else 0
                                 for group, _ in visible
                             ),
+                            default=viewport.columns.widths.get("share", 0),
                         )
                 else:
                     viewport.columns.widths["right"] = max(
-                        viewport.columns.widths.get("right", 1),
-                        *(
+                        (
                             display_width(group.display)
                             + (
                                 display_width(f"{group.share:>5.1%}")
@@ -458,6 +457,7 @@ def render_grouped_custom_ranking_viewport(
                             + 3
                             for group, _ in visible
                         ),
+                        default=viewport.columns.widths.get("right", 1),
                     )
             records: list[GroupedRankingRow] = []
             for group_index, (group, entries) in enumerate(visible):

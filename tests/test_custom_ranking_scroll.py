@@ -218,6 +218,21 @@ def test_grouped_search_matches_only_inner_fields_and_preserves_full_facts() -> 
     assert all(identity[0] != "group" or identity[1] != "empty" for identity in viewport.by_id)
 
 
+def test_grouped_zero_match_search_keeps_empty_width_measurement_renderable() -> None:
+    viewport = GroupedRankingViewport()
+
+    output = strip_ansi(
+        render_grouped(
+            grouped_projection(), viewport, context(density="detailed"), search="gpt4"
+        )
+    )
+
+    assert "Showing 0/3 item(s)" in output
+    assert "Coding Model" not in output
+    assert viewport.visible_groups == ()
+    assert viewport.hits == {}
+
+
 def test_grouped_scrolling_does_not_insert_a_sticky_heading() -> None:
     viewport = GroupedRankingViewport()
     ctx = context(height=5)

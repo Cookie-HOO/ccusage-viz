@@ -196,6 +196,34 @@ def test_grouped_dashboard_inner_series_copy_uses_group_aware_payload(dashboard)
     run([click_series, verify])
 
 
+def test_grouped_dashboard_incremental_numeric_search_survives_zero_matches(dashboard):
+    run, panes, frames, focuses, layouts, decoder, copied, opened, size = dashboard
+    del frames, layouts, decoder, copied, opened
+    size[:] = [160, 14]
+    for pane in panes:
+        model = grouped_projection()
+        config = replace(model.config, date_range=replace(model.date_range, fixed_bounds=True))
+        pane.component.candidate = pane.component.accepted_config = config
+        pane.component.model = replace(model, config=config)
+
+    def verify():
+        pane = panes[0]
+        assert pane.ranking_search.query == "gpt4"
+        assert pane.grouped_ranking_viewport.visible_groups == ()
+        assert pane.ranking_copy_rows == {}
+        return KeyEvent("\x03")
+
+    run(
+        [
+            MouseEvent(0, 1, 1, True, 0),
+            MouseEvent(0, 1, 1, True, 0),
+            KeyEvent("/"),
+            *map(KeyEvent, "gpt4"),
+            verify,
+        ]
+    )
+
+
 def test_grouped_dashboard_scrollbar_drag_uses_active_viewport(dashboard):
     run, panes, frames, focuses, layouts, decoder, copied, opened, size = dashboard
     del frames, decoder, copied, opened
