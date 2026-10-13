@@ -191,8 +191,11 @@ def resolve_pane_layout(
     if width < 1 or height < 1:
         raise ValueError("layout dimensions must be positive")
 
-    gutter = 0 if divider_style == "none" else 1
+    requested_gutter = 0 if divider_style == "none" else 1
     topology, rendered = _build_topology(configured, pane_count)
+    gutter = _resolve_gutter(
+        requested_gutter, width, topology.columns, height, topology.rows
+    )
     resolved_columns = _resolve_weights(column_weights, topology.columns)
     resolved_rows = _resolve_weights(row_weights, topology.rows)
     column_sizes = _allocate_axis(width, resolved_columns, gutter, minimum=MIN_PANE_WIDTH)
@@ -209,6 +212,15 @@ def resolve_pane_layout(
         row_sizes=row_sizes,
         panes=panes,
     )
+
+
+def _resolve_gutter(
+    requested: int, width: int, columns: int, height: int, rows: int
+) -> int:
+    """Drop line dividers before they consume a logical band's last cell."""
+    if requested and (width - (columns - 1) < columns or height - (rows - 1) < rows):
+        return 0
+    return requested
 
 
 def _resolve_weights(weights: tuple[int, ...] | None, count: int) -> tuple[int, ...]:
