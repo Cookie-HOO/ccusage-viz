@@ -459,7 +459,7 @@ class CcusageProvider:
         coverage = DateCoverage()
         notices = plan.notices
         if tagged:
-            records = _strict_project_fallback_records(fragments)
+            records = _project_fallback_replacement_records(fragments)
         for fragment in fragments:
             metadata = _fragment_query_metadata(fragment)
             if not tagged or metadata is None:
@@ -657,7 +657,7 @@ def _exception_agents(records: tuple[UsageRecord, ...]) -> frozenset[str]:
     )
 
 
-def _strict_project_fallback_records(
+def _project_fallback_replacement_records(
     fragments: tuple[ProviderResultFragment, ...],
 ) -> tuple[UsageRecord, ...]:
     observations = tuple(
@@ -688,27 +688,9 @@ def _strict_project_fallback_records(
             fallback = fallbacks.get(
                 (metadata.source, metadata.revision, metadata.observation_id, agent)
             )
-            observations_for_agent = tuple(
-                record
-                for record in observation.records
-                if record.agent.casefold() == agent
-                and record.source is SourceKind.UNIFIED_DAILY
-                and record.attribution in {"unassigned", "unverified"}
-            )
-            sessions = () if fallback is None else fallback.records
-            if (
-                not sessions
-                or any(
-                    record.agent.casefold() != agent
-                    or record.attribution is not None
-                    or record.project is None
-                    for record in sessions
-                )
-                or sum(record.usage.total for record in observations_for_agent)
-                != sum(record.usage.total for record in sessions)
-            ):
+            if fallback is None:
                 raise QueryError("error.ccusage_project_fallback_incomplete", agent=agent)
-            reconciled.extend(sessions)
+            reconciled.extend(fallback.records)
     return tuple(reconciled)
 
 

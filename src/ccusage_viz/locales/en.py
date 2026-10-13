@@ -262,7 +262,7 @@ MESSAGES = {
     "error.custom_command_protocol": "Custom command returned an invalid protocol response: {detail}",
     "error.custom_command_output_limit": "Custom command returned more than {limit} bytes.",
     "error.ccusage_codex_date_attribution": "Codex project usage must be queried one day at a time for date attribution.",
-    "error.ccusage_project_fallback_incomplete": "Project attribution fallback is incomplete for agent {agent}.",
+    "error.ccusage_project_fallback_incomplete": "Project attribution fallback result is missing for agent {agent}.",
     "error.dsh_missing": "dsh-token-collector executable not found: {binary}. Install the local collector with: cargo install --path /Users/bytedance/Projects/rust/dsh-token-collector.",
     "error.dsh_start": "Could not start DSH {query}: {detail}",
     "error.dsh_failed": "DSH {query} failed with exit code {code}: {stderr}",

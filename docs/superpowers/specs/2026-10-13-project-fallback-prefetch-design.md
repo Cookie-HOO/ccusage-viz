@@ -22,10 +22,10 @@ state exists only for the lifetime of the ccuv process.
 ## Query roles
 
 - **A — primary observation:** `daily --by-agent`, queried for the selected date
-  range. A determines which agents currently require project fallback attribution
-  and provides the authoritative per-agent totals used for reconciliation.
+  range. A determines which agents currently require project fallback attribution.
 - **B — agent fallback:** an agent-specific `session` query for one exception
-  agent. B provides session facts that ccuv can resolve to projects.
+  agent. A successful, normalized B provides the complete replacement records for
+  that agent and observation, including empty results and `Unverified` records.
 
 A project refresh is accepted only as one complete logical result. The UI never
 accepts A as an intermediate rendering while required B queries are still pending.
@@ -63,7 +63,8 @@ When no fallback agents are remembered:
 4. Add those agents to learned state.
 5. Immediately submit all corresponding B queries, with no more than four B
    executions active at once.
-6. Normalize and reconcile every required B with A.
+6. Normalize every required B and replace its corresponding A exception records
+   directly with B's normalized records.
 7. Atomically assemble and deliver the complete provider result.
 
 Because B cannot be known before A returns, these queries are supplemental rather
@@ -82,7 +83,7 @@ participate in normal in-flight sharing across panes and requests.
 After A completes, classify each agent:
 
 - **Remembered and still exceptional:** its prefetched B is required. Wait for it,
-  normalize it, and reconcile it with A.
+  normalize it, and use it to replace that observation's A exception records.
 - **Remembered but no longer exceptional:** its prefetched B is irrelevant. Ignore
   its result or failure, remove the agent from learned state, and do not issue it
   next refresh.
@@ -116,24 +117,26 @@ A, plus every B that the completed A identifies as necessary, forms one atomic
 refresh result.
 
 - A failure fails the refresh.
-- A required B command failure, timeout, malformed response, missing project
-  resolution, or reconciliation mismatch fails the refresh.
-- Failure means no new provider result is delivered. The owning component retains
-  its previously accepted snapshot and rendering.
+- A required B command failure, timeout, malformed response, or normalization
+  failure fails the refresh before assembly. The owning component retains its
+  previously accepted snapshot and rendering.
 - The provider must not degrade a failed required B to A's `Unassigned` aggregate.
 - A speculative B failure is held provisionally until A classifies its agent. It
   fails the refresh only if A confirms that B is required.
 - A speculative B for an agent that A no longer classifies as exceptional is
   irrelevant; its failure does not fail the refresh.
+- If assembly is invoked without a required normalized B fragment, it raises the
+  internal incomplete-result error. This is the only incomplete assembly case.
 
-Reconciliation remains strict and agent-local. For every exceptional agent, the
-fallback session total must exactly equal that agent's authoritative total in A
-before the unassigned or unverified A records are replaced. The result is assembled
-and exposed only after all required agents reconcile.
+Successful B normalization is authoritative for replacement. Assembly removes the
+corresponding A exception records and inserts B records exactly as normalized. It
+performs no token-total equality check and does not require every B record to have
+a resolved project. `Unverified` B records are retained, and an empty successful B
+validly replaces the A exception records with no records.
 
 This atomicity is at provider-result acceptance, not at process execution. A and B
 commands may finish in any order, but consumers observe either the prior accepted
-snapshot or the fully reconciled new snapshot.
+snapshot or the complete new snapshot.
 
 ## Query sharing semantics
 
@@ -161,8 +164,10 @@ agents.
 - Compile remembered B queries into subsequent initial plans.
 - Describe supplemental B queries for newly discovered agents.
 - Mark which prefetched results are required after A is known.
-- Reconcile each required agent independently and reject incomplete attribution.
-- Assemble only complete atomic results.
+- Directly replace each observation's exception records with its successful,
+  normalized B records.
+- Raise the internal incomplete-result error only when a required B fragment is
+  missing during assembly; otherwise assemble the complete atomic result.
 
 ### QueryCoordinator
 
@@ -173,7 +178,7 @@ agents.
   they are required.
 - Detach ignored speculative work without cancelling another subscriber's query.
 
-Provider-specific classification and reconciliation must remain outside the generic
+Provider-specific classification and replacement must remain outside the generic
 coordinator. The coordinator supplies scheduling, sharing, cancellation, and result
 collection; the provider supplies dependency decisions.
 
@@ -188,8 +193,9 @@ require no Pi- or agent-specific logic.
 Provider tests cover:
 
 - first A discovery records every exception agent;
-- all newly discovered B queries are issued and reconciled;
-- required B failure and total mismatch reject the whole refresh;
+- all newly discovered B queries are issued and directly replace corresponding A
+  exception records after successful normalization;
+- required B execution or normalization failure rejects the whole refresh;
 - remembered agents are compiled into the next initial plan;
 - a new exception discovered alongside remembered agents receives a supplemental B;
 - an agent absent from A's new exception set is removed;
@@ -211,9 +217,9 @@ Coordinator tests cover:
 Integration/component tests cover:
 
 - a previously rendered project ranking remains unchanged when required fallback
-  attribution fails;
-- a successful retry atomically replaces the old snapshot with fully attributed
-  projects;
+  execution or normalization fails;
+- a successful retry atomically replaces the old snapshot with normalized B
+  records, including unresolved or empty results;
 - no intermediate `Unassigned` rendering is accepted;
 - switching period can reuse remembered agents for one round and then stop querying
   agents that the new A result no longer classifies as exceptions.
@@ -222,7 +228,9 @@ Integration/component tests cover:
 
 1. Consumers never observe A as an intermediate project result while required B
    attribution is pending.
-2. A required fallback failure or mismatch retains the previously accepted view.
+2. A required fallback execution or normalization failure retains the previously
+   accepted view; a successful normalized B is accepted without total or project-
+   resolution validation.
 3. Every exception agent, not only Pi, is learned and prefetched on later refreshes.
 4. Learned agents are removed when A no longer requires their fallback.
 5. First-discovery A and all later initial A/B physical queries retain normal

@@ -4,7 +4,7 @@
 
 **Goal:** Treat the primary project observation and every required agent-session fallback as one atomic refresh, while learning exception agents so later refreshes prefetch their fallbacks concurrently with normal in-flight sharing.
 
-**Architecture:** Extend physical queries with provider-neutral speculative/scheduling metadata. The coordinator starts primary and speculative work together, waits only for primary work before provider dependency resolution, then reuses required speculative futures, launches newly required work, and detaches irrelevant speculation. Keep ccusage-specific learned-agent state and reconciliation in `CcusageProvider`; compile remembered fallbacks into initial plans, discover new fallbacks after A, and reject incomplete required attribution before a `ProviderResult` can reach consumers.
+**Architecture:** Extend physical queries with provider-neutral speculative/scheduling metadata. The coordinator starts primary and speculative work together, waits only for primary work before provider dependency resolution, then reuses required speculative futures, launches newly required work, and detaches irrelevant speculation. Keep ccusage-specific learned-agent state and replacement in `CcusageProvider`; compile remembered fallbacks into initial plans, discover new fallbacks after A, and directly replace A exception records with each successful normalized B result.
 
 **Tech Stack:** Python 3.11–3.13, frozen dataclasses, `threading` synchronization, `concurrent.futures`, pytest, Ruff, ty.
 
@@ -16,7 +16,8 @@
 - Keep learned state process-local, thread-safe, non-persistent, and isolated by ccusage source identity.
 - Do not add CLI/configuration options; the fallback concurrency limit is exactly `4`.
 - A and every fallback confirmed necessary by A form one atomic provider result.
-- A required fallback failure or reconciliation mismatch fails the refresh; never publish A's temporary `Unassigned` aggregate.
+- A required fallback execution or normalization failure fails the refresh; never publish A's temporary `Unassigned` aggregate.
+- Successful normalized B records directly replace corresponding A exception records without token-total or resolved-project validation; empty B is valid.
 - A speculative fallback failure is irrelevant when A no longer identifies that agent as exceptional.
 - Preserve existing physical-query fingerprinting and in-flight sharing; scheduling/dependency metadata must not alter fingerprints.
 - Period changes may waste at most one speculative fallback round before A refreshes learned state.
@@ -27,10 +28,10 @@
 - `src/ccusage_viz/query/models.py` — add immutable scheduling metadata for speculative physical queries.
 - `src/ccusage_viz/query/provider.py` — define the generic provider hook that declares required follow-up queries after primary fragments are known.
 - `src/ccusage_viz/query/coordinator.py` — start speculative work, resolve dependencies from primary results, await only required work, enforce scheduling-group limits, and assemble exactly once.
-- `src/ccusage_viz/providers/ccusage.py` — own learned exception-agent state, compile remembered fallbacks, classify A, resolve required/irrelevant outcomes, and enforce strict reconciliation.
-- `src/ccusage_viz/locales/en.py`, `src/ccusage_viz/locales/zh.py` — localize strict fallback reconciliation failures.
+- `src/ccusage_viz/providers/ccusage.py` — own learned exception-agent state, compile remembered fallbacks, classify A, resolve required/irrelevant outcomes, and directly replace A exception records with normalized B records.
+- `src/ccusage_viz/locales/en.py`, `src/ccusage_viz/locales/zh.py` — localize the internal missing-fallback-fragment error.
 - `tests/test_query_coordinator.py` — protect generic concurrency, sharing, speculative dependency, and cancellation semantics.
-- `tests/test_ccusage_provider.py` — protect learned-agent compilation, source isolation, dynamic addition/removal, and strict atomic reconciliation.
+- `tests/test_ccusage_provider.py` — protect learned-agent compilation, source isolation, dynamic addition/removal, and atomic direct replacement.
 - `tests/test_historical_component.py` — prove failed replacement retains the previously accepted snapshot and successful retry replaces it atomically.
 
 ---
@@ -454,7 +455,7 @@ git commit -m "feat: prefetch remembered project fallbacks"
 
 ---
 
-### Task 4: Reject incomplete required attribution instead of publishing Unassigned
+### Task 4: Directly replace A exceptions with successful normalized B results
 
 **Files:**
 - Modify: `src/ccusage_viz/providers/ccusage.py:380-525`
@@ -464,76 +465,39 @@ git commit -m "feat: prefetch remembered project fallbacks"
 
 **Interfaces:**
 - Consumes: Task 3's exact current exception set and normalized required B fragments.
-- Produces: `_reconcile_project_fallbacks(records, required_agents) -> tuple[UsageRecord, ...]`, `error.ccusage_project_fallback_incomplete`, and strict atomic `assemble` behavior.
+- Produces: `_project_fallback_replacement_records(fragments) -> tuple[UsageRecord, ...]`, `error.ccusage_project_fallback_incomplete` only for a missing required fragment, and atomic direct-replacement `assemble` behavior.
 
-- [ ] **Step 1: Write failing reconciliation tests**
+- [ ] **Step 1: Write failing direct-replacement tests**
 
-Add tests with two exceptional agents to prove reconciliation is agent-local:
+Add tests proving replacement is agent- and observation-local:
 
-1. Both B totals equal A totals: A fixed records disappear and attributed/session records remain.
+1. B records replace corresponding A exception records exactly after normalization.
 2. One B is missing: assembly raises `QueryError` with key `error.ccusage_project_fallback_incomplete` and that agent.
-3. One B total differs by one token: assembly raises the same error.
-4. An irrelevant remembered B exists for an agent no longer exceptional: it is excluded and does not affect assembly.
-5. A required B has records but no usable session facts: assembly fails rather than retaining A's `Unassigned` record.
+3. A B total differing from A succeeds and is retained exactly.
+4. B records with an unresolved project remain `Unverified` and succeed.
+5. Empty successful B is a valid replacement.
+6. Crossed totals in multiple intervals remain associated with their own B observation.
 
-- [ ] **Step 2: Run reconciliation tests and verify failure**
+- [ ] **Step 2: Run direct-replacement tests and verify failure**
 
 Run:
 
 ```bash
 uv run pytest tests/test_ccusage_provider.py \
-  -k 'atomic_fallback or incomplete_fallback or mismatch_fallback or irrelevant_fallback' -v
+  -k 'fallback_replacement or missing_required_fallback or crossed_totals' -v
 ```
 
-Expected: FAIL because `_replace_unverified_records` silently retains A on mismatch.
+Expected: FAIL because the old strict acceptance rules reject mismatched, unresolved, and empty B results.
 
-- [ ] **Step 3: Replace permissive reconciliation with strict agent-local reconciliation**
+- [ ] **Step 3: Implement agent- and observation-local direct replacement**
 
-Implement:
+Implement `_project_fallback_replacement_records(fragments)` by indexing B fragments on `(source, revision, observation_id, agent)`. For each A fragment, preserve non-exception records, then append each corresponding B fragment's `records` tuple without modification. Raise `QueryError("error.ccusage_project_fallback_incomplete", agent=agent)` only when that indexed B fragment is absent.
 
-```python
-def _reconcile_project_fallbacks(
-    records: tuple[UsageRecord, ...],
-    required_agents: frozenset[str],
-) -> tuple[UsageRecord, ...]:
-    replaceable: set[str] = set()
-    for agent in required_agents:
-        observations = tuple(
-            record for record in records
-            if record.agent.casefold() == agent
-            and record.source is SourceKind.UNIFIED_DAILY
-            and record.attribution in {"unassigned", "unverified"}
-        )
-        sessions = tuple(
-            record for record in records
-            if record.agent.casefold() == agent
-            and record.source is SourceKind.PROJECT_SESSIONS
-        )
-        if (
-            not observations
-            or not sessions
-            or sum(record.usage.total for record in observations)
-            != sum(record.usage.total for record in sessions)
-        ):
-            raise QueryError("error.ccusage_project_fallback_incomplete", agent=agent)
-        replaceable.add(agent)
-    return tuple(
-        record for record in records
-        if not (
-            record.agent.casefold() in replaceable
-            and record.source is SourceKind.UNIFIED_DAILY
-            and record.attribution in {"unassigned", "unverified"}
-        )
-    )
-```
-
-Filter successful speculative B fragments for removed agents before reconciliation so stale prefetched records are never rendered.
+Filter successful speculative B fragments for removed agents before replacement so stale prefetched records are never rendered.
 
 - [ ] **Step 4: Derive the required-agent set during assembly without global refresh state**
 
-In `assemble`, derive `required_agents` directly from this run's A records: select `SourceKind.UNIFIED_DAILY` records whose attribution is `unassigned` or `unverified`, and case-fold their agents. Before reconciliation, discard `SourceKind.PROJECT_SESSIONS` records whose agent is not in `required_agents`; these came from irrelevant remembered speculation.
-
-Call `_reconcile_project_fallbacks(filtered_records, required_agents)` exactly once before constructing `ProviderResult`. Do not store per-refresh records or totals in `_ProjectFallbackMemory`. If reconciliation raises, no `ProviderResult` exists and consumers retain their previous accepted snapshot.
+In `assemble`, pair each A observation with B fragments by source, revision, observation ID, and agent. Remove each exceptional agent's A records and append the paired B fragment's records unchanged. Do not compare totals or validate project resolution. Raise `error.ccusage_project_fallback_incomplete` only when the required paired B fragment is absent. Do not store per-refresh records or totals in `_ProjectFallbackMemory`.
 
 - [ ] **Step 5: Add localized failure messages**
 
@@ -542,12 +506,12 @@ Add matching keys:
 ```python
 # locales/en.py
 "error.ccusage_project_fallback_incomplete": (
-    "Project attribution for {agent} was incomplete; the previous view was retained."
+    "Project attribution fallback result is missing for agent {agent}."
 ),
 
 # locales/zh.py
 "error.ccusage_project_fallback_incomplete": (
-    "{agent} 的项目归因不完整，已保留上一次视图。"
+    "缺少代理 {agent} 的项目归属回退结果。"
 ),
 ```
 
@@ -565,11 +529,11 @@ uv run ty check src/ccusage_viz/providers/ccusage.py
 
 Expected: all PASS.
 
-- [ ] **Step 7: Commit strict reconciliation**
+- [ ] **Step 7: Commit direct replacement semantics**
 
 ```bash
 git add src/ccusage_viz/providers/ccusage.py src/ccusage_viz/locales/en.py src/ccusage_viz/locales/zh.py tests/test_ccusage_provider.py
-git commit -m "fix: reject incomplete project attribution"
+git commit -m "fix: accept successful project fallback results"
 ```
 
 ---
@@ -597,7 +561,7 @@ Assert identity/equality of `chart.snapshot`, `chart.model`, `accepted_options`,
 
 - [ ] **Step 2: Add successful retry coverage**
 
-Retry the same generation with A plus a successful, exactly reconciled B. Assert the returned completion contains only attributed project records, then call `accept(completion)` and assert the old snapshot is replaced in one operation. Record every render revision and assert there was no revision containing A-only `Unassigned` data.
+First prove a successful B with a mismatched total completes and is accepted atomically. Separately fail a required B command and assert the exact old state is retained, then retry with a successful B and assert the old snapshot is replaced in one operation. Assert there is no accepted revision containing A-only `Unassigned` data.
 
 - [ ] **Step 3: Add period-switch cleanup coverage**
 
@@ -665,7 +629,7 @@ Run: `uv run pytest`
 
 Expected: all PASS. If unrelated baseline failures exist, record the exact test names and verify the focused suites from Task 5 still pass; do not weaken assertions to hide them.
 
-- [ ] **Step 3: Verify first-round local reconciliation**
+- [ ] **Step 3: Verify first-round local replacement**
 
 Run a project ranking for a range containing Pi usage with query diagnostics enabled by the project's existing mechanism. Verify:
 

@@ -168,9 +168,9 @@ def test_historical_replacement_classifier_ignores_granularity_and_presentation(
     assert not historical_replacement_required(previous, changed_presentation)
 
 
-def test_project_ranking_provider_result_is_accepted_atomically_after_reconciliation() -> None:
-    chart, provider = _atomic_project_component()
-    assert chart.runtime is not None
+def _seed_atomic_project_component(
+    chart: HistoricalChartComponent,
+) -> tuple[UsageSnapshot, datetime, UsageRecord]:
     old_record = UsageRecord(
         date(2026, 1, 7),
         "future-agent",
@@ -187,9 +187,6 @@ def test_project_ranking_provider_result_is_accepted_atomically_after_reconcilia
     )
     old_accepted_at = datetime(2026, 1, 8, tzinfo=UTC)
     chart.seed(chart.candidate, old_snapshot, accepted_at=old_accepted_at)
-    old_model = chart.model
-    old_options = chart.accepted_options
-
     changed = replace(
         chart.candidate,
         chart=replace(
@@ -198,36 +195,66 @@ def test_project_ranking_provider_result_is_accepted_atomically_after_reconcilia
         ),
     )
     chart.configure(changed, data_affecting=True)
-    object.__setattr__(provider, "fallback_total", 19)
-    failed = chart.submit(QueryTrigger.REFRESH)
+    return old_snapshot, old_accepted_at, old_record
 
-    with pytest.raises(QueryError, match="error.ccusage_project_fallback_incomplete") as caught:
-        failed.result()
-    assert chart.fail(caught.value, generation=failed.generation)
-    assert chart.snapshot is old_snapshot
-    assert chart.model is old_model
-    assert chart.accepted_options is old_options
-    assert chart.accepted_at is old_accepted_at
-    assert chart.snapshot.records == (old_record,)
-    assert all(record.project.display_name != "Unassigned" for record in chart.snapshot.records)
 
-    object.__setattr__(provider, "fallback_total", 20)
-    retry = chart.submit(QueryTrigger.REFRESH)
-    completion = retry.result()
-    retry_accepted_at = datetime(2026, 2, 8, tzinfo=UTC)
-    assert chart.accept(completion, accepted_at=retry_accepted_at)
+def test_project_ranking_accepts_fallback_total_mismatch_atomically() -> None:
+    chart, provider = _atomic_project_component()
+    assert chart.runtime is not None
+    try:
+        old_snapshot, _, _ = _seed_atomic_project_component(chart)
+        object.__setattr__(provider, "fallback_total", 19)
 
-    assert chart.snapshot is completion.snapshot
-    assert chart.accepted_options == changed
-    assert chart.accepted_at is retry_accepted_at
-    assert chart.error is None
-    assert len(chart.snapshot.records) == 1
-    (accepted_record,) = chart.snapshot.records
-    assert accepted_record.project is not None
-    assert accepted_record.project.raw_id == "/workspace/attributed"
-    assert accepted_record.attribution is None
-    assert accepted_record.project.display_name != "Unassigned"
-    chart.runtime.cancel()
+        completion = chart.submit(QueryTrigger.REFRESH).result()
+        assert chart.snapshot is old_snapshot
+        assert chart.accept(completion)
+
+        assert chart.snapshot is completion.snapshot
+        assert chart.error is None
+        (accepted_record,) = chart.snapshot.records
+        assert accepted_record.usage.total == 19
+        assert accepted_record.project is not None
+        assert accepted_record.project.raw_id == "/workspace/attributed"
+        assert accepted_record.attribution is None
+    finally:
+        chart.runtime.cancel()
+
+
+def test_project_ranking_b_command_failure_retains_exact_state_then_retry_succeeds() -> None:
+    chart, provider = _atomic_project_component()
+    assert chart.runtime is not None
+    try:
+        old_snapshot, old_accepted_at, old_record = _seed_atomic_project_component(chart)
+        old_model = chart.model
+        old_options = chart.accepted_options
+        object.__setattr__(provider, "fallback_fails", True)
+
+        failed = chart.submit(QueryTrigger.REFRESH)
+        with pytest.raises(QueryError, match="error.ccusage_failed") as caught:
+            failed.result()
+        assert chart.fail(caught.value, generation=failed.generation)
+        assert chart.snapshot is old_snapshot
+        assert chart.model is old_model
+        assert chart.accepted_options is old_options
+        assert chart.accepted_at is old_accepted_at
+        assert chart.snapshot.records == (old_record,)
+
+        object.__setattr__(provider, "fallback_fails", False)
+        retry = chart.submit(QueryTrigger.REFRESH)
+        completion = retry.result()
+        retry_accepted_at = datetime(2026, 2, 8, tzinfo=UTC)
+        assert chart.accept(completion, accepted_at=retry_accepted_at)
+
+        assert chart.snapshot is completion.snapshot
+        assert chart.accepted_options == chart.candidate
+        assert chart.accepted_at is retry_accepted_at
+        assert chart.error is None
+        (accepted_record,) = chart.snapshot.records
+        assert accepted_record.project is not None
+        assert accepted_record.project.raw_id == "/workspace/attributed"
+        assert accepted_record.attribution is None
+    finally:
+        chart.runtime.cancel()
 
 
 def test_period_switch_drops_failed_prefetch_when_observation_no_longer_requires_it() -> None:

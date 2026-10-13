@@ -251,7 +251,7 @@ def test_out_of_order_fallback_revision_cannot_overwrite_newer_memory() -> None:
     ] == ["new"]
 
 
-def _strict_fallback_case(
+def _fallback_replacement_case(
     *, observation_total: int = 20, fallback_total: int = 20, attributed: bool = True
 ):
     provider = CcusageProvider()
@@ -295,32 +295,49 @@ def _strict_fallback_case(
     return provider, plan, observation_fragment, fallback_fragment
 
 
-def test_strict_fallback_reconciliation_succeeds() -> None:
-    provider, plan, observation, fallback = _strict_fallback_case()
+@pytest.mark.parametrize(
+    ("fallback_total", "attributed"),
+    [(20, True), (19, True), (20, False)],
+    ids=["matching-total", "mismatched-total", "unresolved-project"],
+)
+def test_successful_fallback_directly_replaces_observation(
+    fallback_total: int, attributed: bool
+) -> None:
+    provider, plan, observation, fallback = _fallback_replacement_case(
+        fallback_total=fallback_total,
+        attributed=attributed,
+    )
 
     result = provider.assemble(plan, (observation, fallback))
 
-    assert len(result.records) == 1
-    assert result.records[0].project is not None
-    assert result.records[0].project.raw_id == "/project"
+    assert result.records == fallback.records
+    if not attributed:
+        (record,) = result.records
+        assert record.project is not None
+        assert record.project.display_name == "Unverified"
+        assert record.attribution == "unverified"
 
 
-@pytest.mark.parametrize("failure", ["missing", "mismatch", "unresolved"])
-def test_strict_fallback_reconciliation_rejects_incomplete(failure: str) -> None:
-    provider, plan, observation, fallback = _strict_fallback_case(
-        fallback_total=19 if failure == "mismatch" else 20,
-        attributed=failure != "unresolved",
-    )
-    fragments = (observation,) if failure == "missing" else (observation, fallback)
+def test_empty_successful_fallback_directly_replaces_observation() -> None:
+    provider, plan, observation, fallback = _fallback_replacement_case()
+    empty_fallback = replace(fallback, records=())
+
+    result = provider.assemble(plan, (observation, empty_fallback))
+
+    assert result.records == ()
+
+
+def test_missing_required_fallback_fragment_is_incomplete() -> None:
+    provider, plan, observation, _ = _fallback_replacement_case()
 
     with pytest.raises(QueryError) as caught:
-        provider.assemble(plan, fragments)
+        provider.assemble(plan, (observation,))
 
     assert caught.value.key == "error.ccusage_project_fallback_incomplete"
     assert caught.value.values["agent"] == "pi"
 
 
-def test_strict_fallback_reconciles_each_interval_without_aggregate_cancellation() -> None:
+def test_fallback_replacement_associates_crossed_totals_with_each_interval() -> None:
     provider = CcusageProvider()
     first = provider.compile(project_intent(since=date(2026, 1, 1), until=date(2026, 1, 1)))
     first_a = provider.normalize(
@@ -354,12 +371,15 @@ def test_strict_fallback_reconciles_each_interval_without_aggregate_cancellation
         )
 
     combined = PhysicalPlan("two-intervals", first.queries + second.queries)
-    with pytest.raises(QueryError) as caught:
-        provider.assemble(
-            combined,
-            (first_a, second_a, fallback(first_b_query, 20), fallback(second_b_query, 10)),
-        )
-    assert caught.value.key == "error.ccusage_project_fallback_incomplete"
+    result = provider.assemble(
+        combined,
+        (first_a, second_a, fallback(first_b_query, 20), fallback(second_b_query, 10)),
+    )
+
+    assert [(record.day, record.usage.total) for record in result.records] == [
+        (date(2026, 1, 1), 20),
+        (date(2026, 1, 2), 10),
+    ]
 
 
 def test_codex_normalization_attributes_a_singleton_query_to_its_day() -> None:
@@ -420,7 +440,7 @@ def test_range_codex_ranking_normalization_anchors_totals_at_interval_end() -> N
     assert record.usage.total == 20
 
 
-def test_strict_fallback_normalization_accepts_pi_local_and_generic_absolute_paths(
+def test_fallback_normalization_accepts_pi_local_and_generic_absolute_paths(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     provider = CcusageProvider()
