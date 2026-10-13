@@ -22,7 +22,26 @@ from ccusage_viz.render.grouped_ranking_viewport import (
     GroupedRankingViewport,
     render_grouped_custom_ranking_viewport,
 )
-from ccusage_viz.render.ranking_viewport import RankingViewport
+from ccusage_viz.render.ranking_viewport import RankingViewport, ranking_separator
+
+
+def test_dashed_separator_is_muted_and_dim_with_plain_fallback() -> None:
+    colored_context = replace(context(width=12), color=True, color_scheme="classic")
+    colored = ranking_separator("dashed", colored_context)
+    assert "\x1b[38;5;245m" in colored
+    assert "\x1b[2m" in colored
+    assert strip_ansi(colored) == "- - - - - -"
+    assert ranking_separator("dashed", context(width=12)) == "- - - - - -"
+
+
+def test_flat_and_grouped_dash_rendering_share_muted_separator() -> None:
+    colored = replace(context(height=20, width=40), color=True)
+    flat = render(projection(3), RankingViewport(), colored, spacing="dashed")
+    grouped = render_grouped(
+        grouped_projection(), GroupedRankingViewport(), colored, spacing="dashed"
+    )
+    assert "\x1b[38;5;245m" in flat and "\x1b[2m" in flat
+    assert "\x1b[38;5;245m" in grouped and "\x1b[2m" in grouped
 
 
 @pytest.mark.parametrize("visible_rows", (1, 2, 10, 30))

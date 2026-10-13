@@ -587,6 +587,94 @@ def test_custom_action_labels_are_localized(language: str) -> None:
     assert tui_module._localized_actions((("L", "custom_logs"),), translator)
 
 
+def test_grouped_ranking_bindings_scope_partition_spacing_and_filters() -> None:
+    chart = CustomChartConfig(
+        "ranking",
+        CustomCommandSource("router", ("router",)),
+        DateRange(date(2026, 1, 1), date(2026, 1, 14)),
+        partition_by="logical",
+        group_by="real",
+    )
+    component = CustomHistoricalComponent(chart)
+    component.set_capability(
+        CustomChartCapability(
+            ("day",),
+            ("logical", "real", "provider"),
+            (),
+            partition_by=(None, "logical", "real"),
+        )
+    )
+    component.runtime = V2Runtime(
+        filters=(
+            CustomFilter(
+                "provider",
+                LocalizedText("Provider", "提供商"),
+                (CustomFilterOption("all", LocalizedText("All", "全部")),),
+            ),
+        )
+    )
+    pane = tui_module.TuiCustomPane(
+        component,
+        FixedIntervalScheduler(10, now=0),
+        LifecycleOperation("grouped-controls"),
+        SimpleNamespace(),
+    )
+
+    quick = dict(tui_module._custom_pane_adjustment_bindings(pane, "quick"))
+    advanced = dict(tui_module._custom_pane_adjustment_bindings(pane, "advanced"))
+    assert quick["g/G"] == "partition"
+    assert quick["s/S"] == "style"
+    assert "f" not in quick
+    assert advanced["s/S"] == "spacing"
+    assert advanced["f"] == "filters"
+
+
+def test_partition_and_group_cycles_skip_each_other_in_both_directions() -> None:
+    chart = CustomChartConfig(
+        "ranking",
+        CustomCommandSource("router", ("router",)),
+        DateRange(date(2026, 1, 1), date(2026, 1, 14)),
+        partition_by="logical",
+        group_by="real",
+    )
+    assert tui_module._cycle_custom_partitioning(
+        chart, (None, "logical", "real"), step=1
+    ).partition_by is None
+    assert tui_module._cycle_custom_partitioning(
+        chart, (None, "logical", "real"), step=-1
+    ).partition_by is None
+    assert tui_module._cycle_custom_grouping(
+        chart, ("logical", "real", "provider"), step=1
+    ).group_by == "provider"
+    assert tui_module._cycle_custom_grouping(
+        chart, ("logical", "real", "provider"), step=-1
+    ).group_by == "provider"
+    assert tui_module._cycle_custom_grouping(chart, ("logical", "real")) == chart
+    assert tui_module._cycle_custom_partitioning(chart, ("logical", "real")) == chart
+
+
+def test_partition_binding_requires_multiple_effective_choices() -> None:
+    chart = CustomChartConfig(
+        "ranking",
+        CustomCommandSource("router", ("router",)),
+        DateRange(date(2026, 1, 1), date(2026, 1, 14)),
+        group_by="logical",
+    )
+    component = CustomHistoricalComponent(chart)
+    component.set_capability(
+        CustomChartCapability(("day",), ("logical",), (), partition_by=(None, "logical"))
+    )
+    pane = tui_module.TuiCustomPane(
+        component,
+        FixedIntervalScheduler(10, now=0),
+        LifecycleOperation("restricted-partition"),
+        SimpleNamespace(),
+    )
+    assert ("g/G", "partition") not in tui_module._custom_pane_adjustment_bindings(
+        pane, "quick"
+    )
+
+
 def test_custom_dashboard_adjustment_uses_native_footer() -> None:
     chart = CustomChartConfig(
         "timeline",

@@ -22,7 +22,7 @@ from ccusage_viz.render.ranking_presentation import (
     render_historical_ranking,
     render_ranking_heading_row,
 )
-from ccusage_viz.render.ranking_viewport import RankingColumns
+from ccusage_viz.render.ranking_viewport import RankingColumns, ranking_separator
 from ccusage_viz.render.summary import format_custom_value
 from ccusage_viz.scrollbar import Scrollbar
 
@@ -602,13 +602,7 @@ def render_grouped_custom_ranking_viewport(
     )
     group_by_id = viewport._groups_by_id
     rendered_units: dict[tuple[str, str, str | None], list[str]] = {}
-    separator = (
-        " "
-        if item_spacing == "space"
-        else ("-" if context.ascii else "─") * context.width
-        if item_spacing == "line"
-        else ("- " * max(1, context.width // 2)).rstrip()
-    )
+    separator = ranking_separator(item_spacing, context)
 
     def source_line(row: GroupedRankingRow) -> str:
         if row.kind == "separator":

@@ -13,11 +13,30 @@ from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from ccusage_viz.formatting import display_width, strip_ansi, wrap_width
+from ccusage_viz.render.base import styled_text
+from ccusage_viz.render.palette import get_color_scheme
 from ccusage_viz.scrollbar import Scrollbar
 
 if TYPE_CHECKING:
     from ccusage_viz.render.base import RenderContext
     from ccusage_viz.render.ranking_presentation import RankingPresentationEntry
+
+
+def ranking_separator(spacing: str, context: RenderContext) -> str:
+    """Render one presentation-only ranking separator for every viewport."""
+    if spacing == "space":
+        return " "
+    if spacing == "line":
+        return ("-" if context.ascii else "─") * context.width
+    raw = ("- " * max(1, context.width // 2)).rstrip()
+    if spacing == "dashed":
+        return styled_text(
+            raw,
+            get_color_scheme(context.color_scheme).muted,
+            context,
+            dim=True,
+        )
+    return ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -176,13 +195,7 @@ class RankingViewport:
         stop = bisect_left(self.starts, self.offset + self.visible_rows)
         entries = self.entries[first:stop]
         rendered = render_entries(entries, first).splitlines()[len(chrome) :]
-        separator = (
-            " "
-            if spacing == "space"
-            else ("-" if context.ascii else "─") * context.width
-            if spacing == "line"
-            else ("- " * max(1, context.width // 2)).rstrip()
-        )
+        separator = ranking_separator(spacing, context)
         rows: list[str] = []
         primary: list[tuple[int, RankingPresentationEntry]] = []
         position = 0

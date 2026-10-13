@@ -2700,16 +2700,54 @@ def _cycle(values: tuple[str, ...], current: str, step: int) -> str:
     return values[(values.index(current) + step) % len(values)]
 
 
+def _cycle_dimension(
+    values: tuple[str | None, ...],
+    current: str | None,
+    blocked: str | None,
+    step: int,
+) -> str | None:
+    """Cycle declared values in either direction while skipping one conflict."""
+    if not values:
+        return current
+    start = values.index(current) if current in values else 0
+    for distance in range(1, len(values) + 1):
+        candidate = values[(start + step * distance) % len(values)]
+        if candidate != blocked:
+            return candidate
+    return current
+
+
+def _cycle_custom_partitioning(
+    config: CustomChartConfig,
+    partitions: tuple[str | None, ...],
+    *,
+    step: int = 1,
+) -> CustomChartConfig:
+    """Advance partitions without colliding with the active ranking dimension."""
+    values = (
+        partitions
+        if config.group_by is not None
+        else tuple(choice for choice in partitions if choice is None)
+    )
+    partition_by = _cycle_dimension(values, config.partition_by, config.group_by, step)
+    return replace(config, partition_by=partition_by)
+
+
 def _cycle_custom_grouping(
     config: CustomChartConfig, groupings: tuple[str | None, ...], *, step: int = 1
 ) -> CustomChartConfig:
-    """Advance only through the grouping values declared by a Dataset."""
+    """Advance grouping while skipping the active partition dimension."""
 
     if not groupings:
         return config
-    values = groupings
-    current = config.group_by if config.group_by in values else values[0]
-    group_by = values[(values.index(current) + step) % len(values)]
+    values = (
+        tuple(choice for choice in groupings if choice is not None)
+        if config.partition_by is not None
+        else groupings
+    )
+    group_by = _cycle_dimension(values, config.group_by, config.partition_by, step)
+    if group_by == config.group_by:
+        return config
     if config.kind == "monitor":
         return replace(config, group_by=group_by, top=(config.top or 3) if group_by else None)
     presentation = config.presentation
@@ -2916,20 +2954,27 @@ def _custom_pane_adjustment_bindings(pane: TuiCustomPane, page: str) -> tuple[tu
         actions: list[tuple[str, str]] = [("p/P", "period")]
         if _custom_metric_group_switch_available(pane):
             actions.insert(0, ("m/M", "metric"))
-        if chart.kind == "ranking":
-            actions.append(("g/G", "spacing"))
         if capability is not None:
-            if len(capability.granularities) > 1:
+            partitions = capability.partition_by
+            if (
+                chart.kind == "ranking"
+                and partitions is not None
+                and len({choice for choice in partitions if choice != chart.group_by}) > 1
+            ):
+                actions.append(("g/G", "partition"))
+            elif chart.kind != "ranking" and len(capability.granularities) > 1:
                 actions.append(("g/G", "granularity"))
             if chart.kind != "calendar":
                 actions.append(("b/B", "group"))
-            if _custom_runtime_filters(pane.component):
-                actions.append(("f", "filters"))
         if chart.group_by is not None or chart.kind == "ranking":
             actions.append(("+/-", "top"))
         return (*actions, *_COMMON_PANE_QUICK_ACTIONS)
 
     actions = []
+    if chart.kind == "ranking":
+        actions.append(("s/S", "spacing"))
+    if _custom_runtime_filters(pane.component):
+        actions.append(("f", "filters"))
     if chart.group_by is not None:
         actions.append(("o", "other"))
     if chart.kind in {"timeline", "stack"}:
@@ -10184,12 +10229,38 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                 copy_feedback.show(
                                     translator.text("status.custom_period_restricted")
                                 )
-                        elif key in {"g", "G"} and base.kind == "ranking":
+                        elif (
+                            key in {"s", "S"}
+                            and base.kind == "ranking"
+                            and adjustment_page == "advanced"
+                        ):
                             modes = ("compact", "space", "line", "dashed")
                             position = modes.index(pane.ranking_item_spacing)
                             pane.ranking_item_spacing = modes[
-                                (position + (1 if key == "g" else -1)) % len(modes)
+                                (position + (1 if key == "s" else -1)) % len(modes)
                             ]
+                        elif (
+                            key in {"g", "G"}
+                            and base.kind == "ranking"
+                            and capability is not None
+                            and capability.partition_by is not None
+                        ):
+                            updated = _cycle_custom_partitioning(
+                                base,
+                                capability.partition_by,
+                                step=1 if key == "g" else -1,
+                            )
+                            if updated != base:
+                                record_mutation(
+                                    ("pane", focused_index, "custom-partition"),
+                                    lambda config=updated: apply_custom_query(
+                                        config, mutation="partition"
+                                    ),
+                                )
+                            else:
+                                copy_feedback.show(
+                                    translator.text("status.custom_partition_restricted")
+                                )
                         elif (
                             key in {"g", "G"}
                             and capability is not None
