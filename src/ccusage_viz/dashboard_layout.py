@@ -52,11 +52,17 @@ class PaneLayout:
     rendered: RenderedLayout
     width: int
     height: int
-    gutter: int
+    column_gutter: int
+    row_gutter: int
     topology: PaneTopology
     column_sizes: tuple[int, ...]
     row_sizes: tuple[int, ...]
     panes: tuple[PaneRect, ...]
+
+    @property
+    def gutter(self) -> int:
+        """Return the legacy shared gutter only when both axes retain it."""
+        return min(self.column_gutter, self.row_gutter)
 
     def pane(self, index: int) -> PaneRect:
         return self.panes[index]
@@ -193,20 +199,20 @@ def resolve_pane_layout(
 
     requested_gutter = 0 if divider_style == "none" else 1
     topology, rendered = _build_topology(configured, pane_count)
-    gutter = _resolve_gutter(
-        requested_gutter, width, topology.columns, height, topology.rows
-    )
+    column_gutter = _resolve_gutter(requested_gutter, width, topology.columns)
+    row_gutter = _resolve_gutter(requested_gutter, height, topology.rows)
     resolved_columns = _resolve_weights(column_weights, topology.columns)
     resolved_rows = _resolve_weights(row_weights, topology.rows)
-    column_sizes = _allocate_axis(width, resolved_columns, gutter, minimum=MIN_PANE_WIDTH)
-    row_sizes = _allocate_axis(height, resolved_rows, gutter, minimum=MIN_PANE_HEIGHT)
-    panes = _pane_rectangles(topology, column_sizes, row_sizes, gutter)
+    column_sizes = _allocate_axis(width, resolved_columns, column_gutter, minimum=MIN_PANE_WIDTH)
+    row_sizes = _allocate_axis(height, resolved_rows, row_gutter, minimum=MIN_PANE_HEIGHT)
+    panes = _pane_rectangles(topology, column_sizes, row_sizes, column_gutter, row_gutter)
     return PaneLayout(
         configured=configured,
         rendered=rendered,
         width=width,
         height=height,
-        gutter=gutter,
+        column_gutter=column_gutter,
+        row_gutter=row_gutter,
         topology=topology,
         column_sizes=column_sizes,
         row_sizes=row_sizes,
@@ -214,11 +220,9 @@ def resolve_pane_layout(
     )
 
 
-def _resolve_gutter(
-    requested: int, width: int, columns: int, height: int, rows: int
-) -> int:
-    """Drop line dividers before they consume a logical band's last cell."""
-    if requested and (width - (columns - 1) < columns or height - (rows - 1) < rows):
+def _resolve_gutter(requested: int, length: int, bands: int) -> int:
+    """Drop an axis divider before it consumes a logical band's last cell."""
+    if requested and length - (bands - 1) < bands:
         return 0
     return requested
 
@@ -306,25 +310,26 @@ def _pane_rectangles(
     topology: PaneTopology,
     column_sizes: tuple[int, ...],
     row_sizes: tuple[int, ...],
-    gutter: int,
+    column_gutter: int,
+    row_gutter: int,
 ) -> tuple[PaneRect, ...]:
     lefts: list[int] = []
     position = 0
     for size in column_sizes:
         lefts.append(position)
-        position += size + gutter
+        position += size + column_gutter
     tops: list[int] = []
     position = 0
     for size in row_sizes:
         tops.append(position)
-        position += size + gutter
+        position += size + row_gutter
 
     panes = []
     for slot in topology.slots:
         pane_width = sum(column_sizes[slot.column : slot.column + slot.column_span])
-        pane_width += gutter * (slot.column_span - 1)
+        pane_width += column_gutter * (slot.column_span - 1)
         pane_height = sum(row_sizes[slot.row : slot.row + slot.row_span])
-        pane_height += gutter * (slot.row_span - 1)
+        pane_height += row_gutter * (slot.row_span - 1)
         panes.append(
             PaneRect(slot.index, lefts[slot.column], tops[slot.row], pane_width, pane_height)
         )

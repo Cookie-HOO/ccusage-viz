@@ -257,8 +257,12 @@ def test_layout_recovers_impossible_three_band_axes_with_bounded_origins(
 
     assert layout.gutter == 0
     if configured == "1x3":
+        assert layout.column_gutter == 0
+        assert layout.row_gutter == (0 if divider_style == "none" else 1)
         assert layout.column_sizes == axis_sizes
     else:
+        assert layout.column_gutter == (0 if divider_style == "none" else 1)
+        assert layout.row_gutter == 0
         assert layout.row_sizes == axis_sizes
     for rect in layout.panes:
         assert 0 <= rect.left < width
@@ -283,9 +287,43 @@ def test_three_band_line_layouts_keep_exact_normal_geometry(
         layout=configured, pane_count=3, width=width, height=height, divider_style="line"
     )
 
-    assert layout.gutter == 1
+    assert layout.column_gutter == layout.row_gutter == layout.gutter == 1
     assert layout.column_sizes == column_sizes
     assert layout.row_sizes == row_sizes
+
+
+@pytest.mark.parametrize(
+    ("width", "height", "column_gutter", "row_gutter", "column_sizes", "row_sizes"),
+    [
+        (3, 11, 0, 1, (1, 1, 1), (3, 3, 3)),
+        (11, 3, 1, 0, (3, 3, 3), (1, 1, 1)),
+        (11, 11, 1, 1, (3, 3, 3), (3, 3, 3)),
+    ],
+)
+def test_three_by_three_resolves_gutters_independently_per_axis(
+    width: int,
+    height: int,
+    column_gutter: int,
+    row_gutter: int,
+    column_sizes: tuple[int, int, int],
+    row_sizes: tuple[int, int, int],
+) -> None:
+    layout = resolve_pane_layout(
+        layout="3x3", pane_count=9, width=width, height=height, divider_style="line"
+    )
+
+    assert layout.column_gutter == column_gutter
+    assert layout.row_gutter == row_gutter
+    assert layout.gutter == min(column_gutter, row_gutter)
+    assert layout.column_sizes == column_sizes
+    assert layout.row_sizes == row_sizes
+    assert layout.pane(8) == PaneRect(
+        8,
+        sum(column_sizes[:2]) + 2 * column_gutter,
+        sum(row_sizes[:2]) + 2 * row_gutter,
+        column_sizes[2],
+        row_sizes[2],
+    )
 
 
 def test_layout_bands_describe_configured_spotlight_topology() -> None:
