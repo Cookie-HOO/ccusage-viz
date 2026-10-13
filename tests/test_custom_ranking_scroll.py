@@ -332,6 +332,22 @@ def test_grouped_other_primary_row_is_explicit_series_without_copy_hit() -> None
     assert all(hit[0] != ("series", "coding", "other") for hit in viewport.hits.values())
 
 
+def test_grouped_empty_only_has_copy_all_action_and_exact_heading_payload() -> None:
+    model = grouped_projection()
+    empty = (model.groups or ())[-1]
+    viewport = GroupedRankingViewport()
+    output = strip_ansi(
+        render_grouped(replace(model, groups=(empty,)), viewport, copy_all_action=True)
+    )
+    assert "0 item(s) total | ⊞" in output
+    assert viewport.copy_all_hit is not None
+    assert viewport.clipboard_all_text() == (
+        "Empty Unmatched Group\n"
+        "About Empty Unmatched Group\n"
+        "https://example.com/empty"
+    )
+
+
 def test_grouped_other_only_has_zero_match_count_and_no_copy_all_payload() -> None:
     model = grouped_projection()
     coding = (model.groups or ())[0]
@@ -339,7 +355,7 @@ def test_grouped_other_only_has_zero_match_count_and_no_copy_all_payload() -> No
     model = replace(model, groups=(replace(coding, series=(other,)),))
     viewport = GroupedRankingViewport()
     output = strip_ansi(render_grouped(model, viewport, copy_all_action=True))
-    assert "0 item(s) total" in output
+    assert output.splitlines()[1] == "0 item(s) total"
     assert viewport.copy_all_hit is None
     assert viewport.clipboard_all_text() == ""
 

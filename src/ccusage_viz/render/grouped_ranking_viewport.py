@@ -553,7 +553,7 @@ def render_grouped_custom_ranking_viewport(
             viewport.hits[screen_row] = (identity, copy_column, link_column)
 
     rendered = "\n".join((*chrome, *body))
-    if copy_all_action and matched_count and viewport.body_top:
+    if copy_all_action and viewport.clipboard_all_text() and viewport.body_top:
         rows_out = rendered.splitlines()
         count_row = len(chrome) - 1
         if count_row >= 0:
