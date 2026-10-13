@@ -65,8 +65,11 @@ def capability(
     periods: tuple[str, ...] = (),
     group_by: tuple[str | None, ...] = (None,),
     granularities: tuple[str, ...] = ("day",),
+    partition_by: tuple[str | None, ...] | None = None,
 ) -> V2HistoricalChartCapability:
-    return V2HistoricalChartCapability(granularities, group_by, (), periods)
+    return V2HistoricalChartCapability(
+        granularities, group_by, (), periods, partition_by=partition_by
+    )
 
 
 def config(**changes: object) -> CustomChartConfig:
@@ -179,6 +182,37 @@ def test_uses_the_only_declared_period_when_target_has_no_default() -> None:
     )
 
     assert normalize_switch_config(config(), target, "period").date_range.period == "all"  # type: ignore[union-attr]
+
+
+def test_normalizes_partition_and_group_without_collisions() -> None:
+    target = V2MetricDescriptor(
+        "updated_days",
+        TEXT,
+        TEXT,
+        UNIT,
+        "sum",
+        V2MetricCapabilities(
+            (),
+            (),
+            {
+                "ranking": capability(
+                    group_by=("logical", "real", "provider"),
+                    partition_by=(None, "logical"),
+                )
+            },
+        ),
+        {"ranking": CustomChartDefaults("14d", "real", None, partition_by="logical")},
+        group_id="github",
+    )
+    current = config(group_by="logical", partition_by=None)
+
+    assert normalization_category("query.partition_by") == "partition_by"
+    partitioned = normalize_switch_config(current, target, "partition_by")
+    assert partitioned is not None
+    assert partitioned.partition_by == "logical"
+    grouped = normalize_switch_config(partitioned, target, "group_by")
+    assert grouped is not None
+    assert grouped.group_by == "real"
 
 
 def test_unknown_or_unchanged_default_does_not_normalize() -> None:

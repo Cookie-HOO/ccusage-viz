@@ -365,6 +365,57 @@ def test_installed_custom_command_round_trips_without_executable_path() -> None:
     assert "--installed" not in shlex.split(command)
 
 
+def test_custom_ranking_partition_cli_and_command_round_trip() -> None:
+    parser = build_parser(load_translator("en"))
+    argv = [
+        "chart",
+        "ranking",
+        "--dataset",
+        "router",
+        "--metric",
+        "tokens",
+        "--partition-by",
+        "logical_model",
+        "--group-by",
+        "real_model",
+        "--top",
+        "3",
+    ]
+
+    launch = _to_options(
+        parser.parse_args(argv), explicit=frozenset({"partition_by", "group_by", "top"})
+    )
+
+    assert isinstance(launch.chart, CustomChartConfig)
+    assert launch.chart.partition_by == "logical_model"
+    assert "partition_by" in launch.chart.initial_explicit
+    assert "--partition-by logical_model --group-by real_model --top 3" in format_command(launch)
+    reparsed = _to_options(parser.parse_args(shlex.split(format_full_command(launch))[1:]))
+    assert reparsed.chart.partition_by == "logical_model"
+
+
+def test_custom_partition_cli_rejects_invalid_combinations() -> None:
+    parser = build_parser(load_translator("en"))
+    equal = [
+        "chart",
+        "ranking",
+        "--dataset",
+        "router",
+        "--partition-by",
+        "model",
+        "--group-by",
+        "model",
+    ]
+    with pytest.raises(UsageError) as raised:
+        _to_options(parser.parse_args(equal), explicit=frozenset({"partition_by", "group_by"}))
+    assert "must differ" in str(raised.value.values["detail"])
+
+    wrong_kind = ["chart", "timeline", "--dataset", "router", "--partition-by", "model"]
+    with pytest.raises(UsageError) as raised:
+        _to_options(parser.parse_args(wrong_kind), explicit=frozenset({"partition_by"}))
+    assert "ranking" in str(raised.value.values["detail"])
+
+
 def test_custom_standalone_command_round_trips() -> None:
     parser = build_parser(load_translator("en"))
     chart = CustomChartConfig(

@@ -282,6 +282,8 @@ def custom_v2_probe_query_intent(
         ),
         payload=request,
     )
+
+
 def custom_historical_query_intent(
     config: CustomChartConfig,
     *,
@@ -291,6 +293,7 @@ def custom_historical_query_intent(
     trigger: QueryTrigger,
     process: ProcessConfig | None = None,
     request_id_suffix: str = "",
+    partition_declared: bool = False,
 ) -> QueryIntent:
     """Plan one command-backed custom pane request without display-only fields."""
     process = process or ProcessConfig()
@@ -307,7 +310,16 @@ def custom_historical_query_intent(
         filters=config.filters,
         group_by=config.group_by,
         granularity=config.granularity,
-        **({"top": config.top} if config.metric_id is not None else {}),
+        **(
+            {
+                "top": config.top,
+                "partition_by": config.partition_by,
+                "partition_declared": partition_declared,
+                "chart_kind": config.kind,
+            }
+            if config.metric_id is not None
+            else {}
+        ),
         command_argv=config.source.command_argv,
     )
     return QueryIntent(
@@ -405,10 +417,15 @@ def custom_v2_summary_query_intent(
         missing_intervals=plan.intervals,
         resolution=DataResolution.DATE,
         execution_context=ExecutionContext(
-            config.source.command_argv[0], process.query_timeout, process.output_limit, process.environment
+            config.source.command_argv[0],
+            process.query_timeout,
+            process.output_limit,
+            process.environment,
         ),
         payload=request,
     )
+
+
 def custom_summary_query_intent(
     source: CustomCommandSource,
     plan: SummaryQueryPlan,

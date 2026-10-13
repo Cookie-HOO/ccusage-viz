@@ -712,6 +712,7 @@ def test_custom_replacement_requires_only_source_query_fields() -> None:
 
     assert custom_replacement_required(current, replace(current, group_by=None))
     assert custom_replacement_required(current, replace(current, granularity="month"))
+    assert custom_replacement_required(current, replace(current, partition_by="collection"))
     assert custom_replacement_required(
         current, replace(current, filters=(("genre", ("fiction",)),))
     )

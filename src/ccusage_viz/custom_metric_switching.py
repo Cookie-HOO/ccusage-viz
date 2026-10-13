@@ -14,7 +14,7 @@ from ccusage_viz.custom_models import (
 )
 from ccusage_viz.options import CustomChartConfig, resolve_date_range
 
-SwitchNormalization = Literal["period", "group_by", "granularity", "filters", "top"]
+SwitchNormalization = Literal["period", "partition_by", "group_by", "granularity", "filters", "top"]
 
 
 def switch_candidates(
@@ -22,7 +22,9 @@ def switch_candidates(
 ) -> tuple[V2MetricDescriptor, ...]:
     """Return same-Group Metrics that support ``kind`` in declaration order."""
 
-    current = next((metric for metric in descriptor.metrics if metric.id == current_metric_id), None)
+    current = next(
+        (metric for metric in descriptor.metrics if metric.id == current_metric_id), None
+    )
     if current is None or current.group_id is None or not descriptor.metric_groups:
         return ()
     return tuple(
@@ -40,7 +42,9 @@ def cycle_switch_metric(
     candidates = switch_candidates(descriptor, current_metric_id=current_metric_id, kind=kind)
     if len(candidates) < 2:
         return None
-    current_index = next(index for index, metric in enumerate(candidates) if metric.id == current_metric_id)
+    current_index = next(
+        index for index, metric in enumerate(candidates) if metric.id == current_metric_id
+    )
     return candidates[(current_index + (1 if step >= 0 else -1)) % len(candidates)]
 
 
@@ -49,6 +53,8 @@ def normalization_category(field: str) -> SwitchNormalization | None:
 
     if field == "range.period":
         return "period"
+    if field == "query.partition_by":
+        return "partition_by"
     if field == "query.group_by":
         return "group_by"
     if field == "query.granularity":
@@ -89,10 +95,45 @@ def normalize_switch_config(
             else resolve_date_range(config.kind, period=period, since=None, until=None)
         )
         updated = replace(config, date_range=date_range)
+    elif category == "partition_by":
+        capability = target.capabilities.charts.get(config.kind)
+        if not isinstance(capability, V2HistoricalChartCapability):
+            return None
+        choices = capability.partition_by
+        if choices is None:
+            partition_by = None
+        else:
+            preferred = defaults.partition_by if defaults is not None else None
+            if preferred in choices:
+                partition_by = preferred
+            elif None in choices:
+                partition_by = None
+            else:
+                partition_by = next((choice for choice in choices if choice is not None), None)
+                if partition_by is None:
+                    return None
+        updated = replace(config, partition_by=partition_by)
+    elif category == "group_by":
+        capability = target.capabilities.charts.get(config.kind)
+        if not isinstance(capability, V2HistoricalChartCapability):
+            return None
+        preferred = defaults.group_by if defaults is not None else None
+        if preferred in capability.group_by and preferred != config.partition_by:
+            group_by = preferred
+        else:
+            group_by = next(
+                (
+                    choice
+                    for choice in capability.group_by
+                    if choice is not None and choice != config.partition_by
+                ),
+                None,
+            )
+            if config.partition_by is not None and group_by is None:
+                return None
+        updated = replace(config, group_by=group_by)
     elif defaults is None:
         return None
-    elif category == "group_by":
-        updated = replace(config, group_by=defaults.group_by)
     elif category == "granularity" and defaults.granularity is not None:
         updated = replace(config, granularity=defaults.granularity)
     elif category == "top":

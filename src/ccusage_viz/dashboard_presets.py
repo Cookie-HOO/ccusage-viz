@@ -54,6 +54,7 @@ _PERSISTED_CUSTOM_EXPLICIT = frozenset(
         "period",
         "since",
         "until",
+        "partition_by",
         "group_by",
         "top",
         "filter",
@@ -481,6 +482,7 @@ def _chart_wire(chart: object) -> dict[str, object]:
             "date_range": _date_range_wire(chart.date_range),
             "filters": _custom_filters_wire(chart.filters),
             "presentation": _presentation_wire(chart.presentation),
+            "partition_by": chart.partition_by,
             "group_by": chart.group_by,
             "top": chart.top,
             "other": chart.other,
@@ -716,6 +718,7 @@ def _parse_pane(value: object) -> PaneConfig:
                 "date_range",
                 "filters",
                 "presentation",
+                "partition_by",
                 "group_by",
                 "top",
                 "other",
@@ -727,7 +730,11 @@ def _parse_pane(value: object) -> PaneConfig:
                 "metric_titles",
             )
         )
-        custom_wire, attachment = _pane_fields(wire, fields, "custom pane")
+        payload = dict(wire)
+        attachment = _attachment_parse(payload.pop("attachment", None))
+        if "partition_by" not in payload:
+            payload["partition_by"] = None
+        custom_wire = _exact(payload, fields, "custom pane")
         dataset_id = _string(custom_wire["dataset_id"], "custom.dataset_id")
         source_kind = _choice(
             custom_wire["source_kind"], ("command", "installed"), "custom.source_kind"
@@ -775,6 +782,7 @@ def _parse_pane(value: object) -> PaneConfig:
             ),
             metric_periods=_string_list(custom_wire["metric_periods"], "custom.metric_periods"),
             metric_titles=titles,
+            partition_by=_optional_string(custom_wire.get("partition_by"), "custom.partition_by"),
         )
         return CustomChartPaneConfig(chart, *attachment)
     if kind == "animation":

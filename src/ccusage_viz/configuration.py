@@ -80,13 +80,34 @@ def apply_custom_probe_defaults(
         return config
 
     explicit = config.initial_explicit
+    partition_by = config.partition_by
+    partition_choices = getattr(capability, "partition_by", None)
+    if (
+        "partition_by" not in explicit
+        and partition_choices is not None
+        and _declared(defaults, "partition_by")
+        and defaults.partition_by in partition_choices
+    ):
+        partition_by = defaults.partition_by
     group_by = config.group_by
     if (
         "group_by" not in explicit
         and _declared(defaults, "group_by")
         and defaults.group_by in capability.group_by
+        and defaults.group_by != partition_by
     ):
         group_by = defaults.group_by
+    if partition_by is not None and group_by == partition_by:
+        group_by = next(
+            (
+                choice
+                for choice in capability.group_by
+                if choice is not None and choice != partition_by
+            ),
+            None,
+        )
+    if partition_by is not None and group_by is None:
+        partition_by = None
     top = config.top
     if (
         "top" not in explicit
@@ -148,6 +169,7 @@ def apply_custom_probe_defaults(
         presentation=replace(config.presentation, theme=theme, style=style),
         group_by=group_by,
         top=top,
+        partition_by=partition_by,
         other=other,
         granularity=granularity,
     )
@@ -188,12 +210,18 @@ def v2_metric_probe_descriptor(
                 capability.show_percentage,
                 capability.refresh_interval_seconds,
                 capability.sort_direction,
+                capability.partition_by,
             )
     return CustomProbeDescriptor(
         descriptor.revision,
         descriptor.version,
         CustomDataset(metric.title, metric.description, metric.unit),
-        CustomCapabilities(metric.capabilities.group_by, (), charts),
+        CustomCapabilities(
+            metric.capabilities.group_by,
+            (),
+            charts,
+            metric.capabilities.partition_by,
+        ),
         metric.defaults,
         descriptor.environment,
         descriptor.source_timezone,

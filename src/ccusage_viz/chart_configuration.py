@@ -125,7 +125,9 @@ def add_monitor(parser: argparse.ArgumentParser, tr: Translator) -> None:
         "--interval", type=float, default=None, metavar="SECONDS", help=tr.text("help.interval")
     )
     parser.add_argument("--no-watch", action="store_true", help=argparse.SUPPRESS)
-    parser.add_argument("--by", choices=("agent", "model", "project"), help=tr.text("help.monitor_by"))
+    parser.add_argument(
+        "--by", choices=("agent", "model", "project"), help=tr.text("help.monitor_by")
+    )
     parser.add_argument("--top", type=int, help=tr.text("help.monitor_top"))
     parser.add_argument("--agent", action="append", default=[], help=tr.text("help.agent"))
     parser.add_argument("--model", action="append", default=[], help=tr.text("help.model"))
@@ -145,6 +147,7 @@ def add_chart_subcommands(
             "--filter", dest="custom_filters", action="append", default=[], metavar="ID=OPTION"
         )
         chart_parser.add_argument("--group-by")
+        chart_parser.add_argument("--partition-by")
 
     for command in _TUI_COMMANDS:
         chart_parser = chart_subparsers.add_parser(
@@ -320,7 +323,9 @@ def custom_chart_from_namespace(
         try:
             command_argv = tuple(shlex.split(namespace.command_text))
         except ValueError as exc:
-            raise UsageError("error.arguments", detail="--command contains invalid shell quoting") from exc
+            raise UsageError(
+                "error.arguments", detail="--command contains invalid shell quoting"
+            ) from exc
         if not command_argv:
             raise UsageError("error.arguments", detail="--command must not be empty")
         if namespace.dataset is None:
@@ -328,6 +333,13 @@ def custom_chart_from_namespace(
         source = CustomCommandSource(namespace.dataset, command_argv)
     kind = chart_kind(namespace)
     group_by = namespace.group_by
+    partition_by = getattr(namespace, "partition_by", None)
+    if partition_by is not None and kind != "ranking":
+        raise UsageError("error.arguments", detail="--partition-by is only valid for ranking")
+    if partition_by is not None and group_by is None:
+        raise UsageError("error.arguments", detail="partition_by requires a non-null group_by")
+    if partition_by is not None and partition_by == group_by:
+        raise UsageError("error.arguments", detail="partition_by and group_by must differ")
     top = getattr(namespace, "top", None)
     if kind == "ranking" and group_by is None and top == 10 and "top" not in explicit:
         top = None
@@ -367,8 +379,22 @@ def custom_chart_from_namespace(
         granularity=getattr(namespace, "granularity", "day"),
         weekdays=getattr(namespace, "weekdays", "show"),
         initial_explicit=explicit
-        & {"period", "since", "until", "group_by", "top", "filter", "granularity", "other", "style", "color_scheme", "window"},
+        & {
+            "period",
+            "since",
+            "until",
+            "partition_by",
+            "group_by",
+            "top",
+            "filter",
+            "granularity",
+            "other",
+            "style",
+            "color_scheme",
+            "window",
+        },
         metric_id=namespace.metric,
+        partition_by=partition_by,
     )
 
 

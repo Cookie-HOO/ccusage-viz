@@ -197,6 +197,35 @@ def test_round_trip_preserves_monitor_attachment_configuration() -> None:
     assert custom.attachment_theme == original_custom.attachment_theme
 
 
+def test_custom_partition_round_trips_and_old_preset_remains_flat() -> None:
+    chart = CustomChartConfig(
+        "ranking",
+        _installed_source(),
+        RANGE,
+        group_by="real_model",
+        partition_by="logical_model",
+        metric_id="tokens",
+        presentation=ChartPresentation(style="list"),
+    )
+    record = preset_from_launch(
+        "partitioned", _launch(panes=(CustomChartPaneConfig(chart),)), now=NOW
+    )
+    wire = DashboardPresetDocument((record,)).to_wire()
+    custom_wire = wire["presets"][0]["panes"][0]
+    assert custom_wire["partition_by"] == "logical_model"
+
+    parsed = DashboardPresetDocument.parse(wire).presets[0].panes[0]
+    assert isinstance(parsed, CustomChartPaneConfig)
+    assert parsed.chart.partition_by == "logical_model"
+    assert "partition_by" in parsed.chart.initial_explicit
+
+    old_wire = deepcopy(wire)
+    del old_wire["presets"][0]["panes"][0]["partition_by"]
+    old = DashboardPresetDocument.parse(old_wire).presets[0].panes[0]
+    assert isinstance(old, CustomChartPaneConfig)
+    assert old.chart.partition_by is None
+
+
 def test_loaded_custom_preset_preserves_its_configuration_over_probe_defaults() -> None:
     saved_chart = CustomChartConfig(
         "ranking",

@@ -38,6 +38,7 @@ def custom_replacement_required(current: CustomChartConfig, updated: CustomChart
         or current.kind != updated.kind
         or current.date_range != updated.date_range
         or current.filters != updated.filters
+        or current.partition_by != updated.partition_by
         or current.group_by != updated.group_by
         or current.granularity != updated.granularity
     )
@@ -94,6 +95,7 @@ def _query_identity(config: CustomChartConfig) -> tuple[object, ...]:
         config.kind,
         config.date_range,
         config.filters,
+        config.partition_by,
         config.group_by,
         config.granularity,
     )
@@ -474,8 +476,10 @@ class CustomHistoricalComponent:
                             show_percentage=capability.show_percentage,
                             refresh_interval_seconds=capability.refresh_interval_seconds,
                             sort_direction=capability.sort_direction,
+                            partition_by=capability.partition_by,
                         )
                     },
+                    metric.capabilities.partition_by,
                 ),
                 payload.data,
                 warnings=payload.warnings,

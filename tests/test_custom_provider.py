@@ -9,7 +9,12 @@ import pytest
 
 from ccusage_viz.acquisition import custom_historical_query_intent, custom_v2_probe_query_intent
 from ccusage_viz.bootstrap import build_query_runtime
-from ccusage_viz.custom_protocol import CustomChartResponse, V2ChartResponse, V2ProbeResponse
+from ccusage_viz.custom_protocol import (
+    CustomChartResponse,
+    V2ChartRequest,
+    V2ChartResponse,
+    V2ProbeResponse,
+)
 from ccusage_viz.errors import QueryError
 from ccusage_viz.lifecycle import QueryTrigger
 from ccusage_viz.options import (
@@ -176,6 +181,33 @@ def test_custom_provider_executes_a_v2_chart_metric(tmp_path: Path) -> None:
 
     assert isinstance(result.custom_response, V2ChartResponse)
     assert result.custom_response.metric_id == "reading_time"
+
+
+def test_v2_partitioned_ranking_request_includes_chart_kind_and_declaration() -> None:
+    config = CustomChartConfig(
+        "ranking",
+        CustomCommandSource("router", ("router",)),
+        resolve_date_range("ranking", period="14d", since=None, until=None),
+        group_by="real_model",
+        top=3,
+        metric_id="tokens",
+        partition_by="logical_model",
+    )
+
+    intent = custom_historical_query_intent(
+        config,
+        timezone="UTC",
+        owner_id="pane",
+        generation=1,
+        trigger=QueryTrigger.STARTUP,
+        partition_declared=True,
+    )
+
+    assert isinstance(intent.payload, V2ChartRequest)
+    assert intent.payload.chart_kind == "ranking"
+    assert intent.payload.partition_declared
+    assert intent.payload.partition_by == "logical_model"
+    assert intent.payload.to_wire()["query"]["partition_by"] == "logical_model"
 
 
 def test_custom_provider_uses_process_timeout_output_limit_and_environment(tmp_path: Path) -> None:

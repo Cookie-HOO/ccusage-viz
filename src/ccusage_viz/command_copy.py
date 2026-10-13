@@ -73,7 +73,9 @@ def _chart_args(config: StandaloneLaunch, *, full: bool, pane: bool = False) -> 
         args.extend(("--by", by))
     if top is not None and (full or not _is_default_top(chart, by, top)):
         args.extend(("--top", str(top)))
-    if isinstance(chart, (TimelineConfig, StackConfig, RankingConfig)) and (full or chart.other != "show"):
+    if isinstance(chart, (TimelineConfig, StackConfig, RankingConfig)) and (
+        full or chart.other != "show"
+    ):
         args.extend(("--other", chart.other))
     if isinstance(chart, StackConfig) and (full or chart.cache != "combined"):
         args.extend(("--cache", chart.cache))
@@ -143,6 +145,8 @@ def _custom_chart_args(options: StandaloneLaunch, *, full: bool) -> list[str]:
     for filter_id, option_ids in chart.filters:
         for option_id in option_ids:
             args.extend(("--filter", f"{filter_id}={option_id}"))
+    if chart.partition_by is not None:
+        args.extend(("--partition-by", chart.partition_by))
     if chart.group_by is not None:
         args.extend(("--group-by", chart.group_by))
     if chart.top is not None:
@@ -237,6 +241,8 @@ def format_full_dashboard_command(
             for filter_id, option_ids in chart.filters:
                 for option_id in option_ids:
                     fragment_args.extend(("--filter", f"{filter_id}={option_id}"))
+            if chart.partition_by is not None:
+                fragment_args.extend(("--partition-by", chart.partition_by))
             if chart.group_by is not None:
                 fragment_args.extend(("--group-by", chart.group_by))
             if chart.top is not None:

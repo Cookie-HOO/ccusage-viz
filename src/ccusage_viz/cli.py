@@ -395,6 +395,7 @@ def build_parser(tr: Translator) -> argparse.ArgumentParser:
             "--filter", dest="custom_filters", action="append", default=[], metavar="ID=OPTION"
         )
         chart_parser.add_argument("--group-by")
+        chart_parser.add_argument("--partition-by")
         if command == "monitor":
             chart_parser.add_argument(
                 "--other", choices=OTHER_MODES, default="show", help=tr.text("help.other")
@@ -671,6 +672,13 @@ def _custom_chart_from_namespace(
         source = CustomCommandSource(namespace.dataset, command_argv)
     kind = _chart_kind(namespace)
     group_by = namespace.group_by
+    partition_by = getattr(namespace, "partition_by", None)
+    if partition_by is not None and kind != "ranking":
+        raise UsageError("error.arguments", detail="--partition-by is only valid for ranking")
+    if partition_by is not None and group_by is None:
+        raise UsageError("error.arguments", detail="partition_by requires a non-null group_by")
+    if partition_by is not None and partition_by == group_by:
+        raise UsageError("error.arguments", detail="partition_by and group_by must differ")
     top = getattr(namespace, "top", None)
     if kind == "monitor" and group_by is not None and top is None:
         top = 3
@@ -704,7 +712,9 @@ def _custom_chart_from_namespace(
             theme=namespace.color_scheme,
             style=style,
             legend=getattr(namespace, "legend", "below-title"),
-            density=cast(Density, namespace.density or ("full" if kind == "ranking" else "detailed")),
+            density=cast(
+                Density, namespace.density or ("full" if kind == "ranking" else "detailed")
+            ),
         ),
         group_by=group_by,
         top=top,
@@ -712,8 +722,22 @@ def _custom_chart_from_namespace(
         granularity=getattr(namespace, "granularity", "day"),
         weekdays=getattr(namespace, "weekdays", "show"),
         initial_explicit=explicit
-        & {"period", "since", "until", "group_by", "top", "filter", "granularity", "other", "style", "color_scheme", "window"},
+        & {
+            "period",
+            "since",
+            "until",
+            "partition_by",
+            "group_by",
+            "top",
+            "filter",
+            "granularity",
+            "other",
+            "style",
+            "color_scheme",
+            "window",
+        },
         metric_id=namespace.metric,
+        partition_by=partition_by,
     )
 
 
