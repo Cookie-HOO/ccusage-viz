@@ -637,12 +637,17 @@ def test_partition_and_group_cycles_skip_each_other_in_both_directions() -> None
         partition_by="logical",
         group_by="real",
     )
-    assert tui_module._cycle_custom_partitioning(
-        chart, (None, "logical", "real"), step=1
-    ).partition_by is None
-    assert tui_module._cycle_custom_partitioning(
-        chart, (None, "logical", "real"), step=-1
-    ).partition_by is None
+    forward_partition = tui_module._cycle_custom_partitioning(
+        chart, (None, "logical", "real"), ("logical", "real", "provider"), step=1
+    )
+    reverse_partition = tui_module._cycle_custom_partitioning(
+        chart, (None, "logical", "real"), ("logical", "real", "provider"), step=-1
+    )
+    assert (forward_partition.partition_by, forward_partition.group_by) == (
+        "real",
+        "logical",
+    )
+    assert (reverse_partition.partition_by, reverse_partition.group_by) == (None, "real")
     assert tui_module._cycle_custom_grouping(
         chart, ("logical", "real", "provider"), step=1
     ).group_by == "provider"
@@ -650,7 +655,168 @@ def test_partition_and_group_cycles_skip_each_other_in_both_directions() -> None
         chart, ("logical", "real", "provider"), step=-1
     ).group_by == "provider"
     assert tui_module._cycle_custom_grouping(chart, ("logical", "real")) == chart
-    assert tui_module._cycle_custom_partitioning(chart, ("logical", "real")) == chart
+    swapped = tui_module._cycle_custom_partitioning(
+        chart, ("logical", "real"), ("logical", "real")
+    )
+    assert (swapped.partition_by, swapped.group_by) == ("real", "logical")
+
+
+def test_partition_cycle_atomically_groups_a_flat_ranking_in_both_directions() -> None:
+    chart = CustomChartConfig(
+        "ranking",
+        CustomCommandSource("router", ("router",)),
+        DateRange(date(2026, 1, 1), date(2026, 1, 14)),
+    )
+
+    forward = tui_module._cycle_custom_partitioning(
+        chart,
+        (None, "logical", "real"),
+        (None, "real", "provider"),
+        step=1,
+    )
+    reverse = tui_module._cycle_custom_partitioning(
+        chart,
+        (None, "logical", "real"),
+        (None, "real", "provider"),
+        step=-1,
+    )
+
+    assert (forward.partition_by, forward.group_by, forward.top) == ("logical", "real", 3)
+    assert (reverse.partition_by, reverse.group_by, reverse.top) == (
+        "real",
+        "provider",
+        3,
+    )
+
+
+def test_partition_cycle_supports_required_partitions_and_retains_no_legal_pair() -> None:
+    chart = CustomChartConfig(
+        "ranking",
+        CustomCommandSource("router", ("router",)),
+        DateRange(date(2026, 1, 1), date(2026, 1, 14)),
+    )
+
+    required = tui_module._cycle_custom_partitioning(
+        chart, ("logical", "real"), ("logical", "real"), step=1
+    )
+    restricted = tui_module._cycle_custom_partitioning(
+        chart, ("logical",), (None, "logical"), step=1
+    )
+
+    assert (required.partition_by, required.group_by) == ("logical", "real")
+    assert restricted == chart
+
+
+def test_partition_cycle_falls_back_when_current_group_matches_new_partition() -> None:
+    chart = CustomChartConfig(
+        "ranking",
+        CustomCommandSource("router", ("router",)),
+        DateRange(date(2026, 1, 1), date(2026, 1, 14)),
+        group_by="logical",
+    )
+
+    updated = tui_module._cycle_custom_partitioning(
+        chart, (None, "logical"), ("logical", "real"), step=1
+    )
+
+    assert (updated.partition_by, updated.group_by) == ("logical", "real")
+
+
+def test_partition_cycle_preserves_a_legal_current_group_before_catalog_fallback() -> None:
+    chart = CustomChartConfig(
+        "ranking",
+        CustomCommandSource("router", ("router",)),
+        DateRange(date(2026, 1, 1), date(2026, 1, 14)),
+        group_by="provider",
+    )
+
+    updated = tui_module._cycle_custom_partitioning(
+        chart, (None, "logical"), ("real", "provider"), step=1
+    )
+
+    assert (updated.partition_by, updated.group_by) == ("logical", "provider")
+
+
+@pytest.mark.parametrize(
+    ("key", "partitions", "groupings", "expected", "restricted"),
+    (
+        ("g", (None, "logical", "real"), (None, "real", "provider"), ("logical", "real"), False),
+        ("G", (None, "logical", "real"), (None, "real", "provider"), ("real", "provider"), False),
+        ("g", (None, "logical"), (None, "logical"), (None, None), True),
+    ),
+    ids=("forward-refresh", "reverse-refresh", "restricted"),
+)
+def test_dashboard_partition_interaction_refreshes_or_reports_restriction(
+    monkeypatch: pytest.MonkeyPatch,
+    key: str,
+    partitions: tuple[str | None, ...],
+    groupings: tuple[str | None, ...],
+    expected: tuple[str | None, str | None],
+    restricted: bool,
+) -> None:
+    chart = CustomChartConfig(
+        "ranking",
+        CustomCommandSource("router", ("router",)),
+        DateRange(date(2026, 1, 1), date(2026, 1, 14)),
+    )
+    component = CustomHistoricalComponent(chart)
+    component.set_capability(
+        CustomChartCapability(("day",), groupings, (), partition_by=partitions)
+    )
+    pane = tui_module.TuiCustomPane(
+        component,
+        FixedIntervalScheduler(3600, now=tui_module.time.monotonic()),
+        LifecycleOperation("partition-interaction"),
+        _to_options(
+            build_parser(load_translator("en")).parse_args(["dashboard", "--empty"])
+        ).process,
+        probe_complete=True,
+    )
+    submitted: list[object] = []
+    frames: list[str] = []
+
+    class Runtime:
+        def submit(self, intent: object) -> object:
+            submitted.append(intent)
+            raise RuntimeError("stop test submission")
+
+        def cancel(self) -> None:
+            pass
+
+    class Screen:
+        def __init__(self, _stream: object) -> None:
+            pass
+
+        def paint(self, frame: object, **_kwargs: object) -> None:
+            frames.append("\n".join(frame.rows))  # type: ignore[attr-defined]
+
+        def finish(self) -> None:
+            pass
+
+    events = iter((KeyEvent("m"), KeyEvent(key), KeyEvent("\x03")))
+    options = _to_options(
+        build_parser(load_translator("en")).parse_args(
+            ["dashboard", "--empty", "--header-style", "hidden"]
+        )
+    )
+    monkeypatch.setattr(tui_module, "build_query_runtime", Runtime)
+    monkeypatch.setattr(tui_module, "_new_pane", lambda *_args: pane)
+    monkeypatch.setattr(tui_module, "FramePainter", Screen)
+    monkeypatch.setattr(tui_module, "tui_input_mode", nullcontext)
+    monkeypatch.setattr(tui_module, "read_event", lambda _decoder, _timeout: next(events))
+    monkeypatch.setattr(
+        tui_module, "get_terminal_size", lambda: __import__("os").terminal_size((100, 30))
+    )
+
+    assert tui_module.run_tui(options, load_translator("en")) == 0
+    assert (component.candidate.partition_by, component.candidate.group_by) == expected
+    configuration_submissions = [
+        intent for intent in submitted if intent.trigger.value == "refresh"  # type: ignore[attr-defined]
+    ]
+    assert bool(configuration_submissions) is not restricted
+    if restricted:
+        message = load_translator("en").text("status.custom_partition_restricted")
+        assert any(message in frame for frame in frames)
 
 
 def test_partition_binding_requires_multiple_effective_choices() -> None:

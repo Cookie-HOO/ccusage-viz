@@ -2720,17 +2720,57 @@ def _cycle_dimension(
 def _cycle_custom_partitioning(
     config: CustomChartConfig,
     partitions: tuple[str | None, ...],
+    groupings: tuple[str | None, ...],
     *,
     step: int = 1,
 ) -> CustomChartConfig:
-    """Advance partitions without colliding with the active ranking dimension."""
-    values = (
-        partitions
-        if config.group_by is not None
-        else tuple(choice for choice in partitions if choice is None)
-    )
-    partition_by = _cycle_dimension(values, config.partition_by, config.group_by, step)
-    return replace(config, partition_by=partition_by)
+    """Advance to the next legal partition/group pair in either direction."""
+    if not partitions:
+        return config
+    if config.partition_by in partitions:
+        start = partitions.index(config.partition_by)
+        candidates = tuple(
+            partitions[(start + step * distance) % len(partitions)]
+            for distance in range(1, len(partitions) + 1)
+        )
+    else:
+        candidates = partitions if step > 0 else tuple(reversed(partitions))
+
+    for partition_by in candidates:
+        if partition_by is None:
+            group_by = config.group_by if config.group_by in groupings else None
+        else:
+            current_group_is_declared = (
+                config.group_by is not None and config.group_by in groupings
+            )
+            group_by = (
+                config.group_by
+                if current_group_is_declared and config.group_by != partition_by
+                else next(
+                    (
+                        choice
+                        for choice in groupings
+                        if choice is not None and choice != partition_by
+                    ),
+                    None,
+                )
+            )
+            if group_by is None:
+                continue
+        if (partition_by, group_by) == (config.partition_by, config.group_by):
+            continue
+        presentation = config.presentation
+        styles = compatible_styles(config.kind, group_by)
+        if presentation.style not in styles:
+            presentation = replace(presentation, style=styles[0])
+        return replace(
+            config,
+            partition_by=partition_by,
+            group_by=group_by,
+            top=(config.top or 3) if group_by else None,
+            presentation=presentation,
+        )
+    return config
 
 
 def _cycle_custom_grouping(
@@ -2959,7 +2999,14 @@ def _custom_pane_adjustment_bindings(pane: TuiCustomPane, page: str) -> tuple[tu
             if (
                 chart.kind == "ranking"
                 and partitions is not None
-                and len({choice for choice in partitions if choice != chart.group_by}) > 1
+                and (
+                    _cycle_custom_partitioning(chart, partitions, capability.group_by, step=1)
+                    != chart
+                    or _cycle_custom_partitioning(
+                        chart, partitions, capability.group_by, step=-1
+                    )
+                    != chart
+                )
             ):
                 actions.append(("g/G", "partition"))
             elif chart.kind != "ranking" and len(capability.granularities) > 1:
@@ -10053,6 +10100,14 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                             pane,
                             "advanced" if adjustment_page == "quick" else "quick",
                         )
+                        or (
+                            key in {"g", "G"}
+                            and pane.component.candidate.kind == "ranking"
+                            and isinstance(
+                                capability := _custom_capability(pane), CustomChartCapability
+                            )
+                            and capability.partition_by is not None
+                        )
                     ):
                         if key == "a":
                             adjustment_page = "advanced" if adjustment_page == "quick" else "quick"
@@ -10242,12 +10297,13 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         elif (
                             key in {"g", "G"}
                             and base.kind == "ranking"
-                            and capability is not None
+                            and isinstance(capability, CustomChartCapability)
                             and capability.partition_by is not None
                         ):
                             updated = _cycle_custom_partitioning(
                                 base,
                                 capability.partition_by,
+                                capability.group_by,
                                 step=1 if key == "g" else -1,
                             )
                             if updated != base:
