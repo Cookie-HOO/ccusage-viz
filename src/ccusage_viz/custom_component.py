@@ -263,6 +263,20 @@ class CustomHistoricalComponent:
 
         if config == self.candidate:
             return
+        target = (
+            next(
+                (
+                    metric
+                    for metric in self.v2_descriptor.metrics
+                    if metric.id == config.metric_id
+                ),
+                None,
+            )
+            if self.v2_descriptor is not None
+            else None
+        )
+        if target is not None:
+            config = normalize_switch_config(config, target, "partition_by") or config
         self.switch_target_config = config
         self.switch_normalizations = frozenset()
         self.generation += 1

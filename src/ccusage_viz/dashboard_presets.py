@@ -765,6 +765,10 @@ def _parse_pane(value: object) -> PaneConfig:
         partition_by = _optional_string(
             custom_wire.get("partition_by"), "custom.partition_by"
         )
+        if partition_by is not None and chart_kind != "ranking":
+            raise DashboardPresetValidationError(
+                "custom.partition_by is supported only by ranking"
+            )
         if partition_by is not None and group_by is None:
             raise DashboardPresetValidationError(
                 "custom.partition_by requires a non-null custom.group_by"

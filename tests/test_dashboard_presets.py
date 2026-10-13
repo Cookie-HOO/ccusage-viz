@@ -226,6 +226,24 @@ def test_custom_partition_round_trips_and_old_preset_remains_flat() -> None:
     assert old.chart.partition_by is None
 
 
+@pytest.mark.parametrize("chart_kind", ("timeline", "calendar", "stack", "monitor"))
+def test_custom_partition_preset_rejects_non_ranking_chart_kinds(chart_kind: str) -> None:
+    chart = CustomChartConfig(
+        "ranking",
+        _installed_source(),
+        RANGE,
+        group_by="real_model",
+        partition_by="logical_model",
+    )
+    wire = DashboardPresetDocument(
+        (preset_from_launch("partitioned", _launch(panes=(CustomChartPaneConfig(chart),)), now=NOW),)
+    ).to_wire()
+    wire["presets"][0]["panes"][0]["chart_kind"] = chart_kind
+
+    with pytest.raises(DashboardPresetValidationError, match="only by ranking"):
+        DashboardPresetDocument.parse(wire)
+
+
 def test_custom_partition_preset_rejects_missing_or_equal_grouping() -> None:
     chart = CustomChartConfig(
         "ranking",

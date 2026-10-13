@@ -183,6 +183,52 @@ def test_metric_switch_request_wire_uses_target_partition_declaration() -> None:
     assert "partition_by" not in switch_wire("declared", "undeclared")
 
 
+def test_metric_switch_first_request_clears_supported_partition_without_target_default() -> None:
+    capability = V2HistoricalChartCapability(
+        ("day",), ("logical_model", "real_model"), (), partition_by=(None, "logical_model")
+    )
+    metrics = tuple(
+        V2MetricDescriptor(
+            metric_id,
+            LocalizedText(metric_id, metric_id),
+            LocalizedText(metric_id, metric_id),
+            UNIT,
+            "sum",
+            V2MetricCapabilities((), (), {"ranking": capability}),
+            {},
+        )
+        for metric_id in ("current", "target")
+    )
+    component = CustomHistoricalComponent(
+        config(
+            kind="ranking",
+            metric_id="current",
+            partition_by="logical_model",
+            group_by="real_model",
+        )
+    )
+    component.v2_descriptor = V2ProbeDescriptor(
+        "revision",
+        "1",
+        V2Dataset(LocalizedText("Data", "数据"), LocalizedText("Data", "数据")),
+        metrics,
+        (),
+    )
+
+    component.begin_metric_switch(replace(component.candidate, metric_id="target"))
+
+    intent = custom_historical_query_intent(
+        component.request_config,
+        timezone="UTC",
+        owner_id="pane",
+        generation=component.generation,
+        trigger=QueryTrigger.REFRESH,
+        partition_declared=component.partition_declared_for_request,
+    )
+    assert component.request_config.group_by == "real_model"
+    assert intent.payload.to_wire()["query"]["partition_by"] is None  # type: ignore[union-attr]
+
+
 def test_primary_response_retains_its_protocol_warnings() -> None:
     component = CustomHistoricalComponent(config())
     warning = CustomProtocolWarning("coverage", LocalizedText("using 2d", "使用 2 天"))
