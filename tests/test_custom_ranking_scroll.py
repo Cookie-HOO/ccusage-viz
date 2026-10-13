@@ -159,7 +159,7 @@ def test_copy_all_marker_follows_count_row_and_hides_without_it():
     search_hit = viewport.copy_all_hit
     assert search_hit is not None
     assert search_hit[0] == row + 1
-    assert "Showing 11/11 item(s)" in searched.splitlines()[search_hit[0]]
+    assert "Showing 11/100 item(s)" in searched.splitlines()[search_hit[0]]
 
     render(model, viewport, context(density="minimal"), copy_all_action=True)
     assert viewport.copy_all_hit is None
@@ -204,6 +204,90 @@ def test_first_window_preserves_unwindowed_custom_body(density):
     )
     # The caller owns the title. Body and table geometry remain identical.
     assert actual.splitlines()[1:] == expected.splitlines()[1:]
+
+
+def test_viewport_search_preserves_full_facts_and_anchor_after_refresh() -> None:
+    def item(
+        key: str,
+        value: int,
+        *,
+        previous: int,
+        description: str | None = None,
+    ) -> CustomProjectedSeries:
+        return CustomProjectedSeries(
+            key,
+            LocalizedText(key.title(), key),
+            (Decimal(value),),
+            previous_total=Decimal(previous),
+            comparison_ready=True,
+            description=LocalizedText(description, description) if description else None,
+            link=f"https://example.com/{key}",
+        )
+
+    model = replace(
+        projection(0, comparison=True),
+        series=(
+            item("alpha", 50, previous=20),
+            item("beta", 30, previous=60),
+            item(
+                "claude",
+                20,
+                previous=40,
+                description="Release notes",
+            ),
+        ),
+        show_percentage=True,
+    )
+    viewport = RankingViewport()
+    ctx = context(height=20, width=100, density="detailed")
+
+    output = strip_ansi(render(model, viewport, ctx, search="example.com/claude"))
+    claude = next(line for line in output.splitlines() if "Claude" in line)
+    assert claude.lstrip().startswith("3 ")
+    assert "20.0%" in claude
+    assert "●" in claude and "·" in claude
+    assert "↓" in claude
+    assert "Showing 1/3 item(s)" in output
+    assert viewport.total == Decimal(100)
+    assert viewport.maximum == Decimal(50)
+    assert viewport.by_id["claude"].previous_rank == 2
+
+    # Reapply the same search to fresh full facts and retain the matched ID at
+    # the top of the viewport rather than the old numeric line offset.
+    viewport.offset = viewport.starts[0]
+    refreshed = replace(
+        model,
+        series=(
+            item("claude", 60, previous=40, description="Release notes"),
+            item("alpha", 35, previous=20),
+            item("beta", 5, previous=60),
+        ),
+    )
+    output = strip_ansi(render(refreshed, viewport, ctx, search="example.com/claude"))
+    claude = next(line for line in output.splitlines() if "Claude" in line)
+    assert claude.lstrip().startswith("1 ")
+    assert "60.0%" in claude
+    assert viewport.total == Decimal(100)
+    assert viewport.maximum == Decimal(60)
+    assert viewport.offset == viewport.starts[0]
+
+
+def test_refresh_restores_top_visible_entry_by_stable_id() -> None:
+    model = projection(30)
+    viewport = RankingViewport()
+    ctx = context(height=8)
+    render(model, viewport, ctx)
+    anchor_index = 12
+    viewport.offset = viewport.starts[anchor_index]
+    anchor_id = str(viewport.entries[anchor_index].key)
+
+    refreshed = replace(model, series=(model.series[0], *model.series[10:]))
+    render(refreshed, viewport, ctx)
+
+    refreshed_index = next(
+        index for index, entry in enumerate(viewport.entries) if str(entry.key) == anchor_id
+    )
+    assert viewport.offset == viewport.starts[refreshed_index]
 
 
 def test_search_reset_and_hit_identity_and_feedback():

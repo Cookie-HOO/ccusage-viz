@@ -162,6 +162,9 @@ class RankingPresentationEntry:
     # geometry may inspect every entry, so it must never need its formatter.
     display_width: int | None = None
     comparison_display_width: int | None = None
+    # Absolute position in the complete current ranking. Search and viewport
+    # windows may hide rows but must not renumber the survivors.
+    rank: int | None = None
 
 
 def _refresh_markers(
@@ -260,6 +263,7 @@ def _matches_search(entry: RankingPresentationEntry, query: str) -> bool:
             entry.description is not None
             and needle in _description_search_text(entry.description).casefold()
         )
+        or (entry.project_link is not None and needle in entry.project_link.casefold())
     )
 
 
@@ -500,7 +504,13 @@ def render_historical_ranking(
 ) -> str:
     """Render rows and ccuv-owned comparison markers from raw values only."""
     total_entry_count = len(entries) if total_entry_count is None else total_entry_count
-    ranked_entries = tuple(enumerate(entries, start=rank_offset + entry_offset + 1))
+    ranked_entries = tuple(
+        (
+            entry.rank if entry.rank is not None else rank,
+            entry,
+        )
+        for rank, entry in enumerate(entries, start=rank_offset + entry_offset + 1)
+    )
     if not entries_matched:
         ranked_entries = tuple(
             (rank, entry) for rank, entry in ranked_entries if _matches_search(entry, search_query)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from bisect import bisect_right
 from dataclasses import replace
 from decimal import Decimal
 from typing import cast
@@ -50,7 +51,8 @@ def render_custom_ranking_viewport(
         else None,
         search_query,
     )
-    if reset_key != viewport.reset_key:
+    reset_changed = reset_key != viewport.reset_key
+    if reset_changed:
         viewport.offset = 0
         viewport.reset_key = reset_key
     comparison = config.ranking_comparison if config else "full"
@@ -105,7 +107,7 @@ def render_custom_ranking_viewport(
             show_new_entries=True,
             compact_labels=False,
             label_max_width=48,
-            total_entry_count=len(viewport.entries),
+            total_entry_count=len(viewport.full_entries),
             matched_entry_count=len(viewport.entries),
             rank_offset=offset,
             show_percentage=projection.show_percentage,
@@ -159,15 +161,28 @@ def render_custom_ranking_viewport(
                 ),
             )
 
-        entries = tuple(prepare_entry(entry) for entry in projection.series)
-        entries = filter_ranking_entries(entries, search_query)
+        anchor_id: str | None = None
+        if not reset_changed and viewport.entries:
+            anchor_index = max(
+                0,
+                min(
+                    len(viewport.entries) - 1,
+                    bisect_right(viewport.starts, viewport.offset) - 1,
+                ),
+            )
+            anchor_id = str(viewport.entries[anchor_index].key)
+
+        full_entries = tuple(
+            replace(prepare_entry(entry), rank=entry.rank or rank)
+            for rank, entry in enumerate(projection.series, 1)
+        )
         prior = {
             entry.key: rank
             for rank, entry in enumerate(
                 sorted(
                     (
                         entry
-                        for entry in entries
+                        for entry in full_entries
                         if entry.previous is not None and not entry.is_other
                     ),
                     key=lambda entry: (-cast(Decimal, entry.previous), str(entry.key)),
@@ -175,14 +190,15 @@ def render_custom_ranking_viewport(
                 1,
             )
         }
-        viewport.entries = tuple(
+        viewport.full_entries = tuple(
             replace(entry, previous_rank=entry.previous_rank or prior.get(entry.key))
-            for entry in entries
+            for entry in full_entries
         )
+        viewport.entries = filter_ranking_entries(viewport.full_entries, search_query)
         viewport.by_id = {str(entry.key): entry for entry in viewport.entries}
-        viewport.total = sum((entry.current for entry in viewport.entries), Decimal())
+        viewport.total = sum((entry.current for entry in viewport.full_entries), Decimal())
         viewport.maximum = (
-            max((entry.current for entry in viewport.entries), default=Decimal()) or 1
+            max((entry.current for entry in viewport.full_entries), default=Decimal()) or 1
         )
         viewport.source = projection.series
         viewport.data_key = data_key
@@ -202,6 +218,17 @@ def render_custom_ranking_viewport(
                     columns=viewport.columns,
                 )
             viewport.prepare_lines(descriptions=descriptions_visible, spacing=item_spacing)
+            if rebuild_data and anchor_id is not None:
+                anchor_index = next(
+                    (
+                        index
+                        for index, entry in enumerate(viewport.entries)
+                        if str(entry.key) == anchor_id
+                    ),
+                    None,
+                )
+                if anchor_index is not None:
+                    viewport.offset = viewport.starts[anchor_index]
             viewport.remember_geometry(geometry_key)
         # render() clamps only after deriving visible_rows from the current
         # chrome and context height; the previous viewport size may be stale.

@@ -56,6 +56,7 @@ class RankingViewport:
     data_key: object = None
     geometry_key: object = None
     reset_key: object = None
+    full_entries: tuple[RankingPresentationEntry, ...] = ()
     entries: tuple[RankingPresentationEntry, ...] = ()
     by_id: dict[str, RankingPresentationEntry] = field(default_factory=dict)
     columns: RankingColumns = field(default_factory=RankingColumns)
@@ -120,7 +121,7 @@ class RankingViewport:
         self.copy_all_hit = None
         self.active = False
         self.source = self.data_key = self.geometry_key = self.reset_key = None
-        self.entries = ()
+        self.full_entries = self.entries = ()
         self.by_id.clear()
         self.hits.clear()
         self.starts = (0,)
