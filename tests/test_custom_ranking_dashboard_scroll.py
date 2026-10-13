@@ -156,6 +156,46 @@ def test_grouped_dashboard_dispatch_wheel_and_hit_translation(dashboard):
     run([WheelEvent(1, 2, 3), click_visible, verify])
 
 
+def test_grouped_dashboard_inner_series_copy_uses_group_aware_payload(dashboard):
+    run, panes, frames, focuses, layouts, decoder, copied, opened, size = dashboard
+    del frames, decoder, opened
+    size[:] = [160, 14]
+    for pane in panes:
+        model = grouped_projection()
+        config = replace(model.config, date_range=replace(model.date_range, fixed_bounds=True))
+        pane.component.candidate = pane.component.accepted_config = config
+        pane.component.model = replace(model, config=config)
+
+    target = []
+
+    def click_series():
+        pane = panes[0]
+        row, (identity, column, _) = next(
+            (row, hit)
+            for row, hit in pane.ranking_copy_rows.items()
+            if hit[0][0] == "series"
+        )
+        target.append(identity)
+        rect = layouts[-1].pane(0)
+        framed = focuses[-1] == 0
+        return MouseEvent(
+            0,
+            rect.left + column + 1 + framed,
+            rect.top + row + 1 + framed,
+            True,
+            0,
+        )
+
+    def verify():
+        viewport = panes[0].grouped_ranking_viewport
+        assert target[0][0] == "series"
+        assert copied == [viewport.clipboard_text(target[0])]
+        assert copied[0].startswith("Coding Model\nSeed")
+        return KeyEvent("\x03")
+
+    run([click_series, verify])
+
+
 def test_grouped_dashboard_scrollbar_drag_uses_active_viewport(dashboard):
     run, panes, frames, focuses, layouts, decoder, copied, opened, size = dashboard
     del frames, decoder, copied, opened

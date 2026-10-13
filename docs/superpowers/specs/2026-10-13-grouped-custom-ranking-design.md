@@ -12,7 +12,7 @@ Included:
 
 - V2 Custom Historical Ranking only;
 - optional `partition_by` capability, defaults, query, CLI, Dashboard, and preset state;
-- grouped response parsing, projection, comparison, rendering, search, scrolling, copying, and sticky group headings;
+- grouped response parsing, projection, comparison, rendering, search, scrolling, and copying;
 - Dashboard adjustment-page changes for spacing and filters;
 - flat Custom Ranking search invariants.
 
@@ -346,17 +346,9 @@ Rules:
 - spacing never inserts an item separator between a group heading and its first row;
 - groups retain at least one visual break from one another.
 
-## Viewport and Sticky Group Heading
+## Viewport
 
-The grouped Ranking remains physically line-scrollable. A group may span viewport boundaries.
-
-When the original group heading has scrolled above the viewport and the top visible item belongs to that group, the viewport reserves its first line for a muted sticky heading containing only `group.label`.
-
-- No sticky heading is shown while the original heading remains visible.
-- It disappears when the next original group heading enters the viewport.
-- It repeats no description, value, comparison, share, link, or copy action.
-- Empty groups do not create sticky headings.
-- It is omitted if the terminal cannot show both it and one content row.
+The grouped Ranking remains physically line-scrollable. A group may span viewport boundaries, and its original heading scrolls away normally without a synthetic or sticky copy.
 
 Refresh and geometry changes restore position by stable identity where possible:
 
@@ -423,8 +415,7 @@ Dataset response
   → per-group Top and returned-excess Other
   → immutable full projection facts
   → search visibility filtering
-  → grouped row layout and viewport geometry
-  → sticky group heading and rendering
+  → grouped row layout, viewport geometry, and rendering
 ```
 
 Numeric and ranking facts are established before search and rendering. Presentation metadata never changes sorting, totals, shares, comparison, Top, Other, or bar geometry.
@@ -448,6 +439,6 @@ Tests cover:
 - search matching only inner fields, hiding empty match groups, retaining current full-data ranks/shares/scales, and updating after source refresh;
 - the same search invariants for flat Custom Ranking;
 - group headings without bars, density alignment, descriptions, narrow layouts, and no-data rendering;
-- physical scrolling, sticky-heading boundaries, identity restoration, and scrollbar range;
-- grouped copy, Copy All, search copy, and no duplicate sticky copy target;
+- physical scrolling without synthetic headings, identity restoration, and scrollbar range;
+- grouped item copy, group copy, Copy All, and search copy;
 - Quick/Advanced bindings, `g/G` and `b/B` conflict skipping, Dashboard-wide Advanced filters, Advanced `s/S` spacing, and muted dashed separators.

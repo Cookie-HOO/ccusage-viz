@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from bisect import bisect_right
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from decimal import Decimal
@@ -46,7 +45,6 @@ class _GroupedRankingGeometry:
     description_width: int
     rows: tuple[GroupedRankingRow, ...]
     group_headings: tuple[int, ...]
-    group_has_series: tuple[bool, ...]
 
 
 @dataclass(slots=True)
@@ -55,7 +53,6 @@ class GroupedRankingViewport:
     total_rows: int = 0
     visible_rows: int = 0
     reserved_rows: int = 0
-    sticky_rows: int = 0
     body_top: int = 0
     scrollbar: Scrollbar | None = None
     copy_all_hit: tuple[int, int] | None = None
@@ -67,7 +64,6 @@ class GroupedRankingViewport:
     reset_key: object = None
     rows: tuple[GroupedRankingRow, ...] = ()
     group_headings: tuple[int, ...] = ()
-    group_has_series: tuple[bool, ...] = ()
     # Kept for compatibility with viewport inspection. Warm rendering no longer
     # materializes the complete styled result.
     lines: tuple[str, ...] = ()
@@ -88,44 +84,8 @@ class GroupedRankingViewport:
         default_factory=lambda: MappingProxyType({}), init=False, repr=False
     )
 
-    def _group_interval(self, offset: int) -> int | None:
-        """Return the precomputed group interval containing ``offset``."""
-        if not 0 <= offset < len(self.rows):
-            return None
-        interval = bisect_right(self.group_headings, offset) - 1
-        return interval if interval >= 0 else None
-
-    def _group_heading(self, offset: int) -> int | None:
-        """Return the heading whose physical-row interval contains ``offset``."""
-        interval = self._group_interval(offset)
-        return self.group_headings[interval] if interval is not None else None
-
-    def _sticky_required(self, offset: int) -> bool:
-        """Return whether ``offset`` needs a sticky heading in constant group work."""
-        if self.visible_rows < 2 or not self.rows or offset >= len(self.rows):
-            return False
-        interval = self._group_interval(offset)
-        if interval is None or self.group_headings[interval] == offset:
-            return False
-        if not self.group_has_series[interval]:
-            return False
-        # The sticky copy leaves as soon as the next original heading enters
-        # the unreserved window. Besides matching the visual contract, this
-        # makes bottom capacity stable when the base offset is the separator
-        # immediately preceding the final group.
-        if interval + 1 < len(self.group_headings):
-            next_heading = self.group_headings[interval + 1]
-            if next_heading < offset + self.visible_rows:
-                return False
-        return True
-
-    def effective_capacity(self, offset: int | None = None) -> int:
-        position = self.offset if offset is None else offset
-        return max(0, self.visible_rows - int(self._sticky_required(position)))
-
     def maximum_offset(self) -> int:
-        base = max(0, self.total_rows - self.visible_rows)
-        return max(0, self.total_rows - self.effective_capacity(base))
+        return max(0, self.total_rows - self.visible_rows)
 
     def clamp(self) -> None:
         self.offset = min(max(0, self.offset), self.maximum_offset())
@@ -146,7 +106,6 @@ class GroupedRankingViewport:
         self.columns = RankingColumns(dict(snapshot.widths), snapshot.description_width)
         self.rows = snapshot.rows
         self.group_headings = snapshot.group_headings
-        self.group_has_series = snapshot.group_has_series
         self.total_rows = len(snapshot.rows)
         return True
 
@@ -157,7 +116,6 @@ class GroupedRankingViewport:
             self.columns.description_width,
             self.rows,
             self.group_headings,
-            self.group_has_series,
         )
         while len(self._geometry_cache) > 2:
             del self._geometry_cache[next(iter(self._geometry_cache))]
@@ -167,14 +125,13 @@ class GroupedRankingViewport:
 
     def clear(self) -> None:
         self.invalidate_geometry()
-        self.offset = self.total_rows = self.visible_rows = self.reserved_rows = self.sticky_rows = 0
+        self.offset = self.total_rows = self.visible_rows = self.reserved_rows = 0
         self.body_top = 0
         self.scrollbar = self.copy_all_hit = None
         self.active = False
         self.source = self.preparation_key = self.data_key = self.geometry_key = self.reset_key = None
         self.rows = self.lines = ()
         self.group_headings = ()
-        self.group_has_series = ()
         self.groups = self.visible_groups = ()
         self.columns = RankingColumns()
         self.by_id.clear()
@@ -432,9 +389,17 @@ def render_grouped_custom_ranking_viewport(
             entries_matched=True,
             measure_only=measure,
         ).splitlines()
-        # The grouped viewport owns fixed search chrome. The shared renderer
-        # emits that row even with an empty heading, so remove it here.
-        return rendered[int(bool(search_query or search_editing)) :]
+        # The grouped viewport owns heading/search/table chrome. Keep only the
+        # single entry's primary row and any following wrapped description.
+        primary = next(
+            (
+                index
+                for index, line in enumerate(rendered)
+                if strip_ansi(line).lstrip().startswith(f"{marked.rank} ")
+            ),
+            len(rendered),
+        )
+        return rendered[primary:]
 
     if rebuild_geometry:
         if not viewport.restore_geometry(geometry_key):
@@ -528,15 +493,6 @@ def render_grouped_custom_ranking_viewport(
             viewport.group_headings = tuple(
                 index for index, row in enumerate(records) if row.kind == "group"
             )
-            group_ends = (
-                (*viewport.group_headings[1:], len(records))
-                if viewport.group_headings
-                else ()
-            )
-            viewport.group_has_series = tuple(
-                any(row.kind == "series" for row in records[start:end])
-                for start, end in zip(viewport.group_headings, group_ends, strict=True)
-            )
             viewport.total_rows = len(records)
             viewport.remember_geometry(geometry_key)
         viewport.geometry_key = geometry_key
@@ -602,10 +558,8 @@ def render_grouped_custom_ranking_viewport(
     viewport.visible_rows = max(0, context.height - viewport.body_top)
     viewport.clamp()
 
-    sticky = viewport._sticky_required(viewport.offset)
-    capacity = viewport.effective_capacity()
     source_indexes = range(
-        viewport.offset, min(len(viewport.rows), viewport.offset + capacity)
+        viewport.offset, min(len(viewport.rows), viewport.offset + viewport.visible_rows)
     )
     group_by_id = viewport._groups_by_id
     rendered_units: dict[tuple[str, str, str | None], list[str]] = {}
@@ -633,27 +587,9 @@ def render_grouped_custom_ranking_viewport(
         return lines[row.source_line]
 
     body = [source_line(viewport.rows[index]) for index in source_indexes]
-    if sticky and viewport.offset < len(viewport.rows):
-        heading_index = viewport._group_heading(viewport.offset)
-        group = (
-            group_by_id.get(viewport.rows[heading_index].group_id)
-            if heading_index is not None
-            else None
-        )
-        if group is not None:
-            body.insert(
-                0,
-                styled_text(
-                    clip_width(group.label, context.width),
-                    get_color_scheme(context.color_scheme).muted,
-                    context,
-                    dim=True,
-                ),
-            )
-    viewport.sticky_rows = int(sticky)
     viewport.lines = tuple(body)
 
-    for screen_index, source_index in enumerate(source_indexes, start=viewport.sticky_rows):
+    for screen_index, source_index in enumerate(source_indexes):
         row = viewport.rows[source_index]
         if row.kind not in {"group", "series"}:
             continue
@@ -692,18 +628,13 @@ def render_grouped_custom_ranking_viewport(
         viewport.copy_all_hit = (count_row, display_width(prefix) + 3)
         rendered = "\n".join(rows_out)
 
-    effective_rows = viewport.effective_capacity()
-    if gutter and effective_rows > 0 and viewport.total_rows > effective_rows:
-        # Sticky headings reduce the final window by one line. Give the bar a
-        # stable extent whose maximum is identical at the top and bottom, so a
-        # thumb captured at offset zero can still reach the true final row.
-        scrollbar_rows = viewport.total_rows - viewport.maximum_offset()
+    if gutter and viewport.visible_rows > 0 and viewport.total_rows > viewport.visible_rows:
         bar = Scrollbar(
             context.width,
             viewport.body_top,
             viewport.visible_rows,
             viewport.total_rows,
-            scrollbar_rows,
+            viewport.visible_rows,
             viewport.offset,
         )
         viewport.scrollbar = bar
