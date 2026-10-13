@@ -18,6 +18,19 @@ from ccusage_viz.tui_input import KeyEvent, MouseEvent, PasteEvent
 class _FilterColorContext:
     color: bool
 
+
+@dataclass(frozen=True, slots=True)
+class _FilterTab:
+    """One unstyled Custom filter tab and its terminal-cell geometry."""
+
+    index: int
+    text: str
+    selected: int
+    x_start: int
+    x_end: int
+    y: int
+
+
 FilterEditorInput = str | KeyEvent | MouseEvent | PasteEvent
 
 
@@ -104,7 +117,7 @@ def run_custom_filter_editor(
 
     draft = CustomFilterDraft(filters)
     while True:
-        draft = _normalise_draft(draft, choices, translator, height)
+        draft = _normalise_draft(draft, choices, translator, width, height, filters)
         paint(
             _render_custom_filter_draft(
                 draft,
@@ -121,7 +134,10 @@ def run_custom_filter_editor(
         event = read_key()
         if isinstance(event, MouseEvent):
             if event.pressed and event.button == 0:
-                tab_index = _filter_index_at(event, choices, translator, draft.filter_index, filters)
+                tab_index = _filter_index_at(
+                    event,
+                    _tab_layout(choices, translator, draft.filter_index, filters, width),
+                )
                 if tab_index is not None:
                     draft = replace(
                         draft,
@@ -134,7 +150,9 @@ def run_custom_filter_editor(
                     continue
                 current = draft.current_filter(choices)
                 options = _matching_options(current, draft.query, translator)
-                option_index = _option_index_at(event, draft, options, width, height)
+                option_index = _option_index_at(
+                    event, draft, options, choices, translator, filters, width, height
+                )
                 if current is not None and option_index is not None:
                     draft = draft.toggle(current, options[option_index].id)
                     draft = replace(draft, option_index=option_index)
@@ -238,15 +256,28 @@ def _grid_rows(option_count: int, columns: int) -> int:
     return (option_count + columns - 1) // columns
 
 
-def _chrome_rows(draft: CustomFilterDraft) -> int:
-    return 2 + int(bool(draft.query or draft.search_editing))
+def _chrome_rows(
+    draft: CustomFilterDraft,
+    choices: tuple[CustomFilter, ...],
+    translator: Translator,
+    accepted: CustomFilters,
+    width: int,
+) -> int:
+    """Return rows occupied above the option viewport."""
+    tab_rows = max(
+        (tab.y for tab in _tab_layout(choices, translator, draft.filter_index, accepted, width)),
+        default=1,
+    )
+    return tab_rows + 1 + int(bool(draft.query or draft.search_editing))
 
 
 def _normalise_draft(
     draft: CustomFilterDraft,
     choices: tuple[CustomFilter, ...],
     translator: Translator,
+    width: int,
     height: int,
+    accepted: CustomFilters,
 ) -> CustomFilterDraft:
     current = draft.current_filter(choices)
     options = _matching_options(current, draft.query, translator)
@@ -257,7 +288,7 @@ def _normalise_draft(
     focus_row = option_index // columns
     total_rows = _grid_rows(len(options), columns)
     # Reserve two rows conservatively for the above/below continuation indicators.
-    visible_rows = max(1, height - _chrome_rows(draft) - 2)
+    visible_rows = max(1, height - _chrome_rows(draft, choices, translator, accepted, width) - 2)
     maximum_viewport = max(0, total_rows - visible_rows)
     viewport = min(draft.viewport_row, maximum_viewport)
     if focus_row < viewport:
@@ -272,36 +303,32 @@ def _tab_layout(
     translator: Translator,
     active_index: int,
     accepted: CustomFilters,
-) -> tuple[tuple[int, int, int, str, int], ...]:
-    """Return unstyled count-inclusive tab segments and their one-based x ranges."""
-    position = 1
-    segments: list[tuple[int, int, int, str, int]] = []
+    width: int,
+) -> tuple[_FilterTab, ...]:
+    """Return unstyled, whole-tab geometry shared by rendering and mouse input."""
+    width = max(1, width)
+    x, y = 1, 1
+    tabs: list[_FilterTab] = []
     for index, (choice, (selected, total)) in enumerate(
         zip(choices, filter_tab_counts(accepted, choices), strict=True)
     ):
         label = _localized(choice.label, translator)
         text = f"[{label} {selected}/{total}]" if index == active_index else f"{label} {selected}/{total}"
-        end = position + display_width(text)
-        segments.append((index, position, end, text, selected))
-        position = end + display_width(" · ")
-    return tuple(segments)
+        tab_width = min(display_width(text), width)
+        separator_width = display_width(" · ") if tabs and x != 1 else 0
+        if x + separator_width + tab_width - 1 > width:
+            x, y, separator_width = 1, y + 1, 0
+        x += separator_width
+        tabs.append(_FilterTab(index, text, selected, x, x + tab_width, y))
+        x += tab_width
+    return tuple(tabs)
 
 
-def _filter_index_at(
-    event: MouseEvent,
-    choices: tuple[CustomFilter, ...],
-    translator: Translator,
-    active_index: int,
-    accepted: CustomFilters,
-) -> int | None:
-    """Map a click on the rendered tab row to the Dataset filter tab it occupies."""
-    if event.y != 1:
-        return None
-    for index, start, end, _text, _selected in _tab_layout(
-        choices, translator, active_index, accepted
-    ):
-        if start <= event.x < end:
-            return index
+def _filter_index_at(event: MouseEvent, layout: tuple[_FilterTab, ...]) -> int | None:
+    """Map a click to the tab whose shared geometry contains it."""
+    for tab in layout:
+        if event.y == tab.y and tab.x_start <= event.x < tab.x_end:
+            return tab.index
     return None
 
 
@@ -309,6 +336,9 @@ def _option_index_at(
     event: MouseEvent,
     draft: CustomFilterDraft,
     options: tuple[CustomFilterOption, ...],
+    choices: tuple[CustomFilter, ...],
+    translator: Translator,
+    accepted: CustomFilters,
     width: int,
     height: int,
 ) -> int | None:
@@ -316,7 +346,7 @@ def _option_index_at(
     if not options:
         return None
     columns = min(draft.columns, len(options))
-    fixed_rows = _chrome_rows(draft)
+    fixed_rows = _chrome_rows(draft, choices, translator, accepted, width)
     total_rows = _grid_rows(len(options), columns)
     capacity = max(0, height - fixed_rows)
     viewport = min(draft.viewport_row, max(0, total_rows - 1))
@@ -360,12 +390,15 @@ def _render_custom_filter_draft(
             return f"{styled_text(label, scheme.muted, context, dim=True)} {styled_text(count, scheme.cache, context)}"
         return styled_text(text, scheme.muted, context, dim=True)
 
-    tabs = " · ".join(
-        tab(index, text, selected)
-        for index, _start, _end, text, selected in _tab_layout(
-            choices, translator, draft.filter_index, accepted
-        )
-    )
+    layout = _tab_layout(choices, translator, draft.filter_index, accepted, width)
+    tab_rows: list[str] = []
+    for y in range(1, max((item.y for item in layout), default=1) + 1):
+        row = ""
+        for item in (item for item in layout if item.y == y):
+            if row:
+                row += " · "
+            row += tab(item.index, item.text, item.selected)
+        tab_rows.append(clip_width(row, width))
     if current is None:
         return translator.text("status.custom_filter_unavailable")
 
@@ -375,7 +408,7 @@ def _render_custom_filter_draft(
     selected_count = sum(option.id in selected for option in all_options)
     selected_status = translator.text("status.custom_filter_count", selected=selected_count, total=len(all_options))
     selected_prefix, selected_value, selected_suffix = selected_status.partition(str(selected_count))
-    rows = [clip_width(tabs, width)]
+    rows = tab_rows
     if draft.query or draft.search_editing:
         cursor = "_" if draft.search_editing else ""
         rows.append(clip_width(translator.text("label.custom_filter_search", query=draft.query + cursor), width))
@@ -406,7 +439,7 @@ def _render_custom_filter_draft(
 
     columns = min(draft.columns, len(options))
     total_rows = _grid_rows(len(options), columns)
-    fixed_rows = len(rows)
+    fixed_rows = _chrome_rows(draft, choices, translator, accepted, width)
     capacity = max(0, height - fixed_rows)
     viewport = min(draft.viewport_row, max(0, total_rows - 1))
     show_above = viewport > 0

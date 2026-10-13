@@ -3,6 +3,7 @@ from ccusage_viz.custom_filter_draft import (
     _filter_index_at,
     _matching_options,
     _render_custom_filter_draft,
+    _tab_layout,
     filter_tab_counts,
     run_custom_filter_editor,
 )
@@ -26,6 +27,51 @@ CHOICES = (
         (CustomFilterOption("app", LocalizedText("App", "应用")),),
     ),
 )
+
+WRAPPED_CHOICES = (
+    *CHOICES,
+    CustomFilter(
+        "kind",
+        LocalizedText("Kind", "类型"),
+        (CustomFilterOption("novel", LocalizedText("Novel", "小说")),),
+    ),
+)
+
+
+def test_custom_filter_tabs_wrap_without_splitting_and_share_mouse_geometry() -> None:
+    translator = load_translator("en")
+    layout = _tab_layout(WRAPPED_CHOICES, translator, active_index=0, accepted=(), width=18)
+
+    assert [(tab.text, tab.x_start, tab.x_end, tab.y) for tab in layout] == [
+        ("[Category 0/2]", 1, 15, 1),
+        ("Source 0/1", 1, 11, 2),
+        ("Kind 0/1", 1, 9, 3),
+    ]
+    assert _filter_index_at(MouseEvent(0, 4, 2, True, 0), layout) == 1
+    assert _filter_index_at(MouseEvent(0, 4, 3, True, 0), layout) == 2
+    assert _filter_index_at(MouseEvent(0, 16, 1, True, 0), layout) is None
+    assert _filter_index_at(MouseEvent(0, 14, 2, True, 0), layout) is None
+
+
+def test_custom_filter_tab_layout_uses_localized_display_width() -> None:
+    layout = _tab_layout(WRAPPED_CHOICES, load_translator("zh"), active_index=0, accepted=(), width=12)
+
+    assert [(tab.x_start, tab.x_end, tab.y) for tab in layout] == [
+        (1, 11, 1),
+        (1, 9, 2),
+        (1, 9, 3),
+    ]
+
+
+def test_custom_filter_option_click_accounts_for_wrapped_tab_rows() -> None:
+    events = iter((MouseEvent(0, 2, 5, True, 0), KeyEvent("\r")))
+
+    result = run_custom_filter_editor(
+        (), WRAPPED_CHOICES, load_translator("en"), width=18, height=10,
+        paint=lambda _body, _controls: None, read_key=lambda: next(events),
+    )
+
+    assert result == (("category", ("fiction",)),)
 
 
 def test_single_select_replaces_then_clears_the_draft_value() -> None:
@@ -192,10 +238,10 @@ def test_custom_filter_editor_click_switches_filter_tab() -> None:
 
 
 def test_custom_filter_editor_clicks_full_rendered_tab_but_not_separator() -> None:
-    translator = load_translator("en")
+    layout = _tab_layout(CHOICES, load_translator("en"), 0, (), width=80)
 
-    assert _filter_index_at(MouseEvent(0, 20, 1, True, 0), CHOICES, translator, 0, ()) == 1
-    assert _filter_index_at(MouseEvent(0, 16, 1, True, 0), CHOICES, translator, 0, ()) is None
+    assert _filter_index_at(MouseEvent(0, 20, 1, True, 0), layout) == 1
+    assert _filter_index_at(MouseEvent(0, 16, 1, True, 0), layout) is None
 
 
 def test_custom_filter_editor_renders_radio_marks_for_single_select() -> None:
