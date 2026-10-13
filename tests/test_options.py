@@ -195,6 +195,38 @@ def test_custom_probe_partition_default_does_not_overwrite_explicit_grouping() -
     assert resolved.partition_by == "provider"
 
 
+def test_absent_probe_defaults_preserve_valid_current_partition_and_grouping() -> None:
+    text = LocalizedText("Router", "路由")
+    descriptor = CustomProbeDescriptor(
+        "router-1",
+        "1.0",
+        CustomDataset(text, text, CustomUnit("token", text, "suffix", 0)),
+        CustomCapabilities(
+            (),
+            (),
+            {
+                "ranking": CustomChartCapability(
+                    ("day",),
+                    (None, "logical_model", "real_model"),
+                    (),
+                    partition_by=(None, "logical_model"),
+                )
+            },
+        ),
+        {},
+        (),
+    )
+    initial = CustomChartConfig(
+        "ranking",
+        CustomCommandSource("router", ("router",)),
+        resolve_date_range("ranking", period="14d", since=None, until=None),
+        group_by="real_model",
+        partition_by="logical_model",
+    )
+
+    assert apply_custom_probe_defaults(initial, descriptor, timezone="UTC") == initial
+
+
 def test_required_partition_capability_without_defaults_chooses_legal_pair() -> None:
     text = LocalizedText("Router", "路由")
     descriptor = CustomProbeDescriptor(
@@ -463,6 +495,37 @@ def test_custom_ranking_partition_cli_and_command_round_trip() -> None:
     assert "--partition-by logical_model --group-by real_model --top 3" in format_command(launch)
     reparsed = _to_options(parser.parse_args(shlex.split(format_full_command(launch))[1:]))
     assert reparsed.chart.partition_by == "logical_model"
+
+
+def test_standalone_command_copy_outputs_and_round_trips_custom_partition() -> None:
+    parser = build_parser(load_translator("en"))
+    launch = _to_options(
+        parser.parse_args(
+            [
+                "chart",
+                "ranking",
+                "--dataset",
+                "router",
+                "--metric",
+                "tokens",
+                "--partition-by",
+                "logical_model",
+                "--group-by",
+                "real_model",
+                "--top",
+                "3",
+            ]
+        )
+    )
+
+    concise = format_command(launch)
+    full = format_full_command(launch)
+    copied = _to_options(parser.parse_args(shlex.split(full)[1:]))
+
+    assert "--partition-by logical_model --group-by real_model" in concise
+    assert "--partition-by logical_model --group-by real_model" in full
+    assert isinstance(copied.chart, CustomChartConfig)
+    assert (copied.chart.partition_by, copied.chart.group_by) == ("logical_model", "real_model")
 
 
 def test_custom_partition_cli_rejects_invalid_combinations() -> None:

@@ -111,14 +111,23 @@ def normalize_switch_config(
                     if choice in partition_choices
                 )
             )
-        preferred_group = defaults.group_by if defaults is not None else None
+        preferred_group = (
+            defaults.group_by
+            if defaults is not None
+            and defaults.group_by is not None
+            and (not defaults.declared or "group_by" in defaults.declared)
+            else None
+        )
         for partition_by in partition_candidates:
+            group_candidates = (
+                *((preferred_group,) if preferred_group is not None else ()),
+                config.group_by,
+                *capability.group_by,
+            )
             group_by = next(
                 (
                     choice
-                    for choice in dict.fromkeys(
-                        (preferred_group, config.group_by, *capability.group_by)
-                    )
+                    for choice in dict.fromkeys(group_candidates)
                     if choice in capability.group_by
                     and (partition_by is None or choice != partition_by)
                     and (partition_by is None or choice is not None)

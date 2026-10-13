@@ -88,33 +88,41 @@ def apply_custom_probe_defaults(
     else:
         preferred_partition = (
             defaults.partition_by
-            if defaults is not None and _declared(defaults, "partition_by")
+            if defaults is not None
+            and defaults.partition_by is not None
+            and _declared(defaults, "partition_by")
             else None
         )
+        partition_preferences = (
+            *((preferred_partition,) if preferred_partition is not None else ()),
+            config.partition_by,
+            *partition_choices,
+        )
         partition_candidates = tuple(
-            dict.fromkeys(
-                choice
-                for choice in (preferred_partition, config.partition_by, *partition_choices)
-                if choice in partition_choices
-            )
+            dict.fromkeys(choice for choice in partition_preferences if choice in partition_choices)
         )
     if "group_by" in explicit:
         group_candidates = (config.group_by,)
     else:
         preferred_group = (
             defaults.group_by
-            if defaults is not None and _declared(defaults, "group_by")
+            if defaults is not None
+            and defaults.group_by is not None
+            and _declared(defaults, "group_by")
             else None
         )
-        fallback_groups = capability.group_by if any(
-            choice is not None for choice in partition_candidates
-        ) else ()
+        fallback_groups = (
+            capability.group_by
+            if any(choice is not None for choice in partition_candidates)
+            else ()
+        )
+        group_preferences = (
+            *((preferred_group,) if preferred_group is not None else ()),
+            config.group_by,
+            *fallback_groups,
+        )
         group_candidates = tuple(
-            dict.fromkeys(
-                choice
-                for choice in (preferred_group, config.group_by, *fallback_groups)
-                if choice in capability.group_by
-            )
+            dict.fromkeys(choice for choice in group_preferences if choice in capability.group_by)
         )
     partition_by, group_by = next(
         (

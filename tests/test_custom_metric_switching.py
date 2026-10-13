@@ -253,6 +253,54 @@ def test_switch_to_optional_partition_without_default_clears_active_partition_on
     assert intent.payload.to_wire()["query"]["partition_by"] is None
 
 
+def test_group_normalization_ignores_absent_null_default_and_preserves_legal_group() -> None:
+    target = V2MetricDescriptor(
+        "updated_days",
+        TEXT,
+        TEXT,
+        UNIT,
+        "sum",
+        V2MetricCapabilities(
+            (),
+            (),
+            {"ranking": capability(group_by=(None, "real_model"), partition_by=None)},
+        ),
+        {},
+        group_id="github",
+    )
+
+    assert normalize_switch_config(config(group_by="real_model"), target, "group_by") is None
+
+
+def test_declared_non_null_group_default_precedes_current_legal_group() -> None:
+    target = V2MetricDescriptor(
+        "updated_days",
+        TEXT,
+        TEXT,
+        UNIT,
+        "sum",
+        V2MetricCapabilities(
+            (),
+            (),
+            {"ranking": capability(group_by=(None, "real_model", "provider"))},
+        ),
+        {
+            "ranking": CustomChartDefaults(
+                None,
+                "provider",
+                None,
+                declared=frozenset({"group_by"}),
+            )
+        },
+        group_id="github",
+    )
+
+    normalized = normalize_switch_config(config(group_by="real_model"), target, "group_by")
+
+    assert normalized is not None
+    assert normalized.group_by == "provider"
+
+
 def test_required_partition_without_defaults_chooses_first_legal_pair() -> None:
     target = V2MetricDescriptor(
         "updated_days",

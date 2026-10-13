@@ -414,6 +414,28 @@ def test_native_dashboard_timeline_keeps_audit_adjacent_to_x_axis(
         assert frame[tick_row + 1].startswith("+")
 
 
+def test_full_dashboard_command_copies_and_round_trips_custom_partition() -> None:
+    parser = build_parser(load_translator("en"))
+    dashboard = _to_options(
+        parser.parse_args(
+            [
+                "dashboard",
+                "--pane",
+                "chart ranking --dataset router --metric tokens --partition-by logical_model --group-by real_model --top 3",
+            ]
+        )
+    )
+
+    command = format_full_dashboard_command(dashboard)
+    copied = _to_options(parser.parse_args(shlex.split(command)[1:]))
+
+    fragment = shlex.split(command)[shlex.split(command).index("--pane") + 1]
+    assert "--partition-by logical_model --group-by real_model" in fragment
+    pane = copied.panes[0]
+    assert isinstance(pane, tui_module.CustomChartPaneConfig)
+    assert (pane.chart.partition_by, pane.chart.group_by) == ("logical_model", "real_model")
+
+
 def test_dashboard_command_copy_preserves_custom_legend() -> None:
     parser = build_parser(load_translator("en"))
     dashboard = _to_options(

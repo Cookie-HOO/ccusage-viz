@@ -550,6 +550,11 @@ def _chart_kind(namespace: argparse.Namespace) -> str:
 
 def _chart_from_namespace(namespace: argparse.Namespace, *, timezone: str | None = None):
     command = _chart_kind(namespace)
+    if getattr(namespace, "partition_by", None) is not None:
+        raise UsageError(
+            "error.arguments",
+            detail="--partition-by requires a custom chart selected with --dataset",
+        )
     filters = Filters(
         tuple(namespace.agent), tuple(namespace.model), tuple(getattr(namespace, "project", ()))
     )

@@ -758,6 +758,27 @@ def test_command_requires_a_dataset_source() -> None:
     assert caught.value.key == "error.arguments"
 
 
+@pytest.mark.parametrize(
+    ("arguments", "error_key"),
+    (
+        (["chart", "ranking", "--partition-by", "logical_model"], "error.arguments"),
+        (
+            ["dashboard", "--pane", "ranking --partition-by logical_model"],
+            "error.tui_panel",
+        ),
+    ),
+)
+def test_builtin_charts_reject_partition_by_without_dataset(
+    arguments: list[str], error_key: str
+) -> None:
+    parser = build_parser(load_translator("en"))
+
+    with pytest.raises(UsageError) as caught:
+        _to_options(parser.parse_args(arguments), explicit=_explicit_fields(arguments))
+
+    assert caught.value.key == error_key
+
+
 def test_custom_ranking_rejects_an_explicit_top_without_grouping() -> None:
     parser = build_parser(load_translator("en"))
     namespace = parser.parse_args(
