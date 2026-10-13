@@ -24,6 +24,7 @@ from ccusage_viz.render.ranking_presentation import (
 from ccusage_viz.render.ranking_viewport import RankingColumns, ranking_separator
 from ccusage_viz.render.summary import format_custom_value
 from ccusage_viz.scrollbar import Scrollbar
+from ccusage_viz.trends import trend_glyph
 
 GroupedIdentity = tuple[Literal["group"], str] | tuple[Literal["series"], str, str]
 GroupedRowKind = Literal[
@@ -74,6 +75,11 @@ class GroupedRankingViewport:
     by_id: dict[GroupedIdentity, object] = field(default_factory=dict)
     hits: dict[int, tuple[GroupedIdentity, int, int | None]] = field(default_factory=dict)
     columns: RankingColumns = field(default_factory=RankingColumns)
+    comparison_visible: bool = False
+    percentage_visible: bool = False
+    entry_percentage_visible: bool = False
+    entry_pending: bool = False
+    rank_comparison_visible: bool = False
     _geometry_cache: dict[object, _GroupedRankingGeometry] = field(
         default_factory=dict, init=False, repr=False
     )
@@ -136,6 +142,9 @@ class GroupedRankingViewport:
         self.group_headings = ()
         self.groups = self.visible_groups = ()
         self.columns = RankingColumns()
+        self.comparison_visible = self.percentage_visible = self.entry_percentage_visible = (
+            self.entry_pending
+        ) = self.rank_comparison_visible = False
         self.by_id.clear()
         self.hits.clear()
         self._groups_by_id = MappingProxyType({})
@@ -146,53 +155,147 @@ class GroupedRankingViewport:
             pair = next((pair for pair in self.visible_groups if pair[0].id == identity[1]), None)
             if pair is None:
                 return ""
-            return _grouped_ranking_group_clipboard_text(*pair)
+            return _grouped_ranking_group_clipboard_text(
+                *pair,
+                comparison_visible=self.comparison_visible,
+                rank_comparison_visible=self.rank_comparison_visible,
+                percentage_visible=self.percentage_visible,
+                entry_percentage_visible=self.entry_percentage_visible,
+                entry_pending=self.entry_pending,
+            )
         group = next((group for group in self.groups if group.id == identity[1]), None)
         entry = cast(RankingPresentationEntry | None, self.by_id.get(identity))
         if group is None or entry is None:
             return ""
-        return _grouped_ranking_series_clipboard_text(group.label, entry)
+        return _grouped_ranking_series_clipboard_text(
+            group.label,
+            entry,
+            comparison_visible=self.comparison_visible,
+            rank_comparison_visible=self.rank_comparison_visible,
+            percentage_visible=self.entry_percentage_visible,
+            pending=self.entry_pending,
+            total=group.total,
+        )
 
     def clipboard_all_text(self) -> str:
-        return _grouped_ranking_clipboard_all_text(self.visible_groups)
-
-
-def _entry_text(entry: RankingPresentationEntry) -> str:
-    return "\n".join(
-        part
-        for part in (
-            entry.label,
-            copyable_description_text(entry.description or ""),
-            entry.project_link,
+        return _grouped_ranking_clipboard_all_text(
+            self.visible_groups,
+            comparison_visible=self.comparison_visible,
+            rank_comparison_visible=self.rank_comparison_visible,
+            percentage_visible=self.percentage_visible,
+            entry_percentage_visible=self.entry_percentage_visible,
+            entry_pending=self.entry_pending,
         )
-        if part
-    )
+
+
+def _share_text(share: Decimal | None) -> str:
+    """Return a display-equivalent percentage without terminal column padding."""
+    return f"{share:.1%}" if share is not None else ""
+
+
+def _entry_text(
+    entry: RankingPresentationEntry,
+    *,
+    comparison_visible: bool,
+    rank_comparison_visible: bool,
+    percentage_visible: bool,
+    pending: bool,
+    total: Decimal,
+) -> str:
+    parts = [entry.label, "??" if pending else entry.display or ""]
+    if comparison_visible:
+        parts.append(entry.comparison_display or "")
+    if rank_comparison_visible and entry.comparison_ready and entry.previous is not None:
+        rank_delta = (entry.previous_rank or 1) - (entry.rank or 1)
+        parts.append("·" if rank_delta == 0 else trend_glyph(rank_delta, ascii=False))
+    if percentage_visible and total:
+        parts.append(_share_text(Decimal(entry.current) / total))
+    parts.extend((copyable_description_text(entry.description or ""), entry.project_link or ""))
+    return "\n".join(part for part in parts if part)
 
 
 def _grouped_ranking_series_clipboard_text(
-    group_label: str, entry: RankingPresentationEntry
+    group_label: str,
+    entry: RankingPresentationEntry,
+    *,
+    comparison_visible: bool,
+    rank_comparison_visible: bool,
+    percentage_visible: bool,
+    pending: bool,
+    total: Decimal,
 ) -> str:
-    return f"{group_label}\n{_entry_text(entry)}"
+    return "\n".join(
+        (
+            group_label,
+            _entry_text(
+                entry,
+                comparison_visible=comparison_visible,
+                rank_comparison_visible=rank_comparison_visible,
+                percentage_visible=percentage_visible,
+                pending=pending,
+                total=total,
+            ),
+        )
+    )
 
 
 def _grouped_ranking_group_clipboard_text(
-    group: GroupedRankingPresentationGroup, entries: tuple[RankingPresentationEntry, ...]
+    group: GroupedRankingPresentationGroup,
+    entries: tuple[RankingPresentationEntry, ...],
+    *,
+    comparison_visible: bool,
+    rank_comparison_visible: bool,
+    percentage_visible: bool,
+    entry_percentage_visible: bool,
+    entry_pending: bool,
 ) -> str:
-    heading = "\n".join(
-        part
-        for part in (group.label, copyable_description_text(group.description or ""), group.link)
-        if part
+    heading_parts = [group.label, group.display]
+    if comparison_visible:
+        heading_parts.append(group.comparison_display)
+    if percentage_visible:
+        heading_parts.append(_share_text(group.share))
+    heading_parts.extend((copyable_description_text(group.description or ""), group.link or ""))
+    heading = "\n".join(part for part in heading_parts if part)
+    return "\n\n".join(
+        (
+            heading,
+            *(
+                _entry_text(
+                    entry,
+                    comparison_visible=comparison_visible,
+                    rank_comparison_visible=rank_comparison_visible,
+                    percentage_visible=entry_percentage_visible,
+                    pending=entry_pending,
+                    total=group.total,
+                )
+                for entry in entries
+            ),
+        )
     )
-    return "\n\n".join((heading, *(_entry_text(entry) for entry in entries)))
 
 
 def _grouped_ranking_clipboard_all_text(
     groups: tuple[
         tuple[GroupedRankingPresentationGroup, tuple[RankingPresentationEntry, ...]], ...
     ],
+    *,
+    comparison_visible: bool,
+    rank_comparison_visible: bool,
+    percentage_visible: bool,
+    entry_percentage_visible: bool,
+    entry_pending: bool,
 ) -> str:
     return "\n\n".join(
-        _grouped_ranking_group_clipboard_text(group, entries) for group, entries in groups
+        _grouped_ranking_group_clipboard_text(
+            group,
+            entries,
+            comparison_visible=comparison_visible,
+            rank_comparison_visible=rank_comparison_visible,
+            percentage_visible=percentage_visible,
+            entry_percentage_visible=entry_percentage_visible,
+            entry_pending=entry_pending,
+        )
+        for group, entries in groups
     )
 
 
@@ -328,6 +431,21 @@ def render_grouped_custom_ranking_viewport(
     visible = viewport.visible_groups
     prepared = viewport.groups
     comparison_visible = _comparison_visible(projection, context, comparison)
+    # The item renderer emits a value delta only in full comparison mode. List
+    # rows have neither comparison nor share columns, regardless of width.
+    viewport.comparison_visible = (
+        comparison_visible and comparison == "full" and context.style != "list"
+    )
+    viewport.rank_comparison_visible = (
+        comparison_visible
+        and comparison == "rank"
+        and context.style != "list"
+        and context.density == "detailed"
+        and context.width >= 75
+    )
+    viewport.percentage_visible = projection.show_percentage and context.style != "list"
+    viewport.entry_percentage_visible = viewport.percentage_visible and not context.pending
+    viewport.entry_pending = context.pending
     total_entry_count = max((len(group.entries) for group in prepared), default=0)
 
     def value(number: int | Decimal) -> str:
@@ -383,6 +501,7 @@ def render_grouped_custom_ranking_viewport(
             value_formatter=value,
             delta_formatter=lambda number: f"{'+' if number > 0 else '-'}{value(abs(number))}",
             context=context,
+            pending=context.pending,
             total=group.total,
             maximum=group.maximum,
             descriptions_visible=descriptions_visible,

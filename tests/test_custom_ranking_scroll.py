@@ -179,6 +179,27 @@ def grouped_projection() -> CustomChartProjection:
     return replace(model, groups=groups, series=())
 
 
+def grouped_projection_with_visible_comparisons() -> CustomChartProjection:
+    model = grouped_projection()
+    groups = tuple(
+        replace(
+            group,
+            series=tuple(
+                replace(
+                    series,
+                    previous_total=series.total - Decimal(10),
+                    comparison_ready=True,
+                )
+                for series in group.series
+            ),
+            previous_total=group.total - Decimal(20),
+            comparison_ready=True,
+        )
+        for group in model.groups or ()
+    )
+    return replace(model, groups=groups, comparison_available=True)
+
+
 def render_grouped(
     model: CustomChartProjection,
     viewport: GroupedRankingViewport,
@@ -266,6 +287,53 @@ def test_grouped_identity_scrollbar_and_copy_payloads() -> None:
     assert viewport.clipboard_text(("series", "coding", "shared")).startswith("Coding Model\nSeed")
 
 
+def test_grouped_copy_payloads_include_rendered_numeric_fields() -> None:
+    model = grouped_projection_with_visible_comparisons()
+    viewport = GroupedRankingViewport()
+    render_grouped(
+        model,
+        viewport,
+        context(width=90, density="detailed", period="7d"),
+        copy_all_action=True,
+    )
+
+    assert viewport.clipboard_text(("series", "coding", "shared")) == (
+        "Coding Model\nSeed\n70 items\n+10 items\n70.0%\n"
+        "Details for Seed\nhttps://example.com/coding/shared"
+    )
+    assert viewport.clipboard_text(("group", "coding")) == (
+        "Coding Model\n100 items\n+20 items\n83.3%\n"
+        "About Coding Model\nhttps://example.com/coding\n\n"
+        "Seed\n70 items\n+10 items\n70.0%\n"
+        "Details for Seed\nhttps://example.com/coding/shared\n\n"
+        "Sonnet\n30 items\n+10 items\n30.0%\n"
+        "Details for Sonnet\nhttps://example.com/coding/sonnet"
+    )
+    assert viewport.clipboard_all_text().startswith(viewport.clipboard_text(("group", "coding")))
+
+    render_grouped(model, viewport, context(width=40, density="detailed", period="7d"))
+    copied = viewport.clipboard_all_text()
+    assert "+10 items" not in copied
+    assert "70.0%" in copied
+
+    list_context = replace(context(width=90, density="detailed", period="7d"), style="list")
+    render_grouped(model, viewport, list_context)
+    assert "+10 items" not in viewport.clipboard_all_text()
+    assert "%" not in viewport.clipboard_all_text()
+
+    rank_config = replace(model.config, ranking_comparison="rank")
+    render_grouped(model, viewport, context(width=90, density="detailed", period="7d"))
+    render_grouped(replace(model, config=rank_config), viewport, context(width=90, density="detailed", period="7d"))
+    rank_copied = viewport.clipboard_all_text()
+    assert "+10 items" not in rank_copied
+    assert "·" in rank_copied
+
+    render_grouped(model, viewport, context(width=90, density="detailed", period="7d", pending=True))
+    pending = viewport.clipboard_text(("series", "coding", "shared"))
+    assert "??" in pending
+    assert "70.0%" not in pending
+
+
 def test_grouped_list_has_no_copy_or_comparison_affordances() -> None:
     viewport = GroupedRankingViewport()
     model = grouped_projection()
@@ -307,33 +375,50 @@ def test_grouped_copy_all_preserves_empty_groups_and_visible_other_exactly() -> 
     render_grouped(model, viewport)
     assert viewport.clipboard_all_text() == (
         "Empty Unmatched Group\n"
+        "0 items\n"
+        "0.0%\n"
         "About Empty Unmatched Group\n"
         "https://example.com/empty\n\n"
         "Coding Model\n"
+        "100 items\n"
+        "83.3%\n"
         "About Coding Model\n"
         "https://example.com/coding\n\n"
         "Seed\n"
+        "70 items\n"
+        "70.0%\n"
         "Details for Seed\n"
         "https://example.com/coding/shared\n\n"
         "Sonnet\n"
+        "30 items\n"
+        "30.0%\n"
         "Details for Sonnet\n"
         "https://example.com/coding/sonnet\n\n"
         "General Model\n"
+        "20 items\n"
+        "16.7%\n"
         "About General Model\n"
         "https://example.com/general\n\n"
-        "Other"
+        "Other\n"
+        "70 items\n"
+        "350.0%"
     )
     assert viewport.clipboard_text(("group", "general")) == (
-        "General Model\nAbout General Model\nhttps://example.com/general\n\nOther"
+        "General Model\n20 items\n16.7%\n"
+        "About General Model\nhttps://example.com/general\n\nOther\n70 items\n350.0%"
     )
     assert viewport.clipboard_text(("series", "general", "other")) == ""
 
     render_grouped(model, viewport, search="Seed")
     assert viewport.clipboard_all_text() == (
         "Coding Model\n"
+        "100 items\n"
+        "83.3%\n"
         "About Coding Model\n"
         "https://example.com/coding\n\n"
         "Seed\n"
+        "70 items\n"
+        "70.0%\n"
         "Details for Seed\n"
         "https://example.com/coding/shared"
     )
@@ -535,7 +620,7 @@ def test_grouped_empty_only_has_copy_all_action_and_exact_heading_payload() -> N
     assert "0 item(s) total | ⊞" in output
     assert viewport.copy_all_hit is not None
     assert viewport.clipboard_all_text() == (
-        "Empty Unmatched Group\nAbout Empty Unmatched Group\nhttps://example.com/empty"
+        "Empty Unmatched Group\n0 items\nAbout Empty Unmatched Group\nhttps://example.com/empty"
     )
 
 
@@ -611,7 +696,8 @@ def test_grouped_other_only_has_copy_all_payload_but_no_individual_hit() -> None
     assert viewport.copy_all_hit is not None
     assert all(hit[0] != ("series", "coding", "other") for hit in viewport.hits.values())
     assert viewport.clipboard_all_text() == (
-        "Coding Model\nAbout Coding Model\nhttps://example.com/coding\n\nOther"
+        "Coding Model\n100 items\n100.0%\nAbout Coding Model\n"
+        "https://example.com/coding\n\nOther\n70 items\n70.0%"
     )
 
     searched = strip_ansi(render_grouped(model, viewport, search="Other", copy_all_action=True))
@@ -749,9 +835,16 @@ def test_grouped_top_series_description_keeps_its_series_on_source_change() -> N
     assert (top.group_id, top.series_id) == ("coding", "shared")
 
 
-def context(*, height=12, width=100, density="normal", color=False):
+def context(*, height=12, width=100, density="normal", color=False, period=None, pending=False):
     return RenderContext(
-        width, height, load_translator("en"), density=density, style="dot", color=color
+        width,
+        height,
+        load_translator("en"),
+        density=density,
+        style="dot",
+        color=color,
+        period=period,
+        pending=pending,
     )
 
 
