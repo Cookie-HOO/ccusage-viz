@@ -1,5 +1,8 @@
+import pytest
+
 from ccusage_viz.custom_filter_draft import (
     CustomFilterDraft,
+    _custom_filter_controls,
     _filter_index_at,
     _matching_options,
     _render_custom_filter_draft,
@@ -8,7 +11,7 @@ from ccusage_viz.custom_filter_draft import (
     run_custom_filter_editor,
 )
 from ccusage_viz.custom_models import CustomFilter, CustomFilterOption, LocalizedText
-from ccusage_viz.formatting import strip_ansi
+from ccusage_viz.formatting import display_width, strip_ansi
 from ccusage_viz.i18n import load_translator
 from ccusage_viz.tui_input import KeyEvent, MouseEvent
 
@@ -36,6 +39,43 @@ WRAPPED_CHOICES = (
         (CustomFilterOption("novel", LocalizedText("Novel", "小说")),),
     ),
 )
+
+
+def test_custom_filter_controls_full_line() -> None:
+    translator = load_translator("en")
+
+    controls = _custom_filter_controls(translator, 200)
+
+    assert controls == (
+        "h Help · ←/→ switch filter · ↑/↓ or j/k select · / search · Space toggle · "
+        "c clear current · C columns · Enter apply · Esc cancel"
+    )
+
+
+@pytest.mark.parametrize(
+    ("language", "left", "right"),
+    (
+        ("en", "h Help · ←/→ switch filter", "Enter apply · Esc cancel"),
+        ("zh", "h 帮助 · ←/→ 切换筛选", "Enter 应用 · Esc 取消"),
+    ),
+)
+def test_custom_filter_controls_preserve_ends_without_wrapping(
+    language: str, left: str, right: str
+) -> None:
+    controls = _custom_filter_controls(load_translator(language), 58)
+
+    assert controls.startswith(left)
+    assert controls.endswith(right)
+    assert controls.count("…") == 1
+    assert "\n" not in controls
+    assert display_width(controls) <= 58
+
+
+def test_custom_filter_controls_very_narrow_fallback_is_one_bounded_line() -> None:
+    controls = _custom_filter_controls(load_translator("zh"), 12)
+
+    assert "\n" not in controls
+    assert display_width(controls) <= 12
 
 
 def test_custom_filter_tabs_wrap_without_splitting_and_share_mouse_geometry() -> None:

@@ -6,7 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 
 from ccusage_viz.custom_models import CustomFilter, CustomFilterOption
-from ccusage_viz.formatting import clip_width, display_width, pad_width
+from ccusage_viz.formatting import clip_width, display_width, pad_width, truncate_middle_width
 from ccusage_viz.i18n import Translator
 from ccusage_viz.options import CustomFilters
 from ccusage_viz.render.base import styled_text
@@ -129,7 +129,7 @@ def run_custom_filter_editor(
                 color=color,
                 color_scheme=color_scheme,
             ),
-            translator.text("status.custom_filter_controls"),
+            _custom_filter_controls(translator, width),
         )
         event = read_key()
         if isinstance(event, MouseEvent):
@@ -201,6 +201,26 @@ def run_custom_filter_editor(
             if current is not None and options:
                 option = options[draft.option_index % len(options)]
                 draft = draft.toggle(current, option.id)
+
+
+def _custom_filter_controls(
+    translator: Translator, width: int, *, help_visible: bool = False
+) -> str:
+    """Return one display-width-bounded row of Custom filter controls."""
+    if help_visible:
+        return clip_width(translator.text("status.custom_filter_help_back"), width)
+
+    left = translator.text("status.custom_filter_controls_left")
+    middle = translator.text("status.custom_filter_controls_middle")
+    right = translator.text("status.custom_filter_controls_right")
+    full = " · ".join((left, middle, right))
+    if display_width(full) <= width:
+        return full
+
+    compact = f"{left} · … · {right}"
+    if display_width(compact) <= width:
+        return compact
+    return truncate_middle_width(f"{left} · {right}", width)
 
 
 def _localized(value: object, translator: Translator) -> str:
