@@ -1667,6 +1667,38 @@ def test_v2_ranking_source_limit_is_a_pane_local_notice() -> None:
     assert tui_module._custom_top_limit_notice(pane, load_translator("en")) == ()
 
 
+@pytest.mark.parametrize("step", (1, -1))
+@pytest.mark.parametrize("top", (None, 6))
+def test_custom_historical_grouping_cycles_preserve_top(step, top) -> None:
+    chart = CustomChartConfig(
+        "timeline",
+        CustomCommandSource("reading", ("reader", "ccuv")),
+        DateRange(date(2026, 10, 1), date(2026, 10, 8)),
+        group_by=None,
+        top=top,
+    )
+
+    updated = tui_module._cycle_custom_grouping(chart, (None, "book"), step=step)
+
+    assert updated.group_by == "book"
+    assert updated.top == top
+
+
+@pytest.mark.parametrize("top", (None, 6))
+def test_custom_monitor_grouping_cycles_preserve_top(top) -> None:
+    chart = CustomChartConfig(
+        "monitor",
+        CustomCommandSource("router", ("router", "ccuv")),
+        DateRange(date(2026, 10, 1), date(2026, 10, 8)),
+        group_by=None,
+        top=top,
+    )
+
+    updated = tui_module._cycle_custom_grouping(chart, (None, "model"))
+
+    assert (updated.group_by, updated.top) == ("model", top)
+
+
 def test_custom_monitor_grouping_cycles_from_total_in_declared_order() -> None:
     component = _custom_monitor_component(grouped=False)
     capability = tui_module._custom_capability_for_component(component)

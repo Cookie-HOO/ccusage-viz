@@ -2787,7 +2787,7 @@ def _cycle_custom_grouping(
     if group_by == config.group_by:
         return config
     if config.kind == "monitor":
-        return replace(config, group_by=group_by, top=(config.top or 3) if group_by else None)
+        return replace(config, group_by=group_by, top=config.top)
     presentation = config.presentation
     styles = compatible_styles(config.kind, group_by)
     if presentation.style not in styles:
@@ -2795,7 +2795,7 @@ def _cycle_custom_grouping(
     return replace(
         config,
         group_by=group_by,
-        top=(config.top or 3) if group_by else None,
+        top=config.top,
         presentation=presentation,
     )
 
