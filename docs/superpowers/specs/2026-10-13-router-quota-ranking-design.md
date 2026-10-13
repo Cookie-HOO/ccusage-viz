@@ -19,8 +19,10 @@ metric:
 Quota Remaining
 ```
 
-It supports only the Custom Monitor `ranking` presentation. The ranking has one
-row per quota pool, sorted by the normal descending numeric ranking behavior.
+Its default entrypoint is Custom Monitor with `ranking` presentation. It also
+supports the Custom historical `ranking` chart, restricted to `period: "all"`.
+Both rankings have one row per quota pool, sorted by the normal descending
+numeric ranking behavior.
 
 Example:
 
@@ -46,13 +48,22 @@ Title: Quota Remaining / 剩余额度
 Unit: percent
 Aggregation: value
 Summary: none
-Chart capability: ranking only
+Monitor chart capability: ranking presentation only
+Historical chart capability: ranking only; periods: [all]
 Grouping: quota_pool only
 Monitor refresh interval: 20 seconds
+Monitor default style: ranking
 ```
 
 `value` means the Dataset owns the exact current quota snapshot. ccusage-viz
 must neither add snapshots over time nor permit cumulative-bar presentation.
+
+A historical Ranking request is a current-state projection, not quota history.
+The Dataset accepts only `period: "all"`, ignores the date range for provider
+lookup, and returns one point for every pool at `range.end_date`. It must reject
+all other periods with `unsupported_query` naming `range.period`. This lets a
+user open a normal ranking view while preventing an arbitrary date range from
+being misrepresented as historical quota data.
 
 The metric description states that it is a provider quota snapshot and that a
 model list identifies models attached to the pool; it must not claim models
@@ -114,7 +125,8 @@ per-model balance and it does not affect numeric grouping or ordering.
 
 ## Monitor Entry Description Protocol
 
-The `ccuv.custom/v2` Monitor observation group is extended additively from:
+The concurrent ccusage-viz Monitor-ranking description work defines an
+additive `ccuv.custom/v2` Monitor observation group extension from:
 
 ```json
 {"id":"basic","label":{"en":"basic","zh-CN":"basic"},"value":"69.2"}
@@ -139,13 +151,15 @@ remain valid and visually unchanged. Empty text is treated as absent. The
 protocol parser rejects malformed localized descriptions rather than dropping
 them silently.
 
-ccusage-viz carries the optional description from the Monitor observation group
-through the custom Monitor ranking projection. It renders it directly below the
-corresponding ranking row using the existing muted ranking-description style.
-The normal ranking presentation rules apply: no terminal escape interpretation,
-wrapping constrained by available width, and no description on synthetic rows.
-The description does not render in Monitor `list`, timeline, bars, or
-cumulative-bars because the quota metric declares ranking only.
+ccusage-viz owns parsing and rendering this optional Monitor entry description;
+this quota work does not modify that repository. The Dataset emits the field
+according to that existing contract. The normal ranking presentation rules
+apply: no terminal escape interpretation, wrapping constrained by available
+width, and no description on synthetic rows.
+
+For historical `ranking`, the Dataset uses the existing `data.series[]`
+structure: each pool has exactly one `points` entry at `range.end_date`, and
+uses the existing optional series `description` field for the same model list.
 
 ## Boundaries
 
@@ -154,7 +168,8 @@ cumulative-bars because the quota metric declares ranking only.
 - `ccuv-router-dataset` adapts Router's normalized quota snapshot to the V2
   Monitor response. It does not call provider endpoints directly.
 - ccusage-viz owns generic Monitor group-description parsing and ranking
-  presentation. It does not contain Trae-specific pool or model rules.
+  presentation through separate work. This feature only emits the established
+  wire fields and does not change that repository.
 - Provider-observed request/error/token counters are excluded. They have no
   stable period/reset semantics and are not needed for the quota user story.
 - Existing Router Runtime metrics remain separate operational signals.
@@ -208,11 +223,12 @@ Dataset tests cover:
 - the quota metric declares a 20-second refresh while Router Runtime metrics
   retain their 10-second refresh.
 
-ccusage-viz tests cover:
+Dataset tests also cover:
 
-- valid and omitted Monitor group descriptions;
-- malformed group descriptions fail protocol parsing;
-- descriptions survive Custom Monitor ranking projection;
-- ranking renders the description beneath the matching row;
-- non-ranking Custom Monitor views do not render descriptions;
-- existing description-free Monitor rendering remains unchanged.
+- Monitor defaults select `ranking`, declare a 20-second refresh, and permit no
+  other Monitor presentation capability;
+- historical ranking accepts only `period: "all"` and returns one pool series
+  point at `range.end_date`;
+- any other historical ranking period returns `unsupported_query` for
+  `range.period`;
+- historical ranking series use the same one-line model-list description.
