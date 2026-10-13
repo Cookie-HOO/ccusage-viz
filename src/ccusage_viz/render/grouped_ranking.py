@@ -12,6 +12,10 @@ from ccusage_viz.processing.custom_historical import (
     CustomChartProjection,
     CustomProjectedRankingGroup,
 )
+from ccusage_viz.processing.custom_ranking import (
+    CustomProjectedScalarRankingGroup,
+    CustomRankingProjection,
+)
 from ccusage_viz.render.base import RenderContext
 from ccusage_viz.render.custom_ranking_preparation import prepare_custom_ranking
 from ccusage_viz.render.ranking_presentation import (
@@ -22,6 +26,9 @@ from ccusage_viz.render.ranking_presentation import (
 )
 from ccusage_viz.render.ranking_viewport import RankingColumns
 from ccusage_viz.render.summary import format_custom_value
+
+RankingProjection = CustomChartProjection | CustomRankingProjection
+RankingGroup = CustomProjectedRankingGroup | CustomProjectedScalarRankingGroup
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,13 +51,13 @@ def _localized(value: LocalizedText, context: RenderContext) -> str:
     return value.zh_cn if context.translator.language == "zh" else value.en
 
 
-def _value(value: Decimal, projection: CustomChartProjection, context: RenderContext) -> str:
+def _value(value: Decimal, projection: RankingProjection, context: RenderContext) -> str:
     return format_custom_value(value, projection.unit, language=context.translator.language)
 
 
 def _prepare_group(
-    group: CustomProjectedRankingGroup,
-    projection: CustomChartProjection,
+    group: RankingGroup,
+    projection: RankingProjection,
     context: RenderContext,
     *,
     global_total: Decimal,
@@ -66,11 +73,7 @@ def _prepare_group(
         else _value(group.total, projection, context)
     )
     comparison_display = ""
-    if (
-        not context.pending
-        and context.period != "all"
-        and projection.comparison_available
-    ):
+    if not context.pending and context.period != "all" and projection.comparison_available:
         if not group.comparison_ready:
             comparison_display = context.translator.text("label.ranking_new")
         elif group.previous_total is not None:
@@ -97,7 +100,7 @@ def _prepare_group(
 
 
 def render_grouped_custom_ranking(
-    projection: CustomChartProjection,
+    projection: RankingProjection,
     context: RenderContext,
     *,
     heading: str,

@@ -12,7 +12,7 @@ from ccusage_viz.custom_models import (
     V2MetricDescriptor,
     V2ProbeDescriptor,
 )
-from ccusage_viz.options import CustomChartConfig, resolve_date_range
+from ccusage_viz.options import CustomChartConfig, is_v2_custom_ranking, resolve_date_range
 
 SwitchNormalization = Literal["period", "partition_by", "group_by", "granularity", "filters", "top"]
 
@@ -48,7 +48,9 @@ def cycle_switch_metric(
     return candidates[(current_index + (1 if step >= 0 else -1)) % len(candidates)]
 
 
-def normalization_category(field: str) -> SwitchNormalization | None:
+def normalization_category(
+    field: str, *, config: CustomChartConfig | None = None
+) -> SwitchNormalization | None:
     """Map a Dataset unsupported field to its one switch-normalization category."""
 
     if field == "range.period":
@@ -58,7 +60,7 @@ def normalization_category(field: str) -> SwitchNormalization | None:
     if field == "query.group_by":
         return "group_by"
     if field == "query.granularity":
-        return "granularity"
+        return None if config is not None and is_v2_custom_ranking(config) else "granularity"
     if field == "query.top":
         return "top"
     if field == "query.filters" or field.startswith("query.filters."):
@@ -74,6 +76,8 @@ def normalize_switch_config(
     """Apply one target-Metric default, or return ``None`` when it cannot change config."""
 
     defaults = target.defaults.get(config.kind)
+    if category == "granularity" and is_v2_custom_ranking(config):
+        return None
     if category == "filters":
         filters = () if defaults is None else defaults.filters
         updated = config if filters == config.filters else replace(config, filters=filters)

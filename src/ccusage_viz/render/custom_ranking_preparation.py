@@ -10,6 +10,10 @@ from typing import cast
 from ccusage_viz.custom_models import LocalizedText
 from ccusage_viz.formatting import display_width, sanitize_terminal_text
 from ccusage_viz.processing.custom_historical import CustomChartProjection, CustomProjectedSeries
+from ccusage_viz.processing.custom_ranking import (
+    CustomProjectedRankingEntry,
+    CustomRankingProjection,
+)
 from ccusage_viz.render.base import RenderContext
 from ccusage_viz.render.ranking_presentation import (
     RankingPresentationEntry,
@@ -17,7 +21,9 @@ from ccusage_viz.render.ranking_presentation import (
 )
 from ccusage_viz.render.summary import format_custom_value
 
-CopyMarker = Callable[[CustomProjectedSeries], str | None]
+RankingEntry = CustomProjectedSeries | CustomProjectedRankingEntry
+RankingProjection = CustomChartProjection | CustomRankingProjection
+CopyMarker = Callable[[RankingEntry], str | None]
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,7 +38,7 @@ class PreparedCustomRanking:
 
 
 def prepare_custom_ranking(
-    projection: CustomChartProjection,
+    projection: RankingProjection,
     context: RenderContext,
     *,
     search_query: str = "",
@@ -48,7 +54,7 @@ def prepare_custom_ranking(
             Decimal(number), projection.unit, language=context.translator.language
         )
 
-    def prepare_entry(entry: CustomProjectedSeries, rank: int) -> RankingPresentationEntry:
+    def prepare_entry(entry: RankingEntry, rank: int) -> RankingPresentationEntry:
         display = (
             sanitize_terminal_text(localized(entry.display))
             if entry.display and not entry.is_other

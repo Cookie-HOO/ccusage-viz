@@ -26,6 +26,7 @@ from ccusage_viz.custom_models import (
     CustomProbeDescriptor,
     CustomProtocolFailure,
     CustomProtocolWarning,
+    CustomRankingEntry,
     CustomRankingGroup,
     CustomSeries,
     CustomSummary,
@@ -42,6 +43,8 @@ from ccusage_viz.custom_models import (
     V2MonitorCapability,
     V2MonitorObservation,
     V2ProbeDescriptor,
+    V2RankingData,
+    V2RankingGroup,
     V2Runtime,
 )
 
@@ -241,15 +244,17 @@ class V2ChartRequest:
         query: dict[str, object] = {
             "filters": {key: list(values) for key, values in self.filters},
             "group_by": self.group_by,
-            "granularity": self.granularity,
             "top": self.top,
         }
+        if self.chart_kind != "ranking":
+            query["granularity"] = self.granularity
         if self.partition_declared:
             query["partition_by"] = self.partition_by
         return {
             "protocol": V2_PROTOCOL_VERSION,
             "request_id": self.request_id,
             "request_kind": self.request_kind,
+            **({"chart_kind": self.chart_kind} if self.chart_kind is not None else {}),
             "dataset_id": self.dataset_id,
             "metric_id": self.metric_id,
             "timezone": self.timezone,
@@ -391,7 +396,7 @@ class V2ProbeResponse:
 @dataclass(frozen=True, slots=True)
 class V2ChartResponse:
     metric_id: str
-    data: CustomData
+    data: CustomData | V2RankingData
     descriptor: V2ProbeDescriptor
     runtime: V2Runtime
     warnings: tuple[CustomProtocolWarning, ...] = field(default=(), kw_only=True)
@@ -456,7 +461,11 @@ def canonical_custom_request_key(request: CustomRequest) -> tuple[object, ...]:
             request.period,
             request.filters,
             request.group_by,
-            request.granularity,
+            (
+                None
+                if isinstance(request, V2ChartRequest) and request.chart_kind == "ranking"
+                else request.granularity
+            ),
             request.top if isinstance(request, V2ChartRequest) else None,
             *(
                 (request.partition_declared, request.partition_by, request.chart_kind)
@@ -516,18 +525,18 @@ def parse_custom_response(raw: bytes, request: CustomRequest) -> CustomResponse:
         )
         if isinstance(ranking_capability, V2HistoricalChartCapability):
             _validate_ranking_request_partition(request, ranking_capability)
+        data = (
+            _parse_v2_ranking_data(
+                root.get("data"),
+                partitioned=request.partition_by is not None,
+                max_items=ranking_capability.max_items,
+            )
+            if isinstance(ranking_capability, V2HistoricalChartCapability)
+            else _parse_data(root.get("data"), descriptions_allowed=False)
+        )
         return V2ChartResponse(
             metric_id,
-            _parse_data(
-                root.get("data"),
-                descriptions_allowed=True,
-                partitioned=request.partition_by is not None,
-                max_items=(
-                    ranking_capability.max_items
-                    if isinstance(ranking_capability, V2HistoricalChartCapability)
-                    else None
-                ),
-            ),
+            data,
             descriptor,
             _parse_v2_runtime(root.get("runtime")),
             warnings=warnings,
@@ -1046,7 +1055,11 @@ def _parse_v2_capabilities(value: object) -> V2MetricCapabilities:
                     "v2 historical refresh_interval_seconds must be a positive integer"
                 )
             charts[kind] = V2HistoricalChartCapability(
-                _string_tuple(chart.get("granularities"), f"v2 chart {kind} granularities"),
+                (
+                    ()
+                    if kind == "ranking"
+                    else _string_tuple(chart.get("granularities"), f"v2 chart {kind} granularities")
+                ),
                 group_by,
                 (),
                 periods,
@@ -1140,7 +1153,7 @@ def _parse_v2_defaults(
         if not isinstance(top, int) or isinstance(top, bool) or top < 1:
             top = None
         granularity = raw.get("granularity")
-        if not isinstance(granularity, str):
+        if kind == "ranking" or not isinstance(granularity, str):
             granularity = None
         filters = _default_filters(raw.get("filters"))
         other = raw.get("other") if raw.get("other") in {"show", "hide"} else None
@@ -1298,7 +1311,9 @@ def v2_probe_descriptor_to_wire(descriptor: V2ProbeDescriptor) -> dict[str, obje
             "decimal_places": value.decimal_places,
         }
 
-    def capability(value: V2HistoricalChartCapability | V2MonitorCapability) -> dict[str, object]:
+    def capability(
+        value: V2HistoricalChartCapability | V2MonitorCapability, *, ranking: bool = False
+    ) -> dict[str, object]:
         common = {"group_by": list(value.group_by)}
         if isinstance(value, V2MonitorCapability):
             return {
@@ -1317,7 +1332,7 @@ def v2_probe_descriptor_to_wire(descriptor: V2ProbeDescriptor) -> dict[str, obje
             }
         return {
             **common,
-            "granularities": list(value.granularities),
+            **({} if ranking else {"granularities": list(value.granularities)}),
             **(
                 {"partition_by": list(value.partition_by)} if value.partition_by is not None else {}
             ),
@@ -1383,11 +1398,13 @@ def v2_probe_descriptor_to_wire(descriptor: V2ProbeDescriptor) -> dict[str, obje
                         else {}
                     ),
                     "charts": {
-                        kind: capability(item) for kind, item in metric.capabilities.charts.items()
+                        kind: capability(item, ranking=kind == "ranking")
+                        for kind, item in metric.capabilities.charts.items()
                     },
                 },
                 "defaults": {
-                    kind: _defaults_to_wire(item) for kind, item in metric.defaults.items()
+                    kind: _defaults_to_wire(item, ranking=kind == "ranking")
+                    for kind, item in metric.defaults.items()
                 },
                 "summary": metric.summary,
                 **({"group_id": metric.group_id} if metric.group_id is not None else {}),
@@ -1413,7 +1430,7 @@ def v2_probe_descriptor_to_wire(descriptor: V2ProbeDescriptor) -> dict[str, obje
     }
 
 
-def _defaults_to_wire(value: CustomChartDefaults) -> dict[str, object]:
+def _defaults_to_wire(value: CustomChartDefaults, *, ranking: bool = False) -> dict[str, object]:
     declared = value.declared or frozenset({"period", "group_by", "top"})
     fields: dict[str, object] = {}
     for name, item in (
@@ -1426,7 +1443,7 @@ def _defaults_to_wire(value: CustomChartDefaults) -> dict[str, object]:
         ("style", value.style),
         ("theme", value.theme),
     ):
-        if name in declared:
+        if name in declared and not (ranking and name == "granularity"):
             fields[name] = item
     if "window" in declared and value.window_seconds is not None:
         suffix = "h" if value.window_seconds % 3600 == 0 else "m"
@@ -1533,6 +1550,74 @@ def _parse_ranking_group(value: object, *, index: int) -> CustomRankingGroup:
         _string(source.get("id"), f"{name}.id"),
         _parse_localized(source.get("label"), f"{name}.label"),
         series,
+        _parse_localized(source["description"], f"{name}.description")
+        if "description" in source
+        else None,
+        _parse_localized(source["display"], f"{name}.display") if "display" in source else None,
+        _parse_localized(source["comparison_display"], f"{name}.comparison_display")
+        if "comparison_display" in source
+        else None,
+        _parse_https_url(source["link"], f"{name}.link") if "link" in source else None,
+    )
+
+
+def _parse_v2_ranking_data(
+    value: object, *, partitioned: bool, max_items: int | None
+) -> V2RankingData:
+    source = _mapping(value, "data")
+    if "series" in source and "groups" in source:
+        raise CustomProtocolError("data series and groups are mutually exclusive")
+    if partitioned:
+        groups = tuple(
+            _parse_v2_ranking_group(item, index=index)
+            for index, item in enumerate(_sequence(source.get("groups"), "data groups"))
+        )
+        _unique_ids(groups, "data groups")
+        count = sum(len(group.series) for group in groups)
+        if max_items is not None and count > max_items:
+            raise CustomProtocolError(f"data must not contain more than {max_items} series")
+        return V2RankingData(groups=groups)
+    series = tuple(
+        _parse_v2_ranking_entry(item, name=f"data.series[{index}]")
+        for index, item in enumerate(_sequence(source.get("series"), "data series"))
+    )
+    _unique_ids(series, "data series")
+    if max_items is not None and len(series) > max_items:
+        raise CustomProtocolError(f"data must not contain more than {max_items} series")
+    return V2RankingData(series=series)
+
+
+def _parse_v2_ranking_group(value: object, *, index: int) -> V2RankingGroup:
+    name = f"data.groups[{index}]"
+    source = _mapping(value, name)
+    series = tuple(
+        _parse_v2_ranking_entry(item, name=f"{name}.series[{series_index}]")
+        for series_index, item in enumerate(_sequence(source.get("series"), f"{name}.series"))
+    )
+    _unique_ids(series, f"{name}.series")
+    return V2RankingGroup(
+        _string(source.get("id"), f"{name}.id"),
+        _parse_localized(source.get("label"), f"{name}.label"),
+        series,
+        _parse_localized(source["description"], f"{name}.description")
+        if "description" in source
+        else None,
+        _parse_localized(source["display"], f"{name}.display") if "display" in source else None,
+        _parse_localized(source["comparison_display"], f"{name}.comparison_display")
+        if "comparison_display" in source
+        else None,
+        _parse_https_url(source["link"], f"{name}.link") if "link" in source else None,
+    )
+
+
+def _parse_v2_ranking_entry(value: object, *, name: str) -> CustomRankingEntry:
+    source = _mapping(value, name)
+    if "points" in source:
+        raise CustomProtocolError(f"{name} must use scalar value and must not contain points")
+    return CustomRankingEntry(
+        _string(source.get("id"), f"{name}.id"),
+        _parse_localized(source.get("label"), f"{name}.label"),
+        _parse_decimal(source.get("value"), f"{name}.value"),
         _parse_localized(source["description"], f"{name}.description")
         if "description" in source
         else None,
@@ -1787,7 +1872,15 @@ def _group_by_tuple(value: object, name: str) -> tuple[str | None, ...]:
 
 
 def _unique_ids(
-    items: tuple[CustomDimension | CustomFilter | CustomSeries | CustomRankingGroup, ...],
+    items: tuple[
+        CustomDimension
+        | CustomFilter
+        | CustomSeries
+        | CustomRankingGroup
+        | CustomRankingEntry
+        | V2RankingGroup,
+        ...,
+    ],
     name: str,
 ) -> None:
     if len({item.id for item in items}) != len(items):

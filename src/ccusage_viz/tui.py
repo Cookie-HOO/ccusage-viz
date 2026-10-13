@@ -222,6 +222,7 @@ from ccusage_viz.options import (
     adjust_standalone,
     compatible_styles,
     is_monitor_ranking_style,
+    is_v2_custom_ranking,
     replace_chart_filters,
 )
 from ccusage_viz.processing import build_period_summary, required_summary_coverage
@@ -397,6 +398,7 @@ class CustomOutcome:
     result: ProviderResult | None = None
     error: BaseException | None = None
     purpose: Literal["probe", "primary", "comparison"] = "primary"
+    comparison_request_config: CustomChartConfig | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1643,11 +1645,22 @@ def _await_custom_submission(
     handle: QueryHandle[ProviderResult],
     generation: int,
     purpose: Literal["probe", "primary", "comparison"] = "primary",
+    comparison_request_config: CustomChartConfig | None = None,
 ) -> CustomOutcome:
     try:
-        return CustomOutcome(generation, result=handle.result(), purpose=purpose)
+        return CustomOutcome(
+            generation,
+            result=handle.result(),
+            purpose=purpose,
+            comparison_request_config=comparison_request_config,
+        )
     except BaseException as exc:
-        return CustomOutcome(generation, error=exc, purpose=purpose)
+        return CustomOutcome(
+            generation,
+            error=exc,
+            purpose=purpose,
+            comparison_request_config=comparison_request_config,
+        )
 
 
 def _await_historical(handle: QueryHandle[ProviderResult], started: float) -> UsageSnapshot:
@@ -4682,7 +4695,7 @@ def _custom_standalone_actions(
     actions: list[tuple[str, str]] = [("p/P", "period")]
     chart = component.candidate
     if capability is not None:
-        if len(capability.granularities) > 1:
+        if not is_v2_custom_ranking(chart) and len(capability.granularities) > 1:
             actions.append(("g/G", "granularity"))
         if chart.kind != "calendar" and capability.group_by:
             actions.append(("b/B", "group"))
@@ -4862,6 +4875,7 @@ def _run_custom_standalone_adjustment(
                     updated = adjust_custom_chart(adjustment, key)
                 elif (
                     key in {"g", "G"}
+                    and not is_v2_custom_ranking(current)
                     and capability is not None
                     and len(capability.granularities) > 1
                 ):
@@ -5011,7 +5025,13 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
         )
         handle = runtime.submit(intent)
         return (
-            executor.submit(_await_custom_submission, handle, operation.generation, purpose),
+            executor.submit(
+                _await_custom_submission,
+                handle,
+                operation.generation,
+                purpose,
+                config if purpose == "comparison" else None,
+            ),
             handle.cancel,
         )
 
@@ -5350,7 +5370,10 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
                             partition_declared=component.partition_declared_for_request,
                         )
                         comparison_outcome = _await_custom_submission(
-                            runtime.submit(intent), operation.generation, "comparison"
+                            runtime.submit(intent),
+                            operation.generation,
+                            "comparison",
+                            comparison,
                         )
                         if (
                             comparison_outcome.error is not None
@@ -5364,7 +5387,11 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
                             )
                         else:
                             component.apply_provider_result(
-                                comparison_outcome.result, purpose="comparison"
+                                comparison_outcome.result,
+                                purpose="comparison",
+                                comparison_request_config=(
+                                    comparison_outcome.comparison_request_config
+                                ),
                             )
                     except BaseException as exc:
                         component.fail(exc, generation=operation.generation, purpose="comparison")
@@ -5461,7 +5488,11 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
                                 request(LifecycleTrigger.STARTUP, roll_range=False)
                             else:
                                 accepted = component.apply_provider_result(
-                                    outcome.result, purpose=purpose
+                                    outcome.result,
+                                    purpose=purpose,
+                                    comparison_request_config=(
+                                        outcome.comparison_request_config
+                                    ),
                                 )
                                 if accepted:
                                     lifecycle.complete(operation, generation=operation.generation)
@@ -6052,7 +6083,13 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         )
         handle = runtime.submit(intent)
         return (
-            executor.submit(_await_custom_submission, handle, operation.generation, purpose),
+            executor.submit(
+                _await_custom_submission,
+                handle,
+                operation.generation,
+                purpose,
+                config if purpose == "comparison" else None,
+            ),
             handle.cancel,
         )
 
@@ -6901,7 +6938,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         else:
                             pane.lifecycle.abandon(operation)
                     elif pane.component.apply_provider_result(
-                        outcome.result, purpose=outcome.purpose
+                        outcome.result,
+                        purpose=outcome.purpose,
+                        comparison_request_config=outcome.comparison_request_config,
                     ):
                         record_custom_warnings(
                             pane.component.candidate.source, outcome.result.custom_response
@@ -10314,6 +10353,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                 )
                         elif (
                             key in {"g", "G"}
+                            and not is_v2_custom_ranking(base)
                             and capability is not None
                             and capability.granularities
                         ):

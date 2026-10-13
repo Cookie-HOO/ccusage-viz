@@ -22,10 +22,14 @@ from ccusage_viz.custom_models import (
 )
 from ccusage_viz.custom_protocol import CustomChartResponse, V2ChartResponse
 from ccusage_viz.errors import QueryError
-from ccusage_viz.options import CustomChartConfig, has_complete_content
+from ccusage_viz.options import CustomChartConfig, has_complete_content, is_v2_custom_ranking
 from ccusage_viz.processing.custom_historical import (
     CustomChartProjection,
     process_custom_historical,
+)
+from ccusage_viz.processing.custom_ranking import (
+    CustomRankingProjection,
+    process_custom_ranking,
 )
 from ccusage_viz.processing.summaries import ranking_comparison_interval
 
@@ -40,7 +44,10 @@ def custom_replacement_required(current: CustomChartConfig, updated: CustomChart
         or current.filters != updated.filters
         or current.partition_by != updated.partition_by
         or current.group_by != updated.group_by
-        or current.granularity != updated.granularity
+        or (
+            not (is_v2_custom_ranking(current) and is_v2_custom_ranking(updated))
+            and current.granularity != updated.granularity
+        )
     )
 
 
@@ -64,7 +71,10 @@ def custom_summary_replacement_required(
     return (
         current.source != updated.source
         or current.filters != updated.filters
-        or current.granularity != updated.granularity
+        or (
+            not (is_v2_custom_ranking(current) and is_v2_custom_ranking(updated))
+            and current.granularity != updated.granularity
+        )
         or current.date_range.fixed_bounds != updated.date_range.fixed_bounds
         or (current.date_range.fixed_bounds and current.date_range != updated.date_range)
     )
@@ -97,7 +107,7 @@ def _query_identity(config: CustomChartConfig) -> tuple[object, ...]:
         config.filters,
         config.partition_by,
         config.group_by,
-        config.granularity,
+        None if is_v2_custom_ranking(config) else config.granularity,
     )
 
 
@@ -121,6 +131,8 @@ def _comparison_completion_matches(
 
     if issued is None or current is None:
         return False
+    if is_v2_custom_ranking(issued) and is_v2_custom_ranking(current):
+        current = replace(current, granularity=issued.granularity)
     return issued == replace(
         current,
         presentation=issued.presentation,
@@ -136,7 +148,7 @@ def _comparison_completion_matches(
 class CustomCompletion:
     generation: int
     config: CustomChartConfig
-    response: CustomChartResponse
+    response: CustomChartResponse | V2ChartResponse
     purpose: CustomPurpose = "primary"
 
 
@@ -176,16 +188,16 @@ class CustomHistoricalComponent:
         self.candidate = config
         self.capability: CustomChartCapability | None = None
         self.accepted_config: CustomChartConfig | None = None
-        self.accepted_response: CustomChartResponse | None = None
+        self.accepted_response: CustomChartResponse | V2ChartResponse | None = None
         self.accepted_warnings: tuple[CustomProtocolWarning, ...] = ()
         self.accepted_at: datetime | None = None
         self.comparison_config: CustomChartConfig | None = None
         self.comparison_error: BaseException | None = None
-        self.comparison_response: CustomChartResponse | None = None
+        self.comparison_response: CustomChartResponse | V2ChartResponse | None = None
         self.comparison_pending_generation: int | None = None
         self.error: BaseException | None = None
         self.generation = 0
-        self.model: CustomChartProjection | None = None
+        self.model: CustomChartProjection | CustomRankingProjection | None = None
         self.pending_generation: int | None = None
         self.presentation: CustomPresentationDescriptor | None = None
         self.render_revision = 0
@@ -251,12 +263,24 @@ class CustomHistoricalComponent:
             if _comparison_completion_matches(self.comparison_config, comparison_request)
             else None
         )
-        self.model = process_custom_historical(
-            self.accepted_response,
-            self.accepted_config,
-            comparison_response=comparison,
-            comparison_config=self.comparison_config if comparison is not None else None,
-        )
+        if isinstance(self.accepted_response, V2ChartResponse):
+            self.model = process_custom_ranking(
+                self.accepted_response,
+                self.accepted_config,
+                comparison_response=(
+                    comparison if isinstance(comparison, V2ChartResponse) else None
+                ),
+                comparison_config=self.comparison_config if comparison is not None else None,
+            )
+        else:
+            self.model = process_custom_historical(
+                self.accepted_response,
+                self.accepted_config,
+                comparison_response=(
+                    comparison if isinstance(comparison, CustomChartResponse) else None
+                ),
+                comparison_config=self.comparison_config if comparison is not None else None,
+            )
 
     def begin_metric_switch(self, config: CustomChartConfig) -> None:
         """Request a related Metric without replacing accepted historical facts yet."""
@@ -265,11 +289,7 @@ class CustomHistoricalComponent:
             return
         target = (
             next(
-                (
-                    metric
-                    for metric in self.v2_descriptor.metrics
-                    if metric.id == config.metric_id
-                ),
+                (metric for metric in self.v2_descriptor.metrics if metric.id == config.metric_id),
                 None,
             )
             if self.v2_descriptor is not None
@@ -287,7 +307,7 @@ class CustomHistoricalComponent:
     def retry_metric_switch(self, field: str, target: V2MetricDescriptor) -> bool:
         """Normalize one Dataset-reported target field and retry without committing it."""
 
-        category = normalization_category(field)
+        category = normalization_category(field, config=self.switch_target_config)
         if (
             self.switch_target_config is None
             or target.id != self.switch_target_config.metric_id
@@ -408,27 +428,68 @@ class CustomHistoricalComponent:
         self.accepted_response = completion.response
         self.accepted_warnings = completion.response.warnings
         self.retrieval_top = completion.config.top
-        self.presentation = CustomPresentationDescriptor(
-            completion.response.dataset,
-            {
-                dimension.id: dimension.label
-                for dimension in completion.response.capabilities.group_by
-            },
-            {filter.id: filter.label for filter in completion.response.capabilities.filters},
-            {
-                (filter.id, option.id): option.label
-                for filter in completion.response.capabilities.filters
-                for option in filter.options
-            },
-            {
-                dimension.id: dimension.label
-                for dimension in (
-                    completion.response.capabilities.partition_by
-                    or completion.response.capabilities.group_by
+        if isinstance(completion.response, V2ChartResponse):
+            metric = next(
+                item
+                for item in completion.response.descriptor.metrics
+                if item.id == completion.response.metric_id
+            )
+            self.presentation = CustomPresentationDescriptor(
+                CustomDataset(metric.title, metric.description, metric.unit),
+                {dimension.id: dimension.label for dimension in metric.capabilities.group_by},
+                {filter.id: filter.label for filter in completion.response.runtime.filters},
+                {
+                    (filter.id, option.id): option.label
+                    for filter in completion.response.runtime.filters
+                    for option in filter.options
+                },
+                {
+                    dimension.id: dimension.label
+                    for dimension in (
+                        metric.capabilities.partition_by or metric.capabilities.group_by
+                    )
+                },
+            )
+            historical = metric.capabilities.charts.get(self.candidate.kind)
+            self.capability = (
+                CustomChartCapability(
+                    historical.granularities,
+                    historical.group_by,
+                    historical.filters,
+                    historical.max_items,
+                    historical.descriptions_default,
+                    historical.periods,
+                    historical.comparison,
+                    historical.show_percentage,
+                    historical.refresh_interval_seconds,
+                    historical.sort_direction,
+                    historical.partition_by,
                 )
-            },
-        )
-        self.capability = completion.response.capabilities.charts.get(self.candidate.kind)
+                if isinstance(historical, V2HistoricalChartCapability)
+                else None
+            )
+        else:
+            self.presentation = CustomPresentationDescriptor(
+                completion.response.dataset,
+                {
+                    dimension.id: dimension.label
+                    for dimension in completion.response.capabilities.group_by
+                },
+                {filter.id: filter.label for filter in completion.response.capabilities.filters},
+                {
+                    (filter.id, option.id): option.label
+                    for filter in completion.response.capabilities.filters
+                    for option in filter.options
+                },
+                {
+                    dimension.id: dimension.label
+                    for dimension in (
+                        completion.response.capabilities.partition_by
+                        or completion.response.capabilities.group_by
+                    )
+                },
+            )
+            self.capability = completion.response.capabilities.charts.get(self.candidate.kind)
         self.comparison_config = None
         self.comparison_response = None
         self.comparison_error = None
@@ -470,6 +531,7 @@ class CustomHistoricalComponent:
         result: Any,
         *,
         purpose: CustomPurpose = "primary",
+        comparison_request_config: CustomChartConfig | None = None,
         accepted_at: datetime | None = None,
     ) -> bool:
         """Apply the provider's typed optional custom payload when available."""
@@ -477,7 +539,12 @@ class CustomHistoricalComponent:
         descriptor: V2ProbeDescriptor | None = None
         runtime: V2Runtime | None = None
         if isinstance(payload, V2ChartResponse):
-            if payload.metric_id != self.request_config.metric_id:
+            issued_config = (
+                self.request_config
+                if purpose == "primary"
+                else comparison_request_config or self.comparison_request_config()
+            )
+            if issued_config is None or payload.metric_id != issued_config.metric_id:
                 return False
             metric = next(
                 item for item in payload.descriptor.metrics if item.id == payload.metric_id
@@ -487,15 +554,29 @@ class CustomHistoricalComponent:
                 raise TypeError("v2 chart response does not describe the selected historical chart")
             descriptor = payload.descriptor
             runtime = payload.runtime
-            request_config = replace(
-                self.request_config,
-                metric_periods=capability.periods,
-                ranking_comparison=capability.comparison,
+            request_config = (
+                issued_config
+                if purpose == "comparison"
+                else replace(
+                    issued_config,
+                    metric_periods=capability.periods,
+                    ranking_comparison=capability.comparison,
+                )
             )
-            if self.switch_target_config is not None:
-                self.switch_target_config = request_config
-            else:
-                self.candidate = request_config
+            if purpose == "primary":
+                if self.switch_target_config is not None:
+                    self.switch_target_config = request_config
+                else:
+                    self.candidate = request_config
+            if self.request_config.kind == "ranking":
+                accepted = self.apply_result(
+                    CustomCompletion(self.generation, request_config, payload, purpose),
+                    accepted_at=accepted_at,
+                )
+                if accepted and purpose == "primary":
+                    self.v2_descriptor = descriptor
+                    self.runtime = runtime
+                return accepted
             payload = CustomChartResponse(
                 CustomDataset(metric.title, metric.description, metric.unit),
                 CustomCapabilities(

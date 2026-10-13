@@ -328,6 +328,23 @@ def test_required_partition_without_defaults_chooses_first_legal_pair() -> None:
     assert (normalized.partition_by, normalized.group_by) == ("logical", "real")
 
 
+def test_v2_ranking_ignores_unsupported_granularity_during_metric_switch() -> None:
+    current = config(granularity="legacy")
+    target = V2MetricDescriptor(
+        "updated_days",
+        TEXT,
+        TEXT,
+        UNIT,
+        "sum",
+        V2MetricCapabilities((), (), {"ranking": capability()}),
+        {"ranking": CustomChartDefaults(None, None, None, granularity="month")},
+        group_id="github",
+    )
+
+    assert normalization_category("query.granularity", config=current) is None
+    assert normalize_switch_config(current, target, "granularity") is None
+
+
 def test_unknown_or_unchanged_default_does_not_normalize() -> None:
     target = V2MetricDescriptor(
         "updated_days", TEXT, TEXT, UNIT, "sum", V2MetricCapabilities((), (), {"ranking": capability()}), {"ranking": CustomChartDefaults("14d", None, None)}, group_id="github"

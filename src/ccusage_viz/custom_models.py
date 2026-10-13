@@ -254,6 +254,8 @@ class CustomSeries:
 
 @dataclass(frozen=True, slots=True)
 class CustomRankingGroup:
+    """Legacy dated Ranking group used by the V1 protocol."""
+
     id: str
     label: LocalizedText
     series: tuple[CustomSeries, ...]
@@ -261,6 +263,40 @@ class CustomRankingGroup:
     display: LocalizedText | None = None
     comparison_display: LocalizedText | None = None
     link: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class CustomRankingEntry:
+    """One authoritative scalar fact returned by a V2 Ranking query."""
+
+    id: str
+    label: LocalizedText
+    value: Decimal
+    description: LocalizedText | None = None
+    display: LocalizedText | None = None
+    comparison_display: LocalizedText | None = None
+    link: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class V2RankingGroup:
+    id: str
+    label: LocalizedText
+    series: tuple[CustomRankingEntry, ...]
+    description: LocalizedText | None = None
+    display: LocalizedText | None = None
+    comparison_display: LocalizedText | None = None
+    link: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class V2RankingData:
+    series: tuple[CustomRankingEntry, ...] = ()
+    groups: tuple[V2RankingGroup, ...] | None = None
+
+    def __post_init__(self) -> None:
+        if self.groups is not None and self.series:
+            raise ValueError("v2 ranking data groups and series are mutually exclusive")
 
 
 @dataclass(frozen=True, slots=True)

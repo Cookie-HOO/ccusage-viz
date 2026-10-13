@@ -449,10 +449,11 @@ def partitioned_ranking_request(**changes: object) -> V2ChartRequest:
 def ranking_series(
     identifier: str = "model", value: object = "7", *, date_value: str = "2026-10-08"
 ) -> dict[str, object]:
+    del date_value
     return {
         "id": identifier,
         "label": text(identifier.title(), identifier),
-        "points": [{"date": date_value, "value": value}],
+        "value": value,
     }
 
 
@@ -471,7 +472,6 @@ def v2_ranking_response_root(
         {"id": "logical_model", "label": text("Logical model", "逻辑模型")}
     ]
     ranking: dict[str, object] = {
-        "granularities": ["day"],
         "group_by": ["real_model"],
         "partition_by": [None, "logical_model"],
     }
@@ -550,6 +550,39 @@ def test_v2_ranking_response_accepts_old_and_declared_flat_requests(
     assert response.data.groups is None  # type: ignore[union-attr]
 
 
+def test_flat_v2_ranking_parses_scalar_metadata_and_rejects_points() -> None:
+    request = partitioned_ranking_request(
+        partition_by=None, partition_declared=False, chart_kind="ranking"
+    )
+    root = v2_ranking_response_root(request)
+    item = ranking_series("route-a", "185.2")
+    item.update(
+        description=text("Route A requests", "路由 A 请求"),
+        display=text("185 requests", "185 次请求"),
+        comparison_display=text("+12 requests", "+12 次请求"),
+        link="https://example.com/routes/a",
+    )
+    root["data"] = {"series": [item]}
+
+    response = parse_custom_response(json.dumps(root).encode(), request)
+    parsed = response.data.series[0]  # type: ignore[union-attr]
+
+    assert parsed.value == Decimal("185.2")
+    assert not hasattr(parsed, "points")
+    assert not hasattr(parsed, "date")
+    assert parsed.description == LocalizedText("Route A requests", "路由 A 请求")
+    assert parsed.link == "https://example.com/routes/a"
+
+    for malformed in (
+        {**item, "points": [{"date": "2026-10-08", "value": "185.2"}]},
+        {key: value for key, value in item.items() if key != "value"}
+        | {"points": [{"date": "2026-10-08", "value": "185.2"}]},
+    ):
+        root["data"] = {"series": [malformed]}
+        with pytest.raises(CustomProtocolError, match="must use scalar value"):
+            parse_custom_response(json.dumps(root).encode(), request)
+
+
 def test_partitioned_v2_ranking_parses_ordered_groups_and_repeated_inner_ids() -> None:
     request = partitioned_ranking_request()
     root = v2_ranking_response_root(request)
@@ -565,6 +598,8 @@ def test_partitioned_v2_ranking_parses_ordered_groups_and_repeated_inner_ids() -
     assert response.data.groups is not None  # type: ignore[union-attr]
     assert [group.id for group in response.data.groups] == ["coding", "general"]  # type: ignore[union-attr]
     assert response.data.groups[0].series[0].id == response.data.groups[1].series[0].id  # type: ignore[union-attr]
+    assert response.data.groups[0].series[0].value == Decimal("7")  # type: ignore[union-attr]
+    assert not hasattr(response.data.groups[0].series[0], "points")  # type: ignore[union-attr]
     assert response.data.series == ()  # type: ignore[union-attr]
 
 
@@ -608,7 +643,7 @@ def test_v2_ranking_response_enforces_flat_or_grouped_shape_from_request() -> No
         parse_custom_response(json.dumps(flat_root).encode(), flat)
 
 
-def test_grouped_v2_ranking_rejects_duplicate_ids_dates_and_unsafe_metadata() -> None:
+def test_grouped_v2_ranking_rejects_duplicate_ids_and_unsafe_metadata() -> None:
     request = partitioned_ranking_request()
     root = v2_ranking_response_root(request)
     root["data"] = {"groups": [ranking_group("same", "One", []), ranking_group("same", "Two", [])]}
@@ -618,14 +653,6 @@ def test_grouped_v2_ranking_rejects_duplicate_ids_dates_and_unsafe_metadata() ->
     duplicate = ranking_series("same")
     root["data"] = {"groups": [ranking_group("one", "One", [duplicate, ranking_series("same")])]}
     with pytest.raises(CustomProtocolError, match=r"data\.groups\[0\]\.series IDs must be unique"):
-        parse_custom_response(json.dumps(root).encode(), request)
-
-    duplicate_points = ranking_series()
-    duplicate_points["points"].append(duplicate_points["points"][0].copy())  # type: ignore[union-attr]
-    root["data"] = {"groups": [ranking_group("one", "One", [duplicate_points])]}
-    with pytest.raises(
-        CustomProtocolError, match=r"data\.groups\[0\]\.series\[0\]\.points dates must be unique"
-    ):
         parse_custom_response(json.dumps(root).encode(), request)
 
     unsafe = ranking_group("one", "One", [])
@@ -642,13 +669,12 @@ def test_grouped_v2_ranking_rejects_duplicate_ids_dates_and_unsafe_metadata() ->
 def test_grouped_v2_ranking_errors_include_the_complete_failing_path() -> None:
     request = partitioned_ranking_request()
     root = v2_ranking_response_root(request)
-    malformed = ranking_series()
-    malformed["points"] = [{"date": "2026-10-08", "value": 7}]
+    malformed = ranking_series(value=7)
     root["data"] = {"groups": [ranking_group("one", "One", [malformed])]}
 
     with pytest.raises(
         CustomProtocolError,
-        match=r"data\.groups\[0\]\.series\[0\]\.points\[0\]\.value must be a decimal string",
+        match=r"data\.groups\[0\]\.series\[0\]\.value must be a decimal string",
     ):
         parse_custom_response(json.dumps(root).encode(), request)
 
@@ -666,7 +692,11 @@ def test_flat_v2_ranking_applies_max_items_with_multiple_historical_capabilities
         chart_kind="ranking",
     )
     assert "partition_by" not in request.to_wire()["query"]
-    assert "chart_kind" not in request.to_wire()
+    assert request.to_wire()["chart_kind"] == "ranking"
+    assert "granularity" not in request.to_wire()["query"]
+    assert canonical_custom_request_key(request) == canonical_custom_request_key(
+        replace(request, granularity="legacy")
+    )
     assert canonical_custom_request_key(request) != canonical_custom_request_key(
         replace(request, chart_kind="timeline")
     )

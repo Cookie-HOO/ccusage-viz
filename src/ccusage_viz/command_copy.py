@@ -21,6 +21,7 @@ from ccusage_viz.options import (
     StandaloneLaunch,
     TimelineConfig,
     compatible_styles,
+    is_v2_custom_ranking,
 )
 
 
@@ -153,7 +154,7 @@ def _custom_chart_args(options: StandaloneLaunch, *, full: bool) -> list[str]:
         args.extend(("--top", str(chart.top)))
     if chart.other != "show":
         args.extend(("--other", chart.other))
-    if chart.granularity != "day":
+    if not is_v2_custom_ranking(chart) and chart.granularity != "day":
         args.extend(("--granularity", chart.granularity))
     if chart.weekdays != "show":
         args.extend(("--weekdays", chart.weekdays))
@@ -249,7 +250,7 @@ def format_full_dashboard_command(
                 fragment_args.extend(("--top", str(chart.top)))
             if chart.other != "show":
                 fragment_args.extend(("--other", chart.other))
-            if chart.granularity != "day":
+            if not is_v2_custom_ranking(chart) and chart.granularity != "day":
                 fragment_args.extend(("--granularity", chart.granularity))
             if chart.weekdays != "show":
                 fragment_args.extend(("--weekdays", chart.weekdays))

@@ -16,6 +16,10 @@ from ccusage_viz.custom_models import CustomPresentationDescriptor, LocalizedTex
 from ccusage_viz.formatting import center_text, clip_width, display_width
 from ccusage_viz.options import CustomChartConfig
 from ccusage_viz.processing.custom_historical import CustomChartProjection, CustomProjectedSeries
+from ccusage_viz.processing.custom_ranking import (
+    CustomProjectedRankingEntry,
+    CustomRankingProjection,
+)
 from ccusage_viz.render.base import (
     RenderContext,
     colored_mark,
@@ -41,8 +45,12 @@ from ccusage_viz.render.timeline_presentation import (
     render_timeline_plot,
 )
 
+CustomProjection = CustomChartProjection | CustomRankingProjection
 
-def _label(series: CustomProjectedSeries, context: RenderContext) -> str:
+
+def _label(
+    series: CustomProjectedSeries | CustomProjectedRankingEntry, context: RenderContext
+) -> str:
     if series.is_other:
         return context.translator.text("label.other")
     label = series.label
@@ -136,16 +144,18 @@ def custom_heading(
     return center_text(heading, context.width)
 
 
-def _heading(projection: CustomChartProjection, context: RenderContext) -> str:
+def _heading(projection: CustomProjection, context: RenderContext) -> str:
     if projection.config is not None:
         return custom_heading(projection.config, context, projection.presentation)
     title = context.translator.text(f"label.{projection.kind}")
+    if isinstance(projection, CustomRankingProjection):
+        return center_text(title, context.width)
     return center_text(
         date_range_heading(title, projection.days[0], projection.days[-1], context), context.width
     )
 
 
-def _summary(projection: CustomChartProjection, context: RenderContext) -> str:
+def _summary(projection: CustomProjection, context: RenderContext) -> str:
     """Chart responses no longer carry summary facts.
 
     Pane/Header-owned summary lifecycles provide those facts separately; retain
@@ -155,7 +165,7 @@ def _summary(projection: CustomChartProjection, context: RenderContext) -> str:
     return ""
 
 
-def _value(value: Decimal, projection: CustomChartProjection, context: RenderContext) -> str:
+def _value(value: Decimal, projection: CustomProjection, context: RenderContext) -> str:
     return format_custom_value(value, projection.unit, language=context.translator.language)
 
 
@@ -417,7 +427,7 @@ def render_custom_calendar(projection: CustomChartProjection, context: RenderCon
 
 
 def render_custom_ranking(
-    projection: CustomChartProjection,
+    projection: CustomChartProjection | CustomRankingProjection,
     context: RenderContext,
     *,
     descriptions_visible: bool = False,
@@ -484,7 +494,7 @@ def render_custom_ranking(
 
 
 def render_custom_projection(
-    projection: CustomChartProjection,
+    projection: CustomChartProjection | CustomRankingProjection,
     context: RenderContext,
     *,
     descriptions_visible: bool = False,
@@ -495,12 +505,13 @@ def render_custom_projection(
     entry_offset: int = 0,
     entry_limit: int | None = None,
 ) -> str:
-    if projection.kind == "timeline":
-        return render_custom_timeline(projection, context)
-    if projection.kind == "stack":
-        return render_custom_stack(projection, context)
-    if projection.kind == "calendar":
-        return render_custom_calendar(projection, context)
+    if isinstance(projection, CustomChartProjection):
+        if projection.kind == "timeline":
+            return render_custom_timeline(projection, context)
+        if projection.kind == "stack":
+            return render_custom_stack(projection, context)
+        if projection.kind == "calendar":
+            return render_custom_calendar(projection, context)
     return render_custom_ranking(
         projection,
         context,

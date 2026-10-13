@@ -221,6 +221,12 @@ HistoricalChartConfig: TypeAlias = TimelineConfig | CalendarConfig | StackConfig
 ChartConfig: TypeAlias = HistoricalChartConfig | MonitorConfig | CustomChartConfig
 
 
+def is_v2_custom_ranking(chart: CustomChartConfig) -> bool:
+    """Return whether ``chart`` uses the V2 scalar Custom Ranking contract."""
+
+    return chart.kind == "ranking" and chart.metric_id is not None
+
+
 @dataclass(frozen=True, slots=True)
 class StandaloneHostConfig:
     provider: str = "ccusage"

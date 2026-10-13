@@ -26,6 +26,7 @@ from ccusage_viz.options import (
     StandaloneLaunch,
     TimelineConfig,
     compatible_styles,
+    is_v2_custom_ranking,
     resolve_date_range,
 )
 from ccusage_viz.render.palette import COLOR_SCHEMES
@@ -161,9 +162,10 @@ def apply_custom_probe_defaults(
                 until=None,
                 timezone=timezone,
             )
-    granularity = config.granularity
+    granularity = "day" if is_v2_custom_ranking(config) else config.granularity
     if (
-        defaults is not None
+        not is_v2_custom_ranking(config)
+        and defaults is not None
         and "granularity" not in explicit
         and _declared(defaults, "granularity")
         and defaults.granularity in capability.granularities

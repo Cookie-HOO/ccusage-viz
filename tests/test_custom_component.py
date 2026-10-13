@@ -1148,6 +1148,10 @@ def test_custom_replacement_requires_only_source_query_fields() -> None:
 
     assert custom_replacement_required(current, replace(current, group_by=None))
     assert custom_replacement_required(current, replace(current, granularity="month"))
+    assert not custom_replacement_required(
+        replace(current, kind="ranking", metric_id="books"),
+        replace(current, kind="ranking", metric_id="books", granularity="legacy"),
+    )
     assert custom_replacement_required(current, replace(current, partition_by="collection"))
     assert custom_replacement_required(
         current, replace(current, filters=(("genre", ("fiction",)),))
@@ -1202,6 +1206,10 @@ def test_custom_summary_replacement_requires_only_summary_query_fields() -> None
         current, replace(current, filters=(("genre", ("fiction",)),))
     )
     assert custom_summary_replacement_required(current, replace(current, granularity="month"))
+    assert not custom_summary_replacement_required(
+        replace(current, kind="ranking", metric_id="books"),
+        replace(current, kind="ranking", metric_id="books", granularity="legacy"),
+    )
     assert custom_summary_replacement_required(
         current,
         replace(

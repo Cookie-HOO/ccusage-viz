@@ -43,6 +43,7 @@ from ccusage_viz.options import (
     RankingConfig,
     StackConfig,
     TimelineConfig,
+    is_v2_custom_ranking,
 )
 from ccusage_viz.project_identity import PROJECT_AGGREGATIONS
 from ccusage_viz.render.palette import COLOR_SCHEMES
@@ -486,7 +487,7 @@ def _chart_wire(chart: object) -> dict[str, object]:
             "group_by": chart.group_by,
             "top": chart.top,
             "other": chart.other,
-            "granularity": chart.granularity,
+            **({} if is_v2_custom_ranking(chart) else {"granularity": chart.granularity}),
             "weekdays": chart.weekdays,
             "metric_id": chart.metric_id,
             "metric_summary": chart.metric_summary,
@@ -734,6 +735,12 @@ def _parse_pane(value: object) -> PaneConfig:
         attachment = _attachment_parse(payload.pop("attachment", None))
         if "partition_by" not in payload:
             payload["partition_by"] = None
+        ranking = payload.get("chart_kind") == "ranking" and isinstance(
+            payload.get("metric_id"), str
+        )
+        if ranking:
+            payload.pop("granularity", None)
+            fields = fields - {"granularity"}
         custom_wire = _exact(payload, fields, "custom pane")
         dataset_id = _string(custom_wire["dataset_id"], "custom.dataset_id")
         source_kind = _choice(
@@ -786,9 +793,17 @@ def _parse_pane(value: object) -> PaneConfig:
             group_by,
             _optional_int(custom_wire["top"], "custom.top", minimum=1),
             _choice(custom_wire["other"], ("show", "hide"), "custom.other"),
-            _choice(custom_wire["granularity"], GRANULARITIES, "custom.granularity"),
+            (
+                "day"
+                if ranking
+                else _choice(custom_wire["granularity"], GRANULARITIES, "custom.granularity")
+            ),
             _choice(custom_wire["weekdays"], ("show", "hide"), "custom.weekdays"),
-            initial_explicit=_PERSISTED_CUSTOM_EXPLICIT,
+            initial_explicit=(
+                _PERSISTED_CUSTOM_EXPLICIT - {"granularity"}
+                if ranking
+                else _PERSISTED_CUSTOM_EXPLICIT
+            ),
             metric_id=_optional_string(custom_wire["metric_id"], "custom.metric_id"),
             metric_summary=_choice(
                 custom_wire["metric_summary"],

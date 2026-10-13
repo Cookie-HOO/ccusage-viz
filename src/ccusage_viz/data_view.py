@@ -13,11 +13,13 @@ from ccusage_viz.chart_models import (
     TimelineModel,
     TimeOfDayDistributionModel,
 )
+from ccusage_viz.custom_models import LocalizedText
 from ccusage_viz.domain import TokenUsage, UsageRecord
 from ccusage_viz.formatting import format_tokens
 from ccusage_viz.options import MonitorConfig, RankingConfig, is_monitor_distribution
 from ccusage_viz.processing import process_historical
-from ccusage_viz.processing.custom_historical import CustomChartProjection, CustomProjectedSeries
+from ccusage_viz.processing.custom_historical import CustomChartProjection
+from ccusage_viz.processing.custom_ranking import CustomRankingProjection
 from ccusage_viz.processing.filtering import prepare_filtered_scope
 from ccusage_viz.project_identity import (
     FIXED_UNASSIGNED_PROJECT,
@@ -331,43 +333,77 @@ def render_snapshot_data(
     return payload
 
 
-def custom_data_payload(projection: CustomChartProjection, *, language: str) -> dict[str, object]:
+def custom_data_payload(
+    projection: CustomChartProjection | CustomRankingProjection, *, language: str
+) -> dict[str, object]:
     """Return the exact displayed custom projection without Decimal float coercion."""
 
-    def label(series: CustomProjectedSeries) -> str:
-        localized = series.label
-        return localized.zh_cn if language == "zh" else localized.en
+    def localized(text: LocalizedText) -> str:
+        return text.zh_cn if language == "zh" else text.en
 
     unit = projection.unit
-    return {
+    payload: dict[str, object] = {
         "kind": projection.kind,
-        "range": {
-            "start_date": projection.date_range.since.isoformat(),
-            "end_date": projection.date_range.until.isoformat(),
-        },
-        "granularity": projection.granularity,
         "unit": {
             "id": unit.id,
-            "label": unit.label.zh_cn if language == "zh" else unit.label.en,
+            "label": localized(unit.label),
             "placement": unit.placement,
             "decimal_places": unit.decimal_places,
         },
-        "rows": [
-            {
-                "period": day.isoformat(),
-                "series_id": series.id,
-                "series": label(series),
-                "is_other": series.is_other,
-                "value": format(value, "f"),
-            }
-            for series in projection.series
-            for day, value in zip(projection.days, series.values, strict=True)
-        ],
     }
+    if isinstance(projection, CustomRankingProjection):
+        if projection.groups is None:
+            rows = [
+                {
+                    "rank": rank,
+                    "series_id": series.id,
+                    "series": localized(series.label),
+                    "is_other": series.is_other,
+                    "value": format(series.value, "f"),
+                }
+                for rank, series in enumerate(projection.series, 1)
+            ]
+        else:
+            rows = [
+                {
+                    "partition_id": group.id,
+                    "partition": localized(group.label),
+                    "rank": series.rank or rank,
+                    "series_id": series.id,
+                    "series": localized(series.label),
+                    "is_other": series.is_other,
+                    "value": format(series.value, "f"),
+                }
+                for group in projection.groups
+                for rank, series in enumerate(group.series, 1)
+            ]
+        payload["rows"] = rows
+        return payload
+    payload.update(
+        {
+            "range": {
+                "start_date": projection.date_range.since.isoformat(),
+                "end_date": projection.date_range.until.isoformat(),
+            },
+            "granularity": projection.granularity,
+            "rows": [
+                {
+                    "period": day.isoformat(),
+                    "series_id": series.id,
+                    "series": localized(series.label),
+                    "is_other": series.is_other,
+                    "value": format(value, "f"),
+                }
+                for series in projection.series
+                for day, value in zip(projection.days, series.values, strict=True)
+            ],
+        }
+    )
+    return payload
 
 
 def render_custom_data(
-    projection: CustomChartProjection,
+    projection: CustomChartProjection | CustomRankingProjection,
     *,
     language: str,
     translator: Translator,
