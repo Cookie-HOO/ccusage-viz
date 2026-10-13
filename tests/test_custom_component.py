@@ -30,6 +30,7 @@ from ccusage_viz.custom_models import (
     CustomPoint,
     CustomProtocolFailure,
     CustomProtocolWarning,
+    CustomRankingGroup,
     CustomSeries,
     CustomUnit,
     LocalizedText,
@@ -155,7 +156,11 @@ def test_metric_switch_request_wire_uses_target_partition_declaration() -> None:
         ),
     )
     descriptor = V2ProbeDescriptor(
-        "revision", "1", V2Dataset(LocalizedText("Data", "数据"), LocalizedText("Data", "数据")), metrics, ()
+        "revision",
+        "1",
+        V2Dataset(LocalizedText("Data", "数据"), LocalizedText("Data", "数据")),
+        metrics,
+        (),
     )
 
     def switch_wire(source: str, target: str) -> dict[str, object]:
@@ -371,6 +376,213 @@ def test_custom_ranking_uses_capability_sort_direction_for_entries_and_prior_ran
     assert [series.previous_rank for series in projection.series] == [2, 1]
 
 
+def _grouped_response(
+    groups: tuple[tuple[str, tuple[tuple[str, str], ...]], ...],
+    *,
+    point_date: date = date(2026, 9, 1),
+    ascending: bool = False,
+) -> CustomPaneResponse:
+    source = response(())
+    capability = replace(
+        source.capabilities.charts["ranking"],
+        group_by=("real_model",),
+        partition_by=("logical_model",),
+        sort_direction="ascending" if ascending else "descending",
+    )
+    return replace(
+        source,
+        capabilities=replace(source.capabilities, charts={"ranking": capability}),
+        data=CustomData(
+            groups=tuple(
+                CustomRankingGroup(
+                    group_id,
+                    LocalizedText(group_id, group_id),
+                    tuple(
+                        CustomSeries(
+                            series_id,
+                            LocalizedText(series_id, series_id),
+                            (CustomPoint(point_date, Decimal(value)),),
+                        )
+                        for series_id, value in values
+                    ),
+                    description=LocalizedText(f"About {group_id}", f"关于 {group_id}"),
+                    display=LocalizedText(f"Total {group_id}", f"总计 {group_id}"),
+                    comparison_display=LocalizedText(f"Delta {group_id}", f"变化 {group_id}"),
+                    link=f"https://example.com/{group_id}",
+                )
+                for group_id, values in groups
+            )
+        ),
+    )
+
+
+def test_grouped_projection_preserves_dataset_order_and_projects_each_group() -> None:
+    projection = process_custom_historical(
+        _grouped_response(
+            (
+                ("small-first", (("d", "1"), ("b", "3"), ("a", "4"), ("c", "2"))),
+                ("large-second", (("a", "400"), ("b", "300"), ("c", "200"), ("d", "100"))),
+                ("empty", ()),
+            )
+        ),
+        config(
+            kind="ranking",
+            partition_by="logical_model",
+            group_by="real_model",
+            top=2,
+            other="show",
+        ),
+    )
+
+    assert projection.series == ()
+    assert projection.groups is not None
+    assert [group.id for group in projection.groups] == [
+        "small-first",
+        "large-second",
+        "empty",
+    ]
+    first, second, empty = projection.groups
+    assert [(item.id, item.total, item.rank) for item in first.series] == [
+        ("a", Decimal("4"), 1),
+        ("b", Decimal("3"), 2),
+        ("other", Decimal("3"), None),
+    ]
+    assert first.total == Decimal("10") and first.maximum == Decimal("4")
+    assert second.total == Decimal("1000") and second.maximum == Decimal("400")
+    assert empty.series == () and empty.total == empty.maximum == Decimal()
+    assert projection.total == Decimal("1010")
+    assert first.description == LocalizedText("About small-first", "关于 small-first")
+    assert first.display == LocalizedText("Total small-first", "总计 small-first")
+    assert first.link == "https://example.com/small-first"
+
+
+def test_grouped_projection_keeps_full_facts_when_other_is_hidden_and_supports_signed_values() -> (
+    None
+):
+    source = _grouped_response(
+        (("signed", (("positive", "5"), ("negative", "-2"), ("more-negative", "-4"))),)
+    )
+    base = config(
+        kind="ranking",
+        partition_by="logical_model",
+        group_by="real_model",
+        top=1,
+    )
+
+    shown = process_custom_historical(source, replace(base, other="show"))
+    hidden = process_custom_historical(source, replace(base, other="hide"))
+
+    assert shown.groups is not None and hidden.groups is not None
+    shown_group, hidden_group = shown.groups[0], hidden.groups[0]
+    assert shown_group.total == hidden_group.total == Decimal("-1")
+    assert shown_group.maximum == hidden_group.maximum == Decimal("5")
+    assert shown_group.series[-1].is_other
+    assert shown_group.series[-1].total == Decimal("-6")
+    assert [item.id for item in hidden_group.series] == ["positive"]
+
+
+def test_grouped_projection_sorts_ties_and_ascending_values_independently() -> None:
+    projection = process_custom_historical(
+        _grouped_response(
+            (("one", (("z", "2"), ("b", "1"), ("a", "1"))), ("two", (("x", "-1"),))),
+            ascending=True,
+        ),
+        config(
+            kind="ranking",
+            partition_by="logical_model",
+            group_by="real_model",
+            top=None,
+        ),
+    )
+
+    assert projection.groups is not None
+    assert [[item.id for item in group.series] for group in projection.groups] == [
+        ["a", "b", "z"],
+        ["x"],
+    ]
+    assert [[item.rank for item in group.series] for group in projection.groups] == [[1, 2, 3], [1]]
+    assert projection.groups[1].maximum == Decimal("-1")
+
+
+def test_grouped_projection_matches_previous_within_group_and_treats_moves_as_new() -> None:
+    current = _grouped_response(
+        (("one", (("shared", "5"), ("moved", "4"))), ("two", (("moved", "3"),)))
+    )
+    previous = _grouped_response(
+        (("one", (("shared", "2"),)), ("old", (("moved", "9"),))),
+        point_date=date(2026, 8, 30),
+    )
+    chart = config(
+        kind="ranking",
+        partition_by="logical_model",
+        group_by="real_model",
+        top=None,
+    )
+    projection = process_custom_historical(
+        current,
+        chart,
+        comparison_response=previous,
+        comparison_config=replace(
+            chart, date_range=DateRange(date(2026, 8, 30), date(2026, 8, 31))
+        ),
+    )
+
+    assert projection.groups is not None
+    one, two = projection.groups
+    shared, moved_in_one = one.series
+    assert one.comparison_ready and one.previous_total == Decimal("2")
+    assert shared.comparison_ready and shared.previous_total == Decimal("2")
+    assert not moved_in_one.comparison_ready and moved_in_one.previous_total is None
+    assert not two.comparison_ready and two.previous_total is None
+    assert not two.series[0].comparison_ready
+
+
+def test_grouped_projection_period_all_retains_dated_totals_without_comparison() -> None:
+    source = _grouped_response((("one", (("a", "2"),)),))
+    group = source.data.groups[0]  # type: ignore[index]
+    source = replace(
+        source,
+        data=CustomData(
+            groups=(
+                replace(
+                    group,
+                    series=(
+                        replace(
+                            group.series[0],
+                            points=(
+                                CustomPoint(date(2026, 9, 1), Decimal("2")),
+                                CustomPoint(date(2026, 9, 2), Decimal("3")),
+                            ),
+                        ),
+                    ),
+                ),
+            )
+        ),
+    )
+    chart = config(
+        kind="ranking",
+        partition_by="logical_model",
+        group_by="real_model",
+        top=None,
+        date_range=DateRange(date(2026, 9, 1), date(2026, 9, 2), period="all"),
+    )
+
+    projection = process_custom_historical(source, chart)
+
+    assert projection.groups is not None
+    assert projection.groups[0].series[0].values == (Decimal("2"), Decimal("3"))
+    assert projection.groups[0].total == Decimal("5")
+    assert not projection.comparison_available
+
+
+def test_grouped_data_is_rejected_for_non_ranking_projection() -> None:
+    with pytest.raises(CustomProjectionError, match="only by ranking"):
+        process_custom_historical(
+            _grouped_response((("one", (("a", "1"),)),)),
+            config(kind="timeline", partition_by=None, group_by=None),
+        )
+
+
 def test_custom_ranking_derives_decimal_comparison_facts_from_raw_responses() -> None:
     current = response((("api", "3"), ("app", "1")))
     previous = response((("api", "1"), ("app", "2"), ("batch", "4")), point_date=date(2026, 8, 30))
@@ -553,9 +765,7 @@ def test_projection_rejects_non_overlapping_aggregation_bucket() -> None:
         process_custom_historical(monthly, chart)
 
 
-def v2_chart_response(
-    metric_id: str, *, periods: tuple[str, ...] = ()
-) -> V2ChartResponse:
+def v2_chart_response(metric_id: str, *, periods: tuple[str, ...] = ()) -> V2ChartResponse:
     text = LocalizedText("Reading", "阅读")
     capability = V2HistoricalChartCapability(("day",), ("book",), (), periods)
 
@@ -651,7 +861,9 @@ def test_metric_switch_accepts_v2_response_for_requested_metric() -> None:
 
 def test_primary_v1_response_clears_previously_accepted_v2_metadata() -> None:
     component = CustomHistoricalComponent(config(metric_id="stars"))
-    assert component.apply_provider_result(SimpleNamespace(custom_response=v2_chart_response("stars")))
+    assert component.apply_provider_result(
+        SimpleNamespace(custom_response=v2_chart_response("stars"))
+    )
     assert component.v2_descriptor is not None
 
     assert component.apply_provider_result(SimpleNamespace(custom_response=response()))
@@ -660,16 +872,12 @@ def test_primary_v1_response_clears_previously_accepted_v2_metadata() -> None:
 
 
 def test_metric_switch_accepts_target_chart_periods() -> None:
-    component = CustomHistoricalComponent(
-        config(metric_id="stars", metric_periods=("all",))
-    )
+    component = CustomHistoricalComponent(config(metric_id="stars", metric_periods=("all",)))
     assert component.accept_response(response())
     component.begin_metric_switch(config(metric_id="updated_days", metric_periods=("all",)))
 
     assert component.apply_provider_result(
-        SimpleNamespace(
-            custom_response=v2_chart_response("updated_days", periods=("1d", "7d"))
-        )
+        SimpleNamespace(custom_response=v2_chart_response("updated_days", periods=("1d", "7d")))
     )
     assert component.candidate.metric_periods == ("1d", "7d")
     assert component.accepted_config is not None
