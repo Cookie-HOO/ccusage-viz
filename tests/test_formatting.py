@@ -81,3 +81,24 @@ def test_wrap_width_preserves_word_boundaries_and_wide_character_widths() -> Non
     assert wrap_width("one two three", 7) == ("one two", "three")
     assert wrap_width("项目项目项目", 4) == ("项目", "项目", "项目")
     assert all(display_width(row) <= 4 for row in wrap_width("项目项目项目", 4))
+
+
+@pytest.mark.parametrize(
+    ("value", "width", "expected"),
+    [
+        ("路由请求数", 1, ("路", "由", "请", "求", "数")),
+        ("🙂a", 1, ("🙂", "a")),
+        ("a路b", 1, ("a", "路", "b")),
+        ("路 由", 1, ("路", "由")),
+        ("\x1b[31m路由\x1b[0m", 1, ("\x1b[31m路", "由\x1b[0m")),
+    ],
+)
+def test_wrap_width_consumes_characters_that_exceed_a_one_cell_viewport(
+    value: str, width: int, expected: tuple[str, ...]
+) -> None:
+    assert wrap_width(value, width) == expected
+
+
+def test_wrap_width_retains_empty_result_for_non_positive_widths() -> None:
+    assert wrap_width("路由", 0) == ()
+    assert wrap_width("route", -1) == ()

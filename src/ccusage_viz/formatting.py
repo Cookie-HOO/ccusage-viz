@@ -130,6 +130,28 @@ def center_text(value: str, width: int) -> str:
     return " " * max(0, (width - display_width(clipped)) // 2) + clipped
 
 
+def _fitting_prefix(value: str, width: int) -> tuple[str, int, bool]:
+    """Return the ANSI-safe source prefix that fits in ``width`` cells."""
+    part: list[str] = []
+    position = 0
+    used = 0
+    has_character = False
+    while position < len(value):
+        if match := _TERMINAL_CONTROL.match(value, position):
+            part.append(match.group())
+            position = match.end()
+            continue
+        char = value[position]
+        char_width_value = char_width(char)
+        if used + char_width_value > width:
+            break
+        part.append(char)
+        position += 1
+        used += char_width_value
+        has_character = True
+    return "".join(part), position, has_character
+
+
 def wrap_width(value: str, width: int) -> tuple[str, ...]:
     """Wrap text while filling available cells without splitting wide characters.
 
@@ -153,24 +175,26 @@ def wrap_width(value: str, width: int) -> tuple[str, ...]:
             if row and display_width(candidate) > width:
                 remaining = width - display_width(row)
                 if remaining > display_width(separator):
-                    part = ""
-                    for char in word:
-                        if display_width(separator + part + char) > remaining:
-                            break
-                        part += char
-                    if part:
+                    part, consumed, has_visible = _fitting_prefix(
+                        word, remaining - display_width(separator)
+                    )
+                    if has_visible:
                         row = f"{row}{separator}{part}"
-                        word = word[len(part) :]
+                        word = word[consumed:]
                 rows.append(row)
                 row = ""
             while display_width(word) > width:
-                part = ""
-                for char in word:
-                    if display_width(part + char) > width:
-                        break
-                    part += char
+                part, consumed, has_visible = _fitting_prefix(word, width)
+                if not has_visible:
+                    # A wide glyph cannot fit a one-cell viewport. Emit and consume it so
+                    # this loop always advances; callers may clip it to their own geometry.
+                    part += word[consumed]
+                    consumed += 1
+                    while match := _TERMINAL_CONTROL.match(word, consumed):
+                        part += match.group()
+                        consumed = match.end()
+                word = word[consumed:]
                 rows.append(part)
-                word = word[len(part) :]
             row = word if not row else f"{row} {word}"
         if row:
             rows.append(row)
