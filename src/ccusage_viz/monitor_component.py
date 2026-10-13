@@ -19,7 +19,7 @@ from ccusage_viz.charts.definition import ChartDefinition
 from ccusage_viz.charts.registry import ChartRegistry
 from ccusage_viz.deltas import RefreshDeltas, RefreshRanks
 from ccusage_viz.domain import UsageRecord
-from ccusage_viz.options import MonitorConfig, StandaloneLaunch
+from ccusage_viz.options import MonitorConfig, StandaloneLaunch, is_monitor_ranking_style
 from ccusage_viz.processing.monitor import (
     MonitorKey,
     ObservedTPM,
@@ -388,7 +388,7 @@ class MonitorComponent:
         wall: datetime | None = None,
     ) -> TimelineModel | RankingModel | TimeOfDayDistributionModel:
         chart = self._monitor_config(self._active_options())
-        if chart.presentation.style in {"ranking", "list"}:
+        if is_monitor_ranking_style(chart.presentation.style):
             return self.ranking_model(now=now, count=count, wall=wall)
         if chart.presentation.style == "cumulative-bars":
             return self.distribution_model(now=now, wall=wall)

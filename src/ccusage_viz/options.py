@@ -50,7 +50,7 @@ COMMAND_STYLES = {
     "timeline": ("linear", "step", "no-line", "points", "line-points", "stem", "area"),
     "calendar": ("relative", "grid"),
     "stack": ("stacked", "stacked-pattern", "grouped", "grouped-thin", "normalized"),
-    "ranking": ("dot", "bar", "dots"),
+    "ranking": ("dot", "bar", "dots", "list"),
     "monitor": (
         "bars",
         "line",
@@ -58,6 +58,7 @@ COMMAND_STYLES = {
         "points",
         "line-points",
         "ranking",
+        "ranking-dot",
         "list",
         "cumulative-bars",
     ),
@@ -374,8 +375,12 @@ def is_monitor_distribution(chart: MonitorConfig) -> bool:
     return chart.presentation.style == "cumulative-bars"
 
 
+def is_monitor_ranking_style(style: str) -> bool:
+    return style in {"ranking", "ranking-dot", "list"}
+
+
 def monitor_shows_window_control(chart: MonitorConfig) -> bool:
-    return chart.presentation.style not in {"ranking", "list"}
+    return not is_monitor_ranking_style(chart.presentation.style)
 
 
 def _cycle(values: tuple[str, ...], current: str, step: int) -> str:
@@ -503,7 +508,7 @@ def adjust_chart(chart: ChartConfig, key: str, *, demo: bool = False) -> ChartCo
     if key == "o" and isinstance(chart, (TimelineConfig, StackConfig, RankingConfig)):
         return replace(chart, other=_cycle(OTHER_MODES, chart.other, 1))
     if key == "w" and isinstance(chart, MonitorConfig):
-        if chart.presentation.style in {"ranking", "list"}:
+        if is_monitor_ranking_style(chart.presentation.style):
             return chart
         if is_monitor_distribution(chart):
             values: tuple[MonitorDayWindow, ...] = ("today", "yesterday")

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from ccusage_viz.custom_monitor_component import CustomMonitorComponent
 from ccusage_viz.formatting import center_text
+from ccusage_viz.options import is_monitor_ranking_style
 from ccusage_viz.render import RenderContext
 from ccusage_viz.render.monitor_distribution import render_monitor_distribution
 from ccusage_viz.render.ranking import render_ranking
@@ -24,7 +25,7 @@ def render_custom_monitor(component: CustomMonitorComponent, context: RenderCont
 
     style = component.candidate.presentation.style
     heading = component.heading(language=context.translator.language)
-    if style in {"ranking", "list"}:
+    if is_monitor_ranking_style(style):
         return _replace_heading(
             render_ranking(component.ranking_model(language=context.translator.language), context),
             heading,

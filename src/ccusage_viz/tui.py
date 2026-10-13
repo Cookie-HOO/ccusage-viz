@@ -221,6 +221,7 @@ from ccusage_viz.options import (
     adjust_custom_chart,
     adjust_standalone,
     compatible_styles,
+    is_monitor_ranking_style,
     replace_chart_filters,
 )
 from ccusage_viz.processing import build_period_summary, required_summary_coverage
@@ -1937,7 +1938,7 @@ def _append_custom_monitor_attachment(
         not pane.attachment_enabled
         or attachment is None
         or renderer is None
-        or config.presentation.style not in {"ranking", "list"}
+        or not is_monitor_ranking_style(config.presentation.style)
     ):
         if attachment is not None:
             attachment.set_visible(False, now)
@@ -2488,7 +2489,7 @@ def _append_monitor_attachment(
         or attachment is None
         or renderer is None
         or not isinstance(config.chart, MonitorConfig)
-        or config.chart.presentation.style not in {"ranking", "list"}
+        or not is_monitor_ranking_style(config.chart.presentation.style)
         or (
             getattr(pane.component, "accepted_total_token_delta", None) is None
             and attachment.activity_label is None
@@ -2853,7 +2854,7 @@ def _custom_pane_adjustment_bindings(pane: TuiCustomPane, page: str) -> tuple[tu
             if _custom_metric_group_switch_available(pane):
                 actions.append(("m/M", "metric"))
             config = pane.component.accepted_config or pane.component.candidate
-            if config.presentation.style not in {"ranking", "list"}:
+            if not is_monitor_ranking_style(config.presentation.style):
                 actions.append(("w", "window"))
             if isinstance(capability, V2MonitorCapability) and capability.group_by:
                 actions.append(("b/B", "group"))
@@ -2866,7 +2867,7 @@ def _custom_pane_adjustment_bindings(pane: TuiCustomPane, page: str) -> tuple[tu
         if chart.group_by is not None and pane.component.aggregation == "sum":
             actions.insert(0, ("o", "other"))
         config = pane.component.accepted_config or pane.component.candidate
-        if pane.attachment is not None and config.presentation.style in {"ranking", "list"}:
+        if pane.attachment is not None and is_monitor_ranking_style(config.presentation.style):
             actions.extend((("t/T", "animation_theme"), ("s/S", "animation_style")))
         return tuple(actions)
     if page == "quick":
@@ -3075,7 +3076,7 @@ def _pane_adjustment_bindings(
         for key, label in actions
         if not (
             isinstance(chart, MonitorConfig)
-            and chart.presentation.style in {"ranking", "list"}
+            and is_monitor_ranking_style(chart.presentation.style)
             and key == "w"
         )
         and not (isinstance(chart, StackConfig) and chart.by != "composition" and key == "c")
@@ -3517,7 +3518,7 @@ def _pane_adjustment_state(pane: TuiChartPane, page: str, translator: Translator
             advanced.insert(0, f"Cache {chart.cache}")
         if isinstance(chart, MonitorConfig):
             advanced.append(f"Legend {chart.presentation.legend}")
-            if chart.presentation.style in {"ranking", "list"} and pane.attachment is not None:
+            if is_monitor_ranking_style(chart.presentation.style) and pane.attachment is not None:
                 advanced.append(
                     translator.text(
                         "status.monitor_attachment_settings",
@@ -7559,7 +7560,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         chart=chart,
                         attachment_available=(
                             isinstance(chart, MonitorConfig)
-                            and chart.presentation.style in {"ranking", "list"}
+                            and is_monitor_ranking_style(chart.presentation.style)
                             and focused_pane.attachment is not None
                         ),
                     )
@@ -7905,8 +7906,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     attachment_available=(
                         adjustment_page == "advanced"
                         and isinstance(_pane_display_options(pane).chart, MonitorConfig)
-                        and _pane_display_options(pane).chart.presentation.style
-                        in {"ranking", "list"}
+                        and is_monitor_ranking_style(
+                            _pane_display_options(pane).chart.presentation.style
+                        )
                         and pane.attachment is not None
                     ),
                     color=dashboard_theme != "no-color",
@@ -10003,7 +10005,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                             isinstance(component, CustomMonitorComponent)
                             and adjustment_page == "advanced"
                             and pane.attachment is not None
-                            and base.presentation.style in {"ranking", "list"}
+                            and is_monitor_ranking_style(base.presentation.style)
                             and key in {"s", "S", "t", "T"}
                         ):
                             attachment = pane.attachment
@@ -10397,7 +10399,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                             chart=chart,
                             attachment_available=(
                                 isinstance(chart, MonitorConfig)
-                                and chart.presentation.style in {"ranking", "list"}
+                                and is_monitor_ranking_style(chart.presentation.style)
                                 and pane.attachment is not None
                             ),
                         )
@@ -10482,8 +10484,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         adjustment_page == "advanced"
                         and chart_pane.attachment is not None
                         and isinstance(_pane_display_options(chart_pane).chart, MonitorConfig)
-                        and _pane_display_options(chart_pane).chart.presentation.style
-                        in {"ranking", "list"}
+                        and is_monitor_ranking_style(
+                            _pane_display_options(chart_pane).chart.presentation.style
+                        )
                         and key in {"t", "T", "s", "S"}
                     ):
                         attachment = chart_pane.attachment

@@ -115,6 +115,8 @@ def test_standalone_adjustment_uses_dataset_monitor_style_and_window_contract() 
     component.configure_display_window(display_window)
 
     assert _adjust(component, "s")
+    assert component.candidate.presentation.style == "ranking-dot"
+    assert _adjust(component, "s")
     assert component.candidate.presentation.style == "list"
     assert _adjust(component, "w")
     assert component.display_window_seconds == 43200

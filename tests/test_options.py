@@ -633,17 +633,17 @@ def test_replace_chart_filters_preserves_every_other_setting() -> None:
 
 
 def test_monitor_list_is_available_for_total_and_grouped_views() -> None:
+    assert "list" in compatible_styles("ranking", "model")
     assert "list" in compatible_styles("monitor", None)
-    assert "list" in compatible_styles("monitor", "model")
+    assert "ranking-dot" in compatible_styles("monitor", "model")
     assert "bars" not in compatible_styles("monitor", "model")
-    assert "list" not in compatible_styles("ranking", "model")
 
     monitor = StandaloneLaunch(
         ProcessConfig(),
         StandaloneHostConfig(),
         MonitorConfig("monitor", 3600, presentation=ChartPresentation(style="ranking")),
     )
-    assert adjust_standalone(monitor, "s").chart.presentation.style == "list"
+    assert adjust_standalone(monitor, "s").chart.presentation.style == "ranking-dot"
     assert adjust_standalone(monitor, "b").chart.presentation.style == "ranking"
 
 
@@ -666,8 +666,8 @@ def test_monitor_distribution_adjustments_change_only_display_projection() -> No
     assert adjust_standalone(monitor, "i").host.interval == 30
 
 
-def test_monitor_ranking_and_list_do_not_adjust_the_rolling_window() -> None:
-    for style in ("ranking", "list"):
+def test_monitor_ranking_styles_do_not_adjust_the_rolling_window() -> None:
+    for style in ("ranking", "ranking-dot", "list"):
         monitor = StandaloneLaunch(
             ProcessConfig(),
             StandaloneHostConfig(),

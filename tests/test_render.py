@@ -1168,6 +1168,39 @@ def test_observed_ranking_uses_content_driven_label_width() -> None:
     assert "A           " not in row
 
 
+def test_monitor_ranking_dot_prefixes_observed_rows_and_preserves_ascii_fallback() -> None:
+    model = RankingModel(
+        (),
+        None,
+        observed_entries=(
+            ScalarRankingEntry("alpha", "Alpha", 1200.0),
+            ScalarRankingEntry("beta", "Beta", 800.0),
+        ),
+        metric=MetricDescriptor("tokens"),
+        observed_scope=ObservedScope(900, "agent"),
+    )
+
+    dotted = render_ranking(
+        model,
+        RenderContext(80, 24, load_translator("en"), color=False, style="ranking-dot"),
+    )
+    ascii_dotted = render_ranking(
+        model,
+        RenderContext(
+            80, 24, load_translator("en"), color=False, ascii=True, style="ranking-dot"
+        ),
+    )
+    ranking = render_ranking(
+        model,
+        RenderContext(80, 24, load_translator("en"), color=False, style="ranking"),
+    )
+
+    assert all(row.startswith("● ") for row in dotted.splitlines()[-2:])
+    assert all(row.startswith("o ") for row in ascii_dotted.splitlines()[-2:])
+    assert all(not row.startswith("● ") for row in ranking.splitlines()[-2:])
+    assert all(display_width(row) <= 80 for row in dotted.splitlines())
+
+
 def test_monitor_list_is_centered_and_omits_bar_tracks() -> None:
     model = RankingModel(
         (),

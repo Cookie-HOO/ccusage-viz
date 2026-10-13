@@ -292,6 +292,7 @@ def test_value_metrics_exclude_cumulative_bars() -> None:
         "points",
         "line-points",
         "ranking",
+        "ranking-dot",
         "list",
         "cumulative-bars",
     )
@@ -302,6 +303,7 @@ def test_value_metrics_exclude_cumulative_bars() -> None:
         "points",
         "line-points",
         "ranking",
+        "ranking-dot",
         "list",
     )
     assert "bars" not in custom_monitor_styles("sum", "model")

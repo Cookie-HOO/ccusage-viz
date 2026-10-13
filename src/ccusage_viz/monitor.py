@@ -46,6 +46,7 @@ from ccusage_viz.options import (
     StandaloneLaunch,
     adjust_standalone,
     is_monitor_distribution,
+    is_monitor_ranking_style,
     monitor_shows_window_control,
     replace_chart_filters,
 )
@@ -213,7 +214,7 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
         """Append the local animation only below viable ranking/list content."""
 
         chart = monitor_chart(config)
-        available = chart.presentation.style in {"ranking", "list"}
+        available = is_monitor_ranking_style(chart.presentation.style)
         if (
             not attachment_enabled
             or not available
@@ -435,7 +436,7 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                 + (
                     (("t/T", "animation_theme"), ("s/S", "animation_style"))
                     if adjustment_page == "advanced"
-                    and chart.presentation.style in {"ranking", "list"}
+                    and is_monitor_ranking_style(chart.presentation.style)
                     else ()
                 )
             )
@@ -497,7 +498,7 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                                 else translator.text("label.animation_none")
                             ),
                         )
-                        if chart.presentation.style in {"ranking", "list"}
+                        if is_monitor_ranking_style(chart.presentation.style)
                         else ""
                     ),
                 }
@@ -585,7 +586,7 @@ def run_monitor(options: StandaloneLaunch, translator: Translator) -> int:
                     data_affecting = True
             elif (
                 adjustment_page == "advanced"
-                and monitor_chart(component.candidate).presentation.style in {"ranking", "list"}
+                and is_monitor_ranking_style(monitor_chart(component.candidate).presentation.style)
                 and key in {"t", "T", "s", "S"}
             ):
                 now = time.monotonic()

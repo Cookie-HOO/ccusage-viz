@@ -51,7 +51,16 @@ def custom_monitor_y_axis_max(values: list[float]) -> float:
 
 def custom_monitor_styles(aggregation: str, group_by: str | None = None) -> tuple[str, ...]:
     """Return the complete source-safe Monitor style cycle for an aggregation."""
-    styles = ("bars", "line", "step", "points", "line-points", "ranking", "list")
+    styles = (
+        "bars",
+        "line",
+        "step",
+        "points",
+        "line-points",
+        "ranking",
+        "ranking-dot",
+        "list",
+    )
     if group_by is not None:
         styles = tuple(style for style in styles if style != "bars")
     return (*styles, "cumulative-bars") if aggregation == "sum" else styles
