@@ -66,19 +66,22 @@ def _prepare_group(
         else _value(group.total, projection, context)
     )
     comparison_display = ""
-    if context.period != "all" and projection.comparison_available:
+    if (
+        not context.pending
+        and context.period != "all"
+        and projection.comparison_available
+    ):
         if not group.comparison_ready:
             comparison_display = context.translator.text("label.ranking_new")
         elif group.previous_total is not None:
-            if group.comparison_display is not None:
-                comparison_display = _localized(group.comparison_display, context)
-            else:
-                delta = group.total - group.previous_total
-                comparison_display = (
-                    "0"
-                    if delta == 0
-                    else f"{'+' if delta > 0 else '-'}{_value(abs(delta), projection, context)}"
-                )
+            delta = group.total - group.previous_total
+            comparison_display = (
+                "0"
+                if delta == 0
+                else _localized(group.comparison_display, context)
+                if group.comparison_display is not None
+                else f"{'+' if delta > 0 else '-'}{_value(abs(delta), projection, context)}"
+            )
     return GroupedRankingPresentationGroup(
         group.id,
         _localized(group.label, context).replace("\n", "\\n"),
@@ -215,6 +218,7 @@ def render_grouped_custom_ranking(
                 f"{'+' if value > 0 else '-'}{_value(abs(cast(Decimal, value)), projection, context)}"
             ),
             context=context,
+            pending=context.pending,
             descriptions_visible=descriptions_visible,
             comparison_mode=comparison_mode,
             comparison_available=projection.comparison_available,

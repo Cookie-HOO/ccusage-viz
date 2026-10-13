@@ -372,6 +372,56 @@ def test_grouped_custom_ranking_new_group_uses_localized_full_comparison_only() 
         assert "New" not in heading
 
 
+def test_grouped_custom_ranking_unchanged_group_ignores_custom_comparison_display() -> None:
+    groups = (
+        CustomProjectedRankingGroup(
+            "unchanged",
+            LocalizedText("Unchanged", "未变化"),
+            (CustomProjectedSeries("item", LocalizedText("Item", "项目"), (Decimal("7"),), rank=1),),
+            Decimal("7"),
+            Decimal("7"),
+            True,
+            Decimal("7"),
+            comparison_display=LocalizedText("same as before", "与之前相同"),
+        ),
+    )
+    output = strip_ansi(
+        render_custom_projection(
+            _grouped_ranking_projection(groups=groups),
+            RenderContext(
+                100, 20, load_translator("en"), color=False, ascii=True, density="detailed"
+            ),
+        )
+    )
+    heading = next(line for line in output.splitlines() if "Unchanged" in line)
+
+    assert "same as before" not in heading
+    assert re.search(r"7 requests\s+0\s+100\.0%", heading)
+
+
+def test_pending_grouped_custom_ranking_suppresses_group_and_entry_comparisons() -> None:
+    output = strip_ansi(
+        render_custom_projection(
+            _grouped_ranking_projection(),
+            RenderContext(
+                100,
+                30,
+                load_translator("en"),
+                color=False,
+                ascii=True,
+                density="detailed",
+                pending=True,
+            ),
+        )
+    )
+    coding_heading = next(line for line in output.splitlines() if "Coding Model" in line)
+    general_heading = next(line for line in output.splitlines() if "General Model" in line)
+
+    assert "+2 requests" not in coding_heading
+    assert "New" not in general_heading
+    assert "+" not in output and "New" not in output
+
+
 def test_grouped_custom_ranking_rank_mode_suppresses_group_value_delta() -> None:
     projection = _grouped_ranking_projection()
     assert projection.config is not None
