@@ -29,9 +29,13 @@ The existing fixed two-row chrome assumption becomes dynamic: tab-row count plus
 
 ## Repaint lifecycle
 
-The filter-modal paint callbacks at each Custom editor host force the first filter frame to be fully repainted rather than diffed against the preceding chart/adjustment frame. Subsequent filter-editor frames may continue to use normal incremental updates. On returning to the caller, the caller's next normal render restores its own frame.
+Custom filter editor transitions form a modal rendering boundary in both directions:
 
-This prevents residual text from the larger chart frame appearing in the shorter filter modal.
+- The first filter-editor frame is fully repainted rather than diffed against the preceding chart/adjustment frame.
+- The first caller frame after the editor returns is also fully repainted, whether the editor returns by Apply, Cancel, or idle timeout.
+- Consecutive frames while the editor remains open may use normal incremental updates.
+
+This prevents residual text from the larger chart frame appearing in the shorter filter modal and prevents filter-frame content from overlapping the restored Dashboard or standalone browsing frame.
 
 ## Tests
 
@@ -43,7 +47,7 @@ Extend `tests/test_custom_filter_draft.py` with coverage for:
 - separators and unoccupied coordinates producing no tab hit;
 - option click coordinates and viewport rows shifting correctly beneath multi-row tabs.
 
-Add focused host-level tests as appropriate to assert the filter editor's first frame requests a forced repaint, while preserving normal behavior after that frame.
+Add focused host-level tests as appropriate to assert a forced repaint for the filter editor's first frame and the caller's first restored frame after Apply, Cancel, and idle timeout, while preserving normal incremental behavior for subsequent frames.
 
 ## Non-goals
 
