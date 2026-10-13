@@ -7,7 +7,6 @@ charts without adapting measurements into token-domain models.
 
 from __future__ import annotations
 
-from dataclasses import replace
 from decimal import Decimal
 from typing import cast
 
@@ -27,11 +26,9 @@ from ccusage_viz.render.base import (
     isolated_plot,
 )
 from ccusage_viz.render.calendar_body import render_calendar_footer, render_calendar_grid
+from ccusage_viz.render.custom_ranking_preparation import prepare_custom_ranking
 from ccusage_viz.render.palette import categorical_colors, get_color_scheme
-from ccusage_viz.render.ranking_presentation import (
-    RankingPresentationEntry,
-    render_historical_ranking,
-)
+from ccusage_viz.render.ranking_presentation import render_historical_ranking
 from ccusage_viz.render.stack_presentation import (
     normalized_stack_values,
     render_grouped_stack_plot,
@@ -424,50 +421,16 @@ def render_custom_ranking(
                 (_heading(projection, context), context.translator.text("message.custom_no_data"))
             )
         )
-    presentation_entries = tuple(
-        RankingPresentationEntry(
-            entry.id,
-            _label(entry, context),
-            entry.total,
-            entry.previous_total,
-            entry.comparison_ready,
-            entry.is_other,
-            entry.previous_rank,
-            None if entry.description is None or entry.is_other else _localized(entry.description, context),
-            None if entry.display is None or entry.is_other else _localized(entry.display, context),
-            comparison_display=(
-                None
-                if entry.comparison_display is None or entry.is_other
-                else _localized(entry.comparison_display, context)
-            ),
-            copy_marker=None if entry.is_other else "✓" if entry.id == copied_entry_id else "⊞",
-            project_link=None if entry.is_other else entry.link,
-            rank=entry.rank or rank,
-        )
-        for rank, entry in enumerate(projection.series, 1)
+    prepared = prepare_custom_ranking(
+        projection,
+        context,
+        search_query=search_query,
+        copy_marker=lambda entry: (
+            None if entry.is_other else "✓" if entry.id == copied_entry_id else "⊞"
+        ),
     )
-    prior = {
-        entry.key: rank
-        for rank, entry in enumerate(
-            sorted(
-                (
-                    entry
-                    for entry in presentation_entries
-                    if entry.previous is not None and not entry.is_other
-                ),
-                key=lambda entry: (-cast(Decimal, entry.previous), str(entry.key)),
-            ),
-            1,
-        )
-    }
-    presentation_entries = tuple(
-        replace(entry, previous_rank=entry.previous_rank or prior.get(entry.key))
-        for entry in presentation_entries
-    )
-    total = sum((entry.current for entry in presentation_entries), start=Decimal())
-    maximum = max((entry.current for entry in presentation_entries), default=Decimal())
     return render_historical_ranking(
-        presentation_entries,
+        prepared.matched_entries,
         heading=_heading(projection, context).strip(),
         value_formatter=lambda value: _value(cast(Decimal, value), projection, context),
         delta_formatter=lambda value: (
@@ -488,10 +451,12 @@ def render_custom_ranking(
         label_max_width=48,
         entry_offset=entry_offset,
         entry_limit=entry_limit,
-        total_entry_count=len(presentation_entries),
-        total=total,
-        maximum=maximum,
+        total_entry_count=len(prepared.full_entries),
+        matched_entry_count=len(prepared.matched_entries),
+        total=prepared.full_total,
+        maximum=prepared.full_maximum,
         show_percentage=projection.show_percentage,
+        entries_matched=True,
     )
 
 

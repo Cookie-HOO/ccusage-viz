@@ -305,8 +305,8 @@ def test_viewport_search_preserves_full_facts_and_anchor_after_refresh() -> None
     assert "●" in claude and "·" in claude
     assert "↓" in claude
     assert "Showing 1/3 item(s)" in output
-    assert viewport.total == Decimal(100)
-    assert viewport.maximum == Decimal(50)
+    assert viewport.full_total == Decimal(100)
+    assert viewport.full_maximum == Decimal(50)
     assert viewport.by_id["claude"].previous_rank == 2
 
     # Reapply the same search to fresh full facts and retain the matched ID at
@@ -324,8 +324,8 @@ def test_viewport_search_preserves_full_facts_and_anchor_after_refresh() -> None
     claude = next(line for line in output.splitlines() if "Claude" in line)
     assert claude.lstrip().startswith("1 ")
     assert "60.0%" in claude
-    assert viewport.total == Decimal(100)
-    assert viewport.maximum == Decimal(60)
+    assert viewport.full_total == Decimal(100)
+    assert viewport.full_maximum == Decimal(60)
     assert viewport.offset == viewport.starts[0]
 
 
@@ -609,7 +609,7 @@ def test_stable_data_changes_invalidate_all_geometry_snapshots(
 
 
 def test_warm_large_ranking_only_formats_visible_entries(monkeypatch):
-    import ccusage_viz.render.custom_ranking_viewport as module
+    import ccusage_viz.render.custom_ranking_preparation as preparation
     import ccusage_viz.render.ranking_presentation as presentation
 
     model = projection(10_000, descriptions=True, comparison=True)
@@ -629,7 +629,7 @@ def test_warm_large_ranking_only_formats_visible_entries(monkeypatch):
         pytest.fail("warm scrolling must not prepare/filter the full list")
 
     monkeypatch.setattr(presentation, "_refresh_markers", record)
-    monkeypatch.setattr(module, "filter_ranking_entries", fail)
+    monkeypatch.setattr(preparation, "filter_ranking_entries", fail)
     monkeypatch.setattr(RankingViewport, "prepare_lines", fail)
     viewport.offset = 20_000
     output = render(model, viewport, ctx)

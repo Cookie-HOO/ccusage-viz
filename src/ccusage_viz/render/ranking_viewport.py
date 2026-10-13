@@ -64,8 +64,8 @@ class RankingViewport:
     # Heights omit the separator preceding each entry.
     heights: tuple[int, ...] = ()
     hits: dict[int, tuple[str, int, int | None]] = field(default_factory=dict)
-    total: int | Decimal = 0
-    maximum: int | Decimal = 1
+    full_total: int | Decimal = 0
+    full_maximum: int | Decimal = 1
     _geometry_cache: dict[object, _RankingGeometry] = field(
         default_factory=dict, init=False, repr=False
     )
@@ -115,7 +115,7 @@ class RankingViewport:
     def clear(self) -> None:
         self.invalidate_geometry()
         self.offset = self.total_rows = self.visible_rows = self.reserved_rows = 0
-        self.total, self.maximum = 0, 1
+        self.full_total, self.full_maximum = 0, 1
         self.body_top = 0
         self.scrollbar = None
         self.copy_all_hit = None

@@ -5,16 +5,14 @@ from __future__ import annotations
 from bisect import bisect_right
 from dataclasses import replace
 from decimal import Decimal
-from typing import cast
 
-from ccusage_viz.custom_models import LocalizedText
 from ccusage_viz.formatting import center_text, clip_width, display_width, pad_width
-from ccusage_viz.processing.custom_historical import CustomChartProjection, CustomProjectedSeries
+from ccusage_viz.processing.custom_historical import CustomChartProjection
 from ccusage_viz.render.base import RenderContext, styled_text
+from ccusage_viz.render.custom_ranking_preparation import prepare_custom_ranking
 from ccusage_viz.render.palette import get_color_scheme
 from ccusage_viz.render.ranking_presentation import (
     RankingPresentationEntry,
-    filter_ranking_entries,
     measure_ranking_columns,
     render_historical_ranking,
 )
@@ -77,7 +75,8 @@ def render_custom_ranking_viewport(
     )
     rebuild_geometry = rebuild_data or viewport.geometry_key != geometry_key
     anchor_id: str | None = None
-    fallback_ids: tuple[str, ...] = ()
+    old_anchor_index: int | None = None
+    old_entries = viewport.entries
     if rebuild_geometry and not reset_changed and viewport.entries:
         anchor_index = max(
             0,
@@ -87,12 +86,7 @@ def render_custom_ranking_viewport(
             ),
         )
         anchor_id = str(viewport.entries[anchor_index].key)
-        fallback_ids = tuple(
-            str(viewport.entries[index].key)
-            for distance in range(1, len(viewport.entries))
-            for index in (anchor_index + distance, anchor_index - distance)
-            if 0 <= index < len(viewport.entries)
-        )
+        old_anchor_index = anchor_index
 
     def value(number: int | Decimal) -> str:
         return format_custom_value(
@@ -113,8 +107,8 @@ def render_custom_ranking_viewport(
             context=context,
             value_formatter=value,
             delta_formatter=lambda number: f"{'+' if number > 0 else '-'}{value(abs(number))}",
-            total=viewport.total,
-            maximum=viewport.maximum,
+            total=viewport.full_total,
+            maximum=viewport.full_maximum,
             descriptions_visible=descriptions_visible,
             search_query=search_query,
             search_editing=search_editing,
@@ -135,77 +129,17 @@ def render_custom_ranking_viewport(
 
     if rebuild_data:
         viewport.invalidate_geometry()
-
-        def localized(text: LocalizedText) -> str:
-            return text.zh_cn if context.translator.language == "zh" else text.en
-
-        def prepare_entry(entry: CustomProjectedSeries) -> RankingPresentationEntry:
-            display = (
-                localized(entry.display)
-                if entry.display and not entry.is_other
-                else value(entry.total)
-            )
-            comparison_display = (
-                localized(entry.comparison_display)
-                if entry.comparison_display and not entry.is_other
-                else (
-                    f"{'+' if entry.total > entry.previous_total else '-'}"
-                    f"{value(abs(entry.total - entry.previous_total))}"
-                    if entry.previous_total is not None and entry.total != entry.previous_total
-                    else None
-                )
-            )
-            return RankingPresentationEntry(
-                entry.id,
-                context.translator.text("label.other")
-                if entry.is_other
-                else localized(entry.label).replace("\n", "\\n"),
-                entry.total,
-                entry.previous_total,
-                entry.comparison_ready,
-                entry.is_other,
-                entry.previous_rank,
-                description=localized(entry.description)
-                if entry.description and not entry.is_other
-                else None,
-                display=display,
-                comparison_display=comparison_display,
-                copy_marker=None if entry.is_other else "⊞",
-                project_link=None if entry.is_other else entry.link,
-                display_width=display_width(display),
-                comparison_display_width=(
-                    display_width(comparison_display) if comparison_display is not None else None
-                ),
-            )
-
-        full_entries = tuple(
-            replace(prepare_entry(entry), rank=entry.rank or rank)
-            for rank, entry in enumerate(projection.series, 1)
+        prepared = prepare_custom_ranking(
+            projection,
+            context,
+            search_query=search_query,
+            copy_marker=lambda entry: None if entry.is_other else "⊞",
         )
-        prior = {
-            entry.key: rank
-            for rank, entry in enumerate(
-                sorted(
-                    (
-                        entry
-                        for entry in full_entries
-                        if entry.previous is not None and not entry.is_other
-                    ),
-                    key=lambda entry: (-cast(Decimal, entry.previous), str(entry.key)),
-                ),
-                1,
-            )
-        }
-        viewport.full_entries = tuple(
-            replace(entry, previous_rank=entry.previous_rank or prior.get(entry.key))
-            for entry in full_entries
-        )
-        viewport.entries = filter_ranking_entries(viewport.full_entries, search_query)
-        viewport.by_id = {str(entry.key): entry for entry in viewport.entries}
-        viewport.total = sum((entry.current for entry in viewport.full_entries), Decimal())
-        viewport.maximum = (
-            max((entry.current for entry in viewport.full_entries), default=Decimal()) or 1
-        )
+        viewport.full_entries = prepared.full_entries
+        viewport.entries = prepared.matched_entries
+        viewport.by_id = prepared.by_id
+        viewport.full_total = prepared.full_total
+        viewport.full_maximum = prepared.full_maximum
         viewport.source = projection.series
         viewport.data_key = data_key
     if rebuild_geometry:
@@ -215,7 +149,7 @@ def render_custom_ranking_viewport(
                 measure_ranking_columns(
                     viewport.entries,
                     context=context,
-                    total=viewport.total,
+                    total=viewport.full_total,
                     show_percentage=projection.show_percentage,
                     comparison_mode=comparison,
                     comparison_available=projection.comparison_available,
@@ -225,14 +159,24 @@ def render_custom_ranking_viewport(
                 )
             viewport.prepare_lines(descriptions=descriptions_visible, spacing=item_spacing)
             viewport.remember_geometry(geometry_key)
-        if anchor_id is not None:
-            new_indexes = {str(entry.key): index for index, entry in enumerate(viewport.entries)}
-            surviving_id = next(
-                (entry_id for entry_id in (anchor_id, *fallback_ids) if entry_id in new_indexes),
-                None,
-            )
+        if anchor_id is not None and old_anchor_index is not None:
+            surviving_id = anchor_id if anchor_id in viewport.by_id else None
+            for distance in range(1, len(old_entries)):
+                if surviving_id is not None:
+                    break
+                for index in (old_anchor_index + distance, old_anchor_index - distance):
+                    if 0 <= index < len(old_entries):
+                        candidate = str(old_entries[index].key)
+                        if candidate in viewport.by_id:
+                            surviving_id = candidate
+                            break
             if surviving_id is not None:
-                viewport.offset = viewport.starts[new_indexes[surviving_id]]
+                new_index = next(
+                    index
+                    for index, entry in enumerate(viewport.entries)
+                    if str(entry.key) == surviving_id
+                )
+                viewport.offset = viewport.starts[new_index]
         # render() clamps only after deriving visible_rows from the current
         # chrome and context height; the previous viewport size may be stale.
         viewport.geometry_key = geometry_key
