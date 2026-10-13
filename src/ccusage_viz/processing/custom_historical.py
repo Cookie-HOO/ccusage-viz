@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from decimal import Decimal
-from typing import Any, Literal
+from typing import Literal, Protocol
 
 from ccusage_viz.core.time import DateRange
 from ccusage_viz.custom_models import (
@@ -25,6 +25,28 @@ from ccusage_viz.options import CustomChartConfig
 from ccusage_viz.processing.summaries import period_end, period_start
 
 SortDirection = Literal["ascending", "descending"]
+
+
+class SeriesMetadataSource(Protocol):
+    @property
+    def description(self) -> LocalizedText | None: ...
+
+    @property
+    def display(self) -> LocalizedText | None: ...
+
+    @property
+    def comparison_display(self) -> LocalizedText | None: ...
+
+    @property
+    def link(self) -> str | None: ...
+
+
+@dataclass(frozen=True, slots=True)
+class SeriesMetadata:
+    description: LocalizedText | None
+    display: LocalizedText | None
+    comparison_display: LocalizedText | None
+    link: str | None
 
 
 class CustomProjectionError(ValueError):
@@ -174,7 +196,13 @@ def _process_grouped_ranking(
     assert current is not None
     previous = comparison_response.data.groups if comparison_response is not None else None
     sort_direction = response.capabilities.charts["ranking"].sort_direction
-    groups = _project_groups(current, previous, config, sort_direction=sort_direction)
+    groups = _project_groups(
+        current,
+        previous,
+        config,
+        days=days,
+        sort_direction=sort_direction,
+    )
     return CustomChartProjection(
         "ranking",
         days,
@@ -201,32 +229,42 @@ def _project_source_series(
 ) -> tuple[tuple[CustomProjectedSeries, ...], Decimal, Decimal]:
     """Return visible Top/Other entries, full returned total, and full returned maximum."""
     previous_totals, previous_ranks = _previous_facts(previous, sort_direction)
-    candidates = [
-        CustomProjectedSeries(
-            id=source.id,
-            label=source.label,
-            values=_bucket_values(source, days, config),
-            previous_total=previous_totals.get(source.id),
-            comparison_ready=previous is not None and source.id in previous,
-            previous_rank=previous_ranks.get(source.id),
-            **_series_metadata(source),
+    candidates: list[CustomProjectedSeries] = []
+    for source in sources:
+        metadata = _series_metadata(source)
+        candidates.append(
+            CustomProjectedSeries(
+                id=source.id,
+                label=source.label,
+                values=_bucket_values(source, days, config),
+                previous_total=previous_totals.get(source.id),
+                comparison_ready=previous is not None and source.id in previous,
+                previous_rank=previous_ranks.get(source.id),
+                description=metadata.description,
+                display=metadata.display,
+                comparison_display=metadata.comparison_display,
+                link=metadata.link,
+            )
         )
-        for source in sources
-    ]
     candidates.sort(key=lambda item: _ranking_key(item.total, item.id, sort_direction))
-    ranked = [
-        CustomProjectedSeries(
-            id=item.id,
-            label=item.label,
-            values=item.values,
-            previous_total=item.previous_total,
-            comparison_ready=item.comparison_ready,
-            previous_rank=item.previous_rank,
-            rank=rank if include_rank else None,
-            **_series_metadata(item),
+    ranked: list[CustomProjectedSeries] = []
+    for rank, item in enumerate(candidates, start=1):
+        metadata = _series_metadata(item)
+        ranked.append(
+            CustomProjectedSeries(
+                id=item.id,
+                label=item.label,
+                values=item.values,
+                previous_total=item.previous_total,
+                comparison_ready=item.comparison_ready,
+                previous_rank=item.previous_rank,
+                rank=rank if include_rank else None,
+                description=metadata.description,
+                display=metadata.display,
+                comparison_display=metadata.comparison_display,
+                link=metadata.link,
+            )
         )
-        for rank, item in enumerate(candidates, start=1)
-    ]
     total = sum((item.total for item in ranked), start=Decimal())
     maximum = max((item.total for item in ranked), default=Decimal())
     selected, discarded = _select_top(ranked, config.top)
@@ -240,6 +278,7 @@ def _project_groups(
     previous: tuple[CustomRankingGroup, ...] | None,
     config: CustomChartConfig,
     *,
+    days: tuple[date, ...],
     sort_direction: SortDirection,
 ) -> tuple[CustomProjectedRankingGroup, ...]:
     """Preserve current group order and independently project every group."""
@@ -255,11 +294,12 @@ def _project_groups(
         series, total, maximum = _project_source_series(
             group.series,
             config,
-            days=_period_axis(config.date_range.since, config.date_range.until, config.granularity),
+            days=days,
             sort_direction=sort_direction,
             previous=previous_series,
             include_rank=True,
         )
+        metadata = _series_metadata(group)
         projected.append(
             CustomProjectedRankingGroup(
                 id=group.id,
@@ -275,7 +315,10 @@ def _project_groups(
                 ),
                 comparison_ready=previous_group is not None,
                 maximum=maximum,
-                **_series_metadata(group),
+                description=metadata.description,
+                display=metadata.display,
+                comparison_display=metadata.comparison_display,
+                link=metadata.link,
             )
         )
     return tuple(projected)
@@ -338,13 +381,13 @@ def _bucket_values(
     return tuple(values)
 
 
-def _series_metadata(source: Any) -> dict[str, Any]:
-    return {
-        "description": source.description,
-        "display": source.display,
-        "comparison_display": source.comparison_display,
-        "link": source.link,
-    }
+def _series_metadata(source: SeriesMetadataSource) -> SeriesMetadata:
+    return SeriesMetadata(
+        description=source.description,
+        display=source.display,
+        comparison_display=source.comparison_display,
+        link=source.link,
+    )
 
 
 def _validate_capability(response: CustomChartResponse, config: CustomChartConfig) -> None:
