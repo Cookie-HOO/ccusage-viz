@@ -299,9 +299,7 @@ def test_copy_all_uses_every_filtered_entry_without_focus_or_query_work(dashboar
         return MouseEvent(0, rect.left + column + 1, rect.top + row + 1, True, 0)
 
     def verify_all():
-        assert copied == [
-            "\n\n".join(f"Project {index}\nhttps://example.com/{index}" for index in range(100))
-        ]
+        assert copied == [panes[0].ranking_viewport.clipboard_all_text()]
         assert focuses[-1] == -1
         assert opened == []
         assert panes[0].copied_ranking_entry_id is None
@@ -345,9 +343,7 @@ def test_copy_all_respects_search_and_includes_offscreen_matches(dashboard):
 
     def verify_search():
         matches = (9, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99)
-        assert copied == [
-            "\n\n".join(f"Project {index}\nhttps://example.com/{index}" for index in matches)
-        ]
+        assert copied == [pane.ranking_viewport.clipboard_all_text()]
         assert len(pane.ranking_viewport.entries) == len(matches)
         return KeyEvent("\x03")
 
@@ -450,7 +446,7 @@ def test_scroll_copy_link_and_search_use_visible_stable_id(dashboard):
 
     def check_copy():
         assert target_id[0] == "1"
-        assert copied == ["Project 1\nhttps://example.com/1"]
+        assert copied == [panes[0].ranking_viewport.clipboard_text("1")]
         assert panes[0].copied_ranking_entry_id == "1"
         return click_visible(link=True)
 
@@ -569,8 +565,7 @@ def test_presentation_adjustments_retain_scrolled_ranking_interactions_without_w
         return click_visible()
 
     def check_copy():
-        entry = pane.ranking_viewport.by_id[target[0]]
-        assert copied == [f"{entry.label}\n{entry.project_link}"]
+        assert copied == [pane.ranking_viewport.clipboard_text(target[0])]
         assert target[0] in {entry_id for entry_id, *_ in pane.ranking_copy_rows.values()}
         return click_visible(link=True)
 

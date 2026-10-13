@@ -55,6 +55,17 @@ def render_custom_ranking_viewport(
         viewport.offset = 0
         viewport.reset_key = reset_key
     comparison = config.ranking_comparison if config else "full"
+    viewport.comparison_visible = (
+        context.style != "list"
+        and context.density in {"full", "detailed"}
+        and context.width >= 58
+        and context.period != "all"
+        and projection.comparison_available
+        and comparison == "full"
+    )
+    viewport.percentage_visible = (
+        projection.show_percentage and context.style != "list" and not context.pending
+    )
     # Entry facts are stable across presentation changes. The source identity
     # plus locale and query define the localized, filtered entry projection.
     data_key = (context.translator.language, projection.unit, search_query)
@@ -108,6 +119,7 @@ def render_custom_ranking_viewport(
             entries,
             heading=heading,
             context=context,
+            pending=context.pending,
             value_formatter=value,
             delta_formatter=lambda number: f"{'+' if number > 0 else '-'}{value(abs(number))}",
             total=viewport.full_total,

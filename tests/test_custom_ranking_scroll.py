@@ -899,6 +899,21 @@ def test_list_viewport_has_no_copy_actions_and_expands_labels() -> None:
     assert "Project 19" in output
 
 
+def test_flat_ranking_clipboard_includes_visible_values_and_shares() -> None:
+    viewport = RankingViewport()
+    model = projection(2)
+    render(model, viewport, context(width=80, density="detailed"), copy_all_action=True)
+
+    assert viewport.clipboard_text("0") == "Project 0\n2 items\n66.7%\nhttps://example.com/0"
+    assert viewport.clipboard_all_text() == (
+        "Project 0\n2 items\n66.7%\nhttps://example.com/0\n\n"
+        "Project 1\n1 items\n33.3%\nhttps://example.com/1"
+    )
+
+    render(model, viewport, replace(context(width=80, density="detailed"), style="list"))
+    assert "%" not in viewport.clipboard_all_text()
+
+
 def test_copy_all_marker_follows_count_row_and_hides_without_it():
     model = projection(100)
     viewport = RankingViewport()

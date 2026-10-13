@@ -22,6 +22,24 @@ if TYPE_CHECKING:
     from ccusage_viz.render.ranking_presentation import RankingPresentationEntry
 
 
+def _ranking_clipboard_entry_text(
+    entry: RankingPresentationEntry,
+    *,
+    total: int | Decimal,
+    comparison_visible: bool,
+    percentage_visible: bool,
+) -> str:
+    parts = [entry.label, entry.display or ""]
+    if comparison_visible:
+        parts.append(entry.comparison_display or "")
+    if percentage_visible and total:
+        parts.append(f"{Decimal(entry.current) / Decimal(total):.1%}")
+    from ccusage_viz.render.ranking_presentation import copyable_description_text
+
+    parts.extend((copyable_description_text(entry.description or ""), entry.project_link or ""))
+    return "\n".join(part for part in parts if part)
+
+
 def ranking_separator(spacing: str, context: RenderContext) -> str:
     """Render one presentation-only ranking separator for every viewport."""
     if spacing == "space":
@@ -85,6 +103,8 @@ class RankingViewport:
     hits: dict[int, tuple[str, int, int | None]] = field(default_factory=dict)
     full_total: int | Decimal = 0
     full_maximum: int | Decimal = 1
+    comparison_visible: bool = False
+    percentage_visible: bool = False
     _geometry_cache: dict[object, _RankingGeometry] = field(
         default_factory=dict, init=False, repr=False
     )
@@ -141,11 +161,35 @@ class RankingViewport:
         self.active = False
         self.source = self.data_key = self.geometry_key = self.reset_key = None
         self.full_entries = self.entries = ()
+        self.comparison_visible = self.percentage_visible = False
         self.by_id.clear()
         self.hits.clear()
         self.starts = (0,)
         self.heights = ()
         self.columns = RankingColumns()
+
+    def clipboard_text(self, entry_id: str) -> str:
+        entry = self.by_id.get(entry_id)
+        if entry is None or entry.is_other:
+            return ""
+        return _ranking_clipboard_entry_text(
+            entry,
+            total=self.full_total,
+            comparison_visible=self.comparison_visible,
+            percentage_visible=self.percentage_visible,
+        )
+
+    def clipboard_all_text(self) -> str:
+        return "\n\n".join(
+            _ranking_clipboard_entry_text(
+                entry,
+                total=self.full_total,
+                comparison_visible=self.comparison_visible,
+                percentage_visible=self.percentage_visible,
+            )
+            for entry in self.entries
+            if not entry.is_other
+        )
 
     def prepare_lines(self, *, descriptions: bool, spacing: str) -> None:
         from ccusage_viz.render.ranking_presentation import description_visible_text

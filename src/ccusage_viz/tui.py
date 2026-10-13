@@ -8418,12 +8418,8 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             payload = pane.grouped_ranking_viewport.clipboard_all_text()
             entries = ()
         elif pane.ranking_viewport.active:
-            payload = ""
-            entries = tuple(
-                (entry.label, entry.description, entry.project_link)
-                for entry in pane.ranking_viewport.entries
-                if not entry.is_other
-            )
+            payload = pane.ranking_viewport.clipboard_all_text()
+            entries = ()
         else:
             payload = ""
             entries = tuple(
@@ -8475,7 +8471,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             prepared_entry = pane.ranking_viewport.by_id.get(target[0])
             if prepared_entry is None:
                 return False
-            payload = ""
+            payload = pane.ranking_viewport.clipboard_text(str(prepared_entry.key))
             entry_id = str(prepared_entry.key)
             label, description, project_link = (
                 prepared_entry.label,
