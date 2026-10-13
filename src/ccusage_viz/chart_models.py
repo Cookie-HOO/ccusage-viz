@@ -267,6 +267,8 @@ class ScalarRankingEntry:
     value: ChartValue
     is_other: bool = False
     agent: str | None = None
+    description: str | None = None
+    display: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

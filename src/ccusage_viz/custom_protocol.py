@@ -1330,6 +1330,17 @@ def _parse_data(value: object, *, descriptions_allowed: bool = False) -> CustomD
     return CustomData(series)
 
 
+def _normalized_localized(source: object, key: str) -> LocalizedText | None:
+    """Parse an optional localized field, normalising whitespace-only values to None."""
+    value = source.get(key, None) if isinstance(source, dict) else None
+    if value is None:
+        return None
+    result = _parse_localized(value, f"v2 monitor group {key}")
+    if not (result.en.strip() or result.zh_cn.strip()):
+        return None
+    return result
+
+
 def _parse_v2_monitor_observation(value: object) -> V2MonitorObservation:
     source = _mapping(value, "v2 monitor observation")
     end_at = _parse_timestamp(source.get("end_at"), "v2 monitor observation end_at")
@@ -1338,6 +1349,8 @@ def _parse_v2_monitor_observation(value: object) -> V2MonitorObservation:
             _string(item.get("id"), "v2 monitor group ID"),
             _parse_localized(item.get("label"), "v2 monitor group label"),
             _parse_decimal(item.get("value"), "v2 monitor group value"),
+            _normalized_localized(item, "description"),
+            _normalized_localized(item, "display"),
         )
         for raw in _sequence(source.get("groups"), "v2 monitor observation groups")
         for item in (_mapping(raw, "v2 monitor group"),)

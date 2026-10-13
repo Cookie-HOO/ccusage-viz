@@ -115,6 +115,8 @@ class CustomMonitorRankingEntry:
     key: str
     label: LocalizedText | None
     value: Decimal
+    description: LocalizedText | None = None
+    display: LocalizedText | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -412,7 +414,7 @@ class CustomMonitorComponent:
                 (CustomMonitorRankingEntry("total", None, observation.total),)
             )
         entries = tuple(
-            CustomMonitorRankingEntry(group.id, group.label, group.value)
+            CustomMonitorRankingEntry(group.id, group.label, group.value, group.description, group.display)
             for group in sorted(observation.groups, key=lambda item: (-item.value, item.id))
         )
         return CustomMonitorRanking(self._project_entries(entries))
@@ -489,6 +491,8 @@ class CustomMonitorComponent:
                     entry.key,
                     self._series_label(entry.key, entry.label, language),
                     float(entry.value),
+                    description=self._localized(entry.description, language) if entry.description is not None else None,
+                    display=self._localized(entry.display, language) if entry.display is not None else None,
                 )
                 for entry in self.ranking().entries
             ),

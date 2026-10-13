@@ -433,3 +433,103 @@ def test_resolved_metric_carries_declared_ranking_periods() -> None:
     resolved = resolve_metric(omitted, descriptor)
 
     assert resolved.metric_periods == ("all",)
+
+
+def test_custom_monitor_ranking_retains_localized_group_descriptions_and_displays() -> None:
+    chart = replace(config(), group_by="model")
+    component = CustomMonitorComponent(chart)
+    component.accept(
+        CustomMonitorCompletion(
+            0,
+            chart,
+            V2MonitorResponse(
+                "tokens",
+                V2MonitorObservation(
+                    datetime(2026, 10, 7, 14, 0, tzinfo=UTC),
+                    Decimal("11"),
+                    (
+                        V2MetricValue(
+                            "slow",
+                            LocalizedText("Slow", "慢"),
+                            Decimal("2"),
+                            description=LocalizedText("slow help", "慢说明"),
+                            display=LocalizedText("20%", "20%"),
+                        ),
+                        V2MetricValue(
+                            "fast",
+                            LocalizedText("Fast", "快"),
+                            Decimal("9"),
+                            description=LocalizedText("fast help", "快说明"),
+                            display=LocalizedText("90%", "90%"),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+        accepted_at=datetime.now(UTC),
+    )
+
+    english = component.ranking_model(language="en").observed_entries
+    chinese = component.ranking_model(language="zh").observed_entries
+
+    assert [
+        (entry.key, entry.description, entry.display) for entry in english
+    ] == [
+        ("fast", "fast help", "90%"), ("slow", "slow help", "20%")
+    ]
+    assert [
+        (entry.key, entry.description, entry.display) for entry in chinese
+    ] == [
+        ("fast", "快说明", "90%"), ("slow", "慢说明", "20%")
+    ]
+
+
+def test_custom_monitor_ungrouped_ranking_has_no_description_or_display() -> None:
+    component = CustomMonitorComponent(config())
+    component.accept(
+        CustomMonitorCompletion(
+            0,
+            config(),
+            V2MonitorResponse(
+                "tokens",
+                V2MonitorObservation(
+                    datetime(2026, 10, 7, 14, 0, tzinfo=UTC),
+                    Decimal("175"),
+                    (),
+                ),
+            ),
+        ),
+        accepted_at=datetime.now(UTC),
+    )
+
+    entries = component.ranking_model(language="en").observed_entries
+    assert len(entries) == 1
+    assert entries[0].key == "total"
+    assert entries[0].description is None
+    assert entries[0].display is None
+
+
+def test_custom_monitor_ranking_omits_description_and_display_when_not_provided() -> None:
+    chart = replace(config(), group_by="model")
+    component = CustomMonitorComponent(chart)
+    component.accept(
+        CustomMonitorCompletion(
+            0,
+            chart,
+            V2MonitorResponse(
+                "tokens",
+                V2MonitorObservation(
+                    datetime(2026, 10, 7, 14, 0, tzinfo=UTC),
+                    Decimal("175"),
+                    (V2MetricValue("terra", LocalizedText("Terra", "Terra"), Decimal("175")),),
+                ),
+            ),
+        ),
+        accepted_at=datetime.now(UTC),
+    )
+
+    entries = component.ranking_model(language="en").observed_entries
+    assert len(entries) == 1
+    assert entries[0].key == "terra"
+    assert entries[0].description is None
+    assert entries[0].display is None

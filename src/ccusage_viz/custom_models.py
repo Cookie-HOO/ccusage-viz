@@ -210,6 +210,8 @@ class V2MetricValue:
     id: str
     label: LocalizedText
     value: Decimal
+    description: LocalizedText | None = None
+    display: LocalizedText | None = None
 
 
 @dataclass(frozen=True, slots=True)

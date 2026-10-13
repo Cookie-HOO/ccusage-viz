@@ -306,6 +306,137 @@ def test_v2_probe_and_monitor_wire_round_trip() -> None:
     assert isinstance(parsed, V2MonitorResponse)
     assert parsed.observation.total == Decimal("175")
     assert parsed.observation.groups[0].id == "terra"
+    assert parsed.observation.groups[0].description is None
+    assert parsed.observation.groups[0].display is None
+
+
+def test_v2_monitor_response_parses_optional_group_description() -> None:
+    request = V2MonitorRequest(
+        "monitor-desc", "router", "tokens", "Asia/Shanghai",
+        datetime(2026, 10, 7, 14, 0, tzinfo=UTC),
+    )
+    response = {
+        "protocol": V2_PROTOCOL_VERSION,
+        "request_id": "monitor-desc",
+        "request_kind": "monitor",
+        "dataset_id": "router",
+        "metric_id": "tokens",
+        "status": "ok",
+        "descriptor": v2_probe_descriptor(),
+        "runtime": {"filters": []},
+        "observation": {
+            "end_at": "2026-10-07T14:00:00+00:00",
+            "total": "175",
+            "groups": [
+                {
+                    "id": "terra",
+                    "label": text("Terra", "Terra"),
+                    "value": "175",
+                    "description": text("Release validation", "发布验证"),
+                }
+            ],
+        },
+    }
+    parsed = parse_custom_response(json.dumps(response).encode(), request)
+    assert isinstance(parsed, V2MonitorResponse)
+    assert parsed.observation.groups[0].description == LocalizedText("Release validation", "发布验证")
+    assert parsed.observation.groups[0].display is None
+
+
+def test_v2_monitor_response_parses_optional_group_display() -> None:
+    request = V2MonitorRequest(
+        "monitor-disp", "router", "tokens", "Asia/Shanghai",
+        datetime(2026, 10, 7, 14, 0, tzinfo=UTC),
+    )
+    response = {
+        "protocol": V2_PROTOCOL_VERSION,
+        "request_id": "monitor-disp",
+        "request_kind": "monitor",
+        "dataset_id": "router",
+        "metric_id": "tokens",
+        "status": "ok",
+        "descriptor": v2_probe_descriptor(),
+        "runtime": {"filters": []},
+        "observation": {
+            "end_at": "2026-10-07T14:00:00+00:00",
+            "total": "175",
+            "groups": [
+                {
+                    "id": "terra",
+                    "label": text("Terra", "Terra"),
+                    "value": "175",
+                    "display": text("69.2%", "69.2%"),
+                }
+            ],
+        },
+    }
+    parsed = parse_custom_response(json.dumps(response).encode(), request)
+    assert isinstance(parsed, V2MonitorResponse)
+    assert parsed.observation.groups[0].display == LocalizedText("69.2%", "69.2%")
+    assert parsed.observation.groups[0].description is None
+
+
+def test_v2_monitor_response_normalizes_empty_group_description() -> None:
+    request = V2MonitorRequest(
+        "monitor-norm", "router", "tokens", "Asia/Shanghai",
+        datetime(2026, 10, 7, 14, 0, tzinfo=UTC),
+    )
+    response = {
+        "protocol": V2_PROTOCOL_VERSION,
+        "request_id": "monitor-norm",
+        "request_kind": "monitor",
+        "dataset_id": "router",
+        "metric_id": "tokens",
+        "status": "ok",
+        "descriptor": v2_probe_descriptor(),
+        "runtime": {"filters": []},
+        "observation": {
+            "end_at": "2026-10-07T14:00:00+00:00",
+            "total": "175",
+            "groups": [
+                {
+                    "id": "terra",
+                    "label": text("Terra", "Terra"),
+                    "value": "175",
+                    "description": text("   ", "\t"),
+                }
+            ],
+        },
+    }
+    parsed = parse_custom_response(json.dumps(response).encode(), request)
+    assert isinstance(parsed, V2MonitorResponse)
+    assert parsed.observation.groups[0].description is None
+
+
+def test_v2_monitor_response_rejects_malformed_group_description() -> None:
+    request = V2MonitorRequest(
+        "monitor-mal", "router", "tokens", "Asia/Shanghai",
+        datetime(2026, 10, 7, 14, 0, tzinfo=UTC),
+    )
+    response = {
+        "protocol": V2_PROTOCOL_VERSION,
+        "request_id": "monitor-mal",
+        "request_kind": "monitor",
+        "dataset_id": "router",
+        "metric_id": "tokens",
+        "status": "ok",
+        "descriptor": v2_probe_descriptor(),
+        "runtime": {"filters": []},
+        "observation": {
+            "end_at": "2026-10-07T14:00:00+00:00",
+            "total": "175",
+            "groups": [
+                {
+                    "id": "terra",
+                    "label": text("Terra", "Terra"),
+                    "value": "175",
+                    "description": "not localized",
+                }
+            ],
+        },
+    }
+    with pytest.raises(CustomProtocolError, match="v2 monitor group description"):
+        parse_custom_response(json.dumps(response).encode(), request)
 
 
 def test_v2_query_response_requires_a_complete_descriptor_and_runtime_controls() -> None:
