@@ -286,11 +286,11 @@ def _accepted_metric_component(*, style: str) -> CustomMonitorComponent:
 
 
 @pytest.mark.parametrize("style", ("ranking", "ranking-dot", "list"))
-def test_ranking_style_heading_omits_view_and_data_window(style: str) -> None:
+def test_ranking_style_heading_omits_view_but_keeps_data_window(style: str) -> None:
     component = _accepted_metric_component(style=style)
 
-    assert component.heading(language="en") == "Model · Requests"
-    assert component.heading(language="zh") == "模型 · 请求数"
+    assert component.heading(language="en") == "Model · Requests · data window 90s"
+    assert component.heading(language="zh") == "模型 · 请求数 · 数据窗口 90s"
 
 
 def test_temporal_custom_monitor_heading_keeps_view_and_data_window() -> None:

@@ -675,7 +675,7 @@ class CustomMonitorComponent:
                 return f"{day} · 小时累计柱 · 数据窗口 {source}"
             return f"{self.distribution_day_window} · hourly cumulative bars · data window {source}"
         if is_monitor_ranking_style(self.candidate.presentation.style):
-            return ""
+            return f"数据窗口 {source}" if language == "zh" else f"data window {source}"
         view = self._duration_label(self.display_window_seconds)
         return (
             f"视图 {view} · 数据窗口 {source}"

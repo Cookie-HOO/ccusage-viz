@@ -120,7 +120,7 @@ def test_standalone_adjustment_uses_dataset_monitor_style_and_window_contract() 
     assert component.candidate.presentation.style == "list"
     assert _adjust(component, "w")
     assert component.display_window_seconds == 43200
-    assert component.heading(language="en") == "Total · Tokens"
+    assert component.heading(language="en") == "Total · Tokens · data window 1m"
 
     component.configure(
         replace(
