@@ -2,6 +2,8 @@
 
 ## 目标
 
+Custom Dataset 本来就是业务事实的权威来源。Timeline、Calendar、Stack 已经主要按 Dataset 返回的事实组织和绘制；Ranking 与 Monitor 中额外的业务状态推导需要提供明确的退出机制。图表聚合、布局、采样和会话记录属于 ccuv 的呈现与运行职责，不等同于替 Dataset 定义业务含义。
+
 允许 Custom Dataset 明确接管 Ranking 和 Monitor 的变化信息。接管后，ccuv 直接展示 Dataset 返回的状态与适用文案，不等待或计算这些信息，也不为 Ranking 变化展示请求前一期数据。
 
 接管是完整的信息提供责任，而不是对单个字段的可选覆盖。Dataset 缺少必填信息时，ccuv 尽量展示已有有效信息，并在所属图表内常驻报错；不能静默回退到本地计算。
@@ -51,6 +53,8 @@ Custom Monitor 已经接受 Dataset 给出的固定窗口 observation；首个�
 允许值为 `"ccuv" | "dataset"`，省略等价于 `"ccuv"`，表示沿用当前实现，不承诺新增任何默认推导能力。
 
 该声明属于 capability，不属于 CLI 覆盖或运行时根据某个实体字段猜测的模式。Ranking 与 Monitor 可以分别声明。协议中同名字段根据位置区分：capability 的 `refresh` 是 owner 枚举，实体的 `refresh` 是状态对象。
+
+Capability 是唯一的接管开关。`refresh: "ccuv"` 或省略声明时，即使响应包含实体 `refresh` 状态对象，也完全忽略该对象：不消费其中的状态、不覆盖本地结果、不触发接管完整性或字段类型校验，也不因该对象无效而报接管错误。不能因为字段存在自动启用或局部启用接管。原有 `comparison_display` 不属于新增状态对象，默认模式下继续按原有规则使用，并非一并忽略。
 
 ### 实体状态
 
@@ -112,7 +116,7 @@ ccuv 合成的 `Other` 没有 Dataset 所提供的独立身份，不要求 Datas
 
 ### 默认模式
 
-保留现有 primary / comparison 请求规划、刷新状态计算、列可见性与文案处理。
+保留现有 primary / comparison 请求规划、刷新状态计算、列可见性与文案处理。忽略响应中额外提供的实体 `refresh` 对象，即使其中状态与本地推导相矛盾，也不影响默认结果。Custom Monitor 默认模式同样忽略新增状态对象，保持其现有实际行为。
 
 ### Dataset 接管
 
@@ -224,6 +228,7 @@ Dataset 不必保存历次 observation，也不必在首屏返回历史。
 - 未声明接管的 Dataset 行为、请求策略、字段校验不变。
 - 原生 Ranking / Monitor 无回归。
 - capability 枚举与实体状态对象按位置解析；不支持的 owner 不被猜测为某种模式。
+- owner 为 ccuv 或省略时，额外的实体 refresh 对象无论有效、不完整、类型错误或与本地结果矛盾，都不改变展示、请求或错误状态；原有 comparison_display 仍按旧规则处理。
 - 接管 Ranking 首屏完整时直接显示，不查询前期；独立 summary 不受影响。
 - full/rank/none 的文案必填与列限制正确，窄宽度和隐藏列不放松数据契约。
 - 三个状态可独立呈现，语义冲突不产生错误。
@@ -239,6 +244,14 @@ Dataset 不必保存历次 observation，也不必在首屏返回历史。
 - 错误跨多个周期、style 与密度切换持续存在；完整有效结果解除。
 - 过期、失败或身份不符的响应不能清除错误或污染 Monitor 历史。
 - Standalone 与 Dashboard 各自正确显示并预算常驻错误，Pane 间隔离。
+
+## 分阶段迁移
+
+1. 本次先实现接管能力，省略 refresh 的默认值保持 `ccuv`，不迁移用户的 Dataset，也不提前切换默认值。
+2. 用户逐个迁移 Dataset，显式声明 `refresh: "dataset"` 并提供完整接管信息。
+3. 用户确认所有目标 Dataset 迁移完成后，再以独立变更将省略 refresh 的默认值改成 `dataset`，同步更新文档和默认行为测试。本次不执行该变更，也不通过探测现有 Dataset 自动认定迁移完成。
+
+切换默认值不是删除兼容模式；显式 `refresh: "ccuv"` 仍表示忽略新增状态并使用旧路径。本文其余默认 ccuv 的描述对应第一阶段。
 
 ## 文档更新范围
 
