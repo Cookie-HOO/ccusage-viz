@@ -89,6 +89,7 @@ from ccusage_viz.render.ranking import render_ranking
 from ccusage_viz.render.ranking_presentation import (
     RankingPresentationEntry,
     render_historical_ranking,
+    render_ranking_heading_row,
 )
 from ccusage_viz.render.stack import render_stack
 from ccusage_viz.render.summary import SummaryBlock, layout_summary_blocks, render_summary
@@ -2862,9 +2863,102 @@ def test_historical_ranking_list_keeps_label_and_value_columns_aligned() -> None
     assert rows[0].index("10") + len("10") == current_start + len("Current")
     assert "A" in rows[0]
     assert "A much longer" in rows[1]
-    assert rows[0].endswith("66.7%")
-    assert rows[1].endswith("33.3%")
+    assert rows[0].endswith("10")
+    assert rows[1].endswith("five units")
     assert display_width(rows[0]) == display_width(rows[1])
+
+
+def test_historical_ranking_list_prioritizes_labels_and_omits_auxiliary_indicators() -> None:
+    context = RenderContext(
+        80,
+        24,
+        load_translator("en"),
+        color=False,
+        ascii=True,
+        style="list",
+        density="detailed",
+        deltas={"api": 2},
+        rank_deltas={"api": 1},
+    )
+    output = render_historical_ranking(
+        (
+            RankingPresentationEntry(
+                "api",
+                "a deliberately long project label that should use list space",
+                10,
+                previous=5,
+                comparison_ready=True,
+                previous_rank=2,
+                copy_marker="⊞",
+                project_link="https://example.com/api",
+            ),
+        ),
+        heading="Ranking",
+        value_formatter=str,
+        delta_formatter=lambda value: f"{value:+}",
+        context=context,
+        total=10,
+    )
+    header, row = output.splitlines()[1:]
+
+    assert row.startswith(" 1 ")
+    assert "a deliberately long project label" in row
+    assert "⊞" not in output and "→" not in output
+    assert "^" not in output and "*" not in output
+    assert "vs prior" not in output and "Rank Δ" not in output and "%" not in output
+    assert "Current" in header and "Scale" not in header
+
+
+def test_ranking_heading_row_list_preserves_pipe_label_and_description() -> None:
+    context = RenderContext(80, 24, load_translator("en"), color=False, style="list")
+
+    rows = render_ranking_heading_row(
+        label="Group | native label",
+        value="10",
+        delta="+2",
+        share="100.0%",
+        description="Visible heading description",
+        context=context,
+        link="https://example.com/group",
+        descriptions_visible=True,
+    )
+
+    assert len(rows) == 2
+    assert "Group | native label" in rows[0] and "10" in rows[0]
+    assert "→" not in rows[0]
+    assert "+2" not in rows[0] and "100.0%" not in rows[0]
+    assert display_width(rows[0].split("Group | native label", maxsplit=1)[0]) == display_width(
+        rows[1].split("Visible heading description", maxsplit=1)[0]
+    ) == 0
+    assert rows[1] == "Visible heading description"
+
+
+def test_historical_ranking_list_keeps_native_compactable_labels_and_fits_wide_value() -> None:
+    entries = (
+        RankingPresentationEntry("a", "prefix/shared-project-a | native", 10),
+        RankingPresentationEntry("b", "prefix/shared-project-b | native", 5),
+        RankingPresentationEntry("c", "prefix/shared-project-c | native", 1, display="value-too-wide"),
+    )
+    wide_output = render_historical_ranking(
+        entries,
+        heading="Ranking",
+        value_formatter=str,
+        context=RenderContext(80, 24, load_translator("en"), color=False, style="list"),
+    )
+    narrow_context = RenderContext(18, 24, load_translator("en"), color=False, style="list")
+    narrow_output = render_historical_ranking(
+        entries,
+        heading="Ranking",
+        value_formatter=str,
+        context=narrow_context,
+    )
+    _heading, _header, *wide_rows = wide_output.splitlines()
+    _heading, _header, *narrow_rows = narrow_output.splitlines()
+
+    assert all("…" not in row for row in wide_rows)
+    assert all("prefix/shared-project-" in row and " | native" in row for row in wide_rows)
+    assert all(display_width(row) <= narrow_context.width for row in narrow_output.splitlines())
+    assert narrow_rows[2].startswith(" 3 p")
 
 
 def test_historical_ranking_description_starts_with_its_label_column() -> None:
@@ -2883,6 +2977,32 @@ def test_historical_ranking_description_starts_with_its_label_column() -> None:
 
     label_start = primary.index("A")
     assert description.index("First item description.") == label_start
+
+
+def test_historical_ranking_list_description_starts_with_label_display_column() -> None:
+    context = RenderContext(80, 24, load_translator("en"), color=True, style="list")
+    label = "界 Label"
+    description = "**Styled description**"
+    output = render_historical_ranking(
+        (RankingPresentationEntry("entry", label, 10, description=description, rank=12),),
+        heading="Ranking",
+        value_formatter=str,
+        context=context,
+        descriptions_visible=True,
+        total_entry_count=12,
+    )
+    primary = next(row for row in output.splitlines() if label in strip_ansi(row))
+    description_row = next(
+        row for row in output.splitlines() if "Styled description" in strip_ansi(row)
+    )
+    visible_primary = strip_ansi(primary)
+    visible_description = strip_ansi(description_row)
+
+    assert primary.lstrip().startswith("12 ")
+    assert "\x1b[" in description_row
+    assert display_width(visible_primary.split(label, maxsplit=1)[0]) == display_width(
+        visible_description.split("Styled description", maxsplit=1)[0]
+    )
 
 
 def test_ranking_compacts_common_opaque_prefixes() -> None:

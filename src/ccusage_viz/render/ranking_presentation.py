@@ -377,6 +377,28 @@ def measure_ranking_columns(
     the complete stable entry sequence.
     """
     rank_width = max(2, display_width(str(total_entry_count)))
+    if context.style == "list":
+        desired_value_width = max(
+            1,
+            display_width(context.translator.text("label.ranking_column_current")),
+            *(
+                entry.display_width
+                if entry.display_width is not None
+                else display_width(entry.display or "")
+                for entry in entries
+            ),
+        )
+        # Reserve a readable label and both separators before assigning the
+        # value column. Dataset-owned display strings must not consume label
+        # space.
+        label_minimum = min(8, max(1, context.width - rank_width - 3))
+        value_width = min(
+            desired_value_width, max(1, context.width - rank_width - label_minimum - 2)
+        )
+        columns.width("current", value_width)
+        columns.width("right", value_width)
+        columns.description_width = max(1, context.width - rank_width - value_width - 2)
+        return
     comparison_visible = (
         context.density in {"full", "detailed"}
         and context.width >= 58
@@ -539,8 +561,37 @@ def render_ranking_heading_row(
 ) -> tuple[str, ...]:
     """Render a secondary Ranking heading on the shared Ranking column grid."""
     scheme = get_color_scheme(context.color_scheme)
+    plain_label = strip_ansi(label).replace(chr(27), "")
+    if context.style == "list":
+        desired_value_width = max(
+            1,
+            columns.widths.get("current", columns.widths.get("right", display_width(value)))
+            if columns
+            else display_width(value),
+        )
+        # Fit the scalar while retaining a readable supplied label.
+        label_minimum = min(8, max(1, context.width - 2))
+        value_width = min(desired_value_width, max(1, context.width - label_minimum - 1))
+        label_width = max(1, context.width - value_width - 1)
+        row = (
+            f"{pad_width(truncate_width(plain_label, label_width), label_width)} "
+            f"{pad_width(truncate_width(value, value_width), value_width, align='right')}"
+        )
+        rows = [styled_text(clip_width(row, context.width), scheme.muted, context, bold=True)]
+        if descriptions_visible and context.density != "minimal" and description:
+            visible = description_visible_text(description)
+            wrapped = wrap_width(visible, max(1, context.width))
+            for index, text in enumerate(wrapped[:2]):
+                if index == 1 and len(wrapped) > 2:
+                    text = clip_width(text, max(0, context.width - 1)) + "…"
+                rows.append(
+                    _render_highlighted_description(
+                        _description_row_markup(text, description), "", context
+                    )
+                )
+        return tuple(rows)
     marker = f" · {_terminal_link('→', link)}" if link is not None else ""
-    heading_label = f"{strip_ansi(label).replace(chr(27), '')}{marker}"
+    heading_label = f"{plain_label}{marker}"
     growth_visible = comparison_visible and comparison_mode == "full"
     rank_comparison_visible = (
         comparison_visible and context.density == "detailed" and context.width >= 75
@@ -686,7 +737,7 @@ def render_historical_ranking(
     # Do not hide a matching label segment behind shared-prefix compaction.
     labels = (
         raw_labels
-        if search_query or not compact_labels
+        if context.style == "list" or search_query or not compact_labels
         else _compact_labels(raw_labels, label_width)
     )
     values = [
@@ -711,9 +762,11 @@ def render_historical_ranking(
     dot, track = ("o", ".") if context.ascii else ("●", "·")
     scheme = get_color_scheme(context.color_scheme)
 
+    list_style = context.style == "list"
+
     def formatted_label(entry: RankingPresentationEntry, label: str, width: int) -> str:
-        marker = f" | {entry.copy_marker}" if entry.copy_marker is not None else ""
-        if entry.project_link is not None:
+        marker = "" if list_style else f" | {entry.copy_marker}" if entry.copy_marker is not None else ""
+        if entry.project_link is not None and not list_style:
             link_marker = f" · {_terminal_link('→', entry.project_link)}"
             marker += link_marker
         marker_width = display_width(marker)
@@ -768,7 +821,8 @@ def render_historical_ranking(
     # Keep narrow terminals readable: a comparison table is useful only after
     # there is room for a recognizable project label and a meaningful scale.
     comparison_visible = (
-        context.density in {"full", "detailed"}
+        not list_style
+        and context.density in {"full", "detailed"}
         and context.width >= 58
         and context.period != "all"
         and comparison_mode != "none"
@@ -782,7 +836,7 @@ def render_historical_ranking(
     for (rank, entry), label, value in zip(ranked_entries, labels, values, strict=True):
         rank_marker, activity, value_marker = (
             (" ", " ", " ")
-            if measure_only
+            if measure_only or list_style
             else _refresh_markers(
                 entry,
                 context=context,
@@ -848,7 +902,9 @@ def render_historical_ranking(
                 )
             )
         share = (
-            f"{entry.current / total:>5.1%}" if show_percentage and total and not pending else ""
+            f"{entry.current / total:>5.1%}"
+            if show_percentage and total and not pending and not list_style
+            else ""
         )
         rows.append(
             (
@@ -864,6 +920,59 @@ def render_historical_ranking(
                 share,
             )
         )
+
+    if list_style:
+        rank_heading = context.translator.text("label.ranking_column_rank")
+        project_heading = context.translator.text("label.ranking_column_project")
+        current_heading = context.translator.text("label.ranking_column_current")
+        rank_column_width = rank_width
+        desired_current_width = max(
+            display_width(current_heading), *(display_width(row[3]) for row in rows)
+        )
+        if columns is not None:
+            desired_current_width = columns.width("current", desired_current_width)
+        # Keep a readable label available even when a Dataset supplies an
+        # oversized value display. The rank and two separators are fixed list
+        # geometry.
+        label_minimum = min(8, max(1, context.width - rank_column_width - 3))
+        current_width = min(
+            desired_current_width,
+            max(1, context.width - rank_column_width - label_minimum - 2),
+        )
+        if columns is not None:
+            columns.width("current", current_width)
+            columns.width("right", current_width)
+        label_width = max(1, context.width - rank_column_width - current_width - 2)
+        header = (
+            f"{pad_width(truncate_width(rank_heading, rank_width), rank_width, align='right')} "
+            f"{pad_width(truncate_width(project_heading, label_width), label_width)} "
+            f"{pad_width(truncate_width(current_heading, current_width), current_width, align='right')}"
+        )
+        lines.append(clip_width(header, context.width))
+        if columns is not None:
+            columns.description_width = max(1, label_width)
+        if measure_only:
+            return "\n".join(lines)
+        for rank, entry, label, value, *_rest in rows:
+            rank_prefix = f"{rank:>{rank_width}} "
+            # A description belongs beneath the label, not beneath the rank.
+            # Derive its indent from the rendered rank prefix's display width
+            # so ANSI styling in the description cannot affect its column.
+            label_indent = " " * display_width(rank_prefix)
+            row = (
+                f"{rank_prefix}{formatted_label(entry, label, label_width)} "
+                f"{pad_width(truncate_width(value, current_width), current_width, align='right')}"
+            )
+            lines.append(clip_width(row, context.width))
+            if descriptions_visible and context.density != "minimal" and entry.description:
+                description = description_visible_text(entry.description)
+                for index, description_row in enumerate(wrap_width(description, label_width)[:2]):
+                    if index == 1 and len(wrap_width(description, label_width)) > 2:
+                        description_row = clip_width(description_row, max(0, label_width - 1)) + "…"
+                    lines.append(
+                        f"{label_indent}{_render_highlighted_description(_description_row_markup(description_row, entry.description), search_query, context)}"
+                    )
+        return "\n".join(lines)
 
     if comparison_visible:
         rank_heading = context.translator.text("label.ranking_column_rank")
