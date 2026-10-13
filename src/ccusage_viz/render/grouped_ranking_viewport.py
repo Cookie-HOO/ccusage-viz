@@ -129,7 +129,9 @@ class GroupedRankingViewport:
         self.body_top = 0
         self.scrollbar = self.copy_all_hit = None
         self.active = False
-        self.source = self.preparation_key = self.data_key = self.geometry_key = self.reset_key = None
+        self.source = self.preparation_key = self.data_key = self.geometry_key = self.reset_key = (
+            None
+        )
         self.rows = self.lines = ()
         self.group_headings = ()
         self.groups = self.visible_groups = ()
@@ -158,7 +160,11 @@ class GroupedRankingViewport:
 def _entry_text(entry: RankingPresentationEntry) -> str:
     return "\n".join(
         part
-        for part in (entry.label, copyable_description_text(entry.description or ""), entry.project_link)
+        for part in (
+            entry.label,
+            copyable_description_text(entry.description or ""),
+            entry.project_link,
+        )
         if part
     )
 
@@ -215,6 +221,7 @@ def render_grouped_custom_ranking_viewport(
     copied_entry_id: object | None,
     item_spacing: str,
     scrollbar: bool = False,
+    scrollbar_hovered: bool = False,
     copy_all_action: bool = False,
     copied_all: bool = False,
 ) -> str:
@@ -260,6 +267,7 @@ def render_grouped_custom_ranking_viewport(
     comparison = config.ranking_comparison if config else "full"
     geometry_key = (
         context.width,
+        context.style,
         context.density,
         context.period,
         context.pending,
@@ -299,20 +307,18 @@ def render_grouped_custom_ranking_viewport(
             for group in prepared
         )
         visible = tuple(
-            (group, entries)
-            for group, entries in matched
-            if entries or not search_query
+            (group, entries) for group, entries in matched if entries or not search_query
         )
         viewport.visible_groups = visible
         groups_by_id = {group.id: group for group, _ in visible}
         entries_by_id = {
-            (group.id, str(entry.key)): entry
-            for group, entries in visible
-            for entry in entries
+            (group.id, str(entry.key)): entry for group, entries in visible for entry in entries
         }
         viewport._groups_by_id = MappingProxyType(groups_by_id)
         viewport._entries_by_id = MappingProxyType(entries_by_id)
-        viewport.by_id = {("group", group_id): group for group_id, group in groups_by_id.items()} | {
+        viewport.by_id = {
+            ("group", group_id): group for group_id, group in groups_by_id.items()
+        } | {
             ("series", group_id, series_id): entry
             for (group_id, series_id), entry in entries_by_id.items()
             if not entry.is_other
@@ -329,27 +335,31 @@ def render_grouped_custom_ranking_viewport(
             Decimal(number), projection.unit, language=context.translator.language
         )
 
-    def heading_lines(group: GroupedRankingPresentationGroup, *, measure: bool = False) -> list[str]:
+    def heading_lines(
+        group: GroupedRankingPresentationGroup, *, measure: bool = False
+    ) -> list[str]:
         marker = "⊞" if measure or copied_entry_id != ("group", group.id) else "✓"
-        return list(render_ranking_heading_row(
-            label=f"{group.label} | {marker}",
-            value=group.display,
-            delta=group.comparison_display,
-            share=(
-                f"{group.share:>5.1%}"
-                if projection.show_percentage and group.share is not None
-                else ""
-            ),
-            description=group.description,
-            context=context,
-            link=group.link,
-            descriptions_visible=descriptions_visible,
-            comparison_visible=comparison_visible,
-            comparison_mode=comparison,
-            show_percentage=projection.show_percentage,
-            total_entry_count=total_entry_count,
-            columns=viewport.columns,
-        ))
+        return list(
+            render_ranking_heading_row(
+                label=group.label if context.style == "list" else f"{group.label} | {marker}",
+                value=group.display,
+                delta=group.comparison_display,
+                share=(
+                    f"{group.share:>5.1%}"
+                    if projection.show_percentage and group.share is not None
+                    else ""
+                ),
+                description=group.description,
+                context=context,
+                link=None if context.style == "list" else group.link,
+                descriptions_visible=descriptions_visible,
+                comparison_visible=comparison_visible,
+                comparison_mode=comparison,
+                show_percentage=projection.show_percentage,
+                total_entry_count=total_entry_count,
+                columns=viewport.columns,
+            )
+        )
 
     def entry_lines(
         group: GroupedRankingPresentationGroup,
@@ -361,7 +371,7 @@ def render_grouped_custom_ranking_viewport(
             entry,
             copy_marker=(
                 None
-                if entry.is_other
+                if context.style == "list" or entry.is_other
                 else "⊞"
                 if measure or copied_entry_id != ("series", group.id, str(entry.key))
                 else "✓"
@@ -477,9 +487,7 @@ def render_grouped_custom_ranking_viewport(
                     continue
                 for entry_index, entry in enumerate(entries):
                     if entry_index and item_spacing != "compact":
-                        records.append(
-                            GroupedRankingRow("separator", group.id, str(entry.key), 0)
-                        )
+                        records.append(GroupedRankingRow("separator", group.id, str(entry.key), 0))
                     for line_index, _ in enumerate(entry_lines(group, entry)):
                         records.append(
                             GroupedRankingRow(
@@ -516,11 +524,15 @@ def render_grouped_custom_ranking_viewport(
                 if chosen is not None:
                     break
         if chosen is None:
-            old_groups = list(dict.fromkeys(row.group_id for row in old_rows if row.kind == "group"))
+            old_groups = list(
+                dict.fromkeys(row.group_id for row in old_rows if row.kind == "group")
+            )
             if anchor[0] in old_groups:
                 origin = old_groups.index(anchor[0])
                 for distance in range(len(old_groups)):
-                    candidates = (origin,) if distance == 0 else (origin + distance, origin - distance)
+                    candidates = (
+                        (origin,) if distance == 0 else (origin + distance, origin - distance)
+                    )
                     for candidate in candidates:
                         if 0 <= candidate < len(old_groups):
                             chosen = identity_rows.get((old_groups[candidate], None))
@@ -547,7 +559,9 @@ def render_grouped_custom_ranking_viewport(
         count_row = len(chrome)
         chrome.append(
             context.translator.text(
-                "label.ranking_search_visible_items" if search_query else "label.ranking_visible_items",
+                "label.ranking_search_visible_items"
+                if search_query
+                else "label.ranking_visible_items",
                 visible=matched_count,
                 total=full_count,
                 count=matched_count if search_query else full_count,
@@ -589,33 +603,37 @@ def render_grouped_custom_ranking_viewport(
     body = [source_line(viewport.rows[index]) for index in source_indexes]
     viewport.lines = tuple(body)
 
-    for screen_index, source_index in enumerate(source_indexes):
-        row = viewport.rows[source_index]
-        if row.kind not in {"group", "series"}:
-            continue
-        identity: GroupedIdentity = (
-            ("group", row.group_id)
-            if row.kind == "group"
-            else ("series", row.group_id, cast(str, row.series_id))
-        )
-        entry = viewport.by_id.get(identity)
-        if isinstance(entry, RankingPresentationEntry) and entry.is_other:
-            continue
-        visible_line = strip_ansi(body[screen_index])
-        marker = max(visible_line.rfind("⊞"), visible_line.rfind("✓"))
-        if marker < 0:
-            continue
-        copy_column = display_width(visible_line[:marker])
-        link_column = display_width(visible_line.rsplit("→", 1)[0]) if "→" in visible_line else None
-        if link_column is not None and link_column >= context.width:
-            link_column = None
-        screen_row = viewport.body_top + screen_index
-        if screen_row < context.height and copy_column < context.width:
-            viewport.hits[screen_row] = (identity, copy_column, link_column)
+    if context.style != "list":
+        for screen_index, source_index in enumerate(source_indexes):
+            row = viewport.rows[source_index]
+            if row.kind not in {"group", "series"}:
+                continue
+            identity: GroupedIdentity = (
+                ("group", row.group_id)
+                if row.kind == "group"
+                else ("series", row.group_id, cast(str, row.series_id))
+            )
+            entry = viewport.by_id.get(identity)
+            if isinstance(entry, RankingPresentationEntry) and entry.is_other:
+                continue
+            visible_line = strip_ansi(body[screen_index])
+            marker = max(visible_line.rfind("⊞"), visible_line.rfind("✓"))
+            if marker < 0:
+                continue
+            copy_column = display_width(visible_line[:marker])
+            link_column = (
+                display_width(visible_line.rsplit("→", 1)[0]) if "→" in visible_line else None
+            )
+            if link_column is not None and link_column >= context.width:
+                link_column = None
+            screen_row = viewport.body_top + screen_index
+            if screen_row < context.height and copy_column < context.width:
+                viewport.hits[screen_row] = (identity, copy_column, link_column)
 
     rendered = "\n".join((*chrome, *body))
     if (
-        copy_all_action
+        context.style != "list"
+        and copy_all_action
         and count_row is not None
         and count_row < len(chrome)
         and count_row < context.height
@@ -642,10 +660,15 @@ def render_grouped_custom_ranking_viewport(
         rows_out = rendered.splitlines()[: context.height]
         rows_out.extend("" for _ in range(context.height - len(rows_out)))
         for row in range(bar.top, min(context.height, bar.top + bar.height)):
-            thumb = bar.on_thumb(row)
-            mark = ("#" if context.ascii else "█") if thumb else ("|" if context.ascii else "│")
-            rows_out[row] = pad_width(clip_width(rows_out[row], context.width), context.width) + styled_text(
-                mark, scheme.highlight if thumb else scheme.muted, context, bold=thumb
+            mark, color, bold = bar.mark_at(
+                row,
+                ascii=context.ascii,
+                hovered=scrollbar_hovered,
+                highlight=scheme.highlight,
+                muted=scheme.muted,
             )
+            rows_out[row] = pad_width(
+                clip_width(rows_out[row], context.width), context.width
+            ) + styled_text(mark, color, context, bold=bold)
         rendered = "\n".join(rows_out)
     return "\n".join(rendered.splitlines()[: max(0, context.height)])

@@ -266,6 +266,31 @@ def test_grouped_identity_scrollbar_and_copy_payloads() -> None:
     assert viewport.clipboard_text(("series", "coding", "shared")).startswith("Coding Model\nSeed")
 
 
+def test_grouped_list_has_no_copy_or_comparison_affordances() -> None:
+    viewport = GroupedRankingViewport()
+    model = grouped_projection()
+    render_grouped(model, viewport, context(density="detailed"))
+    dot_geometry_key = viewport.geometry_key
+
+    output = strip_ansi(
+        render_grouped(
+            model,
+            viewport,
+            replace(context(), style="list", density="detailed"),
+            copy_all_action=True,
+        )
+    )
+
+    assert viewport.geometry_key != dot_geometry_key
+    assert viewport.copy_all_hit is None
+    assert viewport.hits == {}
+    assert "⊞" not in output and "→" not in output
+    assert "vs prior" not in output and "Rank Δ" not in output
+    # List mode removes affordances but retains the group label and descriptions.
+    assert "Coding Model" in output and "About Coding Model" in output
+    assert "Seed" in output and "Details for Seed" in output
+
+
 def test_grouped_copy_all_preserves_empty_groups_and_visible_other_exactly() -> None:
     model = grouped_projection()
     coding, general, empty = model.groups or ()
