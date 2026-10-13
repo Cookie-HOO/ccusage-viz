@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from decimal import Decimal
+from types import MappingProxyType
 from typing import Literal, cast
 
 from ccusage_viz.formatting import center_text, clip_width, display_width, pad_width, strip_ansi
@@ -56,6 +58,7 @@ class GroupedRankingViewport:
     copy_all_hit: tuple[int, int] | None = None
     active: bool = False
     source: object | None = None
+    preparation_key: object = None
     data_key: object = None
     geometry_key: object = None
     reset_key: object = None
@@ -72,6 +75,12 @@ class GroupedRankingViewport:
     columns: RankingColumns = field(default_factory=RankingColumns)
     _geometry_cache: dict[object, _GroupedRankingGeometry] = field(
         default_factory=dict, init=False, repr=False
+    )
+    _groups_by_id: Mapping[str, GroupedRankingPresentationGroup] = field(
+        default_factory=lambda: MappingProxyType({}), init=False, repr=False
+    )
+    _entries_by_id: Mapping[tuple[str, str], RankingPresentationEntry] = field(
+        default_factory=lambda: MappingProxyType({}), init=False, repr=False
     )
 
     def _group_heading(self, offset: int) -> int | None:
@@ -150,12 +159,14 @@ class GroupedRankingViewport:
         self.body_top = 0
         self.scrollbar = self.copy_all_hit = None
         self.active = False
-        self.source = self.data_key = self.geometry_key = self.reset_key = None
+        self.source = self.preparation_key = self.data_key = self.geometry_key = self.reset_key = None
         self.rows = self.lines = ()
         self.groups = self.visible_groups = ()
         self.columns = RankingColumns()
         self.by_id.clear()
         self.hits.clear()
+        self._groups_by_id = MappingProxyType({})
+        self._entries_by_id = MappingProxyType({})
 
     def clipboard_text(self, identity: GroupedIdentity) -> str:
         if identity[0] == "group":
@@ -265,15 +276,18 @@ def render_grouped_custom_ranking_viewport(
         viewport.offset = 0
         viewport.reset_key = reset_key
 
-    data_key = (
+    preparation_key = (
         context.translator.language,
         projection.unit,
-        search_query,
         context.period,
         context.pending,
         projection.comparison_available,
     )
-    rebuild_data = viewport.source is not projection.groups or viewport.data_key != data_key
+    data_key = search_query
+    rebuild_prepared = (
+        viewport.source is not projection.groups or viewport.preparation_key != preparation_key
+    )
+    rebuild_data = rebuild_prepared or viewport.data_key != data_key
     comparison = config.ranking_comparison if config else "full"
     geometry_key = (
         context.width,
@@ -295,11 +309,15 @@ def render_grouped_custom_ranking_viewport(
 
     if rebuild_data:
         viewport.invalidate_geometry()
-        global_total = sum((group.total for group in projection.groups or ()), start=Decimal())
-        prepared = tuple(
-            _prepare_group(group, projection, context, global_total=global_total)
-            for group in projection.groups or ()
-        )
+        if rebuild_prepared:
+            global_total = sum((group.total for group in projection.groups or ()), start=Decimal())
+            viewport.groups = tuple(
+                _prepare_group(group, projection, context, global_total=global_total)
+                for group in projection.groups or ()
+            )
+            viewport.source = projection.groups
+            viewport.preparation_key = preparation_key
+        prepared = viewport.groups
         matched = tuple(
             (group, filter_ranking_entries(group.entries, search_query)) for group in prepared
         )
@@ -308,15 +326,20 @@ def render_grouped_custom_ranking_viewport(
             for group, entries in matched
             if entries or not search_query
         )
-        viewport.groups = prepared
         viewport.visible_groups = visible
-        viewport.by_id = {("group", group.id): group for group, _ in visible} | {
-            ("series", group.id, str(entry.key)): entry
+        groups_by_id = {group.id: group for group, _ in visible}
+        entries_by_id = {
+            (group.id, str(entry.key)): entry
             for group, entries in visible
             for entry in entries
+        }
+        viewport._groups_by_id = MappingProxyType(groups_by_id)
+        viewport._entries_by_id = MappingProxyType(entries_by_id)
+        viewport.by_id = {("group", group_id): group for group_id, group in groups_by_id.items()} | {
+            ("series", group_id, series_id): entry
+            for (group_id, series_id), entry in entries_by_id.items()
             if not entry.is_other
         }
-        viewport.source = projection.groups
         viewport.data_key = data_key
 
     visible = viewport.visible_groups
@@ -377,6 +400,7 @@ def render_grouped_custom_ranking_viewport(
             maximum=group.maximum,
             descriptions_visible=descriptions_visible,
             search_query=search_query,
+            search_editing=search_editing,
             comparison_mode=comparison,
             comparison_available=projection.comparison_available,
             show_new_entries=True,
@@ -551,7 +575,7 @@ def render_grouped_custom_ranking_viewport(
     source_indexes = range(
         viewport.offset, min(len(viewport.rows), viewport.offset + capacity)
     )
-    group_by_id = {group.id: group for group, _ in visible}
+    group_by_id = viewport._groups_by_id
     rendered_units: dict[tuple[str, str, str | None], list[str]] = {}
     separator = (
         " "
@@ -569,13 +593,17 @@ def render_grouped_custom_ranking_viewport(
         group = group_by_id[row.group_id]
         if row.series_id is None:
             key = ("group", row.group_id, None)
-            lines = rendered_units.setdefault(key, heading_lines(group))
+            lines = rendered_units.get(key)
+            if lines is None:
+                lines = heading_lines(group)
+                rendered_units[key] = lines
         else:
             key = ("series", row.group_id, row.series_id)
-            entry = next(
-                entry for entry in dict(visible)[group] if str(entry.key) == row.series_id
-            )
-            lines = rendered_units.setdefault(key, entry_lines(group, entry))
+            lines = rendered_units.get(key)
+            if lines is None:
+                entry = viewport._entries_by_id[row.group_id, row.series_id]
+                lines = entry_lines(group, entry)
+                rendered_units[key] = lines
         return lines[row.source_line]
 
     body = [source_line(viewport.rows[index]) for index in source_indexes]
@@ -640,12 +668,16 @@ def render_grouped_custom_ranking_viewport(
 
     effective_rows = viewport.effective_capacity()
     if gutter and effective_rows > 0 and viewport.total_rows > effective_rows:
+        # Sticky headings reduce the final window by one line. Give the bar a
+        # stable extent whose maximum is identical at the top and bottom, so a
+        # thumb captured at offset zero can still reach the true final row.
+        scrollbar_rows = viewport.total_rows - viewport.maximum_offset()
         bar = Scrollbar(
             context.width,
             viewport.body_top,
             viewport.visible_rows,
             viewport.total_rows,
-            effective_rows,
+            scrollbar_rows,
             viewport.offset,
         )
         viewport.scrollbar = bar

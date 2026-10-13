@@ -156,6 +156,70 @@ def test_grouped_dashboard_dispatch_wheel_and_hit_translation(dashboard):
     run([WheelEvent(1, 2, 3), click_visible, verify])
 
 
+def test_grouped_dashboard_scrollbar_drag_uses_active_viewport(dashboard):
+    run, panes, frames, focuses, layouts, decoder, copied, opened, size = dashboard
+    del frames, decoder, copied, opened
+    size[:] = [160, 12]
+    for pane in panes:
+        model = grouped_projection()
+        coding = (model.groups or ())[0]
+        seed = coding.series[0]
+        series = tuple(
+            replace(
+                seed,
+                id=f"item-{index}",
+                label=replace(seed.label, en=f"Item {index}", zh_cn=f"Item {index}"),
+                link=f"https://example.com/item-{index}",
+            )
+            for index in range(20)
+        )
+        groups = (replace(coding, series=series),)
+        config = replace(model.config, date_range=replace(model.date_range, fixed_bounds=True))
+        pane.component.candidate = pane.component.accepted_config = config
+        pane.component.model = replace(model, config=config, groups=groups)
+
+    captured: dict[str, object] = {}
+
+    def grab_grouped_thumb():
+        pane = panes[0]
+        viewport = pane.grouped_ranking_viewport
+        assert viewport.active and not pane.ranking_viewport.active
+        bar = viewport.scrollbar
+        assert bar is not None
+        assert bar.maximum_offset == viewport.maximum_offset()
+        rect = layouts[-1].pane(0)
+        captured["bar"] = bar
+        captured["rect"] = rect
+        return MouseEvent(
+            0,
+            rect.left + bar.column + 1,
+            rect.top + bar.thumb_top + 1,
+            True,
+            0,
+        )
+
+    def drag_to_bottom():
+        bar = captured["bar"]
+        rect = captured["rect"]
+        return MouseEvent(
+            0,
+            rect.left + bar.column + 1,
+            rect.top + bar.top + bar.travel + 1,
+            True,
+            0b100000,
+        )
+
+    def verify_grouped_bottom():
+        viewport = panes[0].grouped_ranking_viewport
+        assert viewport.offset == viewport.maximum_offset()
+        assert viewport.scrollbar is not None
+        assert viewport.scrollbar.maximum_offset == viewport.maximum_offset()
+        assert panes[1].grouped_ranking_viewport.offset == 0
+        return MouseEvent(0, 1, 1, False, 0)
+
+    run([grab_grouped_thumb, drag_to_bottom, verify_grouped_bottom, KeyEvent("\x03")])
+
+
 def test_copy_all_uses_every_filtered_entry_without_focus_or_query_work(dashboard):
     run, panes, frames, focuses, layouts, decoder, copied, opened, _ = dashboard
 

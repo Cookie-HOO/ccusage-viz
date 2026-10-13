@@ -109,7 +109,12 @@ def prepare_custom_ranking(
         replace(entry, previous_rank=entry.previous_rank or prior.get(entry.key))
         for entry in full_entries
     )
-    matched_entries = filter_ranking_entries(full_entries, search_query)
+    # Empty-query preparation is the common building block for grouped
+    # rankings. Avoid passing the complete tuple through the search predicate
+    # only for the grouped adapter to filter it again.
+    matched_entries = (
+        filter_ranking_entries(full_entries, search_query) if search_query else full_entries
+    )
     return PreparedCustomRanking(
         full_entries,
         matched_entries,

@@ -336,9 +336,62 @@ def test_grouped_warm_scroll_and_repaint_reuse_preparation_and_geometry(monkeypa
     monkeypatch.setattr(
         module, "measure_ranking_columns", lambda *a, **k: pytest.fail("measured again")
     )
+    original_render = module.render_historical_ranking
+    rendered: list[str] = []
+
+    def render_one(entries, **kwargs):
+        assert len(entries) == 1, "warm rendering must not materialize a complete group"
+        rendered.append(str(entries[0].key))
+        return original_render(entries, **kwargs)
+
+    monkeypatch.setattr(module, "render_historical_ranking", render_one)
     assert viewport.scroll(1)
     render_grouped(model, viewport, ctx)
+    assert len(rendered) <= viewport.visible_rows
+    rendered.clear()
     render_grouped(model, viewport, ctx)
+    assert len(rendered) <= viewport.visible_rows
+
+
+def test_grouped_cold_preparation_filters_each_group_only_once(monkeypatch) -> None:
+    import ccusage_viz.render.custom_ranking_preparation as preparation
+    import ccusage_viz.render.grouped_ranking_viewport as module
+
+    calls: list[tuple[str, ...]] = []
+    original_filter = module.filter_ranking_entries
+
+    def filter_once(entries, query):
+        calls.append(tuple(str(entry.key) for entry in entries))
+        return original_filter(entries, query)
+
+    monkeypatch.setattr(module, "filter_ranking_entries", filter_once)
+    monkeypatch.setattr(
+        preparation,
+        "filter_ranking_entries",
+        lambda *_args, **_kwargs: pytest.fail("empty-query preparation filtered full entries"),
+    )
+    render_grouped(grouped_projection(), GroupedRankingViewport(), search="sonnet")
+    assert calls == [("shared", "sonnet"), ("shared",), ()]
+
+
+def test_grouped_empty_search_editor_keeps_first_series_row() -> None:
+    model = grouped_projection()
+    viewport = GroupedRankingViewport()
+    output = render_grouped_custom_ranking_viewport(
+        model,
+        context(height=8),
+        viewport,
+        heading="Grouped Ranking",
+        descriptions_visible=False,
+        search_query="",
+        search_editing=True,
+        show_visible_count=True,
+        copied_entry_id=None,
+        item_spacing="compact",
+    )
+    assert "Search: ▏" in strip_ansi(output)
+    assert any(row.kind == "series" and row.series_id == "shared" for row in viewport.rows)
+    assert "Seed" in strip_ansi(output)
 
 
 def test_grouped_premeasures_every_visible_group_before_rendering(monkeypatch) -> None:
@@ -476,6 +529,7 @@ def test_grouped_sticky_capacity_reaches_final_row_and_sets_truthful_scrollbar_m
     assert "Item 7" in output
     assert viewport.scrollbar is not None
     assert viewport.scrollbar.maximum_offset == viewport.offset
+    assert viewport.scrollbar.maximum_offset == viewport.maximum_offset()
     assert viewport.scrollbar.thumb_top + viewport.scrollbar.thumb_size == (
         viewport.scrollbar.top + viewport.scrollbar.height
     )
