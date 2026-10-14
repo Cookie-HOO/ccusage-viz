@@ -673,7 +673,7 @@ def test_render_normalizes_standalone_ranking_title() -> None:
         normalize_titles=True,
     )
 
-    assert "Project · Ranking · 2026-01-01–2026-01-14" in rendered.chart
+    assert "Tokens · Ranking · by Project · 2026-01-01–2026-01-14" in rendered.chart
 
 
 def test_render_keeps_notices_separate_from_chart() -> None:
@@ -699,7 +699,7 @@ def test_render_keeps_notices_separate_from_chart() -> None:
     assert rendered.notices[0] not in rendered.chart
     lines = rendered.chart.splitlines()
     assert lines[0] == "Today’s tokens 0; vs yesterday = unchanged; vs last We = unchanged"
-    assert lines[1].strip() == "Ranking · 2026-01-01–2026-01-14"
+    assert lines[1].strip() == "Tokens · Ranking · 2026-01-01–2026-01-14"
     assert lines[2] == "No token usage found for the selected range."
 
 
