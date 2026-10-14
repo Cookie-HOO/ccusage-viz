@@ -227,6 +227,33 @@ def clip_width(value: str, width: int) -> str:
     return "".join(output)
 
 
+def _is_sgr(sequence: str) -> bool:
+    return sequence.startswith("\x1b[") and sequence.endswith("m")
+
+
+def _sgr_resets_style(sequence: str) -> bool:
+    if not _is_sgr(sequence):
+        return False
+    parameters = sequence[2:-1].split(";")
+    index = 0
+    while index < len(parameters):
+        parameter = parameters[index]
+        parameter_value = int(parameter) if parameter.isdigit() else None
+        if not parameter or parameter_value == 0:
+            return True
+        if parameter_value in {38, 48} and index + 1 < len(parameters):
+            color_mode = parameters[index + 1]
+            color_mode_value = int(color_mode) if color_mode.isdigit() else None
+            if color_mode_value == 5:
+                index += 3  # Command, mode, and palette index.
+                continue
+            if color_mode_value == 2:
+                index += 5  # Command, mode, and RGB channels.
+                continue
+        index += 1
+    return False
+
+
 def slice_width(value: str, start: int, width: int) -> str:
     """Return a display-cell slice without splitting ANSI sequences or wide glyphs."""
 
@@ -237,13 +264,22 @@ def slice_width(value: str, start: int, width: int) -> str:
     output: list[str] = []
     position = 0
     used = 0
-    active_sgr = ""
+    active_sgr: list[str] = []
+    active_other = ""
     emitted = False
     while position < len(value):
         match = _TERMINAL_CONTROL.match(value, position)
         if match:
             sequence = match.group()
-            active_sgr = "" if sequence == "\x1b[0m" else sequence
+            if _is_sgr(sequence):
+                if _sgr_resets_style(sequence):
+                    active_sgr.clear()
+                if sequence[2:-1] not in {"", "0"}:
+                    active_sgr.append(sequence)
+                active_other = sequence if active_sgr else ""
+            else:
+                # Preserve the previous behavior for non-SGR controls such as OSC 8.
+                active_other = sequence
             if emitted and used < end:
                 output.append(sequence)
             position = match.end()
@@ -252,15 +288,16 @@ def slice_width(value: str, start: int, width: int) -> str:
         char_width_value = char_width(char)
         if used >= start and used + char_width_value <= end:
             if not emitted:
-                if active_sgr:
-                    output.append(active_sgr)
+                output.extend(active_sgr)
+                if active_other and not _is_sgr(active_other):
+                    output.append(active_other)
                 emitted = True
             output.append(char)
         used += char_width_value
         position += 1
         if used >= end:
             break
-    if emitted and active_sgr:
+    if emitted and active_other:
         output.append("\x1b[0m")
     return "".join(output)
 
@@ -327,14 +364,7 @@ def truncate_middle_width(value: str, width: int, *, ellipsis: str = "…") -> s
     left_width = remaining // 2
     right_width = remaining - left_width
     left = clip_width(value, left_width)
-    right = ""
-    used = 0
-    for char in reversed(value):
-        size = char_width(char)
-        if used + size > right_width:
-            break
-        right = char + right
-        used += size
+    right = slice_width(value, display_width(value) - right_width, right_width)
     return left + ellipsis + right
 
 
