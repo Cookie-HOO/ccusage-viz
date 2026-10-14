@@ -72,13 +72,13 @@ def _metric_title(
     config: CustomChartConfig,
     context: RenderContext,
     descriptor: CustomPresentationDescriptor | None,
-) -> str:
+) -> str | None:
     """Resolve metric chrome from authoritative presentation metadata, never IDs."""
     if descriptor is not None:
         return _localized(descriptor.dataset.title, context)
     if config.metric_titles is not None:
         return config.metric_titles[1 if context.translator.language == "zh" else 0]
-    raise ValueError("custom chart heading requires metric presentation metadata")
+    return None
 
 
 def custom_heading(

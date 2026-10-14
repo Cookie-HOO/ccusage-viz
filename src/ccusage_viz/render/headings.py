@@ -15,7 +15,7 @@ _SEPARATOR = " · "
 
 @dataclass(frozen=True, slots=True)
 class HeadingSpec:
-    metric: str
+    metric: str | None
     chart: str
     dimension: str | None = None
     partition: str | None = None
@@ -121,13 +121,16 @@ def compose_heading(spec: HeadingSpec, context: RenderContext) -> str:
         None,
     )
     if plain is None:
-        suffix = f"{_SEPARATOR}{spec.chart}{status}"
-        metric_width = heading_width - display_width(suffix)
-        if metric_width > 0:
-            metric = truncate_middle_width(spec.metric, metric_width)
-            plain = f"{metric}{suffix}"
-        else:
+        if spec.metric is None:
             plain = clip_width(f"{spec.chart}{status}", heading_width)
+        else:
+            suffix = f"{_SEPARATOR}{spec.chart}{status}"
+            metric_width = heading_width - display_width(suffix)
+            if metric_width > 0:
+                metric = truncate_middle_width(spec.metric, metric_width)
+                plain = f"{metric}{suffix}"
+            else:
+                plain = clip_width(f"{spec.chart}{status}", heading_width)
 
     if status and plain.endswith(status):
         styled_status = styled_text(

@@ -55,11 +55,11 @@ ccuv dashboard wide --demo
 
 | Route | Data model | Terminal composition | Main question |
 | --- | --- | --- | --- |
-| `timeline` | Historical date range | One standalone chart | How does token usage change over time? |
-| `calendar` | Historical date range | One standalone chart | Which days were active and intense? |
-| `stack` | Historical date range | One standalone chart | How are input, output, and cache tokens composed? |
-| `ranking` | Historical date range | One standalone chart | Which Agent, model, or project used the most tokens? |
-| `monitor` | Rolling observation window | One standalone chart | What throughput has this process observed since it started? |
+| Timeline `timeline` | Historical date range | One standalone chart | How does token usage change over time? |
+| Calendar `calendar` | Historical date range | One standalone chart | Which days were active and intense? |
+| Stack `stack` | Historical date range | One standalone chart | How are input, output, and cache tokens composed? |
+| Ranking `ranking` | Historical date range | One standalone chart | Which Agent, model, or project used the most tokens? |
+| Monitor `monitor` | Rolling observation window | One standalone chart | What throughput has this process observed since it started? |
 | `dashboard` | Host-wide cadence plus independent panes | Multi-pane Dashboard | How do several configured charts compare at once? |
 | `custom timeline`, `custom stack`, `custom calendar`, `custom ranking` | Command-returned additive historical series | One standalone chart or a Dashboard pane | How does a command-backed dataset change over time or rank? |
 | `animate` | No usage data | One standalone animation | Show a local terminal animation without querying a provider. |
@@ -299,7 +299,16 @@ agent plus ccusage version.
 
 ## Standalone chart reference
 
-### Timeline
+### Timeline `timeline`
+
+Historical headings use `Metric · chart · by dimension · period`; ungrouped
+headings omit the dimension segment. Partitioned Ranking uses
+`by partition → dimension`. For example:
+
+```text
+Tokens · Timeline · by model · 14d
+Stars · Ranking · by language → repository · 30d
+```
 
 ```bash
 ccuv chart timeline --period 30d --by model --top 5 --style line-points
@@ -315,7 +324,7 @@ ccuv chart timeline --period 30d --by model --top 5 --style line-points
 | `--legend` | `below-title` (default), `inside`, `hidden` | Legend placement. |
 | `--style` | Timeline styles | `area` is unavailable when grouped. |
 
-### Calendar
+### Calendar `calendar`
 
 ```bash
 ccuv chart calendar --period 1y --style grid
@@ -329,7 +338,7 @@ ccuv chart calendar --period 1y --style grid
 Calendar has no grouping, Top, Other, granularity, weekday-label, or legend
 option.
 
-### Stack
+### Stack `stack`
 
 ```bash
 ccuv chart stack --period 30d --granularity month --cache split
@@ -349,7 +358,7 @@ For example:
 ccuv chart stack --demo --cache split --style stacked-pattern
 ```
 
-### Ranking
+### Ranking `ranking`
 
 ```bash
 ccuv chart ranking --period 30d --by project --top 15 --other hide --style dots
@@ -362,7 +371,19 @@ ccuv chart ranking --period 30d --by project --top 15 --other hide --style dots
 | `--other` | `show` (default), `hide` | Show/hide values outside Top. |
 | `--style` | `dot` (default), `bar`, `dots` | Ranking representation. |
 
-### Monitor
+### Monitor `monitor`
+
+`Monitor` is the chooser and product type. Rendered Monitor headings name the
+active view instead: **Trend**, **Ranking**, **List**, or **Cumulative bars**.
+For example:
+
+```text
+TPM · Trend · 1h window (collecting baseline)
+```
+
+The duration is the factual data window represented by the rendered observation,
+not the local display-retention horizon or sampling cadence. A transient
+parenthesized state stays muted on the same heading line; ready state is omitted.
 
 ```bash
 ccuv chart monitor --window 30m --by model --top 5 --style ranking
@@ -439,8 +460,10 @@ is retained in a copied command, including between configured panes.
 Double-click enters the pane's management context; it exposes only Dashboard
 structure and position controls, not chart-specific settings. `r` opens the
 shared replacement chooser, while `N` and `n` open its insert-before and
-insert-after forms. It offers Empty, Timeline, Stack, Calendar, Ranking,
-Monitor, Animate, and Datasets. Datasets lists the Local command editor,
+insert-after forms. The bounded first-level chooser groups `ccusage` entries
+(Timeline, Calendar, Stack, Ranking, Monitor), then **Custom** (Datasets…), then
+**Other** (Animation, Empty); group headings are not selectable. Datasets remains
+a second-level flow and lists the Local command editor,
 installed executable datasets, `Browse official datasets…`, and `Install from
 GitHub…`. Opening Datasets reads only local state. Opening Browse explicitly
 fetches and verifies the signed official catalog, shows a cancellable loading

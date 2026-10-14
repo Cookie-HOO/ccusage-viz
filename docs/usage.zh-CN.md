@@ -51,11 +51,11 @@ ccuv dashboard wide --demo
 
 | 路由 | 数据模型 | 终端组成 | 主要问题 |
 | --- | --- | --- | --- |
-| `timeline` | 历史日期范围 | 单个独立图表 | Token 使用量随时间如何变化？ |
-| `calendar` | 历史日期范围 | 单个独立图表 | 哪些日期活跃、强度如何？ |
-| `stack` | 历史日期范围 | 单个独立图表 | 输入、输出和缓存 Token 的构成如何？ |
-| `ranking` | 历史日期范围 | 单个独立图表 | 哪个 Agent、模型或项目使用 Token 最多？ |
-| `monitor` | 滚动观测窗口 | 单个独立图表 | 当前进程观测到了什么吞吐量？ |
+| 时间趋势 `timeline` | 历史日期范围 | 单个独立图表 | Token 使用量随时间如何变化？ |
+| 活跃日历 `calendar` | 历史日期范围 | 单个独立图表 | 哪些日期活跃、强度如何？ |
+| 分组构成 `stack` | 历史日期范围 | 单个独立图表 | 输入、输出和缓存 Token 的构成如何？ |
+| 累计排名 `ranking` | 历史日期范围 | 单个独立图表 | 哪个 Agent、模型或项目使用 Token 最多？ |
+| 监测 `monitor` | 滚动观测窗口 | 单个独立图表 | 当前进程观测到了什么吞吐量？ |
 | `dashboard` | Host 全局节奏与独立 Pane | 多 Pane Dashboard | 多个已配置图表如何并排比较？ |
 | `custom timeline`、`custom stack`、`custom calendar`、`custom ranking` | 命令返回、可相加的历史系列 | 单个独立图表或 Dashboard Pane | 命令驱动的数据集如何随时间变化或排名？ |
 
@@ -242,7 +242,15 @@ Exact 或其他未合并项目。编号从 `0` 开始，只在当前输出内按
 
 ## 独立图表参考
 
-### Timeline
+### 时间趋势 `timeline`
+
+历史标题采用“指标 · 图表 · by 维度 · 周期”；未分组时省略维度。分区累计排名使用
+“by 分区 → 维度”。例如：
+
+```text
+Token · 时间趋势 · by 模型 · 14d
+Star · 累计排名 · by 语言 → 仓库 · 30d
+```
 
 ```bash
 ccuv chart timeline --period 30d --by model --top 5 --style line-points
@@ -258,7 +266,7 @@ ccuv chart timeline --period 30d --by model --top 5 --style line-points
 | `--legend` | `below-title`（默认）、`inside`、`hidden` | 图例位置。 |
 | `--style` | Timeline 样式 | 分组时 `area` 不可用。 |
 
-### Calendar
+### 活跃日历 `calendar`
 
 ```bash
 ccuv chart calendar --period 1y --style grid
@@ -266,12 +274,12 @@ ccuv chart calendar --period 1y --style grid
 
 | 参数 | 值/默认值 | 含义 |
 | --- | --- | --- |
-| `--style` | `relative`（默认）、`grid` | 日历热力图呈现方式。 |
+| `--style` | `relative`（默认）、`grid` | 活跃日历的呈现方式。 |
 | 历史共用参数 | 见上文 | 范围、筛选、语言/进程/呈现与监听行为。 |
 
-Calendar 没有分组、Top、Other、粒度、星期标签或图例参数。
+活跃日历没有分组、Top、Other、粒度、星期标签或图例参数。
 
-### Stack
+### 分组构成 `stack`
 
 ```bash
 ccuv chart stack --period 30d --granularity month --cache split
@@ -291,7 +299,7 @@ ccuv chart stack --period 30d --granularity month --cache split
 ccuv chart stack --demo --cache split --style stacked-pattern
 ```
 
-### Ranking
+### 累计排名 `ranking`
 
 ```bash
 ccuv chart ranking --period 30d --by project --top 15 --other hide --style dots
@@ -304,7 +312,17 @@ ccuv chart ranking --period 30d --by project --top 15 --other hide --style dots
 | `--other` | `show`（默认）、`hide` | 显示/隐藏 Top 以外的值。 |
 | `--style` | `dot`（默认）、`bar`、`dots` | 排名呈现方式。 |
 
-### Monitor
+### 监测 `monitor`
+
+“监测”是选择器中的产品类型；渲染后的标题直接使用当前视图名称：**趋势**、**排名**、
+**列表**或**累计柱**。例如：
+
+```text
+TPM · 趋势 · 1h 窗口（建立基线中）
+```
+
+这里的时长只表示渲染数据的事实窗口，不是本地显示保留范围或采样节奏。临时状态以低调样式
+留在同一标题行的括号内；就绪状态不显示。
 
 ```bash
 ccuv chart monitor --window 30m --by model --top 5 --style ranking
@@ -362,7 +380,7 @@ ccuv dashboard --empty --grid 2x2 \
   --pane 'animate --style rain'
 ```
 
-`empty` Pane 没有 Provider、调度、数据或汇总贡献，但参与布局、焦点、鼠标处理、Tab 导航、插入、删除和复制命令序列化。它显示 `空白子图` 与 `双击选中，然后按 r 选择类型`。显式位置会在复制命令中保留，包括配置 Pane 之间的空 Pane。双击会进入该 Pane 的管理上下文；其中只显示 Dashboard 结构和位置操作，不显示图表专属设置。`r` 打开共用的替换类型选择器，`N` 和 `n` 分别打开前插和后插选择器。选择器的顺序为 Empty、Timeline、Stack、Calendar、Ranking、Monitor、Animate、Datasets。Datasets 会列出本地命令编辑器、已安装的可执行数据集、`浏览官方数据集…` 和 `从 GitHub 安装…`。打开 Datasets 只读取本地状态；打开浏览页时才会获取并验证已签名的官方索引，并显示可通过 Esc 取消的加载提示。当前固定的官方索引 URL 在维护者提交有效且已签名的 `main/catalog/catalog.json` 前会显示不可用；ccuv 不会回退到未签名索引。选择当前平台可用的数据集后，会显示仓库、Release 标签、平台以及明确的原生可执行文件安装确认。从 GitHub 安装只需输入仓库链接（例如 `https://github.com/Cookie-HOO/ccuv-dataset-weread`）或 `Cookie-HOO/ccuv-dataset-weread`；ccuv 自动发现稳定 Release 中唯一匹配平台的归档，并要求 GitHub SHA-256 摘要或受支持的校验和文件才会提供安装确认。不支持当前平台的条目仍会显示但不能安装。选择就绪的已安装数据集后，再选择 Timeline、Stack、Calendar 或 Ranking。只有初始自定义查询成功后，ccuv 才替换原 Pane。`x` 删除空 Pane 后会压缩其余 Pane，不会自动添加占位。
+`empty` Pane 没有 Provider、调度、数据或汇总贡献，但参与布局、焦点、鼠标处理、Tab 导航、插入、删除和复制命令序列化。它显示 `空白子图` 与 `双击选中，然后按 r 选择类型`。显式位置会在复制命令中保留，包括配置 Pane 之间的空 Pane。双击会进入该 Pane 的管理上下文；其中只显示 Dashboard 结构和位置操作，不显示图表专属设置。`r` 打开共用的替换类型选择器，`N` 和 `n` 分别打开前插和后插选择器。固定的一级选择器依次分为 `ccusage`（时间趋势 (Timeline)、活跃日历 (Calendar)、分组构成 (Stack)、累计排名 (Ranking)、监测 (Monitor)）、**自定义**（数据集…）和**其他**（动画、空白）；分组标题不可选。数据集仍是二级流程，会列出本地命令编辑器、已安装的可执行数据集、`浏览官方数据集…` 和 `从 GitHub 安装…`。打开 Datasets 只读取本地状态；打开浏览页时才会获取并验证已签名的官方索引，并显示可通过 Esc 取消的加载提示。当前固定的官方索引 URL 在维护者提交有效且已签名的 `main/catalog/catalog.json` 前会显示不可用；ccuv 不会回退到未签名索引。选择当前平台可用的数据集后，会显示仓库、Release 标签、平台以及明确的原生可执行文件安装确认。从 GitHub 安装只需输入仓库链接（例如 `https://github.com/Cookie-HOO/ccuv-dataset-weread`）或 `Cookie-HOO/ccuv-dataset-weread`；ccuv 自动发现稳定 Release 中唯一匹配平台的归档，并要求 GitHub SHA-256 摘要或受支持的校验和文件才会提供安装确认。不支持当前平台的条目仍会显示但不能安装。选择就绪的已安装数据集后，再选择 Timeline、Stack、Calendar 或 Ranking。只有初始自定义查询成功后，ccuv 才替换原 Pane。`x` 删除空 Pane 后会压缩其余 Pane，不会自动添加占位。
 
 ### 预设
 

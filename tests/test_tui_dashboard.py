@@ -2541,7 +2541,7 @@ def test_error_only_custom_pane_keeps_scrolling_and_replace_management(
 
     class FailedHandle:
         def result(self) -> object:
-            raise QueryError("error.custom_command_protocol")
+            raise QueryError("error.custom_command_protocol", detail="broken response")
 
         def cancel(self) -> None:
             pass
@@ -2578,7 +2578,9 @@ def test_error_only_custom_pane_keeps_scrolling_and_replace_management(
         offsets.append(key)
         return original_next_text_offset(key, **kwargs)
 
-    events = iter((KeyEvent("m"), KeyEvent("\x1b[B"), KeyEvent("r"), KeyEvent("\x03")))
+    events = iter(
+        (KeyEvent("m"), KeyEvent("\x1b[B"), KeyEvent("r"), *(KeyEvent("j") for _ in range(5)), KeyEvent("\r"), KeyEvent("\x03"))
+    )
     original_modal = tui_module.DashboardDatasetModalState
 
     def record_modal(*args: object, **kwargs: object) -> object:
@@ -2603,6 +2605,10 @@ def test_error_only_custom_pane_keeps_scrolling_and_replace_management(
     assert modal_actions == ["replace"]
     assert service_status_calls == [None]
     assert "Dataset Pane Management" not in rendered
+    assert "No datasets installed" in rendered
+    assert "Timeline · 14d" in rendered
+    assert "broken response" in rendered
+    assert "reading · Timeline" not in rendered
 
 
 def test_dashboard_monitor_and_error_panes_do_not_contribute_chart_notices() -> None:

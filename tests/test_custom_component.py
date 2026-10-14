@@ -1112,6 +1112,24 @@ def test_timestamp_completion_for_an_older_exact_range_is_rejected() -> None:
     assert component.accepted_config is None
 
 
+def test_custom_failure_without_presentation_metadata_uses_chart_and_range_only() -> None:
+    chart = config(
+        group_by=None,
+        metric_id="internal_metric_id",
+        metric_titles=None,
+        source=CustomCommandSource("internal_dataset_id", ("reader", "ccuv")),
+    )
+
+    rendered = custom.render_custom_failure(
+        chart,
+        RenderContext(120, 20, load_translator("en"), color=False),
+    ).strip()
+
+    assert rendered == "Timeline · 2026-09-01–2026-09-02"
+    assert "internal_dataset_id" not in rendered
+    assert "internal_metric_id" not in rendered
+
+
 def test_relative_timestamp_heading_uses_configured_period() -> None:
     interval = TimestampRange(
         datetime.fromisoformat("2026-10-15T11:50:00+08:00"),

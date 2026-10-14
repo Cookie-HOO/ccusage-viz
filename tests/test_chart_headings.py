@@ -57,6 +57,32 @@ def test_historical_heading_places_metric_chart_dimension_and_period_in_order() 
     ) == "Token · 累计排名 · by 项目 · 30d"
 
 
+def test_heading_without_metric_starts_with_chart_and_keeps_optional_metadata() -> None:
+    assert compose_heading(
+        HeadingSpec(None, "Timeline", dimension="project", period="30d", status="Unavailable"),
+        context("en"),
+    ) == "Timeline · by Project · 30d(Unavailable)"
+
+
+def test_heading_without_metric_remains_width_and_query_safe() -> None:
+    render_context = RenderContext(
+        20,
+        20,
+        load_translator("en"),
+        color=False,
+        audit=RenderAudit(querying=True),
+    )
+
+    heading = heading_with_querying(
+        compose_heading(HeadingSpec(None, "Timeline", period="30d"), render_context),
+        render_context,
+    )
+
+    assert heading == "Timeline · querying"
+    assert not heading.startswith(" · ")
+    assert display_width(heading) <= render_context.width
+
+
 def test_partitioned_heading_uses_directional_dimension_relationship() -> None:
     assert compose_heading(
         HeadingSpec("Star", "累计排名", dimension="仓库", partition="语言", period="30d"),

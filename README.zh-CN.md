@@ -87,18 +87,18 @@ ccuv dashboard weekly-review --ccusage-bin /opt/bin/ccusage
 
 | 分类 | 视图 | 命令 | 适用场景 | 预览 |
 | --- | --- | --- | --- | --- |
-| 趋势分析 `timeline` | Timeline — 14 天 | `ccuv timeline` | 按模型、Agent 或项目分组查看近期每日 Token 趋势。 | <img src="docs/assets/readme/standalone-timeline-14d.png" alt="预览" width="180"> |
-| 趋势分析 `timeline` | Timeline — 13 个月 | `ccuv timeline --period 13mo` | 以更粗的时间尺度查看长期变化。 | <img src="docs/assets/readme/standalone-timeline-13mo.png" alt="预览" width="180"> |
-| 活跃热力图 `calendar` | Calendar | `ccuv calendar` | 在较长范围内查看活跃日期、连续天数和用量集中的位置。 | <img src="docs/assets/readme/standalone-calendar.png" alt="预览" width="180"> |
-| 用量构成 `stack` | Stack — 构成 | `ccuv stack` | 查看输入、输出和缓存 Token 随时间的总体构成。 | <img src="docs/assets/readme/standalone-stack-composition.png" alt="预览" width="180"> |
-| 用量构成 `stack` | Stack — 缓存拆分 | `ccuv stack --cache split` | 比较缓存读取与缓存创建随时间的变化。 | <img src="docs/assets/readme/standalone-stack-cache-split.png" alt="预览" width="180"> |
-| 历史排名 `ranking` | Ranking | `ccuv ranking --by project` | 找出指定范围内 Token 使用量最高的项目、模型或 Agent。 | <img src="docs/assets/readme/standalone-ranking.png" alt="预览" width="180"> |
+| 时间趋势 `timeline` | 时间趋势 — 14 天 | `ccuv timeline` | 按模型、Agent 或项目分组查看近期每日 Token 趋势。 | <img src="docs/assets/readme/standalone-timeline-14d.png" alt="预览" width="180"> |
+| 时间趋势 `timeline` | 时间趋势 — 13 个月 | `ccuv timeline --period 13mo` | 以更粗的时间尺度查看长期变化。 | <img src="docs/assets/readme/standalone-timeline-13mo.png" alt="预览" width="180"> |
+| 活跃日历 `calendar` | 活跃日历 | `ccuv calendar` | 在较长范围内查看活跃日期、连续天数和用量集中的位置。 | <img src="docs/assets/readme/standalone-calendar.png" alt="预览" width="180"> |
+| 分组构成 `stack` | 分组构成 — 构成 | `ccuv stack` | 查看输入、输出和缓存 Token 随时间的总体构成。 | <img src="docs/assets/readme/standalone-stack-composition.png" alt="预览" width="180"> |
+| 分组构成 `stack` | 分组构成 — 缓存拆分 | `ccuv stack --cache split` | 比较缓存读取与缓存创建随时间的变化。 | <img src="docs/assets/readme/standalone-stack-cache-split.png" alt="预览" width="180"> |
+| 累计排名 `ranking` | 累计排名 | `ccuv ranking --by project` | 找出指定范围内 Token 使用量最高的项目、模型或 Agent。 | <img src="docs/assets/readme/standalone-ranking.png" alt="预览" width="180"> |
 | 终端动画 `animate` | 动画画廊 | `ccuv animate --gallery` | 无需 Provider 的纯呈现动画；可选指定初始样式，例如 `ccuv animate digital-clock --gallery`。`m` 打开本地样式和主题控制。 | <img src="docs/assets/readme/standalone-animation-gallery.gif" alt="预览" width="180"> |
-| 用量监控 `monitor` | Monitor — 吞吐量 | `ccuv monitor` | 通过重复累计快照观察进程内吞吐量，而非重建历史小时活动。采样基线建立后才开始观测；Timeline 会在可见时标记本次启动时刻。 | <img src="docs/assets/readme/standalone-monitor-throughput.png" alt="预览" width="180"> |
-| 用量监控 `monitor` | Monitor — 累计柱 | `ccuv monitor --style cumulative-bars` | 查看本地自然日内保留的 Token 增量。按 `w` 切换今天/昨天，按 `g` 切换每小时/半小时桶；未观测时段与已观测零值保持区分。 | <img src="docs/assets/readme/standalone-monitor-cumulative-bars.png" alt="预览" width="180"> |
-| 用量监控 `monitor` | Monitor — 分组 Ranking | `ccuv monitor --by project` | 在观测窗口内按所选维度排名。 | <img src="docs/assets/readme/standalone-monitor-ranking.png" alt="预览" width="180"> |
-| 用量监控 `monitor` | Monitor — 列表 | `ccuv monitor` | 在观测结果旁展示进程和条目详情。 | <img src="docs/assets/readme/standalone-monitor-list.png" alt="预览" width="180"> |
-| 用量监控 `monitor` | Monitor 动画附件 | 在 Monitor `ranking` 或 `list` 中：按 `m`，再按 `s` | 数据下方的可选动画，默认关闭。`s`/`S` 循环适用效果和 ccuv 本地的 `无`；`t`/`T` 仅调整附件主题。它会等待可比较的已接受 interval，且绝不会触发额外用量查询。 | <img src="docs/assets/readme/standalone-monitor-animation.gif" alt="预览" width="180"> |
+| 监测 `monitor` | 趋势 | `ccuv monitor` | 通过重复累计快照观察进程内吞吐量，而非重建历史小时活动。采样基线建立后才开始观测；时间线样式会在可见时标记本次启动时刻。 | <img src="docs/assets/readme/standalone-monitor-throughput.png" alt="预览" width="180"> |
+| 监测 `monitor` | 累计柱 | `ccuv monitor --style cumulative-bars` | 查看本地自然日内保留的 Token 增量。按 `w` 切换今天/昨天，按 `g` 切换每小时/半小时桶；未观测时段与已观测零值保持区分。 | <img src="docs/assets/readme/standalone-monitor-cumulative-bars.png" alt="预览" width="180"> |
+| 监测 `monitor` | 排名 | `ccuv monitor --style ranking --by project` | 在观测窗口内按所选维度排名。 | <img src="docs/assets/readme/standalone-monitor-ranking.png" alt="预览" width="180"> |
+| 监测 `monitor` | 列表 | `ccuv monitor --style list` | 在观测结果旁展示进程和条目详情。 | <img src="docs/assets/readme/standalone-monitor-list.png" alt="预览" width="180"> |
+| 监测 `monitor` | 动画附件 | 在 `monitor` 的 `ranking` 或 `list` 样式中：按 `m`，再按 `s` | 数据下方的可选动画，默认关闭。`s`/`S` 循环适用效果和 ccuv 本地的 `无`；`t`/`T` 仅调整附件主题。它会等待可比较的已接受 interval，且绝不会触发额外用量查询。 | <img src="docs/assets/readme/standalone-monitor-animation.gif" alt="预览" width="180"> |
 
 > [!TIP]
 > 项目 Ranking 默认使用保守的 **Name** 聚合：无歧义的 Claude–Codex 配对会成为一个图表项目。按 `v`
