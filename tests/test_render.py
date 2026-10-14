@@ -200,7 +200,7 @@ def test_grouped_custom_ranking_renders_dataset_order_arrow_heading_and_independ
     )
     lines = output.splitlines()
 
-    assert "Router · Logical Model → Real Model · Ranking" in output
+    assert "Router · Ranking · by Logical Model → Real Model · 2026-10-01–2026-10-14" in output
     assert lines.index(next(line for line in lines if "Coding Model" in line)) < lines.index(
         next(line for line in lines if "General Model" in line)
     )
@@ -769,6 +769,47 @@ def test_pending_historical_component_renders_candidate_safe_placeholder(config)
     assert "2026-01-01" not in output
 
 
+@pytest.mark.parametrize(
+    ("language", "identity"),
+    (("en", "Agent → Project"), ("zh", "Agent → 项目")),
+)
+def test_pending_exact_project_ranking_uses_accepted_canonical_identity(
+    language: str, identity: str
+) -> None:
+    config = RankingConfig(
+        "ranking",
+        period(),
+        presentation=ChartPresentation(theme="no-color", style="bar"),
+        project_aggregation="exact",
+    )
+    accepted = StandaloneLaunch(ProcessConfig(), StandaloneHostConfig(), config)
+    component = HistoricalChartComponent(
+        accepted, owner_id="pending-exact-heading", runtime=None, registry=build_chart_registry()
+    )
+    component.seed(accepted, UsageSnapshot((), (), 0.1))
+    component.configure(
+        replace(
+            accepted,
+            chart=replace(
+                config,
+                date_range=DateRange(
+                    date(2026, 2, 1), date(2026, 2, 14), period="14d", relative_until=True
+                ),
+            ),
+        ),
+        data_affecting=True,
+    )
+
+    translator = load_translator(language)
+    output = render_historical_component(
+        component, translator, Terminal(100, 30, False, False), normalize_titles=True
+    ).chart
+
+    assert identity in output
+    assert translator.text("status.querying") in output
+    assert translator.text("message.data_loading") in output
+
+
 def test_title_shows_only_querying_marker() -> None:
     querying = RenderContext(
         80,
@@ -790,22 +831,44 @@ def test_title_shows_only_querying_marker() -> None:
     assert "refreshing" not in render_timeline(model, refreshing)
 
 
-def test_normalized_content_headings_prefix_timeline_and_ranking() -> None:
+def test_historical_headings_are_metric_first_and_omit_total_grouping() -> None:
     translator = load_translator("en")
     timeline = TimelineModel((date(2026, 1, 1),), (Series("total", "Total", (usage(1),)),))
     ranking = RankingModel((RankingEntry("a", "A", usage(1_200)),), period())
 
     timeline_output = render_timeline(
         timeline,
-        RenderContext(80, 24, translator, color=False, period="10d", title_content="Total"),
+        RenderContext(80, 24, translator, color=False, period="1w", title_content="Total"),
     )
     ranking_output = render_ranking(
         ranking,
-        RenderContext(80, 24, translator, color=False, period="14d", title_content="Project"),
+        RenderContext(80, 24, translator, color=False, period="1mo", title_content="Project"),
     )
 
-    assert "Total · Timeline · 10d" in timeline_output
-    assert "Project · Ranking · 14d" in ranking_output
+    assert "Tokens · Timeline · 1w" in timeline_output
+    assert "Tokens · Ranking · by Project · 1mo" in ranking_output
+    assert "Total" not in timeline_output.splitlines()[0]
+
+
+def test_calendar_and_stack_use_canonical_metric_first_headings() -> None:
+    calendar_output = render_calendar(
+        CalendarModel((CalendarDay(date(2026, 1, 1), usage(1)),)),
+        RenderContext(80, 24, load_translator("zh"), color=False, period="1y"),
+    )
+    stack_output = render_stack(
+        StackModel((date(2026, 1, 1),), (Series("input", "input", (usage(1),)),)),
+        RenderContext(
+            80,
+            24,
+            load_translator("zh"),
+            color=False,
+            period="14d",
+            title_content="模型",
+        ),
+    )
+
+    assert "Token · 活跃日历 · 1y" in calendar_output
+    assert "Token · 分组构成 · by 模型 · 14d" in stack_output
 
 
 def test_historical_ranking_heading_is_centered_once() -> None:
@@ -814,7 +877,7 @@ def test_historical_ranking_heading_is_centered_once() -> None:
 
     heading = render_ranking(model, context).splitlines()[0]
 
-    assert heading.lstrip() == "累计排名 · 14d"
+    assert heading.lstrip() == "Token · 累计排名 · 14d"
     assert (
         len(heading) - len(heading.lstrip())
         == (context.width - display_width(heading.lstrip())) // 2
@@ -832,7 +895,9 @@ def test_ranking_heading_shows_hidden_top_coverage() -> None:
 
     output = render_ranking(model, context(True))
 
-    assert "Ranking · 2026-01-01–2026-01-14 · Top 1 · 60.0% of total" in output
+    assert (
+        "Tokens · Ranking · 2026-01-01–2026-01-14 · Top 1 · 60.0% of total" in output
+    )
 
 
 def test_pending_historical_ranking_masks_stale_figures() -> None:
@@ -1120,7 +1185,7 @@ def test_exact_project_ranking_qualifies_safe_labels_and_title() -> None:
     )
     rows = output.splitlines()[-3:]
 
-    assert "Agent · Project · cumulative ranking · 14d" in output
+    assert "Tokens · Ranking · by Agent → Project · 14d" in output
     assert "claude · py-ccusage-viz" not in rows[0]
     assert "codex · py-ccusage-viz" not in rows[1]
     assert "claude" in rows[0] and "py-ccusage-viz" in rows[0]
@@ -1360,7 +1425,7 @@ def test_empty_ranking_keeps_localized_effective_range() -> None:
     )
 
     lines = output.splitlines()
-    assert lines[0].strip() == "累计排名 · 2026-01-01–2026-01-14"
+    assert lines[0].strip() == "Token · 累计排名 · 2026-01-01–2026-01-14"
     assert lines[1] == "所选范围内没有 Token 用量。"
 
 
@@ -2177,7 +2242,8 @@ def test_timeline_hides_only_the_sole_canonical_total_legend() -> None:
         TimelineModel(day, (Series(("agent", "claude"), "claude", (usage(1_000),)),)), context(True)
     )
 
-    assert "Timeline · Total" in total
+    assert "Tokens · Timeline · 2026-01-01–2026-01-01" in total
+    assert "Total" not in total.splitlines()[0]
     assert "claude" in named
 
 
@@ -2289,7 +2355,7 @@ def test_stack_hidden_legend_keeps_heading_and_omits_component_keys() -> None:
         ),
     )
 
-    assert "Grouped composition · 2026-01-01–2026-01-01" in output
+    assert "Tokens · Stack · 2026-01-01–2026-01-01" in output
     assert "# Input" not in output
     assert "= Output" not in output
 

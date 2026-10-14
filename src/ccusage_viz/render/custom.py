@@ -14,7 +14,7 @@ import plotext as plt
 
 from ccusage_viz.core.custom_ranking_time import TimestampRange
 from ccusage_viz.custom_models import CustomPresentationDescriptor, LocalizedText
-from ccusage_viz.formatting import center_text, clip_width, display_width
+from ccusage_viz.formatting import center_text, clip_width
 from ccusage_viz.options import CustomChartConfig
 from ccusage_viz.processing.custom_historical import CustomChartProjection, CustomProjectedSeries
 from ccusage_viz.processing.custom_ranking import (
@@ -25,7 +25,6 @@ from ccusage_viz.render.base import (
     RenderContext,
     colored_mark,
     configure_plot,
-    content_heading,
     date_range_heading,
     date_ticks,
     isolated_plot,
@@ -33,6 +32,13 @@ from ccusage_viz.render.base import (
 from ccusage_viz.render.calendar_body import render_calendar_footer, render_calendar_grid
 from ccusage_viz.render.custom_ranking_preparation import prepare_custom_ranking
 from ccusage_viz.render.grouped_ranking import render_grouped_custom_ranking
+from ccusage_viz.render.headings import (
+    HeadingSpec,
+    chart_name,
+    compose_heading,
+    heading_period,
+    heading_with_querying,
+)
 from ccusage_viz.render.palette import categorical_colors, get_color_scheme
 from ccusage_viz.render.ranking_presentation import render_historical_ranking
 from ccusage_viz.render.stack_presentation import (
@@ -62,42 +68,17 @@ def _localized(value: LocalizedText, context: RenderContext) -> str:
     return value.zh_cn if context.translator.language == "zh" else value.en
 
 
-def _filter_summary(
+def _metric_title(
     config: CustomChartConfig,
     context: RenderContext,
     descriptor: CustomPresentationDescriptor | None,
 ) -> str:
-    if not config.filters:
-        return ""
-    filter_labels = descriptor.filter_labels if descriptor is not None else {}
-    filter_values = descriptor.filter_values if descriptor is not None else {}
-    selections = tuple(
-        (
-            _localized(filter_labels[filter_id], context)
-            if filter_id in filter_labels
-            else filter_id,
-            tuple(
-                _localized(filter_values[filter_id, value], context)
-                if (filter_id, value) in filter_values
-                else value
-                for value in values
-            ),
-        )
-        for filter_id, values in config.filters
-    )
-    candidates = (
-        " · ".join(f"{label} {', '.join(values)}" for label, values in selections),
-        " · ".join(
-            f"{label} {values[0]} +{len(values) - 1}" if len(values) > 1 else f"{label} {values[0]}"
-            for label, values in selections
-        ),
-        " · ".join(f"{label} {len(values)}" for label, values in selections),
-    )
-    for candidate in candidates:
-        summary = context.translator.text("filter.summary", filters=candidate)
-        if display_width(summary) <= max(1, context.width // 2):
-            return summary
-    return context.translator.text("filter.summary", filters=candidates[-1])
+    """Resolve metric chrome from authoritative presentation metadata, never IDs."""
+    if descriptor is not None:
+        return _localized(descriptor.dataset.title, context)
+    if config.metric_titles is not None:
+        return config.metric_titles[1 if context.translator.language == "zh" else 0]
+    raise ValueError("custom chart heading requires metric presentation metadata")
 
 
 def custom_heading(
@@ -107,38 +88,23 @@ def custom_heading(
 ) -> str:
     """Render candidate-first custom chart chrome without retaining numeric facts."""
 
-    labels: list[str] = []
-    if descriptor is not None:
-        dataset = descriptor.dataset.title
-        labels.append(dataset.zh_cn if context.translator.language == "zh" else dataset.en)
-    if config.kind in {"stack", "ranking"}:
-        if config.group_by is None:
-            grouping = context.translator.text("label.total")
-        elif descriptor is not None and config.group_by in descriptor.group_labels:
-            group = descriptor.group_labels[config.group_by]
-            grouping = group.zh_cn if context.translator.language == "zh" else group.en
-        else:
-            grouping = config.group_by
-        if config.kind == "ranking" and config.partition_by is not None:
-            partition = (
-                descriptor.partition_labels.get(config.partition_by)
-                if descriptor is not None
-                else None
-            )
-            partition_label = (
-                (partition.zh_cn if context.translator.language == "zh" else partition.en)
-                if partition is not None
-                else config.partition_by
-            )
-            labels.append(f"{partition_label} → {grouping}")
-        else:
-            labels.append(grouping)
-    if filters := _filter_summary(config, context, descriptor):
-        labels.append(filters)
-    labels.append(context.translator.text(f"label.{config.kind}"))
-    title = " · ".join(labels)
+    metric = _metric_title(config, context, descriptor)
+
+    dimension = None
+    if config.group_by is not None:
+        group = descriptor.group_labels.get(config.group_by) if descriptor is not None else None
+        dimension = _localized(group, context) if group is not None else config.group_by
+    partition = None
+    if config.kind == "ranking" and config.partition_by is not None:
+        label = (
+            descriptor.partition_labels.get(config.partition_by)
+            if descriptor is not None
+            else None
+        )
+        partition = _localized(label, context) if label is not None else config.partition_by
+
     if isinstance(config.date_range, TimestampRange):
-        range_label = (
+        period = (
             config.date_range.period
             if config.date_range.relative_until and config.date_range.period is not None
             else context.translator.text(
@@ -147,16 +113,23 @@ def custom_heading(
                 end_at=config.date_range.end_at.isoformat(),
             )
         )
-        heading = f"{title} · {range_label}"
-        if context.title_content:
-            heading = f"{context.title_content} · {heading}"
     else:
-        heading = (
-            content_heading(title, config.date_range.since, config.date_range.until, context)
-            if context.title_content
-            else date_range_heading(title, config.date_range.since, config.date_range.until, context)
+        period = heading_period(
+            context,
+            since=config.date_range.since,
+            until=config.date_range.until,
         )
-    return center_text(heading, context.width)
+    heading = compose_heading(
+        HeadingSpec(
+            metric=metric,
+            chart=chart_name(config.kind, context.translator),
+            dimension=dimension,
+            partition=partition,
+            period=period,
+        ),
+        context,
+    )
+    return center_text(heading_with_querying(heading, context), context.width)
 
 
 def _heading(projection: CustomProjection, context: RenderContext) -> str:
@@ -190,16 +163,7 @@ def _custom_axis_value(value: Decimal, projection: CustomChartProjection) -> str
 
 
 def _custom_timeline_heading(projection: CustomChartProjection, context: RenderContext) -> str:
-    label = (
-        projection.unit.label.zh_cn
-        if context.translator.language == "zh"
-        else projection.unit.label.en
-    )
-    heading = _heading(projection, context).strip()
-    text = (
-        f"{label} · {heading}" if projection.unit.placement == "prefix" else f"{heading} · {label}"
-    )
-    return center_text(text, context.width)
+    return _heading(projection, context)
 
 
 def _configure_custom_y_ticks(

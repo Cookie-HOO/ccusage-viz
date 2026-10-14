@@ -765,6 +765,7 @@ MESSAGES = {
     "label.peak": "Peak {date} · {value}",
     "label.average": "Daily average {value}",
     "label.dashboard": "ccusage-viz Dashboard",
+    "label.tokens_metric": "Tokens",
     "label.chart_timeline": "Timeline",
     "label.chart_calendar": "Calendar",
     "label.chart_stack": "Stack",

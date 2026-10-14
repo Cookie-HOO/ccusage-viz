@@ -6,8 +6,6 @@ from ccusage_viz.chart_models import ScalarSeries, Series, TimelineModel
 from ccusage_viz.formatting import center_text, display_width
 from ccusage_viz.render.base import (
     RenderContext,
-    content_heading,
-    date_range_heading,
     date_ticks,
     observed_start_marker,
     observed_ticks,
@@ -15,6 +13,13 @@ from ccusage_viz.render.base import (
     styled_text,
     title_with_querying,
     y_tick_spec,
+)
+from ccusage_viz.render.headings import (
+    HeadingSpec,
+    chart_name,
+    compose_heading,
+    heading_period,
+    heading_with_querying,
 )
 from ccusage_viz.render.palette import get_color_scheme
 from ccusage_viz.render.summary import render_summary
@@ -104,15 +109,28 @@ def render_timeline(model: TimelineModel, context: RenderContext) -> str:
     show_legend = (not sole_total and context.legend_position != "hidden") or (
         sole_total and context.legend_position == "inside"
     )
-    title = context.translator.text("label.timeline")
     if observed:
         heading_text = _observed_heading(model, context)
-    elif context.title_content:
-        heading_text = content_heading(title, model.days[0], model.days[-1], context)
     else:
-        if not show_legend:
-            title = f"{title} · {context.translator.text('label.total')}"
-        heading_text = date_range_heading(title, model.days[0], model.days[-1], context)
+        dimension = context.title_content
+        if dimension in {context.translator.text("label.total"), "Total"}:
+            dimension = None
+        heading_text = heading_with_querying(
+            compose_heading(
+                HeadingSpec(
+                    metric=context.translator.text("label.tokens_metric"),
+                    chart=chart_name("timeline", context.translator),
+                    dimension=dimension,
+                    period=heading_period(
+                        context,
+                        since=model.days[0],
+                        until=model.days[-1],
+                    ),
+                ),
+                context,
+            ),
+            context,
+        )
     heading = center_text(heading_text, context.width)
     summary = render_summary(model.summary, context) if model.summary else ""
     start_marker = (

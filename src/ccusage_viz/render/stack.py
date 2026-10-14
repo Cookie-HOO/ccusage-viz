@@ -7,9 +7,15 @@ from ccusage_viz.render.base import (
     colored_mark,
     configure_plot,
     configure_y_ticks,
-    date_range_heading,
     date_ticks,
     isolated_plot,
+)
+from ccusage_viz.render.headings import (
+    HeadingSpec,
+    chart_name,
+    compose_heading,
+    heading_period,
+    heading_with_querying,
 )
 from ccusage_viz.render.palette import categorical_colors, get_color_scheme
 from ccusage_viz.render.stack_presentation import (
@@ -30,10 +36,20 @@ def render_stack(model: StackModel, context: RenderContext) -> str:
     with isolated_plot():
         configure_plot(context)
         heading = center_text(
-            date_range_heading(
-                context.title_content or context.translator.text("label.stack"),
-                model.days[0],
-                model.days[-1],
+            heading_with_querying(
+                compose_heading(
+                    HeadingSpec(
+                        metric=context.translator.text("label.tokens_metric"),
+                        chart=chart_name("stack", context.translator),
+                        dimension=context.title_content,
+                        period=heading_period(
+                            context,
+                            since=model.days[0],
+                            until=model.days[-1],
+                        ),
+                    ),
+                    context,
+                ),
                 context,
             ),
             context.width,

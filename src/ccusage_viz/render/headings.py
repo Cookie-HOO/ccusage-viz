@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 
-from ccusage_viz.formatting import clip_width, display_width, truncate_middle_width
+from ccusage_viz.formatting import clip_width, display_width, strip_ansi, truncate_middle_width
 from ccusage_viz.i18n import Translator
 from ccusage_viz.render.base import RenderContext, styled_text
 from ccusage_viz.render.palette import get_color_scheme
@@ -66,8 +67,17 @@ def _candidate(parts: tuple[str | None, ...], status: str) -> str:
     return _SEPARATOR.join(part for part in parts if part is not None) + status
 
 
+def _querying_marker(context: RenderContext) -> str | None:
+    if context.audit is None or not context.audit.querying:
+        return None
+    return context.translator.text("status.querying")
+
+
 def compose_heading(spec: HeadingSpec, context: RenderContext) -> str:
     translator = context.translator
+    marker = _querying_marker(context)
+    marker_width = display_width(f"{_SEPARATOR}{marker}") if marker is not None else 0
+    heading_width = max(0, context.width - marker_width)
     dimension = _dimension_text(spec, translator)
     period = _period_text(spec, translator)
     status = _plain_status(spec, translator)
@@ -77,17 +87,17 @@ def compose_heading(spec: HeadingSpec, context: RenderContext) -> str:
         _candidate((spec.metric, spec.chart), status),
     )
     plain = next(
-        (candidate for candidate in candidates if display_width(candidate) <= context.width),
+        (candidate for candidate in candidates if display_width(candidate) <= heading_width),
         None,
     )
     if plain is None:
         suffix = f"{_SEPARATOR}{spec.chart}{status}"
-        metric_width = context.width - display_width(suffix)
+        metric_width = heading_width - display_width(suffix)
         if metric_width > 0:
             metric = truncate_middle_width(spec.metric, metric_width)
             plain = f"{metric}{suffix}"
         else:
-            plain = clip_width(f"{spec.chart}{status}", context.width)
+            plain = clip_width(f"{spec.chart}{status}", heading_width)
 
     if status and plain.endswith(status):
         styled_status = styled_text(
@@ -100,13 +110,35 @@ def compose_heading(spec: HeadingSpec, context: RenderContext) -> str:
     return plain
 
 
+def heading_period(
+    context: RenderContext,
+    *,
+    since: date,
+    until: date,
+) -> str:
+    if context.period is not None:
+        return context.period
+    return context.translator.text(
+        "label.date_range",
+        since=since.isoformat(),
+        until=until.isoformat(),
+    )
+
+
 def heading_with_querying(heading: str, context: RenderContext) -> str:
-    if context.audit is None or not context.audit.querying:
+    marker = _querying_marker(context)
+    if marker is None:
         return heading
-    marker = styled_text(
-        context.translator.text("status.querying"),
+    marker_suffix = f"{_SEPARATOR}{marker}"
+    if strip_ansi(heading).endswith(marker_suffix):
+        return clip_width(heading, context.width)
+    styled_marker = styled_text(
+        marker,
         get_color_scheme(context.color_scheme).muted,
         context,
         dim=True,
     )
-    return f"{heading}{_SEPARATOR}{marker}"
+    if display_width(marker_suffix) > context.width:
+        return clip_width(styled_marker, context.width)
+    heading = clip_width(heading, context.width - display_width(marker_suffix))
+    return f"{heading}{_SEPARATOR}{styled_marker}"

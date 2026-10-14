@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from collections.abc import Hashable, Mapping
 from dataclasses import dataclass
+from typing import cast
 
+from ccusage_viz.chart_models import RankingModel
 from ccusage_viz.formatting import center_text
 from ccusage_viz.historical_component import HistoricalChartComponent
 from ccusage_viz.i18n import Translator
@@ -16,8 +18,15 @@ from ccusage_viz.options import (
     TimelineConfig,
 )
 from ccusage_viz.render import RenderContext
-from ccusage_viz.render.base import content_heading, date_range_heading, render_audit
+from ccusage_viz.render.base import render_audit
 from ccusage_viz.render.filters import active_filter_summary
+from ccusage_viz.render.headings import (
+    HeadingSpec,
+    chart_name,
+    compose_heading,
+    heading_period,
+    heading_with_querying,
+)
 from ccusage_viz.render.summary import render_summary_placeholder
 from ccusage_viz.render.surfaces import (
     EMPTY_SURFACE_CONTROLS,
@@ -58,12 +67,28 @@ def _title_content(
 
 def _pending_heading(options: StandaloneLaunch, context: RenderContext) -> str:
     chart = historical_chart_config(options)
-    title = context.translator.text(f"label.{chart.kind}")
-    if isinstance(chart, (TimelineConfig, StackConfig)) and context.title_content:
-        return content_heading(title, chart.date_range.since, chart.date_range.until, context)
-    if isinstance(chart, RankingConfig) and context.title_content:
-        return content_heading(title, chart.date_range.since, chart.date_range.until, context)
-    return date_range_heading(title, chart.date_range.since, chart.date_range.until, context)
+    dimension = context.title_content
+    partition = None
+    if dimension in {context.translator.text("label.total"), "Total"}:
+        dimension = None
+    if isinstance(chart, RankingConfig) and chart.project_aggregation == "exact":
+        dimension = context.translator.text("label.project")
+        partition = context.translator.text("label.agent")
+    heading = compose_heading(
+        HeadingSpec(
+            metric=context.translator.text("label.tokens_metric"),
+            chart=chart_name(chart.kind, context.translator),
+            dimension=dimension,
+            partition=partition,
+            period=heading_period(
+                context,
+                since=chart.date_range.since,
+                until=chart.date_range.until,
+            ),
+        ),
+        context,
+    )
+    return heading_with_querying(heading, context)
 
 
 def _pending_summary(options: StandaloneLaunch, context: RenderContext) -> str:
@@ -200,7 +225,7 @@ def render_historical_component(
         from ccusage_viz.render.ranking import render_ranking
 
         rendered = render_ranking(
-            model,
+            cast(RankingModel, model),
             context,
             search_query=ranking_search_query,
             search_editing=ranking_search_editing,

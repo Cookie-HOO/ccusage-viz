@@ -26,6 +26,7 @@ from ccusage_viz.custom_models import (
     CustomMetric,
     CustomPaneSummary,
     CustomPoint,
+    CustomPresentationDescriptor,
     CustomProtocolFailure,
     CustomProtocolWarning,
     CustomSeries,
@@ -303,33 +304,36 @@ def test_v2_custom_pane_summary_request_uses_the_selected_metric() -> None:
     assert intent.payload.metric_id == "reading_time"
 
 
-def test_custom_standalone_replacement_renders_candidate_loading_placeholder() -> None:
-    from test_custom_component import response
-
-    component = CustomHistoricalComponent(
-        CustomChartConfig(
-            "timeline",
-            CustomCommandSource("reading", ("reader", "ccuv")),
-            DateRange(date(2026, 9, 1), date(2026, 9, 2)),
-        )
+def test_custom_standalone_initial_pending_uses_authoritative_legacy_presentation() -> None:
+    chart = CustomChartConfig(
+        "timeline",
+        CustomCommandSource("opaque-dataset-id", ("reader", "ccuv")),
+        DateRange(date(2026, 9, 1), date(2026, 9, 2)),
     )
-    assert component.accept_response(response((("total", "10"),)))
-    component.configure(
-        replace(component.candidate, date_range=DateRange(date(2026, 9, 17), date(2026, 9, 30))),
-        data_affecting=True,
+    component = CustomHistoricalComponent(chart)
+    component.presentation = CustomPresentationDescriptor(
+        CustomDataset(
+            LocalizedText("Reading", "阅读"),
+            LocalizedText("Daily reading", "每日阅读"),
+            CustomUnit("page", LocalizedText("pages", "页"), "suffix", 0),
+        ),
+        {},
+        {},
+        {},
     )
+    component.pending_generation = component.generation
 
     rendered = tui_module._custom_standalone_render(
         component,
-        load_translator("zh"),
+        load_translator("en"),
         Terminal(80, 16, color=False, ascii=True),
         pending=True,
     )
 
-    assert "时间趋势 · 2026-09-17–2026-09-30" in rendered.chart
-    assert "正在加载数据…" in rendered.chart
-    assert "今日 阅读" not in rendered.chart
-    assert "查询中" not in rendered.chart
+    assert "Reading · Timeline · 2026-09-01–2026-09-02" in rendered.chart
+    assert "Loading data…" in rendered.chart
+    assert "opaque-dataset-id" not in rendered.chart
+    assert "pages" not in rendered.chart
 
 
 def test_custom_capabilities_are_unavailable_after_source_replacement() -> None:

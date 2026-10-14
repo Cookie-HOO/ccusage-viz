@@ -1855,7 +1855,7 @@ def _custom_render_context(
         None,
         interval,
         refreshing=pending,
-        querying=False,
+        querying=pending,
         pending=pending,
     )
     return surface.context(
@@ -4750,7 +4750,7 @@ def _custom_standalone_render(
             pending=True,
             surface=standalone_surface(component.candidate.kind),
         )
-        rendered = render_custom_pending(component.candidate, context)
+        rendered = render_custom_pending(component.candidate, context, component.presentation)
         audit = render_audit(context)
         return PaneRender("\n".join(line for line in (rendered, audit) if line))
     rendered = _render_custom_projection(

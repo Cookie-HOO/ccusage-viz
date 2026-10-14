@@ -2,8 +2,15 @@ from __future__ import annotations
 
 from ccusage_viz.chart_models import CalendarModel
 from ccusage_viz.formatting import center_text, clip_width, display_width, format_tokens
-from ccusage_viz.render.base import RenderContext, date_range_heading
+from ccusage_viz.render.base import RenderContext
 from ccusage_viz.render.calendar_body import render_calendar_footer, render_calendar_grid
+from ccusage_viz.render.headings import (
+    HeadingSpec,
+    chart_name,
+    compose_heading,
+    heading_period,
+    heading_with_querying,
+)
 from ccusage_viz.render.summary import render_summary
 
 
@@ -18,7 +25,17 @@ def render_calendar(model: CalendarModel, context: RenderContext) -> str:
         lines.append(summary)
     lines.append(
         center_text(
-            date_range_heading(context.translator.text("label.calendar"), first, last, context),
+            heading_with_querying(
+                compose_heading(
+                    HeadingSpec(
+                        metric=context.translator.text("label.tokens_metric"),
+                        chart=chart_name("calendar", context.translator),
+                        period=heading_period(context, since=first, until=last),
+                    ),
+                    context,
+                ),
+                context,
+            ),
             context.width,
         )
     )

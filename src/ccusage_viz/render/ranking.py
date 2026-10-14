@@ -15,10 +15,15 @@ from ccusage_viz.project_identity import exact_project_agent
 from ccusage_viz.render.base import (
     RenderContext,
     colored_mark,
-    content_heading,
-    date_range_heading,
     styled_text,
     title_with_querying,
+)
+from ccusage_viz.render.headings import (
+    HeadingSpec,
+    chart_name,
+    compose_heading,
+    heading_period,
+    heading_with_querying,
 )
 from ccusage_viz.render.palette import get_color_scheme
 from ccusage_viz.render.ranking_presentation import (
@@ -131,14 +136,6 @@ def _entry_agent(entry: RankingEntry | ScalarRankingEntry) -> str | None:
     return exact_project_agent(entry.key)
 
 
-def _historical_title(model: RankingModel, context: RenderContext) -> str:
-    return (
-        context.translator.text("label.ranking_agent_project")
-        if model.project_aggregation == "exact"
-        else context.translator.text("label.ranking")
-    )
-
-
 def render_ranking(
     model: RankingModel,
     context: RenderContext,
@@ -147,7 +144,6 @@ def render_ranking(
     search_editing: bool = False,
     show_visible_count: bool = False,
 ) -> str:
-    title = _historical_title(model, context)
     scope = model.observed_scope
     if scope is not None:
         heading = _observed_heading(model, context)
@@ -155,21 +151,33 @@ def render_ranking(
         date_range = model.date_range
         if date_range is None:
             raise ValueError("historical ranking is missing its date range")
-        heading_text = (
-            date_range_heading(title, date_range.since, date_range.until, context)
-            if model.project_aggregation == "exact"
-            else content_heading(title, date_range.since, date_range.until, context)
-            if context.title_content
-            else date_range_heading(title, date_range.since, date_range.until, context)
+        dimension = context.title_content
+        partition = None
+        if model.project_aggregation == "exact":
+            dimension = context.translator.text("label.project")
+            partition = context.translator.text("label.agent")
+        heading = compose_heading(
+            HeadingSpec(
+                metric=context.translator.text("label.tokens_metric"),
+                chart=chart_name("ranking", context.translator),
+                dimension=dimension,
+                partition=partition,
+                period=heading_period(
+                    context,
+                    since=date_range.since,
+                    until=date_range.until,
+                ),
+            ),
+            context,
         )
         if not context.pending and model.top is not None and model.top_share is not None:
-            heading_text = context.translator.text(
+            heading = context.translator.text(
                 "label.ranking_top_share",
-                heading=heading_text,
+                heading=heading,
                 top=model.top,
                 share=f"{model.top_share:.1%}",
             )
-        heading = heading_text
+        heading = heading_with_querying(heading, context)
     pending = context.pending and not model.is_observed
     summary = (
         render_summary_placeholder(

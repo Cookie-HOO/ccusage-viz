@@ -9,6 +9,7 @@ import pytest
 
 import ccusage_viz.custom_component as custom_component_module
 from ccusage_viz.acquisition import custom_historical_query_intent
+from ccusage_viz.configuration import apply_custom_probe_defaults, v2_metric_probe_descriptor
 from ccusage_viz.core.custom_ranking_time import TimestampRange
 from ccusage_viz.core.time import DateRange
 from ccusage_viz.custom_component import (
@@ -26,6 +27,7 @@ from ccusage_viz.custom_models import (
     CustomComparison,
     CustomData,
     CustomDataset,
+    CustomDimension,
     CustomFilter,
     CustomFilterOption,
     CustomMetric,
@@ -33,6 +35,7 @@ from ccusage_viz.custom_models import (
     CustomPoint,
     CustomProtocolFailure,
     CustomProtocolWarning,
+    CustomRankingEntry,
     CustomRankingGroup,
     CustomSeries,
     CustomUnit,
@@ -42,6 +45,8 @@ from ccusage_viz.custom_models import (
     V2MetricCapabilities,
     V2MetricDescriptor,
     V2ProbeDescriptor,
+    V2RankingData,
+    V2RankingGroup,
     V2Runtime,
 )
 from ccusage_viz.custom_protocol import (
@@ -63,6 +68,7 @@ from ccusage_viz.processing.custom_historical import (
     CustomProjectionError,
     process_custom_historical,
 )
+from ccusage_viz.processing.custom_ranking import process_custom_ranking
 from ccusage_viz.query.models import QueryTrigger
 from ccusage_viz.render import custom
 from ccusage_viz.render.base import RenderContext
@@ -1113,14 +1119,20 @@ def test_relative_timestamp_heading_uses_configured_period() -> None:
         relative_until=True,
         period="10m",
     )
-    chart = config(kind="ranking", metric_id="reading_time", date_range=interval)
+    chart = config(
+        kind="ranking",
+        metric_id="reading_time",
+        metric_titles=("Reading time", "阅读时长"),
+        date_range=interval,
+    )
 
     heading = custom.custom_heading(
         chart,
         RenderContext(120, 20, load_translator("en"), color=False),
     )
 
-    assert heading.endswith(" · 10m")
+    assert "Reading time · Ranking · by book · 10m" in heading
+    assert "pages" not in heading
     assert "2026-10-15T" not in heading
 
 
@@ -1129,14 +1141,106 @@ def test_fixed_timestamp_heading_uses_exact_aware_half_open_bounds() -> None:
         datetime.fromisoformat("2026-10-15T11:50:00+08:00"),
         datetime.fromisoformat("2026-10-15T12:00:00+08:00"),
     )
-    chart = config(kind="ranking", metric_id="reading_time", date_range=interval)
+    chart = config(
+        kind="ranking",
+        metric_id="reading_time",
+        metric_titles=("Reading time", "阅读时长"),
+        date_range=interval,
+    )
 
     heading = custom.custom_heading(
         chart,
         RenderContext(120, 20, load_translator("en"), color=False),
     )
 
+    assert "Reading time · Ranking · by book" in heading
     assert "[2026-10-15T11:50:00+08:00, 2026-10-15T12:00:00+08:00)" in heading
+
+
+def test_v2_partitioned_ranking_heading_prefers_accepted_descriptor_metric_title() -> None:
+    dataset_title = LocalizedText("Routing Dataset", "路由数据集")
+    metric_title = LocalizedText("Successful Requests", "成功请求数")
+    unit = CustomUnit("request-unit", LocalizedText("calls", "调用次"), "suffix", 0)
+    partition = CustomDimension("provider", LocalizedText("Provider", "供应商"))
+    group = CustomDimension("model", LocalizedText("Model", "模型"))
+    capability = V2HistoricalChartCapability(
+        (),
+        ("model",),
+        ("region",),
+        partition_by=("provider",),
+    )
+    metric = V2MetricDescriptor(
+        "successful_requests_metric_id",
+        metric_title,
+        LocalizedText("Successful request count", "成功请求计数"),
+        unit,
+        "sum",
+        V2MetricCapabilities((group,), (), {"ranking": capability}, (partition,)),
+        {"ranking": CustomChartDefaults("14d", "model", 10, partition_by="provider")},
+    )
+    descriptor = V2ProbeDescriptor(
+        "routing-v2",
+        "2.0.0",
+        V2Dataset(dataset_title, LocalizedText("Routing telemetry", "路由遥测")),
+        (metric,),
+        (),
+    )
+    dashboard_config = config(
+        kind="ranking",
+        metric_id=metric.id,
+        metric_titles=("Stale Requests", "过期请求数"),
+        group_by=None,
+        partition_by=None,
+        filters=(("region", ("apac",)),),
+        top=None,
+    )
+    projected_descriptor = v2_metric_probe_descriptor(descriptor, metric.id)
+    chart = apply_custom_probe_defaults(
+        dashboard_config,
+        projected_descriptor,
+        timezone="UTC",
+        now=datetime(2026, 10, 15, tzinfo=UTC),
+    )
+    payload = V2ChartResponse(
+        metric.id,
+        V2RankingData(
+            groups=(
+                V2RankingGroup(
+                    "cloud",
+                    LocalizedText("Cloud", "云厂商"),
+                    (
+                        CustomRankingEntry(
+                            "model-a", LocalizedText("Model A", "模型 A"), Decimal("42")
+                        ),
+                    ),
+                ),
+            )
+        ),
+        descriptor,
+        V2Runtime(()),
+    )
+
+    projection = process_custom_ranking(payload, chart)
+    heading = render_custom_projection(
+        projection,
+        RenderContext(120, 24, load_translator("zh"), color=False, style="dot"),
+    ).splitlines()[0]
+
+    assert chart.partition_by == "provider"
+    assert chart.group_by == "model"
+    assert "成功请求数 · 累计排名 · by 供应商 → 模型" in heading
+    for forbidden in (
+        "路由数据集",
+        "Routing Dataset",
+        "successful_requests_metric_id",
+        "Stale Requests",
+        "过期请求数",
+        "calls",
+        "调用次",
+        "region",
+        "apac",
+    ):
+        assert forbidden not in heading
 
 
 def test_date_only_summary_support_restores_after_leaving_subday_period() -> None:
@@ -1828,7 +1932,7 @@ def test_custom_ranking_heading_is_centered_once() -> None:
 
     heading = render_custom_projection(projection, context).splitlines()[0]
 
-    assert heading.lstrip() == "阅读 · book · 累计排名 · 14d"
+    assert heading.lstrip() == "阅读 · 累计排名 · by book · 14d"
     assert (
         len(heading) - len(heading.lstrip())
         == (context.width - display_width(heading.lstrip())) // 2
@@ -2005,7 +2109,7 @@ def test_custom_timeline_matches_native_total_palette_identity() -> None:
     output = render_custom_projection(projection, context)
 
     assert f"\x1b[38;5;{categorical_color('total')}m" in output
-    assert "pages" in output
+    assert "pages" not in strip_ansi(output).splitlines()[0]
 
 
 def test_custom_timeline_labels_unit_once_and_keeps_numeric_ticks_unit_free() -> None:
@@ -2016,7 +2120,8 @@ def test_custom_timeline_labels_unit_once_and_keeps_numeric_ticks_unit_free() ->
         projection, RenderContext(80, 20, load_translator("en"), color=False, style="points")
     )
 
-    assert "Timeline · 2026-09-01–2026-09-02 · pages" in output
+    assert "Reading · Timeline · 2026-09-01–2026-09-02" in output
+    assert "pages" not in output.splitlines()[0]
     assert "0.00 pages" not in output
     assert "2.50 pages" not in output
 
@@ -2033,7 +2138,8 @@ def test_custom_timeline_places_prefix_unit_before_heading() -> None:
         projection, RenderContext(80, 20, load_translator("en"), color=False, style="points")
     )
 
-    assert "$ · Reading · Timeline · 2026-09-01–2026-09-02" in output
+    assert "Reading · Timeline · 2026-09-01–2026-09-02" in output
+    assert "$" not in output.splitlines()[0]
     assert "$0.00" not in output
 
 
@@ -2172,7 +2278,7 @@ def test_custom_ranking_other_never_inherits_a_project_link() -> None:
     assert other.is_other and other.link is None
 
 
-def test_custom_ranking_title_includes_selected_dataset_filters() -> None:
+def test_custom_ranking_title_omits_selected_dataset_filters() -> None:
     source = response((("book", "10"),))
     projection = process_custom_historical(
         source,
@@ -2188,10 +2294,10 @@ def test_custom_ranking_title_includes_selected_dataset_filters() -> None:
         projection, RenderContext(100, 20, load_translator("en"), color=False, style="dot")
     )
 
-    assert "Filters: Genre Fiction" in output
+    assert "Filters: Genre Fiction" not in output.splitlines()[0]
 
 
-def test_custom_timeline_title_includes_selected_dataset_filters() -> None:
+def test_custom_timeline_title_omits_selected_dataset_filters() -> None:
     source = response((("book", "10"),))
     projection = process_custom_historical(
         source,
@@ -2202,7 +2308,7 @@ def test_custom_timeline_title_includes_selected_dataset_filters() -> None:
         projection, RenderContext(100, 20, load_translator("en"), color=False, style="points")
     )
 
-    assert "Filters: Genre Fiction" in output
+    assert "Filters: Genre Fiction" not in output.splitlines()[0]
 
 
 def test_custom_ranking_preserves_long_dataset_labels_without_prefix_compaction() -> None:

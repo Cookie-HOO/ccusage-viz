@@ -758,6 +758,7 @@ MESSAGES = {
     "label.peak": "峰值 {date} · {value}",
     "label.average": "日均 {value}",
     "label.dashboard": "ccusage-viz 仪表盘",
+    "label.tokens_metric": "Token",
     "label.chart_timeline": "时间趋势",
     "label.chart_calendar": "活跃日历",
     "label.chart_stack": "分组构成",

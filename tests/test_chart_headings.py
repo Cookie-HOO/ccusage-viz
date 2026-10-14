@@ -161,3 +161,94 @@ def test_heading_with_querying_omits_filter_summary_and_mutes_marker() -> None:
     assert strip_ansi(heading) == "Tokens · Timeline · querying"
     assert "project = app" not in heading
     assert "\x1b[2m" in heading
+
+
+def test_heading_with_querying_does_not_append_a_second_marker() -> None:
+    render_context = RenderContext(
+        80,
+        20,
+        load_translator("en"),
+        color=False,
+        audit=RenderAudit(querying=True),
+    )
+
+    heading = heading_with_querying("Tokens · Timeline · querying", render_context)
+
+    assert heading == "Tokens · Timeline · querying"
+    assert heading.count("querying") == 1
+
+
+def test_querying_heading_reserves_marker_width_before_ascii_reduction() -> None:
+    render_context = RenderContext(
+        20,
+        20,
+        load_translator("en"),
+        color=False,
+        audit=RenderAudit(querying=True),
+    )
+
+    heading = heading_with_querying(
+        compose_heading(HeadingSpec("Tokens", "Timeline", period="30d"), render_context),
+        render_context,
+    )
+
+    assert heading == "Timeline · querying"
+    assert heading.count("querying") == 1
+    assert display_width(heading) <= render_context.width
+
+
+def test_querying_heading_reserves_marker_width_for_cjk() -> None:
+    render_context = RenderContext(
+        17,
+        20,
+        load_translator("zh"),
+        color=False,
+        audit=RenderAudit(querying=True),
+    )
+
+    heading = heading_with_querying(
+        compose_heading(HeadingSpec("Token", "累计排名", period="30d"), render_context),
+        render_context,
+    )
+
+    assert heading == "累计排名 · 查询中"
+    assert display_width(heading) <= render_context.width
+
+
+def test_querying_heading_keeps_color_ansi_intact_at_narrow_width() -> None:
+    render_context = RenderContext(
+        20,
+        20,
+        load_translator("en"),
+        color=True,
+        audit=RenderAudit(querying=True),
+    )
+
+    heading = heading_with_querying(
+        compose_heading(HeadingSpec("Tokens", "Timeline", period="30d"), render_context),
+        render_context,
+    )
+
+    assert strip_ansi(heading) == "Timeline · querying"
+    assert display_width(heading) <= render_context.width
+    assert "\x1b[2m" in heading
+    assert heading.endswith("\x1b[0m")
+
+
+def test_querying_marker_wider_than_viewport_is_safely_clipped() -> None:
+    render_context = RenderContext(
+        4,
+        20,
+        load_translator("en"),
+        color=True,
+        audit=RenderAudit(querying=True),
+    )
+
+    heading = heading_with_querying(
+        compose_heading(HeadingSpec("Tokens", "Timeline"), render_context),
+        render_context,
+    )
+
+    assert strip_ansi(heading) == "quer"
+    assert display_width(heading) <= render_context.width
+    assert heading.endswith("\x1b[0m")
