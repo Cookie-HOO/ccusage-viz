@@ -285,19 +285,39 @@ def _accepted_metric_component(*, style: str) -> CustomMonitorComponent:
     return component
 
 
-@pytest.mark.parametrize("style", ("ranking", "ranking-dot", "list"))
-def test_ranking_style_heading_omits_view_but_keeps_data_window(style: str) -> None:
+@pytest.mark.parametrize("style", ("ranking", "ranking-dot", "list", "line"))
+def test_custom_monitor_heading_metadata_uses_metric_dimension_and_capability_window(
+    style: str,
+) -> None:
     component = _accepted_metric_component(style=style)
+    component.configure_display_window(43_200)
 
-    assert component.heading(language="en") == "Model · Requests · data window 90s"
-    assert component.heading(language="zh") == "模型 · 请求数 · 数据窗口 90s"
+    english = component.heading_metadata(language="en")
+    chinese = component.heading_metadata(language="zh")
+
+    assert (english.metric, english.dimension, english.window_seconds) == (
+        "Requests",
+        "Model",
+        90,
+    )
+    assert (chinese.metric, chinese.dimension, chinese.window_seconds) == (
+        "请求数",
+        "模型",
+        90,
+    )
 
 
-def test_temporal_custom_monitor_heading_keeps_view_and_data_window() -> None:
-    component = _accepted_metric_component(style="line")
+def test_custom_monitor_heading_metadata_rejects_unresolved_title_without_id_fallback() -> None:
+    component = CustomMonitorComponent(config())
+    component.set_capability(
+        V2MetricCapabilities((), (), {"monitor": V2MonitorCapability(90, 10, (), ())})
+    )
 
-    assert component.heading(language="en") == "Model · Requests · view 1h · data window 90s"
-    assert component.heading(language="zh") == "模型 · 请求数 · 视图 1h · 数据窗口 90s"
+    with pytest.raises(
+        ValueError,
+        match="requires presentation.title or metric_titles",
+    ):
+        component.heading_metadata(language="en")
 
 
 def test_value_metrics_exclude_cumulative_bars() -> None:
@@ -370,6 +390,46 @@ def test_top_n_uses_other_only_for_sum_metrics() -> None:
     assert [(entry.key, entry.value) for entry in component.ranking().entries] == [
         ("a", Decimal("60")),
     ]
+
+
+def test_pending_reconfiguration_projects_accepted_monitor_facts_consistently() -> None:
+    accepted = replace(config(), group_by="model", metric_titles=("Tokens", "令牌"))
+    component = CustomMonitorComponent(accepted)
+    component.set_capability(
+        V2MetricCapabilities((), (), {"monitor": V2MonitorCapability(60, 10, ("model",), ())})
+    )
+    observation = V2MonitorResponse(
+        "tokens",
+        V2MonitorObservation(
+            datetime(2026, 10, 7, 14, 0, tzinfo=UTC),
+            Decimal("100"),
+            (
+                V2MetricValue("a", LocalizedText("Alpha", "阿尔法"), Decimal("60")),
+                V2MetricValue("b", LocalizedText("Beta", "贝塔"), Decimal("40")),
+            ),
+        ),
+    )
+    assert component.accept(
+        CustomMonitorCompletion(0, accepted, observation), accepted_at=datetime.now(UTC)
+    )
+
+    component.configure(
+        replace(
+            accepted,
+            group_by=None,
+            top=1,
+            other="hide",
+            presentation=replace(accepted.presentation, style="line"),
+        ),
+        data_affecting=True,
+    )
+
+    assert component.pending
+    assert [(entry.key, entry.value) for entry in component.ranking().entries] == [
+        ("a", Decimal("60")),
+        ("b", Decimal("40")),
+    ]
+    assert component.heading_metadata(language="en").dimension == "model"
 
 
 def test_rejects_stale_or_wrong_metric_observations() -> None:

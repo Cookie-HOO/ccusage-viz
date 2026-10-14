@@ -11,7 +11,6 @@ from ccusage_viz.render.base import (
     observed_ticks,
     overlay_plot_column,
     styled_text,
-    title_with_querying,
     y_tick_spec,
 )
 from ccusage_viz.render.headings import (
@@ -20,6 +19,7 @@ from ccusage_viz.render.headings import (
     compose_heading,
     heading_period,
     heading_with_querying,
+    monitor_heading_spec,
 )
 from ccusage_viz.render.palette import get_color_scheme
 from ccusage_viz.render.summary import render_summary
@@ -33,26 +33,17 @@ def _observed_heading(model: TimelineModel, context: RenderContext) -> str:
     scope = model.observed_scope
     if scope is None:
         raise ValueError("observed timeline is missing its scope")
-    window = (
-        f"{scope.window_seconds // 3600}h"
-        if scope.window_seconds % 3600 == 0
-        else f"{scope.window_seconds // 60}m"
-    )
-    mode = context.translator.text(f"label.monitor_{scope.mode}_mode")
-    state = (
-        f" · {context.translator.text(f'label.monitor_{scope.state}')}"
-        if scope.state != "ready"
-        else ""
-    )
-    return title_with_querying(
-        context.translator.text(
-            "label.monitor_timeline_tokens"
-            if model.metric.unit == "tokens"
-            else "label.monitor_timeline_tpm",
-            window=window,
-            state=state,
-            agents="",
-            mode=mode,
+    return heading_with_querying(
+        compose_heading(
+            monitor_heading_spec(
+                unit=model.metric.unit,
+                style=context.style,
+                window_seconds=scope.window_seconds,
+                mode=scope.mode,
+                state=scope.state,
+                translator=context.translator,
+            ),
+            context,
         ),
         context,
     )

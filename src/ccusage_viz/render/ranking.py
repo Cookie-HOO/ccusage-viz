@@ -12,18 +12,14 @@ from ccusage_viz.formatting import (
     wrap_width,
 )
 from ccusage_viz.project_identity import exact_project_agent
-from ccusage_viz.render.base import (
-    RenderContext,
-    colored_mark,
-    styled_text,
-    title_with_querying,
-)
+from ccusage_viz.render.base import RenderContext, colored_mark, styled_text
 from ccusage_viz.render.headings import (
     HeadingSpec,
     chart_name,
     compose_heading,
     heading_period,
     heading_with_querying,
+    monitor_heading_spec,
 )
 from ccusage_viz.render.palette import get_color_scheme
 from ccusage_viz.render.ranking_presentation import (
@@ -39,25 +35,17 @@ def _observed_heading(model: RankingModel, context: RenderContext) -> str:
     scope = model.observed_scope
     if scope is None:
         raise ValueError("observed ranking is missing its scope")
-    window = (
-        f"{scope.window_seconds // 3600}h"
-        if scope.window_seconds % 3600 == 0
-        else f"{scope.window_seconds // 60}m"
-    )
-    mode = context.translator.text(f"label.monitor_{scope.mode}_mode")
-    state = (
-        f" · {context.translator.text(f'label.monitor_{scope.state}')}"
-        if scope.state != "ready"
-        else ""
-    )
-    heading = title_with_querying(
-        context.translator.text(
-            "label.monitor_ranking_tokens"
-            if model.metric.unit == "tokens"
-            else "label.monitor_ranking_tpm",
-            mode=mode,
-            window=window,
-            state=state,
+    heading = heading_with_querying(
+        compose_heading(
+            monitor_heading_spec(
+                unit=model.metric.unit,
+                style=context.style if context.style in {"ranking-dot", "list"} else "ranking",
+                window_seconds=scope.window_seconds,
+                mode=scope.mode,
+                state=scope.state,
+                translator=context.translator,
+            ),
+            context,
         ),
         context,
     )

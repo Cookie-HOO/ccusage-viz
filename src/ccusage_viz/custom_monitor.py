@@ -24,6 +24,7 @@ from ccusage_viz.custom_monitor_component import (
 )
 from ccusage_viz.custom_protocol import V2MonitorResponse, V2ProbeResponse
 from ccusage_viz.diagnostics import format_error
+from ccusage_viz.formatting import clip_width
 from ccusage_viz.i18n import Translator
 from ccusage_viz.lifecycle import (
     FixedIntervalScheduler,
@@ -35,7 +36,7 @@ from ccusage_viz.lifecycle import (
 from ccusage_viz.options import CustomChartConfig, StandaloneLaunch
 from ccusage_viz.query.models import ProviderResult
 from ccusage_viz.render.base import RenderAudit, RenderContext, render_audit
-from ccusage_viz.render.custom_monitor import render_custom_monitor
+from ccusage_viz.render.custom_monitor import render_custom_monitor, render_custom_monitor_heading
 from ccusage_viz.render.palette import COLOR_SCHEMES
 from ccusage_viz.terminal import FramePainter, Terminal, compose_frame, inspect_terminal
 from ccusage_viz.terminal_ui import AdjustmentAction, adjustment_rows, input_mode, read_key
@@ -44,7 +45,9 @@ from ccusage_viz.terminal_ui import AdjustmentAction, adjustment_rows, input_mod
 def _metric_capability(descriptor: object, config: CustomChartConfig) -> V2MonitorCapability:
     if isinstance(descriptor, V2ProbeResponse):
         descriptor = descriptor.descriptor
-    metric = next((item for item in getattr(descriptor, "metrics", ()) if item.id == config.metric_id), None)
+    metric = next(
+        (item for item in getattr(descriptor, "metrics", ()) if item.id == config.metric_id), None
+    )
     if metric is None:
         raise ValueError("runtime probe does not declare selected metric")
     capability = metric.capabilities.charts.get("monitor")
@@ -62,15 +65,14 @@ def _render(
 ) -> str:
     """Use the standalone Monitor renderer with Dataset-owned facts and headings."""
 
-    config = component.candidate
-    if component.accepted_response is None:
-        detail = (
-            format_error(component.error, translator, color=False)
-            if component.error
-            else translator.text("status.querying")
-        )
-        return f"{component.heading(language=translator.language)}\n{detail}"
-    audit = RenderAudit(component.accepted_at, interval=interval, cadence="sample")
+    config = component.accepted_config or component.candidate
+    transient = component.accepted_response is None or component.pending
+    audit = RenderAudit(
+        component.accepted_at,
+        interval=interval,
+        cadence="sample",
+        querying=transient and component.error is None,
+    )
     context = RenderContext(
         terminal.width,
         max(1, terminal.height - int(config.presentation.density == "detailed")),
@@ -81,8 +83,19 @@ def _render(
         style=config.presentation.style,
         legend_position=config.presentation.legend,
         density=config.presentation.density,
+        pending=transient,
         audit=audit,
     )
+    if transient:
+        detail = (
+            format_error(component.error, translator, color=False)
+            if component.error
+            else translator.text("status.querying")
+        )
+        return (
+            f"{render_custom_monitor_heading(component, context)}\n"
+            f"{clip_width(detail, context.width)}"
+        )
     rendered = render_custom_monitor(component, context)
     audit_row = render_audit(context)
     notice = (
@@ -201,7 +214,11 @@ def _custom_monitor_actions(
     """Expose the standalone native Monitor action split with Dataset capabilities."""
 
     if page == "advanced":
-        filters = (("f", "filters"),) if component.runtime is not None and component.runtime.filters else ()
+        filters = (
+            (("f", "filters"),)
+            if component.runtime is not None and component.runtime.filters
+            else ()
+        )
         return (
             (*filters, *(("o", "other"), ("l", "legend")))
             if component.aggregation == "sum"
@@ -221,6 +238,7 @@ def run_custom_monitor(options: StandaloneLaunch, translator: Translator) -> int
         raise TypeError("custom monitor runner requires a custom monitor chart")
     if options.host.timezone is None:
         raise RuntimeError("custom monitor requires a resolved timezone")
+    timezone = options.host.timezone
     runtime = build_query_runtime()
     component = CustomMonitorComponent(options.chart)
     component.configure_display_timezone(ZoneInfo(options.host.timezone))
@@ -245,7 +263,7 @@ def run_custom_monitor(options: StandaloneLaunch, translator: Translator) -> int
         else:
             intent = custom_v2_monitor_query_intent(
                 component.candidate,
-                timezone=options.host.timezone,
+                timezone=timezone,
                 owner_id=operation.owner_id,
                 generation=operation.generation,
                 trigger=query_trigger(operation.trigger),
@@ -266,9 +284,7 @@ def run_custom_monitor(options: StandaloneLaunch, translator: Translator) -> int
                 probe = response
                 resolved = resolve_metric(component.candidate, probe.descriptor)
                 metric = next(
-                    item
-                    for item in probe.descriptor.metrics
-                    if item.id == resolved.metric_id
+                    item for item in probe.descriptor.metrics if item.id == resolved.metric_id
                 )
                 resolved, display_window = apply_custom_monitor_defaults(resolved, metric)
                 component.configure(resolved, data_affecting=False)
@@ -313,11 +329,14 @@ def run_custom_monitor(options: StandaloneLaunch, translator: Translator) -> int
                     start=submit,
                 )
             terminal = inspect_terminal("monitor", stream=sys.stdout, ascii=options.host.ascii)
-            body = (
-                _render(component, capability, translator, terminal, options.host.interval)
-                if capability is not None
-                else translator.text("status.querying")
-            )
+            if capability is None:
+                body = (
+                    format_error(component.error, translator, color=False)
+                    if component.error is not None
+                    else translator.text("status.querying")
+                )
+            else:
+                body = _render(component, capability, translator, terminal, options.host.interval)
             controls = "r refresh · m adjust · Ctrl-C exit"
             screen.paint(compose_frame(body, "ccuv", controls, (), height=terminal.height))
             with input_mode():
@@ -404,7 +423,9 @@ def run_custom_monitor(options: StandaloneLaunch, translator: Translator) -> int
                                 width=terminal.width,
                                 height=max(0, terminal.height - 2),
                                 paint=paint_filter_editor,
-                                read_key=lambda timer=filter_timer: _read_filter_editor_key(read_key, timer),
+                                read_key=lambda timer=filter_timer: _read_filter_editor_key(
+                                    read_key, timer
+                                ),
                                 color=terminal.color,
                                 color_scheme=component.candidate.presentation.theme,
                             )
@@ -422,7 +443,9 @@ def run_custom_monitor(options: StandaloneLaunch, translator: Translator) -> int
                                                 translator.text(f"adjustment.{label}"),
                                                 priority,
                                             )
-                                            for priority, (action_key, label) in enumerate(action_rows)
+                                            for priority, (action_key, label) in enumerate(
+                                                action_rows
+                                            )
                                         ),
                                         width=terminal.width,
                                         color=terminal.color,

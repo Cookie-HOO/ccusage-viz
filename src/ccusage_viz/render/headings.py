@@ -40,6 +40,36 @@ def monitor_view_name(style: str | None, translator: Translator) -> str:
     return translator.text(f"label.monitor_view_{family}")
 
 
+def duration_label(seconds: int) -> str:
+    if seconds % 3600 == 0:
+        return f"{seconds // 3600}h"
+    if seconds % 60 == 0:
+        return f"{seconds // 60}m"
+    return f"{seconds}s"
+
+
+def monitor_heading_spec(
+    *,
+    unit: str,
+    style: str | None,
+    window_seconds: int,
+    mode: str,
+    state: str,
+    translator: Translator,
+    dimension: str | None = None,
+) -> HeadingSpec:
+    if dimension is None and mode != "total":
+        dimension = mode
+    return HeadingSpec(
+        metric="TPM" if unit == "tpm" else translator.text("label.tokens_metric"),
+        chart=monitor_view_name(style, translator),
+        dimension=dimension,
+        period=duration_label(window_seconds),
+        window=True,
+        status=None if state == "ready" else translator.text(f"label.monitor_{state}"),
+    )
+
+
 def _dimension_text(spec: HeadingSpec, translator: Translator) -> str | None:
     if spec.dimension is None:
         return None

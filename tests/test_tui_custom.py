@@ -1328,6 +1328,7 @@ def _custom_monitor_component(*, grouped: bool = True, total: str = "90") -> Cus
         CustomCommandSource("router", ("router-dataset",)),
         DateRange(date(2026, 10, 8), date(2026, 10, 8)),
         metric_id="tokens",
+        metric_titles=("Requests", "请求数"),
         group_by="real_model" if grouped else None,
     )
     component = CustomMonitorComponent(chart)
@@ -1381,7 +1382,98 @@ def test_custom_monitor_renders_source_owned_monitor_presentations_without_share
     assert "Alpha" in bars and "Beta" in bars
     assert "Other" not in bars
     assert "%" not in bars and "%" not in line and "%" not in step
-    assert "real_model · tokens · view 1h · data window 1m" in bars
+    assert "Requests · Trend · by real_model · 1m window" in bars
+    assert "view 1h" not in bars
+    assert "data window" not in bars
+
+
+@pytest.mark.parametrize(
+    ("style", "view"),
+    (
+        ("line", "Trend"),
+        ("ranking", "Ranking"),
+        ("list", "List"),
+        ("cumulative-bars", "Cumulative bars"),
+    ),
+)
+@pytest.mark.parametrize("failed", (False, True), ids=("pending", "error"))
+def test_custom_monitor_transient_states_use_canonical_heading(
+    style: str, view: str, failed: bool
+) -> None:
+    component = _custom_monitor_component()
+    component.accepted_response = None
+    component.accepted_config = None
+    component.configure(
+        replace(component.candidate, presentation=replace(component.candidate.presentation, style=style)),
+        data_affecting=False,
+    )
+    component.error = RuntimeError("source failed") if failed else None
+
+    rendered = tui_module._render_custom_monitor(
+        component,
+        load_translator("en"),
+        Terminal(80, 16, color=False, ascii=True),
+        interval=10,
+    )
+    heading = rendered.chart.splitlines()[0].strip()
+
+    expected = f"Requests · {view} · by real_model · 1m window"
+    assert heading == (expected if failed else f"{expected} · querying")
+    assert rendered.error_body is failed
+    assert ("source failed" in rendered.chart) is failed
+    for excluded in ("view", "data window", "router-dataset", "token"):
+        assert excluded not in heading.lower()
+    assert all(display_width(line) <= 80 for line in rendered.chart.splitlines())
+
+
+@pytest.mark.parametrize("failed", (False, True), ids=("pending", "error"))
+def test_custom_monitor_unresolved_transient_state_omits_unfactual_heading(
+    failed: bool,
+) -> None:
+    chart = CustomChartConfig(
+        "monitor",
+        CustomCommandSource("private-dataset-id", ("router-dataset",)),
+        DateRange(date(2026, 10, 8), date(2026, 10, 8)),
+        metric_id="private-metric-id",
+    )
+    component = CustomMonitorComponent(chart)
+    component.error = RuntimeError("probe failed") if failed else None
+
+    rendered = tui_module._render_custom_monitor(
+        component,
+        load_translator("en"),
+        Terminal(24, 10, color=False, ascii=True),
+        interval=10,
+    )
+
+    assert rendered.chart == ("probe failed" if failed else "Loading…")
+    assert "private-dataset-id" not in rendered.chart
+    assert "private-metric-id" not in rendered.chart
+    assert rendered.error_body is failed
+
+
+def test_custom_monitor_pane_preserves_probe_error_body() -> None:
+    chart = CustomChartConfig(
+        "monitor",
+        CustomCommandSource("router", ("router-dataset",)),
+        DateRange(date(2026, 10, 8), date(2026, 10, 8)),
+        metric_id="tokens",
+    )
+    component = CustomMonitorComponent(chart)
+    assert component.fail(RuntimeError("probe failed"), generation=component.generation)
+    pane = tui_module.TuiCustomPane(
+        component,
+        FixedIntervalScheduler(10, now=0),
+        LifecycleOperation("custom-monitor-probe-error"),
+        SimpleNamespace(),
+    )
+
+    rendered = _pane_render(
+        pane, load_translator("en"), Terminal(80, 16, color=False, ascii=True)
+    )
+
+    assert rendered.error_body
+    assert rendered.chart == "probe failed"
 
 
 def test_custom_monitor_ranking_and_list_keep_native_row_geometry() -> None:

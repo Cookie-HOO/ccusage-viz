@@ -99,6 +99,14 @@ class CustomMonitorPresentation:
 
 
 @dataclass(frozen=True, slots=True)
+class CustomMonitorHeadingMetadata:
+    metric: str
+    dimension: str | None
+    window_seconds: int
+    status: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class CustomMonitorSeries:
     key: str
     label: LocalizedText | None
@@ -180,6 +188,12 @@ class CustomMonitorComponent:
         self.switch_target_config: CustomChartConfig | None = None
         self.switch_normalizations: frozenset[str] = frozenset()
         self.v2_descriptor: V2ProbeDescriptor | None = None
+
+    @property
+    def _display_config(self) -> CustomChartConfig:
+        """Return the configuration whose semantics match the displayed facts."""
+
+        return self.accepted_config or self.candidate
 
     @property
     def request_config(self) -> CustomChartConfig:
@@ -418,7 +432,7 @@ class CustomMonitorComponent:
         observation = response.observation if response is not None else None
         if observation is None:
             return CustomMonitorRanking(())
-        if self.candidate.group_by is None:
+        if self._display_config.group_by is None:
             return CustomMonitorRanking(
                 (CustomMonitorRankingEntry("total", None, observation.total),)
             )
@@ -428,10 +442,32 @@ class CustomMonitorComponent:
         )
         return CustomMonitorRanking(self._project_entries(entries))
 
-    def heading(self, *, language: str) -> str:
-        """Return the Dataset-owned Monitor heading shared by both product surfaces."""
+    def heading_metadata(self, *, language: str) -> CustomMonitorHeadingMetadata:
+        """Return source-owned facts for the shared Monitor heading composer."""
 
-        config = self.accepted_config or self.candidate
+        config = self._display_config
+        if self.presentation is not None:
+            metric = self._localized(self.presentation.title, language)
+        elif config.metric_titles is not None:
+            metric = config.metric_titles[1] if language == "zh" else config.metric_titles[0]
+        else:
+            raise ValueError(
+                "custom Monitor heading requires presentation.title or metric_titles"
+            )
+        return CustomMonitorHeadingMetadata(
+            metric=metric,
+            dimension=(
+                self._group_label(config.group_by, language)
+                if config.group_by is not None
+                else None
+            ),
+            window_seconds=self._window_seconds(require_resolved=True),
+        )
+
+    def heading(self, *, language: str) -> str:
+        """Return the legacy plain heading used by pre-chart loading surfaces."""
+
+        config = self._display_config
         title = (
             self._localized(self.presentation.title, language)
             if self.presentation is not None
@@ -577,9 +613,9 @@ class CustomMonitorComponent:
             )
             bucket_start = bucket_end
         keys = tuple(dict.fromkeys(key for bucket in buckets for key in bucket.values))
-        if self.candidate.group_by is None:
+        if self._display_config.group_by is None:
             keys = ("total",)
-        elif self.candidate.top is not None:
+        elif self._display_config.top is not None:
             totals = {key: sum(bucket.values.get(key, 0.0) for bucket in buckets) for key in keys}
             kept = self._top_keys(totals)
             merged_buckets: list[TimeOfDayBucket] = []
@@ -669,12 +705,12 @@ class CustomMonitorComponent:
 
     def _display_period_label(self, language: str) -> str:
         source = self._window_label()
-        if self.candidate.presentation.style == "cumulative-bars":
+        if self._display_config.presentation.style == "cumulative-bars":
             if language == "zh":
                 day = "昨天" if self.distribution_day_window == "yesterday" else "今天"
                 return f"{day} · 小时累计柱 · 数据窗口 {source}"
             return f"{self.distribution_day_window} · hourly cumulative bars · data window {source}"
-        if is_monitor_ranking_style(self.candidate.presentation.style):
+        if is_monitor_ranking_style(self._display_config.presentation.style):
             return f"数据窗口 {source}" if language == "zh" else f"data window {source}"
         view = self._duration_label(self.display_window_seconds)
         return (
@@ -719,12 +755,12 @@ class CustomMonitorComponent:
         return self._localized(label, language) if label is not None else key
 
     def _observation_values(self, observation: V2MonitorObservation) -> dict[str, float]:
-        if self.candidate.group_by is None:
+        if self._display_config.group_by is None:
             return {"total": float(observation.total)}
         return {item.id: float(item.value) for item in observation.groups}
 
     def _top_keys(self, values: dict[str, Decimal | float]) -> set[str]:
-        top = self.candidate.top
+        top = self._display_config.top
         if top is None or len(values) <= top:
             return set(values)
         return {
@@ -735,7 +771,8 @@ class CustomMonitorComponent:
     def _project_entries(
         self, entries: tuple[CustomMonitorRankingEntry, ...]
     ) -> tuple[CustomMonitorRankingEntry, ...]:
-        if self.candidate.top is None or len(entries) <= self.candidate.top:
+        config = self._display_config
+        if config.top is None or len(entries) <= config.top:
             return entries
         kept = self._top_keys({entry.key: entry.value for entry in entries})
         result = tuple(entry for entry in entries if entry.key in kept)
@@ -744,14 +781,15 @@ class CustomMonitorComponent:
         other = sum((entry.value for entry in entries if entry.key not in kept), start=Decimal())
         return (
             (*result, CustomMonitorRankingEntry("Other", None, other))
-            if other and self.candidate.other == "show"
+            if other and config.other == "show"
             else result
         )
 
     def _project_timeline_series(
         self, series: tuple[CustomMonitorSeries, ...]
     ) -> tuple[CustomMonitorSeries, ...]:
-        if self.candidate.top is None or len(series) <= self.candidate.top:
+        config = self._display_config
+        if config.top is None or len(series) <= config.top:
             return series
         totals = {
             item.key: sum((value for value in item.values if value is not None), start=Decimal())
@@ -770,7 +808,7 @@ class CustomMonitorComponent:
         )
         return (
             (*result, CustomMonitorSeries("Other", None, other_values))
-            if self.candidate.other == "show"
+            if config.other == "show"
             else result
         )
 
@@ -783,7 +821,7 @@ class CustomMonitorComponent:
         labels = {
             group.id: group.label for observation in observations for group in observation.groups
         }
-        if self.candidate.group_by is None:
+        if self._display_config.group_by is None:
             keys, labels = ("total",), {}
         points = tuple(
             CustomMonitorPoint(
@@ -832,12 +870,16 @@ class CustomMonitorComponent:
             response for response in self.history if response.observation.end_at >= cutoff
         ]
 
-    def _window_seconds(self) -> int:
+    def _window_seconds(self, *, require_resolved: bool = False) -> int:
         capability = self.monitor_capability
-        if capability is not None:
-            return capability.window_seconds
-        capability = self.capability.charts.get("monitor") if self.capability is not None else None
-        return capability.window_seconds if isinstance(capability, V2MonitorCapability) else 60
+        if capability is None and self.capability is not None:
+            candidate = self.capability.charts.get("monitor")
+            capability = candidate if isinstance(candidate, V2MonitorCapability) else None
+        if capability is None:
+            if require_resolved:
+                raise ValueError("custom Monitor heading requires a resolved Monitor capability")
+            return 60
+        return capability.window_seconds
 
 
 def resolve_metric(config: CustomChartConfig, descriptor: V2ProbeDescriptor) -> CustomChartConfig:

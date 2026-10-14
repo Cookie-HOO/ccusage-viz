@@ -1460,7 +1460,7 @@ def test_observed_timeline_uses_wall_clock_axis_and_metric_heading() -> None:
 
     output = render_timeline(model, context(True))
 
-    assert "Total TPM · recent 15m" in output
+    assert "TPM · Trend · 15m window" in output
     assert "10:00" in output and "10:05" in output
     assert "2026-01-01" not in output
 
@@ -1548,7 +1548,7 @@ def test_observed_timeline_overlays_a_thin_start_marker_without_plotext_line(
     assert ascii.count(":") > 4
 
 
-def test_observed_timeline_renders_sampling_state_with_real_translator() -> None:
+def test_observed_timeline_renders_sampling_state_inline_and_muted() -> None:
     model = TimelineModel(
         (),
         (),
@@ -1560,10 +1560,17 @@ def test_observed_timeline_renders_sampling_state_with_real_translator() -> None
 
     output = render_timeline(
         model,
+        RenderContext(80, 24, load_translator("en"), color=True, ascii=True),
+    )
+    ready = render_timeline(
+        replace(model, observed_scope=ObservedScope(900, "total", "ready")),
         RenderContext(80, 24, load_translator("en"), color=False, ascii=True),
     )
 
-    assert "sampling" in output
+    heading = output.splitlines()[0]
+    assert strip_ansi(heading).strip().endswith("(sampling)")
+    assert "\x1b[2m" in heading
+    assert "(ready)" not in ready.splitlines()[0]
 
 
 @pytest.mark.parametrize(
@@ -1682,7 +1689,7 @@ def test_non_detailed_audit_hides_refreshing_suffix(density: str) -> None:
     assert output == ""
 
 
-def test_monitor_titles_use_recent_range_and_current_tpm_wording() -> None:
+def test_monitor_titles_use_metric_view_dimension_and_factual_window() -> None:
     model_ranking = RankingModel(
         (),
         None,
@@ -1699,8 +1706,10 @@ def test_monitor_titles_use_recent_range_and_current_tpm_wording() -> None:
         observed_scope=ObservedScope(3600, "project"),
     )
 
-    assert "Model · current TPM" in render_ranking(model_ranking, context(True))
-    assert "Project cumulative Token · recent 1h" in render_timeline(
+    assert "TPM · Ranking · by Model · 1h window" in render_ranking(
+        model_ranking, context(True)
+    )
+    assert "Tokens · Trend · by Project · 1h window" in render_timeline(
         project_timeline, context(True)
     )
 
@@ -1719,7 +1728,7 @@ def test_observed_ranking_uses_recent_range_without_historical_percentage() -> N
 
     output = render_ranking(model, context(True))
 
-    assert "Agent · current Token" in output
+    assert "Tokens · Ranking · by Agent · 15m window" in output
     assert "1.2K" in output and "800" in output
     assert "%" not in output
     assert "2026-01-01" not in output
@@ -1897,7 +1906,7 @@ def test_monitor_project_ranking_and_list_preserve_exact_agent_labels() -> None:
         RenderContext(80, 24, load_translator("en"), color=False, ascii=True, style="list"),
     )
 
-    assert "Project · current Token" in ranking
+    assert "Tokens · Ranking · by Project · 15m window" in ranking
     assert "claude · app" in ranking and "codex · app" in ranking
     assert "claude · app" in listing and "codex · app" in listing
 
@@ -2139,7 +2148,9 @@ def _distribution_model() -> TimeOfDayDistributionModel:
 def test_distribution_renderer_keeps_observation_metadata_outside_the_chart() -> None:
     output = render_monitor_distribution(_distribution_model(), context(True))
 
-    assert "Total · Token cumulative bars · Today · Hourly" in output
+    assert "Tokens · Cumulative bars · 1d window" in output
+    assert "Today" not in output.splitlines()[0]
+    assert "Hourly" not in output.splitlines()[0]
     assert "observed from" not in output
     assert "not observed" in output
     assert "#" in output

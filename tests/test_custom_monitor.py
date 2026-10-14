@@ -1,6 +1,9 @@
+from concurrent.futures import Future
+from contextlib import nullcontext
 from dataclasses import replace
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import Any
 
 import pytest
 
@@ -25,16 +28,21 @@ from ccusage_viz.custom_monitor_component import (
     apply_custom_monitor_defaults,
 )
 from ccusage_viz.custom_protocol import V2MonitorResponse, V2ProbeResponse
+from ccusage_viz.errors import SchemaError
+from ccusage_viz.formatting import display_width
 from ccusage_viz.i18n import load_translator
 from ccusage_viz.options import (
     ChartPresentation,
     CustomChartConfig,
     CustomCommandSource,
+    ProcessConfig,
+    StandaloneHostConfig,
+    StandaloneLaunch,
     resolve_date_range,
 )
 from ccusage_viz.render.base import RenderContext
 from ccusage_viz.render.custom_monitor import render_custom_monitor
-from ccusage_viz.terminal import Terminal
+from ccusage_viz.terminal import Frame, Terminal
 
 
 def config() -> CustomChartConfig:
@@ -43,6 +51,7 @@ def config() -> CustomChartConfig:
         CustomCommandSource("router", ("router-dataset",)),
         resolve_date_range("timeline", period="14d", since=None, until=None),
         metric_id="tokens",
+        metric_titles=("Tokens", "Token"),
     )
 
 
@@ -79,8 +88,77 @@ def test_custom_monitor_filter_reader_propagates_idle_timeout() -> None:
         custom_monitor_host._read_filter_editor_key(lambda _timeout: None, timer)
 
 
+def test_standalone_initial_probe_failure_renders_localized_error_before_exit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    launch = StandaloneLaunch(
+        ProcessConfig(query_timeout=1),
+        StandaloneHostConfig(ascii=True, interval=15, timezone="UTC"),
+        config(),
+    )
+    painted: list[str] = []
+
+    class Handle:
+        def result(self) -> object:
+            raise SchemaError("error.schema", path="$.metrics", reason="expected array")
+
+        def cancel(self) -> None:
+            pass
+
+    class Runtime:
+        def submit(self, _intent: object) -> Handle:
+            return Handle()
+
+        def cancel(self) -> None:
+            pass
+
+    class ImmediateExecutor:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def submit(self, function: Any) -> Future[object]:
+            future: Future[object] = Future()
+            try:
+                future.set_result(function())
+            except BaseException as error:
+                future.set_exception(error)
+            return future
+
+        def shutdown(self, **_kwargs: object) -> None:
+            pass
+
+    class Screen:
+        def __init__(self, _stream: object) -> None:
+            pass
+
+        def paint(self, frame: Frame, **_kwargs: object) -> None:
+            painted.append("\n".join(frame.rows))
+
+        def finish(self) -> None:
+            pass
+
+    monkeypatch.setattr(custom_monitor_host, "build_query_runtime", Runtime)
+    monkeypatch.setattr(custom_monitor_host, "ThreadPoolExecutor", ImmediateExecutor)
+    monkeypatch.setattr(custom_monitor_host, "FramePainter", Screen)
+    monkeypatch.setattr(custom_monitor_host, "input_mode", nullcontext)
+    monkeypatch.setattr(custom_monitor_host, "read_key", lambda _timeout: "\x03")
+    monkeypatch.setattr(
+        custom_monitor_host,
+        "inspect_terminal",
+        lambda *_args, **_kwargs: Terminal(80, 20, False, True),
+    )
+
+    assert custom_monitor_host.run_custom_monitor(launch, load_translator("zh")) == 0
+    assert len(painted) == 1
+    assert "ccusage 在 $.metrics 返回了不兼容的数据：expected array" in painted[0]
+    assert load_translator("zh").text("status.querying") not in painted[0]
+    assert "Tokens" not in painted[0]
+    assert "window" not in painted[0]
+
+
 def test_render_source_owned_observation_and_interval_mismatch_notice() -> None:
     component = CustomMonitorComponent(config())
+    component.set_capability(probe().descriptor.metrics[0].capabilities)
     response = V2MonitorResponse(
         "tokens",
         V2MonitorObservation(
@@ -120,7 +198,8 @@ def test_standalone_adjustment_uses_dataset_monitor_style_and_window_contract() 
     assert component.candidate.presentation.style == "list"
     assert _adjust(component, "w")
     assert component.display_window_seconds == 43200
-    assert component.heading(language="en") == "Total · Tokens · data window 1m"
+    metadata = component.heading_metadata(language="en")
+    assert (metadata.metric, metadata.dimension, metadata.window_seconds) == ("Tokens", None, 60)
 
     component.configure(
         replace(
@@ -130,14 +209,28 @@ def test_standalone_adjustment_uses_dataset_monitor_style_and_window_contract() 
         data_affecting=False,
     )
     assert _adjust(component, "w")
-    assert "yesterday · hourly" in component.heading(language="en")
+    rendered = render_custom_monitor(
+        component,
+        RenderContext(80, 20, load_translator("en"), color=False, style="cumulative-bars"),
+    )
+    assert "Tokens · Cumulative bars · 1m window" in rendered.splitlines()[0]
+    assert "yesterday" not in rendered.splitlines()[0]
+    assert "hourly" not in rendered.splitlines()[0]
 
 
 def described_monitor_component(style: str | None = None) -> CustomMonitorComponent:
     """Build an accepted Custom Monitor component with a description and display."""
     presentation = ChartPresentation(style=style or "ranking", density="detailed")
-    chart = replace(config(), group_by="model", presentation=presentation)
+    chart = replace(
+        config(),
+        metric_titles=("Requests", "请求数"),
+        group_by="model",
+        presentation=presentation,
+    )
     component = CustomMonitorComponent(chart)
+    component.set_capability(
+        V2MetricCapabilities((), (), {"monitor": V2MonitorCapability(90, 10, ("model",), ())})
+    )
     component.accept(
         CustomMonitorCompletion(
             0,
@@ -167,8 +260,12 @@ def described_monitor_component(style: str | None = None) -> CustomMonitorCompon
 def test_custom_monitor_ranking_renders_descriptions_only_at_complete_density() -> None:
     component = described_monitor_component()
 
-    detailed_ctx = RenderContext(34, 20, load_translator("en"), color=False, ascii=True, density="detailed")
-    normal_ctx = RenderContext(34, 20, load_translator("en"), color=False, ascii=True, density="normal")
+    detailed_ctx = RenderContext(
+        34, 20, load_translator("en"), color=False, ascii=True, density="detailed"
+    )
+    normal_ctx = RenderContext(
+        34, 20, load_translator("en"), color=False, ascii=True, density="normal"
+    )
 
     detailed = render_custom_monitor(component, detailed_ctx)
     normal = render_custom_monitor(component, normal_ctx)
@@ -198,6 +295,103 @@ def test_custom_monitor_list_renders_display_without_description() -> None:
     assert "Release validation" not in rendered
 
 
+@pytest.mark.parametrize(
+    ("style", "view"),
+    (
+        ("line", "Trend"),
+        ("ranking", "Ranking"),
+        ("list", "List"),
+        ("cumulative-bars", "Cumulative bars"),
+    ),
+)
+def test_custom_monitor_style_families_use_canonical_accepted_heading(
+    style: str, view: str
+) -> None:
+    component = described_monitor_component(style=style)
+    component.configure_display_window(43_200)
+    context = RenderContext(80, 20, load_translator("en"), color=False, ascii=True, style=style)
+
+    heading = render_custom_monitor(component, context).splitlines()[0].strip()
+
+    assert heading == f"Requests · {view} · by Model · 90s window"
+    for excluded in ("view", "data window", "12h", "router-dataset", "tokens", "token"):
+        assert excluded not in heading.lower()
+
+
+@pytest.mark.parametrize(
+    ("style", "view"),
+    (
+        ("line", "Trend"),
+        ("ranking", "Ranking"),
+        ("list", "List"),
+        ("cumulative-bars", "Cumulative bars"),
+    ),
+)
+@pytest.mark.parametrize(
+    ("error", "detail", "querying"),
+    ((None, "querying", True), (RuntimeError("failed"), "failed", False)),
+)
+def test_standalone_custom_monitor_transient_states_use_canonical_heading(
+    style: str, view: str, error: BaseException | None, detail: str, querying: bool
+) -> None:
+    chart = replace(
+        config(),
+        metric_titles=("Requests", "请求数"),
+        group_by="model",
+        presentation=ChartPresentation(style=style),
+    )
+    component = CustomMonitorComponent(chart)
+    capability = V2MonitorCapability(90, 10, ("model",), ())
+    component.set_capability(V2MetricCapabilities((), (), {"monitor": capability}))
+    if error is not None:
+        component.fail(error, generation=component.generation)
+
+    rendered = _render(
+        component,
+        capability,
+        load_translator("en"),
+        Terminal(80, 20, False, True),
+        15,
+    )
+    heading, rendered_detail = rendered.splitlines()
+    expected = f"Requests · {view} · by Model · 90s window"
+    if querying:
+        expected += " · querying"
+
+    assert heading.strip() == expected
+    assert rendered_detail == detail
+    assert all(display_width(line) <= 80 for line in rendered.splitlines())
+    for excluded in ("view", "data window", "router-dataset", "tokens", "token"):
+        assert excluded not in heading.lower()
+
+
+def test_standalone_pending_reconfiguration_uses_accepted_monitor_semantics() -> None:
+    component = described_monitor_component(style="ranking")
+    component.configure(
+        replace(
+            component.candidate,
+            group_by=None,
+            top=1,
+            presentation=replace(component.candidate.presentation, style="line"),
+        ),
+        data_affecting=True,
+    )
+
+    rendered = _render(
+        component,
+        V2MonitorCapability(90, 10, ("model",), ()),
+        load_translator("en"),
+        Terminal(80, 20, False, True),
+        15,
+    )
+
+    heading, detail = rendered.splitlines()
+    assert heading.strip() == "Requests · Ranking · by Model · 90s window · querying"
+    assert detail == "querying"
+    assert "Trend" not in heading
+    assert "Total" not in heading
+
+
 @pytest.mark.parametrize("style", ("line", "bars"))
 def test_custom_monitor_time_based_views_hide_presentation_metadata(style: str) -> None:
     component = described_monitor_component(style=style)
@@ -214,15 +408,20 @@ def test_custom_monitor_time_based_views_hide_presentation_metadata(style: str) 
 def test_custom_monitor_description_free_output_unchanged() -> None:
     """Regression: description-free responses render exactly as before."""
     component = CustomMonitorComponent(config())
+    component.set_capability(probe().descriptor.metrics[0].capabilities)
     component.accept(
-        CustomMonitorCompletion(0, config(), V2MonitorResponse(
-            "tokens",
-            V2MonitorObservation(
-                datetime(2026, 10, 8, 12, 0, tzinfo=UTC),
-                Decimal("175"),
-                (V2MetricValue("terra", LocalizedText("Terra", "Terra"), Decimal("175")),),
+        CustomMonitorCompletion(
+            0,
+            config(),
+            V2MonitorResponse(
+                "tokens",
+                V2MonitorObservation(
+                    datetime(2026, 10, 8, 12, 0, tzinfo=UTC),
+                    Decimal("175"),
+                    (V2MetricValue("terra", LocalizedText("Terra", "Terra"), Decimal("175")),),
+                ),
             ),
-        )),
+        ),
         accepted_at=datetime.now(UTC),
     )
 

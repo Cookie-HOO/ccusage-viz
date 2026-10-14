@@ -8,12 +8,12 @@ from ccusage_viz.chart_models import (
 )
 from ccusage_viz.errors import UsageError
 from ccusage_viz.formatting import center_text, clip_width, display_width, format_tokens, pad_width
-from ccusage_viz.render.base import (
-    RenderContext,
-    colored_mark,
-    styled_text,
-    title_with_querying,
-    y_tick_spec,
+from ccusage_viz.render.base import RenderContext, colored_mark, styled_text, y_tick_spec
+from ccusage_viz.render.headings import (
+    HeadingSpec,
+    compose_heading,
+    heading_with_querying,
+    monitor_view_name,
 )
 from ccusage_viz.render.palette import categorical_colors, get_color_scheme
 
@@ -29,13 +29,6 @@ def _dimension_label(model: TimeOfDayDistributionModel, context: RenderContext) 
         return context.translator.text(f"label.{key[0]}")
     return context.translator.text("label.total")
 
-
-def _day_label(model: TimeOfDayDistributionModel, context: RenderContext) -> str:
-    return context.translator.text(f"label.monitor_distribution_{model.day_window}")
-
-
-def _granularity_label(model: TimeOfDayDistributionModel, context: RenderContext) -> str:
-    return context.translator.text(f"label.monitor_distribution_{model.granularity}")
 
 
 def _series_colors(model: TimeOfDayDistributionModel, context: RenderContext) -> dict[object, int]:
@@ -198,12 +191,19 @@ def render_monitor_distribution(model: TimeOfDayDistributionModel, context: Rend
         return context.translator.text("message.no_data")
 
     dimension = _dimension_label(model, context)
+    if dimension == context.translator.text("label.total"):
+        dimension = None
     heading = center_text(
-        title_with_querying(
-            context.translator.text(
-                "label.monitor_distribution_title",
-                mode=dimension,
-                day=f"{_day_label(model, context)} · {_granularity_label(model, context)}",
+        heading_with_querying(
+            compose_heading(
+                HeadingSpec(
+                    metric=context.translator.text("label.tokens_metric"),
+                    chart=monitor_view_name("cumulative-bars", context.translator),
+                    dimension=dimension,
+                    period="1d",
+                    window=True,
+                ),
+                context,
             ),
             context,
         ),

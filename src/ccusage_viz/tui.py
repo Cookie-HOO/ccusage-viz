@@ -251,7 +251,10 @@ from ccusage_viz.render.custom import (
     render_custom_pending,
     render_custom_projection,
 )
-from ccusage_viz.render.custom_monitor import render_custom_monitor
+from ccusage_viz.render.custom_monitor import (
+    render_custom_monitor,
+    render_custom_monitor_heading,
+)
 from ccusage_viz.render.custom_ranking_viewport import render_custom_ranking_viewport
 from ccusage_viz.render.filters import active_filter_summary
 from ccusage_viz.render.grouped_ranking_viewport import (
@@ -1919,16 +1922,7 @@ def _render_custom_monitor(
     interval: float,
 ) -> PaneRender:
     config = component.accepted_config or component.candidate
-    if component.accepted_response is None or component.pending:
-        body = (
-            format_error(component.error, translator, color=False)
-            if component.error
-            else translator.text("status.loading")
-        )
-        return PaneRender(
-            f"{component.heading(language=translator.language)}\n{body}",
-            error_body=component.error is not None,
-        )
+    transient = component.accepted_response is None or component.pending
     context = dashboard_pane_surface("timeline").context(
         terminal,
         translator,
@@ -1945,8 +1939,25 @@ def _render_custom_monitor(
             None,
             None,
             None,
+            querying=transient and component.error is None,
+            pending=transient,
         ),
     )
+    if transient:
+        body = (
+            format_error(component.error, translator, color=False)
+            if component.error
+            else translator.text("status.loading")
+        )
+        capability = component.monitor_capability
+        if capability is None and component.capability is not None:
+            capability = component.capability.charts.get("monitor")
+        if not isinstance(capability, V2MonitorCapability):
+            return PaneRender(body, error_body=component.error is not None)
+        return PaneRender(
+            f"{render_custom_monitor_heading(component, context)}\n{body}",
+            error_body=component.error is not None,
+        )
     return PaneRender(render_custom_monitor(component, context))
 
 
@@ -2195,16 +2206,20 @@ def _pane_render(
                 return PaneRender(
                     format_full_command_display(format_full_command(options), terminal.width)
                 )
+            rendered = _render_custom_monitor(
+                component, translator, terminal, interval=pane.interval
+            )
             return PaneRender(
                 _append_custom_monitor_attachment(
                     pane,
-                    _render_custom_monitor(
-                        component, translator, terminal, interval=pane.interval
-                    ).chart,
+                    rendered.chart,
                     terminal=terminal,
                     now=time.monotonic(),
                     translator=translator,
-                )
+                ),
+                rendered.notices,
+                rendered.overlay_placements,
+                error_body=rendered.error_body,
             )
         if component.error is not None and component.model is None:
             return _render_custom_failure(
