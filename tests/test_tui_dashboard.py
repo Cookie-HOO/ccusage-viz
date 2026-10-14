@@ -37,6 +37,8 @@ from ccusage_viz.custom_models import (
     CustomSeries,
     CustomUnit,
     LocalizedText,
+    V2Dataset,
+    V2ProbeDescriptor,
 )
 from ccusage_viz.custom_protocol import CustomChartResponse, CustomProbeResponse
 from ccusage_viz.domain import Notice, SourceKind, TokenUsage, UsageRecord
@@ -295,7 +297,7 @@ def test_official_catalog_table_keeps_headers_visible_while_scrolling() -> None:
     assert offset > 0
 
 
-def test_pane_chooser_groups_token_usage_and_other_datasets() -> None:
+def test_pane_chooser_groups_sources_in_command_order() -> None:
     frames: list[object] = []
 
     class Screen:
@@ -312,9 +314,104 @@ def test_pane_chooser_groups_token_usage_and_other_datasets() -> None:
     ) is None
 
     output = "\n".join(frames[0].rows)  # type: ignore[union-attr]
-    assert "Built-in token usage" in output
-    assert "Other datasets" in output
-    assert "Datasets" in output
+    expected = (
+        "ccusage",
+        "Timeline",
+        "Calendar",
+        "Stack",
+        "Ranking",
+        "Monitor",
+        "Custom",
+        "Datasets…",
+        "Other",
+        "Animation",
+        "Empty",
+    )
+    positions = [output.index(value) for value in expected]
+    assert positions == sorted(positions)
+
+
+def test_run_tui_dashboard_dataset_entry_keeps_installed_titles_in_source_stage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_title = "Fake Installed Dataset"
+    text = LocalizedText(fake_title, "伪安装数据集")
+    descriptor = V2ProbeDescriptor("revision", "1", V2Dataset(text, text), (), ())
+    status = SimpleNamespace(
+        registration=SimpleNamespace(
+            dataset_id="fake-installed", probe=SimpleNamespace(descriptor=descriptor)
+        )
+    )
+    frames_by_stage: dict[str, str] = {}
+    modals: list[object] = []
+    original_modal = tui_module.DashboardDatasetModalState
+
+    def record_modal(*args: object, **kwargs: object) -> object:
+        modal = original_modal(*args, **kwargs)
+        modals.append(modal)
+        return modal
+
+    class Runtime:
+        def cancel(self) -> None:
+            pass
+
+    class DatasetService:
+        def ready_registered_sources(self) -> tuple[object, ...]:
+            return (status,)
+
+    class Screen:
+        def __init__(self, _stream: object) -> None:
+            pass
+
+        def paint(self, frame: object, **_kwargs: object) -> None:
+            if modals:
+                stage = str(modals[-1].stage)  # type: ignore[union-attr]
+                rendered = "\n".join(frame.rows)  # type: ignore[union-attr]
+                if (stage == "pane" and all(
+                    heading in rendered for heading in ("ccusage", "Custom", "Other")
+                )) or (stage == "source" and fake_title in rendered):
+                    frames_by_stage.setdefault(stage, rendered)
+
+        def finish(self) -> None:
+            pass
+
+    events = iter(
+        (
+            KeyEvent("m"),
+            KeyEvent("r"),
+            *(KeyEvent("j") for _ in range(5)),
+            KeyEvent("\r"),
+            KeyEvent("\x03"),
+        )
+    )
+    options = _to_options(
+        build_parser(load_translator("en")).parse_args(
+            ["dashboard", "--empty", "--grid", "1x1", "--header-style", "hidden"]
+        )
+    )
+    monkeypatch.setattr(tui_module, "build_query_runtime", Runtime)
+    monkeypatch.setattr(tui_module, "DashboardDatasetModalState", record_modal)
+    monkeypatch.setattr(tui_module, "FramePainter", Screen)
+    monkeypatch.setattr(tui_module, "tui_input_mode", nullcontext)
+    monkeypatch.setattr(tui_module, "read_event", lambda _decoder, _timeout: next(events))
+    monkeypatch.setattr(
+        tui_module, "get_terminal_size", lambda: __import__("os").terminal_size((100, 30))
+    )
+    monkeypatch.setattr("ccusage_viz.datasets.service.DatasetService", DatasetService)
+
+    assert tui_module.run_tui(options, load_translator("en")) == 0
+
+    pane_frame = frames_by_stage["pane"]
+    headings = ("ccusage", "Custom", "Other")
+    assert tuple(sorted(headings, key=pane_frame.index)) == headings
+    assert all(pane_frame.count(heading) == 1 for heading in headings)
+    assert pane_frame.index("Timeline") < pane_frame.index("Datasets…") < pane_frame.index(
+        "Animation"
+    )
+    assert fake_title not in pane_frame
+
+    source_frame = frames_by_stage["source"]
+    assert fake_title in source_frame
 
 
 def test_dashboard_custom_sources_choose_first_pane_for_each_dataset_id() -> None:

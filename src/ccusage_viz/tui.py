@@ -320,30 +320,22 @@ from ccusage_viz.tui_preset_manager import (
     render_preset_manager,
 )
 
-_PANE_COMMANDS = (
-    "empty",
-    "timeline",
-    "stack",
-    "calendar",
-    "ranking",
-    "monitor",
-    "animate",
-    "datasets",
+_PANE_GROUPS = (
+    (
+        "status.tui_pane_group_ccusage",
+        ("timeline", "calendar", "stack", "ranking", "monitor"),
+    ),
+    ("status.tui_pane_group_custom", ("datasets",)),
+    ("status.tui_pane_group_other", ("animate", "empty")),
 )
-
-_TOKEN_PANE_COMMANDS = ("timeline", "stack", "calendar", "ranking", "monitor")
-_OTHER_PANE_COMMANDS = ("empty", "animate")
+_PANE_COMMANDS = tuple(command for _, commands in _PANE_GROUPS for command in commands)
 
 
 def _pane_chooser_rows(translator: Translator, selected: int) -> tuple[list[str], dict[str, int]]:
     current = _PANE_COMMANDS[selected]
     rows: list[str] = []
     positions: dict[str, int] = {}
-    for heading, commands in (
-        ("status.tui_pane_group_token", _TOKEN_PANE_COMMANDS),
-        ("status.tui_pane_group_datasets", ("datasets",)),
-        ("status.tui_pane_group_other", _OTHER_PANE_COMMANDS),
-    ):
+    for heading, commands in _PANE_GROUPS:
         if rows:
             rows.append("")
         rows.append(translator.text(heading))
@@ -9096,13 +9088,12 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         width, height = _dataset_modal_size(modal.pane_index)
         notices = () if modal.error is None else (modal.error,)
         if modal.stage == "pane":
-            rows = [
-                f"{'›' if item == _PANE_COMMANDS[modal.index] else ' '} "
-                f"{translator.text(f'label.pane_{item}')}"
-                for item in _PANE_COMMANDS
-            ]
+            rows, positions = _pane_chooser_rows(translator, modal.index)
             body, modal.offset = _chooser_viewport(
-                rows, index=modal.index, offset=modal.offset, height=height
+                rows,
+                index=positions[_PANE_COMMANDS[modal.index]],
+                offset=modal.offset,
+                height=height,
             )
             title = translator.text(f"status.tui_{modal.action}_title")
             controls = translator.text(f"status.tui_{modal.action}_controls")

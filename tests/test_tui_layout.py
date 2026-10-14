@@ -210,7 +210,7 @@ def test_pane_chooser_reuses_dashboard_decoder_and_ignores_mouse(
             decoder,
             height=20,
         )
-        == "timeline"
+        == "calendar"
     )
 
 
@@ -231,12 +231,12 @@ def test_pane_chooser_opens_help_without_losing_selection() -> None:
             read_input=lambda: next(events),
             on_help=selected.append,
         )
-        == "timeline"
+        == "calendar"
     )
-    assert selected == ["empty"]
+    assert selected == ["timeline"]
 
 
-def test_pane_chooser_wraps_backward_to_datasets_and_escape_cancels(
+def test_pane_chooser_wraps_backward_to_empty_and_escape_cancels(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class Screen:
@@ -250,7 +250,7 @@ def test_pane_chooser_wraps_backward_to_datasets_and_escape_cancels(
         "read_event",
         lambda active, timeout: active.next(now=1.0),
     )
-    assert _choose_pane_type(Screen(), load_translator("en"), decoder, height=20) == "datasets"
+    assert _choose_pane_type(Screen(), load_translator("en"), decoder, height=20) == "empty"
 
     cancelled = InputDecoder()
     cancelled.feed("\x1b")
@@ -312,11 +312,62 @@ def test_pane_chooser_localizes_names_and_includes_animation() -> None:
         is None
     )
 
-    assert "空白 (Empty)" in painted[0][0]
-    assert "时间趋势 (Timeline)" in painted[0][0]
-    assert "监控 (Monitor)" in painted[0][0]
-    assert "动画 (Animation)" in painted[0][0]
-    assert "数据集…" in painted[0][0]
+    body = painted[0][0]
+    expected = (
+        "ccusage",
+        "时间趋势 (Timeline)",
+        "活跃日历 (Calendar)",
+        "分组构成 (Stack)",
+        "累计排名 (Ranking)",
+        "监测 (Monitor)",
+        "自定义",
+        "数据集…",
+        "其他",
+        "动画 (Animation)",
+        "空白 (Empty)",
+    )
+    positions = [body.index(value) for value in expected]
+    assert positions == sorted(positions)
+
+
+def test_pane_chooser_english_uses_short_non_redundant_names() -> None:
+    painted: list[tuple[str, str, str]] = []
+
+    assert (
+        _choose_pane_type(
+            object(),
+            load_translator("en"),
+            InputDecoder(),
+            height=20,
+            paint_choices=lambda choices, title, controls, notices: painted.append(
+                (choices, title, controls)
+            ),
+            read_input=lambda: KeyEvent("\x1b"),
+        )
+        is None
+    )
+
+    body = painted[0][0]
+    assert "Timeline (Timeline)" not in body
+    assert "Calendar (Calendar)" not in body
+    assert " Timeline" in body
+    assert body.index("ccusage") < body.index("Custom") < body.index("Other")
+
+
+def test_pane_chooser_navigation_skips_group_headings() -> None:
+    events = iter((*(KeyEvent("j") for _ in range(5)), KeyEvent("\r")))
+
+    assert (
+        _choose_pane_type(
+            object(),
+            load_translator("en"),
+            InputDecoder(),
+            height=20,
+            paint_choices=lambda *_args: None,
+            read_input=lambda: next(events),
+        )
+        == "datasets"
+    )
 
 
 def test_tui_parses_runtime_numeric_grid_with_capacity() -> None:
