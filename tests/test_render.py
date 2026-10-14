@@ -1660,6 +1660,48 @@ def test_observed_ranking_uses_recent_range_without_historical_percentage() -> N
     assert "2026-01-01" not in output
 
 
+@pytest.mark.parametrize("style", ("ranking", "ranking-dot"))
+def test_monitor_ranking_description_starts_with_label_column(style: str) -> None:
+    label = "Provider quota"
+    description = "Models available through this quota pool and its current routing policy."
+    model = RankingModel(
+        (),
+        None,
+        observed_entries=(
+            ScalarRankingEntry(
+                "quota", label, 69.2, description=description, display="69.2%"
+            ),
+        ),
+        metric=MetricDescriptor("tokens"),
+        observed_scope=ObservedScope(20, "model"),
+    )
+    render_context = RenderContext(
+        56,
+        24,
+        load_translator("en"),
+        color=False,
+        ascii=True,
+        style=style,
+        density="detailed",
+    )
+
+    output = render_ranking(model, render_context)
+    primary = next(row for row in output.splitlines() if label in row)
+    description_rows = [
+        row
+        for row in output.splitlines()
+        if "Models available" in row or "routing policy" in row
+    ]
+
+    label_start = display_width(primary.split(label, maxsplit=1)[0])
+    assert description_rows
+    assert display_width(description_rows[0]) <= render_context.width
+    assert (
+        display_width(description_rows[0].split("Models available", maxsplit=1)[0])
+        == label_start
+    )
+
+
 def test_observed_ranking_reclaims_percentage_space_for_labels() -> None:
     label = "gpt-5.6-very-long-model-name"
     model = RankingModel(

@@ -350,7 +350,7 @@ def render_ranking(
             and not entry.is_other
         )
         if show_description:
-            indent = " " * min(context.width, display_width(prefix) + value_width + 1)
+            indent = " " * min(context.width, display_width(prefix))
             available = max(1, context.width - display_width(indent))
             desc = description_visible_text(entry.description)
             desc_rows = wrap_width(desc, available)
