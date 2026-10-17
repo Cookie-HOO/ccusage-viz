@@ -266,26 +266,39 @@ def _catalog_entries(count: int = 1) -> tuple[object, ...]:
             id=f"dataset-{index}",
             title=LocalizedText(f"Dataset {index}", f"数据集 {index}"),
             summary=LocalizedText(
-                "This deliberately long summary explains what the Dataset measures over a useful period.",
-                "这是一个用于验证官方数据集简介在表格中最多显示两行并在超出时省略的较长说明。",
+                "This deliberately long summary explains what the Dataset measures over a useful period and adds enough detail to require truncation after two lines.",
+                "这是一个用于验证官方数据集简介最多显示两行并在超出时省略的较长说明，同时增加足够内容以确保窄窗口需要截断。",
             ),
         )
         for index in range(count)
     )
 
 
-def test_official_catalog_table_limits_each_summary_to_two_lines() -> None:
+def test_official_catalog_items_separate_identity_from_description() -> None:
     rows = _official_catalog_rows(
         _catalog_entries(), load_translator("en"), index=0, width=48
     )
 
-    assert rows[0].startswith("  Name")
-    assert rows[2].startswith("› Dataset 0")
-    assert rows[3].endswith("...")
-    assert len(rows) == 4
+    assert rows[0] == "› Dataset 0 · dataset-0"
+    assert all(row.startswith("  ") for row in rows[1:])
+    assert rows[-1].endswith("…")
+    assert len(rows) == 3
+    assert not any("Name" in row or "Summary" in row for row in rows)
+    assert all(display_width(row) <= 48 for row in rows)
 
 
-def test_official_catalog_table_keeps_headers_visible_while_scrolling() -> None:
+def test_official_catalog_items_align_chinese_description_at_narrow_width() -> None:
+    rows = _official_catalog_rows(
+        _catalog_entries(), load_translator("zh"), index=0, width=18
+    )
+
+    assert rows[0].startswith("› 数据集 0 ·")
+    assert all(row.startswith("  ") for row in rows[1:])
+    assert all(display_width(row) <= 18 for row in rows)
+    assert len(rows) <= 3
+
+
+def test_official_catalog_viewport_keeps_selected_variable_height_item_visible() -> None:
     choices, offset = _official_catalog_viewport(
         _catalog_entries(5),
         load_translator("en"),
@@ -295,9 +308,10 @@ def test_official_catalog_table_keeps_headers_visible_while_scrolling() -> None:
         height=5,
     )
 
-    assert choices.splitlines()[0].startswith("  Name")
-    assert choices.splitlines()[1] == "─" * 72
-    assert "Dataset 4" in choices
+    rows = choices.splitlines()
+    assert rows[0].startswith("› Dataset 4 · dataset-4")
+    assert len(rows) == 3
+    assert rows[-1].startswith("  ")
     assert offset > 0
 
 

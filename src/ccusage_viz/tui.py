@@ -4196,46 +4196,38 @@ def _chooser_viewport(
     return "\n".join(rows[offset : offset + visible_rows]), offset
 
 
+def _official_catalog_item_rows(
+    entry: object,
+    translator: Translator,
+    *,
+    selected: bool,
+    width: int,
+) -> tuple[str, ...]:
+    """Render one catalog item with its description as subordinate rows."""
+
+    width = max(1, width)
+    content_width = max(1, width - 2)
+    name = entry.title.zh_cn if translator.language == "zh" else entry.title.en
+    summary = entry.summary.zh_cn if translator.language == "zh" else entry.summary.en
+    primary = clip_width(f"{'›' if selected else ' '} {name} · {entry.id}", width)
+    wrapped = list(wrap_width(summary, content_width))
+    if len(wrapped) > 2:
+        wrapped = [wrapped[0], truncate_width(wrapped[1], max(0, content_width - 1)) + "…"]
+    return (primary, *(clip_width(f"  {row}", width) for row in wrapped[:2]))
+
+
 def _official_catalog_rows(
     entries: tuple[object, ...], translator: Translator, *, index: int, width: int
 ) -> list[str]:
-    """Render official catalog entries in a compact two-line table layout."""
+    """Render catalog entries as primary items with subordinate descriptions."""
 
-    name_width = max(12, width * 25 // 100)
-    id_width = max(10, width * 18 // 100)
-    summary_width = max(12, width - name_width - id_width - 5)
-    rows = [
-        clip_width(
-            f"  {pad_width(translator.text('status.dataset_column_name'), name_width)} "
-            f"{pad_width(translator.text('label.custom_dataset'), id_width)} "
-            f"{pad_width(translator.text('status.dataset_column_summary'), summary_width)}",
-            width,
-        ),
-        "─" * width,
-    ]
-    for item_index, entry in enumerate(entries):
-        name = entry.title.zh_cn if translator.language == "zh" else entry.title.en
-        summary = entry.summary.zh_cn if translator.language == "zh" else entry.summary.en
-        summary_lines = list(wrap_width(summary, summary_width))
-        if len(summary_lines) > 2:
-            summary_lines = [
-                summary_lines[0],
-                truncate_width(summary_lines[1], summary_width - 3) + "...",
-            ]
-        elif len(summary_lines) < 2:
-            summary_lines.append("")
-        rows.extend(
-            (
-                clip_width(
-                    f"{'›' if item_index == index else ' '} "
-                    f"{pad_width(truncate_width(name, name_width), name_width)} "
-                    f"{pad_width(truncate_width(entry.id, id_width), id_width)} {summary_lines[0]}",
-                    width,
-                ),
-                clip_width(f"  {'':{name_width}} {'':{id_width}} {summary_lines[1]}", width),
-            )
+    return [
+        row
+        for item_index, entry in enumerate(entries)
+        for row in _official_catalog_item_rows(
+            entry, translator, selected=item_index == index, width=width
         )
-    return rows
+    ]
 
 
 def _official_catalog_viewport(
@@ -4247,13 +4239,28 @@ def _official_catalog_viewport(
     width: int,
     height: int,
 ) -> tuple[str, int]:
-    rows = _official_catalog_rows(entries, translator, index=index, width=width)
-    header = rows[:2]
-    items = rows[2:]
-    body, offset = _chooser_viewport(
-        items, index=index * 2, offset=offset, height=max(1, height - len(header))
+    blocks = tuple(
+        _official_catalog_item_rows(
+            entry, translator, selected=item_index == index, width=width
+        )
+        for item_index, entry in enumerate(entries)
     )
-    return "\n".join([*header, *body.splitlines()]), offset
+    rows = [row for block in blocks for row in block]
+    visible_rows = max(1, height - 2)
+    maximum_offset = max(0, len(rows) - visible_rows)
+    offset = min(max(0, offset), maximum_offset)
+    selected_start = sum(len(block) for block in blocks[:index])
+    selected_end = selected_start + len(blocks[index])
+    if selected_start < offset:
+        offset = selected_start
+    elif selected_end > offset + visible_rows:
+        offset = (
+            selected_start
+            if len(blocks[index]) > visible_rows
+            else selected_end - visible_rows
+        )
+    offset = min(max(0, offset), maximum_offset)
+    return "\n".join(rows[offset : offset + visible_rows]), offset
 
 
 def _official_preview_rows(
