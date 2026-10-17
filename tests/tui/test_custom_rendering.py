@@ -201,7 +201,7 @@ def test_custom_standalone_renders_accepted_dataset_summary() -> None:
         DateRange(date(2026, 9, 1), date(2026, 9, 2)),
     )
     component = CustomHistoricalComponent(chart)
-    from test_custom_component import response
+    from tests.custom_component.helpers import response
 
     assert component.accept_response(response())
     summary = tui_models.CustomDashboardSummary(
@@ -286,7 +286,7 @@ def test_v2_custom_pane_summary_request_uses_the_selected_metric() -> None:
     assert intent.payload.metric_id == "reading_time"
 
 def test_pending_metric_switch_rendering_retains_accepted_projection() -> None:
-    from test_custom_component import response
+    from tests.custom_component.helpers import response
 
     accepted = CustomChartConfig(
         "ranking",
@@ -340,7 +340,7 @@ def test_pending_metric_switch_rendering_retains_accepted_projection() -> None:
     assert "Loading data…" in dashboard.chart
 
 def test_custom_standalone_refresh_retains_accepted_projection() -> None:
-    from test_custom_component import response
+    from tests.custom_component.helpers import response
 
     component = CustomHistoricalComponent(
         CustomChartConfig(
@@ -368,7 +368,7 @@ def test_custom_standalone_refresh_retains_accepted_projection() -> None:
     assert "正在加载数据…" not in rendered.chart
 
 def test_custom_dashboard_refresh_retains_accepted_ranking_with_visible_audit() -> None:
-    from test_custom_component import response
+    from tests.custom_component.helpers import response
 
     chart = CustomChartConfig(
         "ranking",
@@ -446,7 +446,7 @@ def test_custom_standalone_initial_pending_uses_authoritative_legacy_presentatio
     assert "pages" not in rendered.chart
 
 def test_custom_heading_lifecycle_uses_canonical_identity_and_pending_query_marker() -> None:
-    from test_custom_component import response
+    from tests.custom_component.helpers import response
 
     chart = CustomChartConfig(
         "ranking",
@@ -517,7 +517,7 @@ def test_custom_heading_lifecycle_uses_canonical_identity_and_pending_query_mark
     assert "querying" not in replacement_failure
 
 def test_custom_standalone_low_density_refresh_retains_chart_without_audit_row() -> None:
-    from test_custom_component import response
+    from tests.custom_component.helpers import response
 
     chart = CustomChartConfig(
         "timeline",
@@ -572,7 +572,7 @@ def test_dashboard_subday_ranking_suppresses_summary_and_date_restore_reuses_rou
         metric_periods=("10m", "1d"),
     )
     component = CustomHistoricalComponent(chart)
-    from test_custom_component import response
+    from tests.custom_component.helpers import response
 
     assert component.accept_response(response(point_date=date(2026, 10, 15)))
     component.set_capability(CustomChartCapability((), (None,), (), periods=("10m", "1d")))
@@ -686,7 +686,7 @@ def test_dashboard_subday_ranking_suppresses_summary_and_date_restore_reuses_rou
     assert all("STALE SUMMARY" not in frame for frame in subday_frames)
 
 def test_grouped_custom_ranking_dispatch_uses_grouped_viewport_and_clears_flat_state() -> None:
-    from test_custom_ranking_scroll import grouped_projection
+    from tests.ranking_scroll.helpers import grouped_projection
 
     model = grouped_projection()
     flat = tui_models.RankingViewport(offset=4)
@@ -830,7 +830,7 @@ def test_custom_dashboard_pane_renders_accepted_response_warnings_as_local_notic
         replace(pane.component.candidate, date_range=DateRange(date(2026, 9, 1), date(2026, 9, 2))),
         data_affecting=False,
     )
-    from test_custom_component import response
+    from tests.custom_component.helpers import response
 
     source = response()
     warnings = (
@@ -866,7 +866,7 @@ def test_custom_dashboard_pane_renders_accepted_decimal_projection() -> None:
     )
     assert isinstance(pane, tui_models.TuiCustomPane)
 
-    from test_custom_component import response
+    from tests.custom_component.helpers import response
 
     pane.component.configure(
         replace(pane.component.candidate, date_range=DateRange(date(2026, 9, 1), date(2026, 9, 2))),
@@ -900,7 +900,7 @@ def test_custom_dashboard_timeline_keeps_x_axis_labels_after_local_clipping(
     )
     assert isinstance(pane, tui_models.TuiCustomPane)
 
-    from test_custom_component import response
+    from tests.custom_component.helpers import response
 
     configured = replace(
         pane.component.candidate,

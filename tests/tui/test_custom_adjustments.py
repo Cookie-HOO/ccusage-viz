@@ -459,7 +459,7 @@ def test_custom_capabilities_are_hidden_when_the_source_changes() -> None:
     )
     assert isinstance(pane, tui_models.TuiCustomPane)
 
-    from test_custom_component import response
+    from tests.custom_component.helpers import response
 
     pane.component.configure(
         replace(pane.component.candidate, date_range=DateRange(date(2026, 9, 1), date(2026, 9, 2))),

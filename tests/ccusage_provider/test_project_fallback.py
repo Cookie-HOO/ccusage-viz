@@ -4,102 +4,28 @@ from datetime import date
 
 import pytest
 
-from ccusage_viz.coverage import DateCoverage, DateInterval
+from ccusage_viz.coverage import DateCoverage
 from ccusage_viz.domain import ProjectRef, SourceKind, TokenUsage, UsageRecord
 from ccusage_viz.errors import QueryError
 from ccusage_viz.providers.ccusage import CcusageProvider
 from ccusage_viz.providers.ccusage_definition import CCUSAGE_DEFINITION
 from ccusage_viz.query.models import (
     DataResolution,
-    DataScope,
-    ExecutionContext,
     PhysicalPlan,
     PhysicalQuery,
     PhysicalResult,
     ProviderProvenance,
     ProviderRef,
     ProviderResultFragment,
-    QueryIntent,
-    QueryTrigger,
 )
 
-
-def intent(chart_kind: str) -> QueryIntent:
-    interval = DateInterval(date(2026, 1, 2), date(2026, 1, 3))
-    return QueryIntent(
-        "standalone",
-        0,
-        QueryTrigger.STARTUP,
-        ProviderRef("ccusage"),
-        DataScope((interval,)),
-        (interval,),
-        DataResolution.DATE,
-        ("project",) if chart_kind == "ranking" else ("agent",),
-        (("chart_kind", chart_kind),),
-    )
-
-
-def project_intent(
-    *,
-    source_id: str = "learned-source",
-    since: date = date(2026, 1, 2),
-    until: date = date(2026, 1, 3),
-    executable: str = "ccusage",
-    environment: tuple[tuple[str, str], ...] = (),
-) -> QueryIntent:
-    interval = DateInterval(since, until)
-    return QueryIntent(
-        "standalone",
-        0,
-        QueryTrigger.STARTUP,
-        ProviderRef("ccusage", source_id),
-        DataScope((interval,)),
-        (interval,),
-        DataResolution.DATE,
-        ("project",),
-        (("chart_kind", "ranking"),),
-        ExecutionContext(executable, 10, 1024, environment),
-    )
-
-
-def observation_payload(*agents: str, total: int = 20) -> bytes:
-    return json.dumps(
-        {
-            "daily": [
-                {
-                    "date": "2026-01-03",
-                    "agents": [
-                        {
-                            "agent": agent,
-                            "project": "relative/project",
-                            "inputTokens": total,
-                            "outputTokens": 0,
-                            "cacheReadTokens": 0,
-                            "cacheCreationTokens": 0,
-                            "totalTokens": total,
-                        }
-                        for agent in agents
-                    ],
-                }
-            ]
-        }
-    ).encode()
-
-
-def _observation(plan: PhysicalPlan) -> PhysicalQuery:
-    return next(
-        query for query in plan.queries if query.operation == "unified_daily_agent_observation"
-    )
-
-
-def test_ccusage_provider_owns_logical_to_physical_planning() -> None:
-    plan = CCUSAGE_DEFINITION.provider.compile(intent("timeline"))
-    (query,) = plan.queries
-
-    assert query.operation == "unified_daily"
-    assert query.arguments[:3] == ("daily", "--by-agent", "--json")
-    assert query.arguments[-2:] == ("--offline", "--no-cost")
-    assert CCUSAGE_DEFINITION.provider.fingerprint(query) == query.fingerprint
+from .helpers import (
+    _fallback_replacement_case,
+    _observation,
+    intent,
+    observation_payload,
+    project_intent,
+)
 
 
 def test_project_ranking_compiles_primary_queries_without_speculative_fallbacks() -> None:
@@ -118,102 +44,6 @@ def test_project_ranking_compiles_primary_queries_without_speculative_fallbacks(
     )
     assert plan.summary_notices == ()
 
-
-def test_fallback_memory_learns_and_prefetches_with_preserved_source() -> None:
-    provider = CcusageProvider()
-    plan = provider.compile(project_intent(source_id="workspace-a"))
-    assert not any(query.operation.startswith("project_fallback") for query in plan.queries)
-    observation = _observation(plan)
-    fragment = provider.normalize(
-        PhysicalResult(observation, observation_payload("pi", "future-agent"))
-    )
-
-    required = provider.resolve_queries(plan, (fragment,))
-
-    assert [query.arguments[0] for query in required] == ["future-agent", "pi"]
-    assert all(query.provider == ProviderRef("ccusage", "workspace-a") for query in required)
-    assert all(query.required and not query.speculative for query in required)
-    assert all(query.scheduling_group == "ccusage-project-fallback" for query in required)
-    assert all(query.scheduling_limit == 4 for query in required)
-    next_plan = provider.compile(project_intent(source_id="workspace-a"))
-    speculative = [q for q in next_plan.queries if q.operation.startswith("project_fallback")]
-    assert [query.arguments[0] for query in speculative] == ["future-agent", "pi"]
-    assert all(not query.required and query.speculative for query in speculative)
-    assert [query.fingerprint for query in speculative] == [query.fingerprint for query in required]
-
-
-def test_fallback_memory_isolates_source_executable_and_environment_digest() -> None:
-    provider = CcusageProvider()
-    seeded = provider.compile(
-        project_intent(source_id="a", executable="one", environment=(("TOKEN", "secret"),))
-    )
-    provider.resolve_queries(
-        seeded,
-        (provider.normalize(PhysicalResult(_observation(seeded), observation_payload("pi"))),),
-    )
-
-    same = provider.compile(
-        project_intent(source_id="a", executable="one", environment=(("TOKEN", "secret"),))
-    )
-    assert any(query.operation.endswith(":pi") for query in same.queries)
-    for isolated in (
-        project_intent(source_id="b", executable="one", environment=(("TOKEN", "secret"),)),
-        project_intent(source_id="a", executable="two", environment=(("TOKEN", "secret"),)),
-        project_intent(source_id="a", executable="one", environment=(("TOKEN", "other"),)),
-    ):
-        assert not any(
-            query.operation.startswith("project_fallback")
-            for query in provider.compile(isolated).queries
-        )
-    metadata = dict(
-        provider.normalize(
-            PhysicalResult(_observation(same), observation_payload("pi"))
-        ).provider_metadata
-    )
-    assert metadata["ccusage_environment_digest"] != "secret"
-
-
-def test_fallback_memory_reuses_period_then_adds_removes_and_clears() -> None:
-    provider = CcusageProvider()
-    first = provider.compile(project_intent())
-    provider.resolve_queries(
-        first,
-        (
-            provider.normalize(
-                PhysicalResult(_observation(first), observation_payload("pi", "old-agent"))
-            ),
-        ),
-    )
-    changed = provider.compile(project_intent(since=date(2026, 2, 1), until=date(2026, 2, 5)))
-    fallbacks = [q for q in changed.queries if q.operation.startswith("project_fallback")]
-    assert {query.arguments[0] for query in fallbacks} == {"pi", "old-agent"}
-    assert all(
-        "2026-02-01" in query.arguments and "2026-02-05" in query.arguments for query in fallbacks
-    )
-    provider.resolve_queries(
-        changed,
-        (
-            provider.normalize(
-                PhysicalResult(_observation(changed), observation_payload("pi", "new-agent"))
-            ),
-        ),
-    )
-    updated = provider.compile(project_intent())
-    assert {
-        query.arguments[0]
-        for query in updated.queries
-        if query.operation.startswith("project_fallback")
-    } == {"pi", "new-agent"}
-    provider.resolve_queries(
-        updated,
-        (provider.normalize(PhysicalResult(_observation(updated), observation_payload())),),
-    )
-    assert not any(
-        query.operation.startswith("project_fallback")
-        for query in provider.compile(project_intent()).queries
-    )
-
-
 def test_newer_unresolved_compile_does_not_block_older_fallback_learning() -> None:
     provider = CcusageProvider()
     older = provider.compile(project_intent())
@@ -230,71 +60,6 @@ def test_newer_unresolved_compile_does_not_block_older_fallback_learning() -> No
         for query in latest.queries
         if query.operation.startswith("project_fallback")
     ] == ["old"]
-
-
-def test_out_of_order_fallback_revision_cannot_overwrite_newer_memory() -> None:
-    provider = CcusageProvider()
-    older = provider.compile(project_intent())
-    newer = provider.compile(project_intent())
-    provider.resolve_queries(
-        newer,
-        (provider.normalize(PhysicalResult(_observation(newer), observation_payload("new"))),),
-    )
-    provider.resolve_queries(
-        older,
-        (provider.normalize(PhysicalResult(_observation(older), observation_payload("old"))),),
-    )
-    latest = provider.compile(project_intent())
-    assert [
-        query.arguments[0]
-        for query in latest.queries
-        if query.operation.startswith("project_fallback")
-    ] == ["new"]
-
-
-def _fallback_replacement_case(
-    *, observation_total: int = 20, fallback_total: int = 20, attributed: bool = True
-):
-    provider = CcusageProvider()
-    plan = provider.compile(project_intent(since=date(2026, 1, 3), until=date(2026, 1, 3)))
-    observation_fragment = provider.normalize(
-        PhysicalResult(_observation(plan), observation_payload("pi", total=observation_total))
-    )
-    (required,) = provider.resolve_queries(plan, (observation_fragment,))
-    fallback_fragment = provider.normalize(
-        PhysicalResult(
-            required,
-            json.dumps(
-                {
-                    "sessions": [
-                        {
-                            "sessionId": "session",
-                            "projectPath": "encoded",
-                            "inputTokens": fallback_total,
-                            "outputTokens": 0,
-                            "cacheReadTokens": 0,
-                            "cacheCreationTokens": 0,
-                            "totalTokens": fallback_total,
-                        }
-                    ]
-                }
-            ).encode(),
-        )
-    )
-    if attributed:
-        fallback_fragment = replace(
-            fallback_fragment,
-            records=tuple(
-                replace(
-                    record,
-                    project=ProjectRef("pi", "/project", "project", True),
-                    attribution=None,
-                )
-                for record in fallback_fragment.records
-            ),
-        )
-    return provider, plan, observation_fragment, fallback_fragment
-
 
 @pytest.mark.parametrize(
     ("fallback_total", "attributed"),
@@ -318,7 +83,6 @@ def test_successful_fallback_directly_replaces_observation(
         assert record.project.display_name == "Unverified"
         assert record.attribution == "unverified"
 
-
 def test_empty_successful_fallback_directly_replaces_observation() -> None:
     provider, plan, observation, fallback = _fallback_replacement_case()
     empty_fallback = replace(fallback, records=())
@@ -326,7 +90,6 @@ def test_empty_successful_fallback_directly_replaces_observation() -> None:
     result = provider.assemble(plan, (observation, empty_fallback))
 
     assert result.records == ()
-
 
 def test_missing_required_fallback_fragment_is_incomplete() -> None:
     provider, plan, observation, _ = _fallback_replacement_case()
@@ -336,7 +99,6 @@ def test_missing_required_fallback_fragment_is_incomplete() -> None:
 
     assert caught.value.key == "error.ccusage_project_fallback_incomplete"
     assert caught.value.values["agent"] == "pi"
-
 
 def test_fallback_replacement_associates_crossed_totals_with_each_interval() -> None:
     provider = CcusageProvider()
@@ -381,65 +143,6 @@ def test_fallback_replacement_associates_crossed_totals_with_each_interval() -> 
         (date(2026, 1, 1), 20),
         (date(2026, 1, 2), 10),
     ]
-
-
-def test_codex_normalization_attributes_a_singleton_query_to_its_day() -> None:
-    query = PhysicalQuery(
-        ProviderRef("ccusage"),
-        "codex_sessions",
-        coverage=DateCoverage.from_interval(date(2026, 1, 3), date(2026, 1, 3)),
-    )
-    payload = {
-        "sessions": [
-            {
-                "inputTokens": 2,
-                "outputTokens": 3,
-                "cacheReadTokens": 5,
-                "cacheCreationTokens": 7,
-                "totalTokens": 20,
-                "cwd": "/workspace/project",
-            }
-        ]
-    }
-
-    (record,) = CCUSAGE_DEFINITION.provider.normalize(
-        PhysicalResult(query, json.dumps(payload).encode())
-    ).records
-
-    assert record.day == date(2026, 1, 3)
-    assert record.project is not None
-    assert record.project.raw_id == "/workspace/project"
-    assert record.usage.total == 20
-
-
-def test_range_codex_ranking_normalization_anchors_totals_at_interval_end() -> None:
-    query = PhysicalQuery(
-        ProviderRef("ccusage"),
-        "codex_ranking_sessions",
-        coverage=DateCoverage.from_interval(date(2026, 1, 2), date(2026, 1, 3)),
-    )
-    payload = {
-        "sessions": [
-            {
-                "inputTokens": 2,
-                "outputTokens": 3,
-                "cacheReadTokens": 5,
-                "cacheCreationTokens": 7,
-                "totalTokens": 20,
-                "cwd": "/workspace/project",
-            }
-        ]
-    }
-
-    (record,) = CCUSAGE_DEFINITION.provider.normalize(
-        PhysicalResult(query, json.dumps(payload).encode())
-    ).records
-
-    assert record.day == date(2026, 1, 3)
-    assert record.project is not None
-    assert record.project.raw_id == "/workspace/project"
-    assert record.usage.total == 20
-
 
 def test_fallback_normalization_accepts_pi_local_and_generic_absolute_paths(
     monkeypatch: pytest.MonkeyPatch,
@@ -491,7 +194,6 @@ def test_fallback_normalization_accepts_pi_local_and_generic_absolute_paths(
     }
     assert all(record.attribution is None for record in result.records)
 
-
 def test_generic_fallback_encoded_project_path_remains_unverified() -> None:
     query = PhysicalQuery(
         ProviderRef("ccusage"),
@@ -518,7 +220,6 @@ def test_generic_fallback_encoded_project_path_remains_unverified() -> None:
     assert record.project.display_name == "Unverified"
     assert record.attribution == "unverified"
     assert record.source_project == "--workspace-future-project--"
-
 
 def test_project_fallback_normalization_resolves_pi_session_cwd(
     monkeypatch: pytest.MonkeyPatch,
@@ -554,7 +255,6 @@ def test_project_fallback_normalization_resolves_pi_session_cwd(
     assert record.project is not None
     assert record.project.key == ("pi", "/workspace/github-projects")
     assert record.attribution is None
-
 
 def test_project_fallback_replaces_matching_unverified_observation(
     monkeypatch: pytest.MonkeyPatch,
@@ -628,7 +328,6 @@ def test_project_fallback_replaces_matching_unverified_observation(
         (record.agent, record.project.raw_id) for record in result.records if record.project
     ] == [("pi", "/workspace/github-projects")]
 
-
 def test_pending_unverified_agents_generate_optional_session_fallbacks() -> None:
     observation = PhysicalQuery(
         ProviderRef("ccusage"),
@@ -680,7 +379,6 @@ def test_pending_unverified_agents_generate_optional_session_fallbacks() -> None
     ]
     assert all(query.required is False for query in queries)
 
-
 def test_pending_unassigned_agent_generates_optional_session_fallback() -> None:
     observation = PhysicalQuery(
         ProviderRef("ccusage"),
@@ -718,126 +416,6 @@ def test_pending_unassigned_agent_generates_optional_session_fallback() -> None:
 
     assert query.arguments[:3] == ("pi", "session", "--json")
     assert query.required is False
-
-
-def test_codex_normalization_uses_local_session_cwd(monkeypatch: pytest.MonkeyPatch) -> None:
-    query = PhysicalQuery(
-        ProviderRef("ccusage"),
-        "codex_sessions",
-        coverage=DateCoverage.from_interval(date(2026, 1, 3), date(2026, 1, 3)),
-    )
-    monkeypatch.setattr(
-        "ccusage_viz.providers.ccusage_fallback.resolve_codex_session_cwds",
-        lambda session_ids: {"2026/01/03/rollout-test": "/workspace/from-session"},
-    )
-    payload = {
-        "sessions": [
-            {
-                "inputTokens": 2,
-                "outputTokens": 3,
-                "cacheReadTokens": 5,
-                "cacheCreationTokens": 7,
-                "totalTokens": 20,
-                "directory": "2026/01/03",
-                "sessionId": "2026/01/03/rollout-test",
-            }
-        ]
-    }
-
-    fragment = CCUSAGE_DEFINITION.provider.normalize(
-        PhysicalResult(query, json.dumps(payload).encode())
-    )
-    (record,) = fragment.records
-
-    assert record.project is not None
-    assert record.project.key == ("codex", "/workspace/from-session")
-    assert record.day == date(2026, 1, 3)
-    assert fragment.provider_metadata == ()
-
-
-def test_codex_normalization_falls_back_without_treating_directory_as_project(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    query = PhysicalQuery(
-        ProviderRef("ccusage"),
-        "codex_sessions",
-        coverage=DateCoverage.from_interval(date(2026, 1, 3), date(2026, 1, 3)),
-    )
-    monkeypatch.setattr("ccusage_viz.providers.ccusage_fallback.resolve_codex_session_cwds", lambda _: {})
-    payload = {
-        "sessions": [
-            {
-                "inputTokens": 2,
-                "outputTokens": 3,
-                "cacheReadTokens": 5,
-                "cacheCreationTokens": 7,
-                "totalTokens": 20,
-                "directory": "2026/01/03",
-                "sessionId": "2026/01/03/rollout-missing",
-            }
-        ]
-    }
-
-    fragment = CCUSAGE_DEFINITION.provider.normalize(
-        PhysicalResult(query, json.dumps(payload).encode())
-    )
-    (record,) = fragment.records
-
-    assert record.project is not None
-    assert record.project.display_name == "Unassigned"
-    assert record.attribution == "unassigned"
-    assert record.session_id == "2026/01/03/rollout-missing"
-    assert fragment.provider_metadata == ()
-
-
-def test_codex_incomplete_attribution_retains_session_on_fixed_project_record(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    query = PhysicalQuery(
-        ProviderRef("ccusage"),
-        "codex_sessions",
-        coverage=DateCoverage.from_interval(date(2026, 1, 3), date(2026, 1, 3)),
-    )
-    monkeypatch.setattr("ccusage_viz.providers.ccusage_fallback.resolve_codex_session_cwds", lambda _: {})
-    fragment = CCUSAGE_DEFINITION.provider.normalize(
-        PhysicalResult(
-            query,
-            json.dumps(
-                {
-                    "sessions": [
-                        {
-                            "sessionId": "2026/01/03/rollout-unassigned",
-                            "inputTokens": 2,
-                            "outputTokens": 3,
-                            "cacheReadTokens": 5,
-                            "cacheCreationTokens": 7,
-                            "totalTokens": 20,
-                        }
-                    ]
-                }
-            ).encode(),
-        )
-    )
-
-    (record,) = fragment.records
-    assert record.project is not None
-    assert record.project.display_name == "Unassigned"
-    assert record.attribution == "unassigned"
-    assert record.session_id == "2026/01/03/rollout-unassigned"
-
-
-def test_codex_normalization_rejects_non_singleton_coverage() -> None:
-    query = PhysicalQuery(
-        ProviderRef("ccusage"),
-        "codex_sessions",
-        coverage=DateCoverage.from_interval(date(2026, 1, 2), date(2026, 1, 3)),
-    )
-
-    with pytest.raises(QueryError) as caught:
-        CCUSAGE_DEFINITION.provider.normalize(PhysicalResult(query, b'{"sessions": []}'))
-
-    assert caught.value.key == "error.ccusage_codex_date_attribution"
-
 
 def test_project_agent_observation_maps_unreliable_agents_to_fixed_projects() -> None:
     query = PhysicalQuery(
@@ -914,7 +492,6 @@ def test_project_agent_observation_maps_unreliable_agents_to_fixed_projects() ->
     assert not result.notices
     assert result.includes_project_attribution
 
-
 def test_project_agent_observation_maps_relative_dsh_project_to_unverified() -> None:
     query = PhysicalQuery(ProviderRef("ccusage"), "unified_daily_agent_observation")
     payload = {
@@ -945,40 +522,3 @@ def test_project_agent_observation_maps_relative_dsh_project_to_unverified() -> 
     assert record.project.display_name == "Unverified"
     assert record.attribution == "unverified"
     assert record.source_project == "relative/project"
-
-
-def test_provider_preserves_source_identity() -> None:
-    source_intent = intent("timeline")
-    source_intent = QueryIntent(
-        source_intent.owner_id,
-        source_intent.generation,
-        source_intent.trigger,
-        ProviderRef("ccusage", "workspace-a"),
-        source_intent.scope,
-        source_intent.missing_intervals,
-        source_intent.resolution,
-        source_intent.dimensions,
-        source_intent.execution_options,
-    )
-
-    (query,) = CCUSAGE_DEFINITION.provider.compile(source_intent).queries
-
-    assert query.provider == ProviderRef("ccusage", "workspace-a")
-
-
-def test_provider_rejects_unsupported_resolution() -> None:
-    source = intent("timeline")
-    unsupported = QueryIntent(
-        source.owner_id,
-        source.generation,
-        source.trigger,
-        source.provider,
-        source.scope,
-        source.missing_intervals,
-        DataResolution.RANGE,
-        source.dimensions,
-        source.execution_options,
-    )
-
-    with pytest.raises(ValueError, match="unsupported resolution: range"):
-        CCUSAGE_DEFINITION.provider.compile(unsupported)
