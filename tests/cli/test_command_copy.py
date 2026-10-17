@@ -195,18 +195,22 @@ def test_concise_commands_omit_effective_defaults() -> None:
             ]
         )
     )
-    assert format_command(explicit) == "ccuv chart timeline --timezone Asia/Shanghai"
+    assert format_command(explicit) == f"ccuv chart timeline --timezone {explicit.host.timezone}"
 
 
 def test_concise_monitor_command_uses_grouped_effective_defaults() -> None:
     parser = build_parser(load_translator("en"))
     grouped = _to_options(parser.parse_args(["chart", "monitor", "--by", "model"]))
 
-    assert format_command(grouped) == "ccuv chart monitor --by model --timezone Asia/Shanghai"
+    assert format_command(grouped) == (
+        f"ccuv chart monitor --by model --timezone {grouped.host.timezone}"
+    )
     non_default = _to_options(
         parser.parse_args(["chart", "monitor", "--by", "model", "--top", "4", "--style", "points"])
     )
-    assert format_command(non_default).endswith("--timezone Asia/Shanghai --style points")
+    assert format_command(non_default).endswith(
+        f"--timezone {non_default.host.timezone} --style points"
+    )
     assert "--by model --top 4" in format_command(non_default)
 
 
@@ -217,7 +221,9 @@ def test_concise_command_keeps_effect_bearing_private_project_filter() -> None:
     command = format_command(launch)
     reparsed = _to_options(parser.parse_args(shlex.split(command)[1:]))
 
-    assert command == "ccuv chart timeline --project /private/project --timezone Asia/Shanghai"
+    assert command == (
+        f"ccuv chart timeline --project /private/project --timezone {launch.host.timezone}"
+    )
     assert reparsed.chart.filters == launch.chart.filters
 
 
