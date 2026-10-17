@@ -4,7 +4,6 @@ from decimal import Decimal
 import pytest
 
 import ccusage_viz.tui.models as tui_models
-import ccusage_viz.tui.runtime as tui_module
 from ccusage_viz.bootstrap import build_query_runtime
 from ccusage_viz.cli.configuration import _to_options
 from ccusage_viz.command_parsing.parser import build_parser
@@ -182,7 +181,7 @@ def test_custom_dashboard_summary_reconfiguration_invalidates_replaced_source() 
     header = _new_header(options, build_query_runtime())
     initial = CustomCommandSource("reading", ("reader", "ccuv"))
     replacement = CustomCommandSource("reading", ("reader-next", "ccuv"))
-    summary = tui_module.CustomDashboardSummary(
+    summary = tui_models.CustomDashboardSummary(
         initial,
         FixedIntervalScheduler(60, now=0),
         LifecycleOperation("dashboard:header:custom:reading"),
@@ -211,7 +210,7 @@ def test_header_renders_custom_metrics_without_token_summary() -> None:
     options = _to_options(build_parser(load_translator("en")).parse_args(["dashboard", "--empty"]))
     header = _new_header(options, build_query_runtime())
     source = CustomCommandSource("reading", ("reader", "ccuv"))
-    summary = tui_module.CustomDashboardSummary(
+    summary = tui_models.CustomDashboardSummary(
         source,
         FixedIntervalScheduler(60, now=0),
         LifecycleOperation("dashboard:header:custom:reading"),
@@ -232,7 +231,7 @@ def test_header_keeps_summary_items_on_separate_rows() -> None:
     first = CustomCommandSource("reading", ("reader", "ccuv"))
     second = CustomCommandSource("builds", ("builder", "ccuv"))
     for source in (first, second):
-        header.custom_summaries[source.dataset_id] = tui_module.CustomDashboardSummary(
+        header.custom_summaries[source.dataset_id] = tui_models.CustomDashboardSummary(
             source,
             FixedIntervalScheduler(60, now=0),
             LifecycleOperation(f"dashboard:header:custom:{source.dataset_id}"),
@@ -252,7 +251,7 @@ def test_header_renders_custom_metrics_against_their_accepted_scope() -> None:
     header = _new_header(options, build_query_runtime())
     header.summary_period = "month"
     source = CustomCommandSource("reading", ("reader", "ccuv"))
-    header.custom_summaries[source.dataset_id] = tui_module.CustomDashboardSummary(
+    header.custom_summaries[source.dataset_id] = tui_models.CustomDashboardSummary(
         source,
         FixedIntervalScheduler(60, now=0),
         LifecycleOperation("dashboard:header:custom:reading"),

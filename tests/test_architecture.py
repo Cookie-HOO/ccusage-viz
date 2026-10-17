@@ -177,10 +177,10 @@ def test_monitor_hosts_do_not_import_the_removed_query_client() -> None:
 
 def test_dashboard_composes_notices_inside_their_source_panes() -> None:
     source = _tui_source()
-    runtime = (PACKAGE_ROOT / "tui" / "runtime.py").read_text()
+    painting = (PACKAGE_ROOT / "tui" / "painting.py").read_text()
 
     assert "def _local_pane_content(" in source
-    assert "_local_pane_content(" in runtime[runtime.index("def run_tui(") :]
+    assert "_local_pane_content(" in painting[painting.index("def paint(") :]
     assert "def _unique_notices(" not in source
 
 

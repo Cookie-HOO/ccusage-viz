@@ -1,6 +1,3 @@
-
-
-
 from dataclasses import replace
 from datetime import UTC, date, datetime
 from decimal import Decimal
@@ -10,8 +7,10 @@ import pytest
 
 import ccusage_viz.tui.custom_adjustments as tui_custom_adjustments
 import ccusage_viz.tui.custom_rendering as tui_custom_rendering
+import ccusage_viz.tui.models as tui_models
 import ccusage_viz.tui.pane_lifecycle as tui_pane_lifecycle
-import ccusage_viz.tui.runtime as tui_module
+import ccusage_viz.tui.rendering as tui_rendering
+import ccusage_viz.tui.structure as tui_structure
 from ccusage_viz.cli.configuration import _to_options
 from ccusage_viz.command_parsing.parser import build_parser
 from ccusage_viz.core.time import DateRange
@@ -83,7 +82,7 @@ def test_dashboard_help_overlay_omits_monitor_metric_after_descriptorless_accept
         accepted_at=datetime(2026, 10, 8, 12, tzinfo=UTC),
     )
     assert component.v2_descriptor is None
-    pane = tui_module.TuiCustomPane(
+    pane = tui_models.TuiCustomPane(
         component,
         FixedIntervalScheduler(10, now=0),
         LifecycleOperation("monitor-v1-metric-help"),
@@ -104,11 +103,11 @@ def test_custom_monitor_renders_source_owned_monitor_presentations_without_share
 
     bars = tui_custom_rendering._render_custom_monitor(component, translated, terminal, interval=10).chart
     component.configure(
-        tui_module._adjust_custom_monitor_chart(component.candidate, "s"), data_affecting=False
+        tui_custom_adjustments._adjust_custom_monitor_chart(component.candidate, "s"), data_affecting=False
     )
     line = tui_custom_rendering._render_custom_monitor(component, translated, terminal, interval=10).chart
     component.configure(
-        tui_module._adjust_custom_monitor_chart(component.candidate, "s"), data_affecting=False
+        tui_custom_adjustments._adjust_custom_monitor_chart(component.candidate, "s"), data_affecting=False
     )
     step = tui_custom_rendering._render_custom_monitor(component, translated, terminal, interval=10).chart
 
@@ -217,7 +216,7 @@ def test_custom_monitor_pane_preserves_probe_error_body() -> None:
     )
     component = CustomMonitorComponent(chart)
     assert component.fail(RuntimeError("probe failed"), generation=component.generation)
-    pane = tui_module.TuiCustomPane(
+    pane = tui_models.TuiCustomPane(
         component,
         FixedIntervalScheduler(10, now=0),
         LifecycleOperation("custom-monitor-probe-error"),
@@ -253,7 +252,7 @@ def test_custom_monitor_cycles_only_native_compatible_presentations() -> None:
     chart = _custom_monitor_component().candidate
     styles = []
     for _ in range(4):
-        chart = tui_module._adjust_custom_monitor_chart(chart, "s")
+        chart = tui_custom_adjustments._adjust_custom_monitor_chart(chart, "s")
         styles.append(chart.presentation.style)
 
     assert styles == ["step", "points", "line-points", "ranking"]
@@ -278,14 +277,14 @@ def test_custom_value_monitor_excludes_cumulative_bars() -> None:
     chart = _custom_monitor_component().candidate
     styles = []
     for _ in range(4):
-        chart = tui_module._adjust_custom_monitor_chart(chart, "s", aggregation="value")
+        chart = tui_custom_adjustments._adjust_custom_monitor_chart(chart, "s", aggregation="value")
         styles.append(chart.presentation.style)
 
     assert styles == ["step", "points", "line-points", "ranking"]
 
 def test_custom_monitor_window_control_reprojects_without_query_configuration() -> None:
     component = _custom_monitor_component()
-    pane = tui_module.TuiCustomPane(
+    pane = tui_models.TuiCustomPane(
         component,
         FixedIntervalScheduler(10, now=0),
         LifecycleOperation("custom-monitor-window"),
@@ -295,9 +294,9 @@ def test_custom_monitor_window_control_reprojects_without_query_configuration() 
     )
 
     assert ("w", "window") in tui_custom_adjustments._custom_pane_adjustment_bindings(pane, "quick")
-    assert tui_module._cycle_custom_monitor_window(3600) == 21600
+    assert tui_custom_adjustments._cycle_custom_monitor_window(3600) == 21600
     candidate = component.candidate
-    component.configure_display_window(tui_module._cycle_custom_monitor_window(3600))
+    component.configure_display_window(tui_custom_adjustments._cycle_custom_monitor_window(3600))
 
     assert component.candidate == candidate
 
@@ -315,7 +314,7 @@ def test_custom_monitor_grouping_cycles_preserve_top_at_group_boundaries(
         top=top,
     )
 
-    updated = tui_module._cycle_custom_grouping(chart, (None, "model"), step=step)
+    updated = tui_custom_adjustments._cycle_custom_grouping(chart, (None, "model"), step=step)
 
     assert (updated.group_by, updated.top) == (
         "model" if group_by is None else None,
@@ -327,9 +326,9 @@ def test_custom_monitor_grouping_cycles_from_total_in_declared_order() -> None:
     capability = tui_custom_adjustments._custom_capability_for_component(component)
     assert isinstance(capability, V2MonitorCapability)
 
-    forward = tui_module._cycle_custom_grouping(component.candidate, capability.group_by)
-    second = tui_module._cycle_custom_grouping(forward, capability.group_by)
-    reverse = tui_module._cycle_custom_grouping(component.candidate, capability.group_by, step=-1)
+    forward = tui_custom_adjustments._cycle_custom_grouping(component.candidate, capability.group_by)
+    second = tui_custom_adjustments._cycle_custom_grouping(forward, capability.group_by)
+    reverse = tui_custom_adjustments._cycle_custom_grouping(component.candidate, capability.group_by, step=-1)
 
     assert forward.group_by == "public_model"
     assert second.group_by == "real_model"
@@ -338,12 +337,12 @@ def test_custom_monitor_grouping_cycles_from_total_in_declared_order() -> None:
 def test_custom_monitor_attachment_activity_uses_dataset_observation_total() -> None:
     component = _custom_monitor_component(total="90")
     attachment = tui_pane_lifecycle.new_animation_session(
-        tui_module.default_animation_spec("monitor"), theme="classic"
+        tui_structure.default_animation_spec("monitor"), theme="classic"
     )
     attachment.set_visible(True, 0)
     attachment.set_viable(True, 0)
 
-    tui_module._update_custom_monitor_attachment_activity(
+    tui_rendering._update_custom_monitor_attachment_activity(
         component,
         attachment,
         now=1,
@@ -356,7 +355,7 @@ def test_custom_monitor_attachment_activity_uses_dataset_observation_total() -> 
         "tokens",
         V2MonitorObservation(datetime(2026, 10, 8, 12, 1, tzinfo=UTC), Decimal(), ()),
     )
-    tui_module._update_custom_monitor_attachment_activity(
+    tui_rendering._update_custom_monitor_attachment_activity(
         component,
         attachment,
         now=2,

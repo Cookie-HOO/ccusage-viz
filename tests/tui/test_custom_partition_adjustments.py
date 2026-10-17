@@ -1,13 +1,29 @@
-
-
 from contextlib import nullcontext
 from datetime import date
 from types import SimpleNamespace
 
 import pytest
 
+import ccusage_viz.tui.adjustments as tui_adjustments
 import ccusage_viz.tui.custom_adjustments as tui_custom_adjustments
-import ccusage_viz.tui.runtime as tui_module
+import ccusage_viz.tui.dashboard_events as tui_dashboard_events
+import ccusage_viz.tui.datasets.blocking as tui_datasets_blocking
+import ccusage_viz.tui.datasets.catalog as tui_datasets_catalog
+import ccusage_viz.tui.datasets.chooser as tui_datasets_chooser
+import ccusage_viz.tui.datasets.modal as tui_datasets_modal
+import ccusage_viz.tui.events as tui_events
+import ccusage_viz.tui.help as tui_help
+import ccusage_viz.tui.history as tui_history
+import ccusage_viz.tui.input as tui_input
+import ccusage_viz.tui.models as tui_models
+import ccusage_viz.tui.painting as tui_painting
+import ccusage_viz.tui.pane_events as tui_pane_events
+import ccusage_viz.tui.pane_lifecycle as tui_pane_lifecycle
+import ccusage_viz.tui.pointer as tui_pointer
+import ccusage_viz.tui.rendering as tui_rendering
+import ccusage_viz.tui.runtime as tui_runtime
+import ccusage_viz.tui.session as tui_session
+import ccusage_viz.tui.structure as tui_structure
 from ccusage_viz.cli.configuration import _to_options
 from ccusage_viz.command_parsing.parser import build_parser
 from ccusage_viz.core.time import DateRange
@@ -51,7 +67,7 @@ def test_grouped_ranking_bindings_scope_partition_spacing_and_filters() -> None:
             ),
         )
     )
-    pane = tui_module.TuiCustomPane(
+    pane = tui_models.TuiCustomPane(
         component,
         FixedIntervalScheduler(10, now=0),
         LifecycleOperation("grouped-controls"),
@@ -74,27 +90,27 @@ def test_partition_and_group_cycles_skip_each_other_in_both_directions() -> None
         partition_by="logical",
         group_by="real",
     )
-    forward_partition = tui_module._cycle_custom_partitioning(
+    forward_partition = tui_custom_adjustments._cycle_custom_partitioning(
         chart, (None, "logical", "real"), ("logical", "real", "provider"), step=1
     )
-    reverse_partition = tui_module._cycle_custom_partitioning(
+    reverse_partition = tui_custom_adjustments._cycle_custom_partitioning(
         chart, (None, "logical", "real"), ("logical", "real", "provider"), step=-1
     )
     assert (forward_partition.partition_by, forward_partition.group_by) == (None, "real")
     assert (reverse_partition.partition_by, reverse_partition.group_by) == (None, "real")
     assert (
-        tui_module._cycle_custom_grouping(chart, ("logical", "real", "provider"), step=1).group_by
+        tui_custom_adjustments._cycle_custom_grouping(chart, ("logical", "real", "provider"), step=1).group_by
         == "provider"
     )
     assert (
-        tui_module._cycle_custom_grouping(chart, ("logical", "real", "provider"), step=-1).group_by
+        tui_custom_adjustments._cycle_custom_grouping(chart, ("logical", "real", "provider"), step=-1).group_by
         == "provider"
     )
-    assert tui_module._cycle_custom_grouping(chart, ("logical", "real")) == chart
-    skipped = tui_module._cycle_custom_partitioning(
+    assert tui_custom_adjustments._cycle_custom_grouping(chart, ("logical", "real")) == chart
+    skipped = tui_custom_adjustments._cycle_custom_partitioning(
         chart, ("logical", "real", "provider"), ("logical", "real", "provider")
     )
-    restricted = tui_module._cycle_custom_partitioning(
+    restricted = tui_custom_adjustments._cycle_custom_partitioning(
         chart, ("logical", "real"), ("logical", "real")
     )
     assert (skipped.partition_by, skipped.group_by) == ("provider", "real")
@@ -107,13 +123,13 @@ def test_partition_cycle_atomically_groups_a_flat_ranking_in_both_directions() -
         DateRange(date(2026, 1, 1), date(2026, 1, 14)),
     )
 
-    forward = tui_module._cycle_custom_partitioning(
+    forward = tui_custom_adjustments._cycle_custom_partitioning(
         chart,
         (None, "logical", "real"),
         (None, "real", "provider"),
         step=1,
     )
-    reverse = tui_module._cycle_custom_partitioning(
+    reverse = tui_custom_adjustments._cycle_custom_partitioning(
         chart,
         (None, "logical", "real"),
         (None, "real", "provider"),
@@ -134,10 +150,10 @@ def test_partition_cycle_supports_required_partitions_and_retains_no_legal_pair(
         DateRange(date(2026, 1, 1), date(2026, 1, 14)),
     )
 
-    required = tui_module._cycle_custom_partitioning(
+    required = tui_custom_adjustments._cycle_custom_partitioning(
         chart, ("logical", "real"), ("logical", "real"), step=1
     )
-    restricted = tui_module._cycle_custom_partitioning(
+    restricted = tui_custom_adjustments._cycle_custom_partitioning(
         chart, ("logical",), (None, "logical"), step=1
     )
 
@@ -152,7 +168,7 @@ def test_partition_cycle_skips_choice_matching_existing_group() -> None:
         group_by="logical",
     )
 
-    updated = tui_module._cycle_custom_partitioning(
+    updated = tui_custom_adjustments._cycle_custom_partitioning(
         chart, (None, "logical"), ("logical", "real"), step=1
     )
 
@@ -176,7 +192,7 @@ def test_partition_cycle_recovers_from_stale_non_null_grouping(
         group_by="stale",
     )
 
-    updated = tui_module._cycle_custom_partitioning(
+    updated = tui_custom_adjustments._cycle_custom_partitioning(
         chart,
         (None, "logical", "real"),
         (None, "logical", "real"),
@@ -193,7 +209,7 @@ def test_partition_cycle_preserves_a_legal_current_group_before_catalog_fallback
         group_by="provider",
     )
 
-    updated = tui_module._cycle_custom_partitioning(
+    updated = tui_custom_adjustments._cycle_custom_partitioning(
         chart, (None, "logical"), ("real", "provider"), step=1
     )
 
@@ -227,9 +243,9 @@ def test_dashboard_partition_interaction_refreshes_or_reports_restriction(
     component.set_capability(
         CustomChartCapability(("day",), groupings, (), partition_by=partitions)
     )
-    pane = tui_module.TuiCustomPane(
+    pane = tui_models.TuiCustomPane(
         component,
-        FixedIntervalScheduler(3600, now=tui_module.time.monotonic()),
+        FixedIntervalScheduler(3600, now=tui_rendering.time.monotonic()),
         LifecycleOperation("partition-interaction"),
         _to_options(
             build_parser(load_translator("en")).parse_args(["dashboard", "--empty"])
@@ -263,16 +279,42 @@ def test_dashboard_partition_interaction_refreshes_or_reports_restriction(
             ["dashboard", "--empty", "--header-style", "hidden"]
         )
     )
-    monkeypatch.setattr(tui_module, "build_query_runtime", Runtime)
-    monkeypatch.setattr(tui_module, "_new_pane", lambda *_args: pane)
-    monkeypatch.setattr(tui_module, "FramePainter", Screen)
-    monkeypatch.setattr(tui_module, "tui_input_mode", nullcontext)
-    monkeypatch.setattr(tui_module, "read_event", lambda _decoder, _timeout: next(events))
-    monkeypatch.setattr(
-        tui_module, "get_terminal_size", lambda: __import__("os").terminal_size((100, 30))
-    )
+    monkeypatch.setattr(tui_session, 'build_query_runtime', Runtime)
+    monkeypatch.setattr(tui_pane_lifecycle, '_new_pane', lambda *_args: pane)
+    monkeypatch.setattr(tui_session, '_new_pane', lambda *_args: pane)
+    monkeypatch.setattr(tui_structure, '_new_pane', lambda *_args: pane)
+    monkeypatch.setattr(tui_history, '_new_pane', lambda *_args: pane)
+    monkeypatch.setattr(tui_session, 'FramePainter', Screen)
+    monkeypatch.setattr(tui_adjustments, 'FramePainter', Screen)
+    monkeypatch.setattr(tui_datasets_catalog, 'FramePainter', Screen)
+    monkeypatch.setattr(tui_datasets_chooser, 'FramePainter', Screen)
+    monkeypatch.setattr(tui_runtime, 'tui_input_mode', nullcontext)
+    monkeypatch.setattr(tui_adjustments, 'read_event', lambda _decoder, _timeout: next(events))
+    monkeypatch.setattr(tui_input, 'read_event', lambda _decoder, _timeout: next(events))
+    monkeypatch.setattr(tui_datasets_catalog, 'read_event', lambda _decoder, _timeout: next(events))
+    monkeypatch.setattr(tui_datasets_chooser, 'read_event', lambda _decoder, _timeout: next(events))
+    monkeypatch.setattr(tui_events, 'get_terminal_size', lambda: __import__('os').terminal_size((100, 30)))
+    monkeypatch.setattr(tui_runtime, 'get_terminal_size', lambda: __import__('os').terminal_size((100, 30)))
+    monkeypatch.setattr(tui_painting, 'get_terminal_size', lambda: __import__('os').terminal_size((100, 30)))
+    monkeypatch.setattr(tui_dashboard_events, 'get_terminal_size', lambda: __import__('os').terminal_size((100, 30)))
+    monkeypatch.setattr(tui_pointer, 'get_terminal_size', lambda: __import__('os').terminal_size((100, 30)))
+    monkeypatch.setattr(tui_pane_events, 'get_terminal_size', lambda: __import__('os').terminal_size((100, 30)))
+    monkeypatch.setattr(tui_help, 'get_terminal_size', lambda: __import__('os').terminal_size((100, 30)))
+    monkeypatch.setattr(tui_history, 'get_terminal_size', lambda: __import__('os').terminal_size((100, 30)))
+    monkeypatch.setattr(tui_datasets_catalog, 'get_terminal_size', lambda: __import__('os').terminal_size((100, 30)))
+    monkeypatch.setattr(tui_datasets_chooser, 'get_terminal_size', lambda: __import__('os').terminal_size((100, 30)))
+    monkeypatch.setattr(tui_datasets_blocking, 'get_terminal_size', lambda: __import__('os').terminal_size((100, 30)))
+    monkeypatch.setattr(tui_datasets_modal, 'get_terminal_size', lambda: __import__('os').terminal_size((100, 30)))
+    monkeypatch.setattr(tui_painting, 'get_terminal_size', lambda: __import__('os').terminal_size((100, 30)))
+    monkeypatch.setattr(tui_pointer, 'get_terminal_size', lambda: __import__('os').terminal_size((100, 30)))
+    monkeypatch.setattr(tui_help, 'get_terminal_size', lambda: __import__('os').terminal_size((100, 30)))
+    monkeypatch.setattr(tui_history, 'get_terminal_size', lambda: __import__('os').terminal_size((100, 30)))
+    monkeypatch.setattr(tui_datasets_catalog, 'get_terminal_size', lambda: __import__('os').terminal_size((100, 30)))
+    monkeypatch.setattr(tui_datasets_chooser, 'get_terminal_size', lambda: __import__('os').terminal_size((100, 30)))
+    monkeypatch.setattr(tui_datasets_blocking, 'get_terminal_size', lambda: __import__('os').terminal_size((100, 30)))
+    monkeypatch.setattr(tui_datasets_modal, 'get_terminal_size', lambda: __import__('os').terminal_size((100, 30)))
 
-    assert tui_module.run_tui(options, load_translator("en")) == 0
+    assert tui_runtime.run_tui(options, load_translator("en")) == 0
     assert (component.candidate.partition_by, component.candidate.group_by) == expected
     configuration_submissions = [
         intent
@@ -297,7 +339,7 @@ def test_partition_binding_requires_multiple_effective_choices() -> None:
     component.set_capability(
         CustomChartCapability(("day",), ("logical",), (), partition_by=(None, "logical"))
     )
-    pane = tui_module.TuiCustomPane(
+    pane = tui_models.TuiCustomPane(
         component,
         FixedIntervalScheduler(10, now=0),
         LifecycleOperation("restricted-partition"),

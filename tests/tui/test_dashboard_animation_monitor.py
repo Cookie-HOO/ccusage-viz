@@ -1,15 +1,10 @@
-
-
-
-
-
 from dataclasses import replace
 from datetime import UTC, date, datetime
 
 import pytest
 
+import ccusage_viz.tui.models as tui_models
 import ccusage_viz.tui.pane_lifecycle as tui_pane_lifecycle
-import ccusage_viz.tui.runtime as tui_module
 from ccusage_viz.animation import animation_spec, animation_style_choices
 from ccusage_viz.bootstrap import build_query_runtime
 from ccusage_viz.cli.configuration import _to_options
@@ -52,8 +47,8 @@ def test_dashboard_animation_panes_keep_independent_session_state() -> None:
 
     first = _new_pane(options, options.panes[0])
     second = _new_pane(options, options.panes[1])
-    assert isinstance(first, tui_module.TuiAnimationPane)
-    assert isinstance(second, tui_module.TuiAnimationPane)
+    assert isinstance(first, tui_models.TuiAnimationPane)
+    assert isinstance(second, tui_models.TuiAnimationPane)
 
     first.session.set_theme("vivid", 1.0)
     first.session.set_playback_requested(False, 1.0)
@@ -113,7 +108,7 @@ def test_dashboard_monitor_attachment_hides_outside_ranking_and_list() -> None:
     parser = build_parser(load_translator("en"))
     options = _to_options(parser.parse_args(["dashboard", "--pane", "monitor --style ranking"]))
     pane = _new_pane(options, options.panes[0], "pane:monitor")
-    assert isinstance(pane, tui_module.TuiChartPane)
+    assert isinstance(pane, tui_models.TuiChartPane)
     assert pane.attachment is not None
 
     body = _append_monitor_attachment(

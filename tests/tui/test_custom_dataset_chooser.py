@@ -1,17 +1,5 @@
-
-
-
-
-
-
-
-
-
-
-
-
+import ccusage_viz.tui.datasets.chooser as tui_datasets_chooser
 import ccusage_viz.tui.models as tui_models
-import ccusage_viz.tui.runtime as tui_module
 from ccusage_viz.cli.configuration import _to_options
 from ccusage_viz.command_parsing.parser import build_parser
 from ccusage_viz.custom_models import (
@@ -60,7 +48,7 @@ def test_dataset_metric_chooser_groups_declared_metrics_and_keeps_ungrouped_flat
         ),
     )
 
-    rows = tui_module._dataset_metric_chooser_rows(descriptor, load_translator("en"))
+    rows = tui_datasets_chooser._dataset_metric_chooser_rows(descriptor, load_translator("en"))
 
     assert [(row.kind, row.text, row.metric_index) for row in rows] == [
         ("group", "GitHub tools", None),
@@ -72,7 +60,7 @@ def test_dataset_metric_chooser_groups_declared_metrics_and_keeps_ungrouped_flat
         ("description", "  └─ Dataset", None),
     ]
 
-    chinese_rows = tui_module._dataset_metric_chooser_rows(descriptor, load_translator("zh"))
+    chinese_rows = tui_datasets_chooser._dataset_metric_chooser_rows(descriptor, load_translator("zh"))
     assert [(row.text, row.metric_index) for row in chinese_rows] == [
         ("GitHub 工具", None),
         ("├─ stars-zh", 0),
@@ -99,7 +87,7 @@ def test_dataset_metric_chooser_keeps_legacy_descriptor_flat() -> None:
     )
     descriptor = V2ProbeDescriptor("revision", "1", V2Dataset(text, text), (metric,), ())
 
-    rows = tui_module._dataset_metric_chooser_rows(descriptor, load_translator("en"))
+    rows = tui_datasets_chooser._dataset_metric_chooser_rows(descriptor, load_translator("en"))
 
     assert [(row.kind, row.text, row.metric_index) for row in rows] == [
         ("metric", "Stars", 0),
@@ -119,7 +107,7 @@ def test_dataset_metric_chooser_titles_the_selected_dataset() -> None:
     )
     descriptor = V2ProbeDescriptor("router-live-v1", "0.1.0", V2Dataset(text, text), (metric,), ())
 
-    chrome = tui_module._dataset_metric_chooser_chrome(descriptor, load_translator("zh"))
+    chrome = tui_datasets_chooser._dataset_metric_chooser_chrome(descriptor, load_translator("zh"))
 
     assert chrome == ("数据集：大模型路由 · 0.1.0", "选择一个指标")
 

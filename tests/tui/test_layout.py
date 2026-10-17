@@ -3,10 +3,28 @@ from contextlib import nullcontext
 
 import pytest
 
+import ccusage_viz.tui.adjustments as tui_adjustments
+import ccusage_viz.tui.completion as tui_completion
+import ccusage_viz.tui.custom_adjustments as tui_custom_adjustments
+import ccusage_viz.tui.dashboard_events as tui_dashboard_events
+import ccusage_viz.tui.datasets.blocking as tui_datasets_blocking
+import ccusage_viz.tui.datasets.catalog as tui_datasets_catalog
 import ccusage_viz.tui.datasets.chooser as tui_chooser
+import ccusage_viz.tui.datasets.chooser as tui_datasets_chooser
+import ccusage_viz.tui.datasets.modal as tui_datasets_modal
+import ccusage_viz.tui.events as tui_events
+import ccusage_viz.tui.help as tui_help
+import ccusage_viz.tui.history as tui_history
+import ccusage_viz.tui.input as tui_input
 import ccusage_viz.tui.models as tui_models
+import ccusage_viz.tui.painting as tui_painting
+import ccusage_viz.tui.pane_events as tui_pane_events
 import ccusage_viz.tui.pane_lifecycle as tui_pane_lifecycle
-import ccusage_viz.tui.runtime as tui_module
+import ccusage_viz.tui.pointer as tui_pointer
+import ccusage_viz.tui.queries as tui_queries
+import ccusage_viz.tui.rendering as tui_rendering
+import ccusage_viz.tui.runtime as tui_runtime
+import ccusage_viz.tui.session as tui_session
 from ccusage_viz.cli.configuration import _to_options
 from ccusage_viz.command_parsing.parser import build_parser
 from ccusage_viz.coverage import DateCoverage
@@ -199,11 +217,10 @@ def test_pane_chooser_reuses_dashboard_decoder_and_ignores_mouse(
 
     decoder = InputDecoder()
     decoder.feed("\x1b[<0;20;5M\x1b[B\r")
-    monkeypatch.setattr(
-        tui_module,
-        "read_event",
-        lambda active, timeout: active.next(now=1.0),
-    )
+    monkeypatch.setattr(tui_adjustments, 'read_event', lambda active, timeout: active.next(now=1.0))
+    monkeypatch.setattr(tui_input, 'read_event', lambda active, timeout: active.next(now=1.0))
+    monkeypatch.setattr(tui_datasets_catalog, 'read_event', lambda active, timeout: active.next(now=1.0))
+    monkeypatch.setattr(tui_datasets_chooser, 'read_event', lambda active, timeout: active.next(now=1.0))
 
     assert (
         _choose_pane_type(
@@ -489,7 +506,7 @@ def test_dashboard_pane_height_keys_adjust_only_shared_row_weights(
     class Submission:
         def __init__(self, generation: int) -> None:
             self.generation = generation
-            self.purpose = tui_module.HistoricalPurpose.PRIMARY
+            self.purpose = tui_models.HistoricalPurpose.PRIMARY
             self.handle = self
             self.cancelled = threading.Event()
 
@@ -544,25 +561,70 @@ def test_dashboard_pane_height_keys_adjust_only_shared_row_weights(
             KeyEvent("\x03"),
         )
     )
-    monkeypatch.setattr(tui_module, "build_query_runtime", Runtime)
+    monkeypatch.setattr(tui_session, 'build_query_runtime', Runtime)
     monkeypatch.setattr(tui_pane_lifecycle, "build_chart_registry", lambda: object())
-    monkeypatch.setattr(tui_module, "HistoricalChartComponent", Component)
+    monkeypatch.setattr(tui_models, 'HistoricalChartComponent', Component)
+    monkeypatch.setattr(tui_rendering, 'HistoricalChartComponent', Component)
+    monkeypatch.setattr(tui_completion, 'HistoricalChartComponent', Component)
+    monkeypatch.setattr(tui_custom_adjustments, 'HistoricalChartComponent', Component)
+    monkeypatch.setattr(tui_models, 'HistoricalChartComponent', Component)
+    monkeypatch.setattr(tui_rendering, 'HistoricalChartComponent', Component)
+    monkeypatch.setattr(tui_completion, 'HistoricalChartComponent', Component)
+    monkeypatch.setattr(tui_custom_adjustments, 'HistoricalChartComponent', Component)
+    monkeypatch.setattr(tui_queries, 'HistoricalChartComponent', Component)
+    monkeypatch.setattr(tui_pane_events, 'HistoricalChartComponent', Component)
+    monkeypatch.setattr(tui_pane_lifecycle, 'HistoricalChartComponent', Component)
+    monkeypatch.setattr(tui_history, 'HistoricalChartComponent', Component)
+    monkeypatch.setattr(tui_queries, 'HistoricalChartComponent', Component)
+    monkeypatch.setattr(tui_pane_lifecycle, 'HistoricalChartComponent', Component)
+    monkeypatch.setattr(tui_history, 'HistoricalChartComponent', Component)
     monkeypatch.setattr(tui_pane_lifecycle, "HistoricalChartComponent", Component)
-    monkeypatch.setattr(tui_module, "FramePainter", Screen)
-    monkeypatch.setattr(tui_module, "tui_input_mode", nullcontext)
-    monkeypatch.setattr(tui_module, "read_event", lambda _decoder, _timeout: next(keys))
-    monkeypatch.setattr(tui_module, "copy_command", lambda command: copied.append(command) or True)
-    monkeypatch.setattr(
-        tui_module, "get_terminal_size", lambda: __import__("os").terminal_size((100, 30))
-    )
+    monkeypatch.setattr(tui_session, 'FramePainter', Screen)
+    monkeypatch.setattr(tui_adjustments, 'FramePainter', Screen)
+    monkeypatch.setattr(tui_datasets_catalog, 'FramePainter', Screen)
+    monkeypatch.setattr(tui_datasets_chooser, 'FramePainter', Screen)
+    monkeypatch.setattr(tui_runtime, 'tui_input_mode', nullcontext)
+    monkeypatch.setattr(tui_adjustments, 'read_event', lambda _decoder, _timeout: next(keys))
+    monkeypatch.setattr(tui_input, 'read_event', lambda _decoder, _timeout: next(keys))
+    monkeypatch.setattr(tui_datasets_catalog, 'read_event', lambda _decoder, _timeout: next(keys))
+    monkeypatch.setattr(tui_datasets_chooser, 'read_event', lambda _decoder, _timeout: next(keys))
+    monkeypatch.setattr(tui_events, 'copy_command', lambda command: copied.append(command) or True)
+    monkeypatch.setattr(tui_pointer, 'copy_command', lambda command: copied.append(command) or True)
+    monkeypatch.setattr(tui_pane_events, 'copy_command', lambda command: copied.append(command) or True)
+    monkeypatch.setattr(tui_datasets_chooser, 'copy_command', lambda command: copied.append(command) or True)
+    monkeypatch.setattr(tui_datasets_modal, 'copy_command', lambda command: copied.append(command) or True)
+    monkeypatch.setattr(tui_pointer, 'copy_command', lambda command: copied.append(command) or True)
+    monkeypatch.setattr(tui_datasets_chooser, 'copy_command', lambda command: copied.append(command) or True)
+    monkeypatch.setattr(tui_datasets_modal, 'copy_command', lambda command: copied.append(command) or True)
+    monkeypatch.setattr(tui_events, 'get_terminal_size', lambda: __import__('os').terminal_size((100, 30)))
+    monkeypatch.setattr(tui_runtime, 'get_terminal_size', lambda: __import__('os').terminal_size((100, 30)))
+    monkeypatch.setattr(tui_painting, 'get_terminal_size', lambda: __import__('os').terminal_size((100, 30)))
+    monkeypatch.setattr(tui_dashboard_events, 'get_terminal_size', lambda: __import__('os').terminal_size((100, 30)))
+    monkeypatch.setattr(tui_pointer, 'get_terminal_size', lambda: __import__('os').terminal_size((100, 30)))
+    monkeypatch.setattr(tui_pane_events, 'get_terminal_size', lambda: __import__('os').terminal_size((100, 30)))
+    monkeypatch.setattr(tui_help, 'get_terminal_size', lambda: __import__('os').terminal_size((100, 30)))
+    monkeypatch.setattr(tui_history, 'get_terminal_size', lambda: __import__('os').terminal_size((100, 30)))
+    monkeypatch.setattr(tui_datasets_catalog, 'get_terminal_size', lambda: __import__('os').terminal_size((100, 30)))
+    monkeypatch.setattr(tui_datasets_chooser, 'get_terminal_size', lambda: __import__('os').terminal_size((100, 30)))
+    monkeypatch.setattr(tui_datasets_blocking, 'get_terminal_size', lambda: __import__('os').terminal_size((100, 30)))
+    monkeypatch.setattr(tui_datasets_modal, 'get_terminal_size', lambda: __import__('os').terminal_size((100, 30)))
+    monkeypatch.setattr(tui_painting, 'get_terminal_size', lambda: __import__('os').terminal_size((100, 30)))
+    monkeypatch.setattr(tui_pointer, 'get_terminal_size', lambda: __import__('os').terminal_size((100, 30)))
+    monkeypatch.setattr(tui_help, 'get_terminal_size', lambda: __import__('os').terminal_size((100, 30)))
+    monkeypatch.setattr(tui_history, 'get_terminal_size', lambda: __import__('os').terminal_size((100, 30)))
+    monkeypatch.setattr(tui_datasets_catalog, 'get_terminal_size', lambda: __import__('os').terminal_size((100, 30)))
+    monkeypatch.setattr(tui_datasets_chooser, 'get_terminal_size', lambda: __import__('os').terminal_size((100, 30)))
+    monkeypatch.setattr(tui_datasets_blocking, 'get_terminal_size', lambda: __import__('os').terminal_size((100, 30)))
+    monkeypatch.setattr(tui_datasets_modal, 'get_terminal_size', lambda: __import__('os').terminal_size((100, 30)))
 
     def render(pane: object, *_args: object) -> tui_models.PaneRender:
         rendered_views.append(pane.body_view)
         return tui_models.PaneRender("chart")
 
-    monkeypatch.setattr(tui_module, "_pane_render", render)
+    monkeypatch.setattr(tui_rendering, '_pane_render', render)
+    monkeypatch.setattr(tui_painting, '_pane_render', render)
 
-    assert tui_module.run_tui(options, load_translator("en")) == 0
+    assert tui_runtime.run_tui(options, load_translator("en")) == 0
 
     assert copied
     if expected is None:
@@ -585,12 +647,12 @@ def test_dashboard_pane_adjustment_preserves_chart_top_shortcuts() -> None:
     parser = build_parser(load_translator("en"))
     base = _to_options(parser.parse_args(["chart", "ranking"]))
 
-    assert tui_module.adjust_standalone(base, "+").chart.top == base.chart.top + 1
-    assert tui_module.adjust_standalone(base, "-").chart.top == base.chart.top - 1
-    assert tui_module._adjustment_key_supported("ranking", "quick", "+")
-    assert tui_module._adjustment_key_supported("ranking", "quick", "-")
-    assert not tui_module._adjustment_key_supported("ranking", "quick", "J")
-    assert not tui_module._adjustment_key_supported("ranking", "quick", "K")
+    assert tui_pane_events.adjust_standalone(base, "+").chart.top == base.chart.top + 1
+    assert tui_pane_events.adjust_standalone(base, "-").chart.top == base.chart.top - 1
+    assert tui_adjustments._adjustment_key_supported("ranking", "quick", "+")
+    assert tui_adjustments._adjustment_key_supported("ranking", "quick", "-")
+    assert not tui_adjustments._adjustment_key_supported("ranking", "quick", "J")
+    assert not tui_adjustments._adjustment_key_supported("ranking", "quick", "K")
 
 
 def test_pane_advanced_actions_exclude_dashboard_management() -> None:

@@ -1,6 +1,6 @@
 import shlex
 
-import ccusage_viz.tui.runtime as tui_module
+import ccusage_viz.tui.models as tui_models
 from ccusage_viz.cli.configuration import _to_options
 from ccusage_viz.command_copy import (
     format_command,
@@ -47,7 +47,7 @@ def test_full_dashboard_command_copies_and_round_trips_custom_partition() -> Non
     fragment = shlex.split(command)[shlex.split(command).index("--pane") + 1]
     assert "--partition-by logical_model --group-by real_model" in fragment
     pane = copied.panes[0]
-    assert isinstance(pane, tui_module.CustomChartPaneConfig)
+    assert isinstance(pane, tui_models.CustomChartPaneConfig)
     assert (pane.chart.partition_by, pane.chart.group_by) == ("logical_model", "real_model")
 
 def test_dashboard_command_copy_preserves_custom_legend() -> None:
@@ -67,7 +67,7 @@ def test_dashboard_command_copy_preserves_custom_legend() -> None:
 
     assert "--legend inside" in command
     pane = copied.panes[0]
-    assert isinstance(pane, tui_module.CustomChartPaneConfig)
+    assert isinstance(pane, tui_models.CustomChartPaneConfig)
     assert pane.chart.presentation.legend == "inside"
 
 def test_dashboard_commands_preserve_local_date_context_and_timezone() -> None:

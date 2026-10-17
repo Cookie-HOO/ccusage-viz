@@ -1,5 +1,3 @@
-"""Exercise real Dashboard routing/composition with accepted local Dataset facts."""
-
 from contextlib import nullcontext
 from dataclasses import replace
 from os import terminal_size
@@ -8,7 +6,27 @@ from time import monotonic
 import pytest
 from test_custom_ranking_scroll import grouped_projection, projection
 
-import ccusage_viz.tui.runtime as tui
+import ccusage_viz.tui.adjustments as tui_adjustments
+import ccusage_viz.tui.custom_rendering as tui_custom_rendering
+import ccusage_viz.tui.dashboard_events as tui_dashboard_events
+import ccusage_viz.tui.datasets.blocking as tui_datasets_blocking
+import ccusage_viz.tui.datasets.catalog as tui_datasets_catalog
+import ccusage_viz.tui.datasets.chooser as tui_datasets_chooser
+import ccusage_viz.tui.datasets.modal as tui_datasets_modal
+import ccusage_viz.tui.events as tui_events
+import ccusage_viz.tui.header as tui_header
+import ccusage_viz.tui.help as tui_help
+import ccusage_viz.tui.history as tui_history
+import ccusage_viz.tui.input as tui_input
+import ccusage_viz.tui.layout as tui_layout
+import ccusage_viz.tui.models as tui_models
+import ccusage_viz.tui.painting as tui_painting
+import ccusage_viz.tui.pane_events as tui_pane_events
+import ccusage_viz.tui.pane_lifecycle as tui_pane_lifecycle
+import ccusage_viz.tui.pointer as tui_pointer
+import ccusage_viz.tui.runtime as tui_runtime
+import ccusage_viz.tui.session as tui_session
+import ccusage_viz.tui.structure as tui_structure
 from ccusage_viz.cli.configuration import _to_options
 from ccusage_viz.command_parsing.parser import build_parser
 from ccusage_viz.custom_component import CustomHistoricalComponent
@@ -48,7 +66,7 @@ def dashboard(monkeypatch):
         component.model = replace(model, config=config)
         component.accepted_config = config
         component.pending_generation = None
-        pane = tui.TuiCustomPane(
+        pane = tui_models.TuiCustomPane(
             component,
             FixedIntervalScheduler(3600, now=monotonic()),
             LifecycleOperation(f"scroll-test-{index}"),
@@ -81,23 +99,56 @@ def dashboard(monkeypatch):
         assert trigger == LifecycleTrigger.STARTUP, "wheel input must not request work"
         return False
 
-    original_compose = tui._compose_resolved_panes
+    original_compose = tui_painting._compose_resolved_panes
 
     def compose(contents, layout, **kwargs):
         focuses.append(kwargs["focused"])
         geometries.append(layout)
         return original_compose(contents, layout, **kwargs)
 
-    original_new_pane = tui._new_pane
+    original_new_pane = tui_session._new_pane
     supplied = iter(panes)
-    monkeypatch.setattr(tui, "_new_pane", lambda *args, **kwargs: next(supplied))
-    monkeypatch.setattr(tui, "FramePainter", Screen)
-    monkeypatch.setattr(tui, "_compose_resolved_panes", compose)
-    monkeypatch.setattr(tui, "tui_input_mode", lambda: nullcontext(decoder))
-    monkeypatch.setattr(tui, "get_terminal_size", lambda: terminal_size(size))
+    monkeypatch.setattr(tui_pane_lifecycle, '_new_pane', lambda *args, **kwargs: next(supplied))
+    monkeypatch.setattr(tui_session, '_new_pane', lambda *args, **kwargs: next(supplied))
+    monkeypatch.setattr(tui_structure, '_new_pane', lambda *args, **kwargs: next(supplied))
+    monkeypatch.setattr(tui_history, '_new_pane', lambda *args, **kwargs: next(supplied))
+    monkeypatch.setattr(tui_session, 'FramePainter', Screen)
+    monkeypatch.setattr(tui_adjustments, 'FramePainter', Screen)
+    monkeypatch.setattr(tui_datasets_catalog, 'FramePainter', Screen)
+    monkeypatch.setattr(tui_datasets_chooser, 'FramePainter', Screen)
+    monkeypatch.setattr(tui_layout, '_compose_resolved_panes', compose)
+    monkeypatch.setattr(tui_painting, '_compose_resolved_panes', compose)
+    monkeypatch.setattr(tui_runtime, 'tui_input_mode', lambda: nullcontext(decoder))
+    monkeypatch.setattr(tui_events, 'get_terminal_size', lambda: terminal_size(size))
+    monkeypatch.setattr(tui_runtime, 'get_terminal_size', lambda: terminal_size(size))
+    monkeypatch.setattr(tui_painting, 'get_terminal_size', lambda: terminal_size(size))
+    monkeypatch.setattr(tui_dashboard_events, 'get_terminal_size', lambda: terminal_size(size))
+    monkeypatch.setattr(tui_pointer, 'get_terminal_size', lambda: terminal_size(size))
+    monkeypatch.setattr(tui_pane_events, 'get_terminal_size', lambda: terminal_size(size))
+    monkeypatch.setattr(tui_help, 'get_terminal_size', lambda: terminal_size(size))
+    monkeypatch.setattr(tui_history, 'get_terminal_size', lambda: terminal_size(size))
+    monkeypatch.setattr(tui_datasets_catalog, 'get_terminal_size', lambda: terminal_size(size))
+    monkeypatch.setattr(tui_datasets_chooser, 'get_terminal_size', lambda: terminal_size(size))
+    monkeypatch.setattr(tui_datasets_blocking, 'get_terminal_size', lambda: terminal_size(size))
+    monkeypatch.setattr(tui_datasets_modal, 'get_terminal_size', lambda: terminal_size(size))
+    monkeypatch.setattr(tui_painting, 'get_terminal_size', lambda: terminal_size(size))
+    monkeypatch.setattr(tui_pointer, 'get_terminal_size', lambda: terminal_size(size))
+    monkeypatch.setattr(tui_help, 'get_terminal_size', lambda: terminal_size(size))
+    monkeypatch.setattr(tui_history, 'get_terminal_size', lambda: terminal_size(size))
+    monkeypatch.setattr(tui_datasets_catalog, 'get_terminal_size', lambda: terminal_size(size))
+    monkeypatch.setattr(tui_datasets_chooser, 'get_terminal_size', lambda: terminal_size(size))
+    monkeypatch.setattr(tui_datasets_blocking, 'get_terminal_size', lambda: terminal_size(size))
+    monkeypatch.setattr(tui_datasets_modal, 'get_terminal_size', lambda: terminal_size(size))
     monkeypatch.setattr(LifecycleOperation, "request", request)
-    monkeypatch.setattr(tui, "copy_command", lambda text: copied.append(text) or True)
-    monkeypatch.setattr(tui.webbrowser, "open", lambda url: opened.append(url) or True)
+    monkeypatch.setattr(tui_events, 'copy_command', lambda text: copied.append(text) or True)
+    monkeypatch.setattr(tui_pointer, 'copy_command', lambda text: copied.append(text) or True)
+    monkeypatch.setattr(tui_pane_events, 'copy_command', lambda text: copied.append(text) or True)
+    monkeypatch.setattr(tui_datasets_chooser, 'copy_command', lambda text: copied.append(text) or True)
+    monkeypatch.setattr(tui_datasets_modal, 'copy_command', lambda text: copied.append(text) or True)
+    monkeypatch.setattr(tui_pointer, 'copy_command', lambda text: copied.append(text) or True)
+    monkeypatch.setattr(tui_datasets_chooser, 'copy_command', lambda text: copied.append(text) or True)
+    monkeypatch.setattr(tui_datasets_modal, 'copy_command', lambda text: copied.append(text) or True)
+    monkeypatch.setattr(tui_pointer.webbrowser, "open", lambda url: opened.append(url) or True)
 
     def run(events):
         turns = iter(events)
@@ -106,8 +157,11 @@ def dashboard(monkeypatch):
             event = next(turns)
             return event() if callable(event) else event
 
-        monkeypatch.setattr(tui, "read_event", read)
-        assert tui.run_tui(run.options, load_translator("en")) == 0
+        monkeypatch.setattr(tui_adjustments, 'read_event', read)
+        monkeypatch.setattr(tui_input, 'read_event', read)
+        monkeypatch.setattr(tui_datasets_catalog, 'read_event', read)
+        monkeypatch.setattr(tui_datasets_chooser, 'read_event', read)
+        assert tui_runtime.run_tui(run.options, load_translator("en")) == 0
         assert len(requests) == run.expected_requests
 
     run.options = options
@@ -377,7 +431,14 @@ def test_copy_all_uses_every_filtered_entry_without_focus_or_query_work(dashboar
 
 def test_copy_all_failure_does_not_show_success(dashboard):
     run, panes, frames, focuses, layouts, decoder, copied, *_ = dashboard
-    run.monkeypatch.setattr(tui, "copy_command", lambda text: False)
+    run.monkeypatch.setattr(tui_events, 'copy_command', lambda text: False)
+    run.monkeypatch.setattr(tui_pointer, 'copy_command', lambda text: False)
+    run.monkeypatch.setattr(tui_pane_events, 'copy_command', lambda text: False)
+    run.monkeypatch.setattr(tui_datasets_chooser, 'copy_command', lambda text: False)
+    run.monkeypatch.setattr(tui_datasets_modal, 'copy_command', lambda text: False)
+    run.monkeypatch.setattr(tui_pointer, 'copy_command', lambda text: False)
+    run.monkeypatch.setattr(tui_datasets_chooser, 'copy_command', lambda text: False)
+    run.monkeypatch.setattr(tui_datasets_modal, 'copy_command', lambda text: False)
 
     def click_all():
         hit = panes[0].ranking_viewport.copy_all_hit
@@ -490,9 +551,8 @@ def test_help_owns_wheel_and_reverse_leaves_bottom_immediately(dashboard):
 def test_scroll_copy_link_and_search_use_visible_stable_id(dashboard):
     run, panes, frames, focuses, layouts, decoder, copied, opened, _ = dashboard
     target_id = []
-    run.monkeypatch.setattr(
-        tui, "_custom_ranking_copyable_entries", lambda *args: pytest.fail("full-list copy lookup")
-    )
+    run.monkeypatch.setattr(tui_custom_rendering, '_custom_ranking_copyable_entries', lambda *args: pytest.fail('full-list copy lookup'))
+    run.monkeypatch.setattr(tui_pointer, '_custom_ranking_copyable_entries', lambda *args: pytest.fail('full-list copy lookup'))
 
     def click_visible(*, link=False):
         pane = panes[0]
@@ -600,10 +660,10 @@ def test_presentation_adjustments_retain_scrolled_ranking_interactions_without_w
 
     def after_density():
         check_adjustment("density", "detailed")
-        return adjust("t", "theme", tui.COLOR_SCHEMES[1])()
+        return adjust("t", "theme", tui_adjustments.COLOR_SCHEMES[1])()
 
     def after_theme():
-        check_adjustment("theme", tui.COLOR_SCHEMES[1])
+        check_adjustment("theme", tui_adjustments.COLOR_SCHEMES[1])
         return adjust("s", "style", "bar")()
 
     def click_visible(*, link: bool = False):
@@ -825,7 +885,11 @@ def test_text_view_and_nonranking_panes_do_not_scroll_while_pending_ranking_clea
 def test_scrolling_uses_displayed_header_and_resized_geometry(dashboard):
     run, panes, frames, focuses, layouts, decoder, copied, opened, size = dashboard
     run.options = replace(run.options, host=replace(run.options.host, header_style="full"))
-    run.monkeypatch.setattr(tui, "_header_lines", lambda *args: ["header", "summary", "divider"])
+    run.monkeypatch.setattr(tui_header, '_header_lines', lambda *args: ['header', 'summary', 'divider'])
+    run.monkeypatch.setattr(tui_painting, '_header_lines', lambda *args: ['header', 'summary', 'divider'])
+    run.monkeypatch.setattr(tui_pointer, '_header_lines', lambda *args: ['header', 'summary', 'divider'])
+    run.monkeypatch.setattr(tui_datasets_blocking, '_header_lines', lambda *args: ['header', 'summary', 'divider'])
+    run.monkeypatch.setattr(tui_datasets_modal, '_header_lines', lambda *args: ['header', 'summary', 'divider'])
 
     def resize():
         assert panes[0].ranking_viewport.offset == 1
@@ -885,7 +949,7 @@ def test_notices_audit_and_summary_stay_fixed(dashboard):
     )
     pane.component.accepted_config = pane.component.candidate
     pane.component.error = QueryError("error.query", detail="temporary failure")
-    pane.summary = tui.CustomDashboardSummary(
+    pane.summary = tui_models.CustomDashboardSummary(
         pane.component.candidate.source,
         FixedIntervalScheduler(3600, now=monotonic()),
         LifecycleOperation("test-summary"),
@@ -894,13 +958,14 @@ def test_notices_audit_and_summary_stay_fixed(dashboard):
         accepted_as_of_date=pane.component.candidate.date_range.until,
     )
     snapshots = []
-    original = tui._compose_resolved_panes
+    original = tui_painting._compose_resolved_panes
 
     def compose(contents, layout, **kwargs):
         snapshots.append(contents[0].splitlines())
         return original(contents, layout, **kwargs)
 
-    run.monkeypatch.setattr(tui, "_compose_resolved_panes", compose)
+    run.monkeypatch.setattr(tui_layout, '_compose_resolved_panes', compose)
+    run.monkeypatch.setattr(tui_painting, '_compose_resolved_panes', compose)
     run([WheelEvent(1, 1, 1), KeyEvent("\x03")])
     before, after = snapshots[:2]
     assert before != after

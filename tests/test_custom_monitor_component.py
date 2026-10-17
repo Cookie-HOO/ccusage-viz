@@ -5,7 +5,8 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-import ccusage_viz.tui.runtime as tui_module
+import ccusage_viz.tui.custom_adjustments as tui_custom_adjustments
+import ccusage_viz.tui.models as tui_models
 from ccusage_viz.chart_models import DistributionCoverage
 from ccusage_viz.custom_models import (
     CustomDimension,
@@ -123,13 +124,13 @@ def test_monitor_metric_switch_pending_state_retains_accepted_metric_help() -> N
     assert component.pending
     assert component.candidate.metric_id == "stars"
     assert component.request_config.metric_id == "growth"
-    pane = tui_module.TuiCustomPane(
+    pane = tui_models.TuiCustomPane(
         component,
         FixedIntervalScheduler(10, now=0),
         LifecycleOperation("monitor-metric-help"),
         ProcessConfig(),
     )
-    assert tui_module._accepted_custom_metric_help_node(
+    assert tui_custom_adjustments._accepted_custom_metric_help_node(
         pane, load_translator("en")
     ) == ("CURRENT METRIC", (("Stars", (("Accepted stars help", ()),)),))
 
@@ -139,7 +140,7 @@ def test_monitor_metric_switch_pending_state_retains_accepted_metric_help() -> N
     )
     assert component.candidate.metric_id == "growth"
     assert component.v2_descriptor is None
-    assert tui_module._accepted_custom_metric_help_node(pane, load_translator("en")) is None
+    assert tui_custom_adjustments._accepted_custom_metric_help_node(pane, load_translator("en")) is None
 
 
 def test_monitor_metric_switch_failure_retains_old_sampling_state() -> None:

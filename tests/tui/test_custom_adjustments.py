@@ -1,6 +1,3 @@
-
-
-
 from dataclasses import replace
 from datetime import date
 from decimal import Decimal
@@ -10,7 +7,6 @@ import pytest
 import ccusage_viz.tui.custom_adjustments as tui_custom_adjustments
 import ccusage_viz.tui.custom_rendering as tui_custom_rendering
 import ccusage_viz.tui.models as tui_models
-import ccusage_viz.tui.runtime as tui_module
 from ccusage_viz.bootstrap import build_query_runtime
 from ccusage_viz.cli.configuration import _to_options
 from ccusage_viz.command_parsing.parser import build_parser
@@ -54,7 +50,7 @@ def test_custom_capabilities_are_unavailable_after_source_replacement() -> None:
         CustomCommandSource("reading", ("reader", "ccuv")),
         DateRange(date(2026, 1, 1), date(2026, 1, 14)),
     )
-    component = tui_module.CustomHistoricalComponent(chart)
+    component = tui_models.CustomHistoricalComponent(chart)
     response = CustomPaneResponse(
         CustomDataset(
             LocalizedText("Reading", "阅读"),
@@ -117,7 +113,7 @@ def test_probe_capability_keeps_period_and_group_controls_after_rejected_query()
         for action in tui_custom_rendering._custom_standalone_actions(component, load_translator("en"))
     }
     assert (
-        tui_module._cycle_custom_grouping(component.candidate, capability.group_by).group_by
+        tui_custom_adjustments._cycle_custom_grouping(component.candidate, capability.group_by).group_by
         == "book"
     )
 
@@ -140,10 +136,10 @@ def test_custom_metric_periods_follow_the_selected_chart_kind() -> None:
         {},
     )
 
-    assert tui_module._custom_metric_periods(metric, "timeline") == ("7d", "30d")
-    assert tui_module._custom_metric_periods(metric, "ranking") == ("all",)
-    assert tui_module._custom_metric_periods(metric, "calendar") == ()
-    assert tui_module._custom_metric_periods(metric, "missing") == ()
+    assert tui_models._custom_metric_periods(metric, "timeline") == ("7d", "30d")
+    assert tui_models._custom_metric_periods(metric, "ranking") == ("all",)
+    assert tui_models._custom_metric_periods(metric, "calendar") == ()
+    assert tui_models._custom_metric_periods(metric, "missing") == ()
 
 def test_live_capability_periods_replace_stale_pane_periods_for_adjustment() -> None:
     chart = CustomChartConfig(
@@ -159,7 +155,7 @@ def test_live_capability_periods_replace_stale_pane_periods_for_adjustment() -> 
     )
     capability = CustomChartCapability(("day",), (), (), periods=("1d", "7d"))
 
-    effective = tui_module._custom_period_adjustment_chart(chart, capability)
+    effective = tui_custom_adjustments._custom_period_adjustment_chart(chart, capability)
 
     assert effective.metric_periods == ("1d", "7d")
     assert adjust_custom_chart(effective, "p").date_range.period == "7d"
@@ -224,7 +220,7 @@ def test_pending_metric_switch_uses_target_metric_periods() -> None:
         )
     )
 
-    target = tui_module._custom_period_adjustment_target(component)
+    target = tui_custom_adjustments._custom_period_adjustment_target(component)
     updated = adjust_custom_chart(target, "p")
 
     assert target.metric_id == "growth"
@@ -245,7 +241,7 @@ def test_undeclared_live_periods_restore_generic_period_cycling() -> None:
         metric_periods=("all",),
     )
 
-    effective = tui_module._custom_period_adjustment_chart(
+    effective = tui_custom_adjustments._custom_period_adjustment_chart(
         chart, CustomChartCapability(("day",), (), ())
     )
 
@@ -272,13 +268,13 @@ def test_custom_dashboard_adjustment_uses_native_footer() -> None:
         DateRange(date(2026, 1, 1), date(2026, 1, 14)),
     )
     options = _to_options(build_parser(load_translator("en")).parse_args(["dashboard", "--empty"]))
-    pane = _new_pane(options, tui_module.CustomChartPaneConfig(chart), "test-custom")
-    assert isinstance(pane, tui_module.TuiCustomPane)
+    pane = _new_pane(options, tui_models.CustomChartPaneConfig(chart), "test-custom")
+    assert isinstance(pane, tui_models.TuiCustomPane)
 
-    footer = tui_module._custom_adjustment_footer(
+    footer = tui_custom_adjustments._custom_adjustment_footer(
         pane, "quick", load_translator("en"), 120, color=False
     )
-    advanced = tui_module._custom_adjustment_footer(
+    advanced = tui_custom_adjustments._custom_adjustment_footer(
         pane, "advanced", load_translator("en"), 120, color=False
     )
 
@@ -328,7 +324,7 @@ def test_custom_ranking_adjustment_state_exposes_top_and_other_projection() -> N
             top=10,
         )
     )
-    pane = tui_module.TuiCustomPane(
+    pane = tui_models.TuiCustomPane(
         component,
         FixedIntervalScheduler(10, now=0),
         LifecycleOperation("custom-ranking-state"),
@@ -344,7 +340,7 @@ def test_custom_ranking_adjustment_state_exposes_top_and_other_projection() -> N
     assert "Top 10" in quick
     assert (
         "+/- Top"
-        in tui_module._custom_adjustment_footer(
+        in tui_custom_adjustments._custom_adjustment_footer(
             pane, "quick", load_translator("en"), 160, color=False
         )[1]
     )
@@ -364,8 +360,8 @@ def test_v2_ranking_top_refreshes_only_when_it_outgrows_retrieved_coverage() -> 
     component.set_capability(CustomChartCapability(("day",), ("project",), (), max_items=50))
     component.retrieval_top = 10
 
-    assert tui_module._custom_top_refresh_required(component, replace(component.candidate, top=11))
-    assert not tui_module._custom_top_refresh_required(
+    assert tui_custom_adjustments._custom_top_refresh_required(component, replace(component.candidate, top=11))
+    assert not tui_custom_adjustments._custom_top_refresh_required(
         component, replace(component.candidate, top=10)
     )
 
@@ -383,7 +379,7 @@ def test_v2_ranking_top_above_dataset_maximum_does_not_request_more_coverage() -
     component.set_capability(CustomChartCapability(("day",), ("book",), (), max_items=10))
     component.retrieval_top = 10
 
-    assert not tui_module._custom_top_refresh_required(
+    assert not tui_custom_adjustments._custom_top_refresh_required(
         component, replace(component.candidate, top=11)
     )
 
@@ -424,7 +420,7 @@ def test_v2_ranking_response_keeps_the_source_limit_for_later_top_adjustments() 
 
     assert component.capability is not None
     assert component.capability.max_items == 10
-    assert not tui_module._custom_top_refresh_required(
+    assert not tui_custom_adjustments._custom_top_refresh_required(
         component, replace(component.candidate, top=11)
     )
 
@@ -442,7 +438,7 @@ def test_custom_historical_grouping_cycles_preserve_top_at_group_boundaries(
         top=top,
     )
 
-    updated = tui_module._cycle_custom_grouping(chart, (None, "book"), step=step)
+    updated = tui_custom_adjustments._cycle_custom_grouping(chart, (None, "book"), step=step)
 
     assert updated.group_by == ("book" if group_by is None else None)
     assert updated.top is top
@@ -461,7 +457,7 @@ def test_custom_capabilities_are_hidden_when_the_source_changes() -> None:
         "dashboard:pane:0",
         build_query_runtime(),
     )
-    assert isinstance(pane, tui_module.TuiCustomPane)
+    assert isinstance(pane, tui_models.TuiCustomPane)
 
     from test_custom_component import response
 
@@ -479,4 +475,4 @@ def test_custom_capabilities_are_hidden_when_the_source_changes() -> None:
         data_affecting=True,
     )
 
-    assert tui_module._custom_capability(pane) is None
+    assert tui_custom_adjustments._custom_capability(pane) is None

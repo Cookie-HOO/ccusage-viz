@@ -1,10 +1,7 @@
-
-
-
-
 from datetime import datetime
 
-import ccusage_viz.tui.runtime as tui_module
+import ccusage_viz.tui.custom_rendering as tui_custom_rendering
+import ccusage_viz.tui.models as tui_models
 from ccusage_viz.bootstrap import build_query_runtime
 from ccusage_viz.cli.configuration import _to_options
 from ccusage_viz.command_parsing.parser import build_parser
@@ -27,17 +24,17 @@ def test_custom_failure_log_detail_uses_only_validated_protocol_fields() -> None
     )
 
     assert (
-        tui_module._custom_failure_log_detail(failure, load_translator("en"))
+        tui_custom_rendering._custom_failure_log_detail(failure, load_translator("en"))
         == "source_unavailable: Safe source category (range.period=1w)"
     )
     assert (
-        tui_module._custom_failure_log_detail(failure, load_translator("zh"))
+        tui_custom_rendering._custom_failure_log_detail(failure, load_translator("zh"))
         == "source_unavailable: 安全的数据源分类 (range.period=1w)"
     )
 
 def test_custom_failure_log_detail_hides_unstructured_exception_text() -> None:
     assert (
-        tui_module._custom_failure_log_detail(
+        tui_custom_rendering._custom_failure_log_detail(
             RuntimeError("private stderr and credential"), load_translator("en")
         )
         == "error"
@@ -57,11 +54,11 @@ def test_custom_log_records_render_localized_statuses() -> None:
         "dashboard:pane:0",
         build_query_runtime(),
     )
-    assert isinstance(pane, tui_module.TuiCustomPane)
+    assert isinstance(pane, tui_models.TuiCustomPane)
     pane.logs.extend(
         (
-            tui_module.CustomLogRecord(datetime(2026, 9, 30, 10, 20), "ok", "done"),
-            tui_module.CustomLogRecord(datetime(2026, 9, 30, 10, 21), "error", "failed"),
+            tui_models.CustomLogRecord(datetime(2026, 9, 30, 10, 20), "ok", "done"),
+            tui_models.CustomLogRecord(datetime(2026, 9, 30, 10, 21), "error", "failed"),
         )
     )
 

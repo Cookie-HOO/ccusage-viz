@@ -1,5 +1,3 @@
-
-
 from contextlib import nullcontext
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
@@ -8,10 +6,29 @@ from types import SimpleNamespace
 
 import pytest
 
+import ccusage_viz.tui.adjustments as tui_adjustments
 import ccusage_viz.tui.controls as tui_controls
+import ccusage_viz.tui.custom_adjustments as tui_custom_adjustments
 import ccusage_viz.tui.custom_rendering as tui_custom_rendering
+import ccusage_viz.tui.dashboard_events as tui_dashboard_events
+import ccusage_viz.tui.datasets.blocking as tui_datasets_blocking
+import ccusage_viz.tui.datasets.catalog as tui_datasets_catalog
+import ccusage_viz.tui.datasets.chooser as tui_datasets_chooser
+import ccusage_viz.tui.datasets.modal as tui_datasets_modal
+import ccusage_viz.tui.events as tui_events
+import ccusage_viz.tui.help as tui_help
+import ccusage_viz.tui.history as tui_history
+import ccusage_viz.tui.input as tui_input
 import ccusage_viz.tui.models as tui_models
-import ccusage_viz.tui.runtime as tui_module
+import ccusage_viz.tui.painting as tui_painting
+import ccusage_viz.tui.pane_events as tui_pane_events
+import ccusage_viz.tui.pane_lifecycle as tui_pane_lifecycle
+import ccusage_viz.tui.pointer as tui_pointer
+import ccusage_viz.tui.queries as tui_queries
+import ccusage_viz.tui.rendering as tui_rendering
+import ccusage_viz.tui.runtime as tui_runtime
+import ccusage_viz.tui.session as tui_session
+import ccusage_viz.tui.structure as tui_structure
 from ccusage_viz.bootstrap import build_query_runtime
 from ccusage_viz.cli.configuration import _to_options
 from ccusage_viz.command_parsing.parser import build_parser
@@ -97,7 +114,7 @@ def test_custom_standalone_timeline_keeps_x_axis_labels_inside_frame() -> None:
             )
         ),
     )
-    component = tui_module.CustomHistoricalComponent(chart)
+    component = tui_models.CustomHistoricalComponent(chart)
     assert component.accept_response(response)
     terminal = Terminal(58, 14, color=False, ascii=True)
 
@@ -187,7 +204,7 @@ def test_custom_standalone_renders_accepted_dataset_summary() -> None:
     from test_custom_component import response
 
     assert component.accept_response(response())
-    summary = tui_module.CustomDashboardSummary(
+    summary = tui_models.CustomDashboardSummary(
         chart.source,
         FixedIntervalScheduler(60, now=0),
         LifecycleOperation("standalone:custom:summary"),
@@ -219,12 +236,12 @@ def test_custom_ranking_pane_restores_preset_item_spacing() -> None:
 
     pane = _new_pane(
         dashboard,
-        tui_module.CustomChartPaneConfig(chart, ranking_item_spacing="dashed"),
+        tui_models.CustomChartPaneConfig(chart, ranking_item_spacing="dashed"),
         "dashboard:pane:spacing",
         build_query_runtime(),
     )
 
-    assert isinstance(pane, tui_module.TuiCustomPane)
+    assert isinstance(pane, tui_models.TuiCustomPane)
     assert pane.ranking_item_spacing == "dashed"
 
 def test_v2_custom_pane_owns_a_metric_scoped_summary_lifecycle() -> None:
@@ -244,7 +261,7 @@ def test_v2_custom_pane_owns_a_metric_scoped_summary_lifecycle() -> None:
         build_query_runtime(),
     )
 
-    assert isinstance(pane, tui_module.TuiCustomPane)
+    assert isinstance(pane, tui_models.TuiCustomPane)
     assert pane.summary is not None
 
 def test_v2_custom_pane_summary_request_uses_the_selected_metric() -> None:
@@ -254,15 +271,15 @@ def test_v2_custom_pane_summary_request_uses_the_selected_metric() -> None:
         DateRange(date(2026, 1, 1), date(2026, 10, 8), relative_until=True, period="1y"),
         metric_id="reading_time",
     )
-    plan = tui_module.summary_query_plan(date(2026, 10, 8), "day")
+    plan = tui_queries.summary_query_plan(date(2026, 10, 8), "day")
 
-    intent = tui_module.custom_v2_summary_query_intent(
+    intent = tui_queries.custom_v2_summary_query_intent(
         config,
         plan,
         timezone="Asia/Shanghai",
         owner_id="dashboard:pane:v2-summary:summary",
         generation=3,
-        trigger=tui_module.query_trigger(LifecycleTrigger.STARTUP),
+        trigger=tui_queries.query_trigger(LifecycleTrigger.STARTUP),
     )
 
     assert isinstance(intent.payload, V2SummaryRequest)
@@ -306,7 +323,7 @@ def test_pending_metric_switch_rendering_retains_accepted_projection() -> None:
         Terminal(160, 24, color=False, ascii=True),
         pending=True,
     )
-    pane = tui_module.TuiCustomPane(
+    pane = tui_models.TuiCustomPane(
         component,
         FixedIntervalScheduler(60, now=0),
         LifecycleOperation("pending-switch"),
@@ -366,7 +383,7 @@ def test_custom_dashboard_refresh_retains_accepted_ranking_with_visible_audit() 
         replace(component.candidate, date_range=DateRange(date(2026, 9, 17), date(2026, 9, 30))),
         data_affecting=True,
     )
-    pane = tui_module.TuiCustomPane(
+    pane = tui_models.TuiCustomPane(
         component,
         FixedIntervalScheduler(60, now=0),
         LifecycleOperation("dashboard-refresh"),
@@ -533,7 +550,7 @@ def test_custom_action_labels_are_localized(language: str) -> None:
         CustomCommandSource("reading", ("reader", "ccuv")),
         DateRange(date(2026, 1, 1), date(2026, 1, 14)),
     )
-    component = tui_module.CustomHistoricalComponent(chart)
+    component = tui_models.CustomHistoricalComponent(chart)
     translator = load_translator(language)
 
     actions = tui_custom_rendering._custom_standalone_actions(component, translator)
@@ -564,16 +581,16 @@ def test_dashboard_subday_ranking_suppresses_summary_and_date_restore_reuses_rou
             ["dashboard", "--empty", "--header-style", "hidden"]
         )
     )
-    pane = tui_module.TuiCustomPane(
+    pane = tui_models.TuiCustomPane(
         component,
-        FixedIntervalScheduler(3600, now=tui_module.time.monotonic()),
+        FixedIntervalScheduler(3600, now=tui_rendering.time.monotonic()),
         LifecycleOperation("subday-summary"),
         options.process,
         probe_complete=True,
     )
-    pane.summary = tui_module.CustomDashboardSummary(
+    pane.summary = tui_models.CustomDashboardSummary(
         chart.source,
-        FixedIntervalScheduler(3600, now=tui_module.time.monotonic()),
+        FixedIntervalScheduler(3600, now=tui_rendering.time.monotonic()),
         LifecycleOperation("subday-summary:summary"),
         response=custom_summary_response(display="STALE SUMMARY"),
         accepted_period="day",
@@ -619,16 +636,42 @@ def test_dashboard_subday_ranking_suppresses_summary_and_date_restore_reuses_rou
             KeyEvent("\x03"),
         )
     )
-    monkeypatch.setattr(tui_module, "build_query_runtime", Runtime)
-    monkeypatch.setattr(tui_module, "_new_pane", lambda *_args: pane)
-    monkeypatch.setattr(tui_module, "FramePainter", Screen)
-    monkeypatch.setattr(tui_module, "tui_input_mode", nullcontext)
-    monkeypatch.setattr(tui_module, "read_event", lambda _decoder, _timeout: next(events))
-    monkeypatch.setattr(
-        tui_module, "get_terminal_size", lambda: __import__("os").terminal_size((100, 30))
-    )
+    monkeypatch.setattr(tui_session, 'build_query_runtime', Runtime)
+    monkeypatch.setattr(tui_pane_lifecycle, '_new_pane', lambda *_args: pane)
+    monkeypatch.setattr(tui_session, '_new_pane', lambda *_args: pane)
+    monkeypatch.setattr(tui_structure, '_new_pane', lambda *_args: pane)
+    monkeypatch.setattr(tui_history, '_new_pane', lambda *_args: pane)
+    monkeypatch.setattr(tui_session, 'FramePainter', Screen)
+    monkeypatch.setattr(tui_adjustments, 'FramePainter', Screen)
+    monkeypatch.setattr(tui_datasets_catalog, 'FramePainter', Screen)
+    monkeypatch.setattr(tui_datasets_chooser, 'FramePainter', Screen)
+    monkeypatch.setattr(tui_runtime, 'tui_input_mode', nullcontext)
+    monkeypatch.setattr(tui_adjustments, 'read_event', lambda _decoder, _timeout: next(events))
+    monkeypatch.setattr(tui_input, 'read_event', lambda _decoder, _timeout: next(events))
+    monkeypatch.setattr(tui_datasets_catalog, 'read_event', lambda _decoder, _timeout: next(events))
+    monkeypatch.setattr(tui_datasets_chooser, 'read_event', lambda _decoder, _timeout: next(events))
+    monkeypatch.setattr(tui_events, 'get_terminal_size', lambda: __import__('os').terminal_size((100, 30)))
+    monkeypatch.setattr(tui_runtime, 'get_terminal_size', lambda: __import__('os').terminal_size((100, 30)))
+    monkeypatch.setattr(tui_painting, 'get_terminal_size', lambda: __import__('os').terminal_size((100, 30)))
+    monkeypatch.setattr(tui_dashboard_events, 'get_terminal_size', lambda: __import__('os').terminal_size((100, 30)))
+    monkeypatch.setattr(tui_pointer, 'get_terminal_size', lambda: __import__('os').terminal_size((100, 30)))
+    monkeypatch.setattr(tui_pane_events, 'get_terminal_size', lambda: __import__('os').terminal_size((100, 30)))
+    monkeypatch.setattr(tui_help, 'get_terminal_size', lambda: __import__('os').terminal_size((100, 30)))
+    monkeypatch.setattr(tui_history, 'get_terminal_size', lambda: __import__('os').terminal_size((100, 30)))
+    monkeypatch.setattr(tui_datasets_catalog, 'get_terminal_size', lambda: __import__('os').terminal_size((100, 30)))
+    monkeypatch.setattr(tui_datasets_chooser, 'get_terminal_size', lambda: __import__('os').terminal_size((100, 30)))
+    monkeypatch.setattr(tui_datasets_blocking, 'get_terminal_size', lambda: __import__('os').terminal_size((100, 30)))
+    monkeypatch.setattr(tui_datasets_modal, 'get_terminal_size', lambda: __import__('os').terminal_size((100, 30)))
+    monkeypatch.setattr(tui_painting, 'get_terminal_size', lambda: __import__('os').terminal_size((100, 30)))
+    monkeypatch.setattr(tui_pointer, 'get_terminal_size', lambda: __import__('os').terminal_size((100, 30)))
+    monkeypatch.setattr(tui_help, 'get_terminal_size', lambda: __import__('os').terminal_size((100, 30)))
+    monkeypatch.setattr(tui_history, 'get_terminal_size', lambda: __import__('os').terminal_size((100, 30)))
+    monkeypatch.setattr(tui_datasets_catalog, 'get_terminal_size', lambda: __import__('os').terminal_size((100, 30)))
+    monkeypatch.setattr(tui_datasets_chooser, 'get_terminal_size', lambda: __import__('os').terminal_size((100, 30)))
+    monkeypatch.setattr(tui_datasets_blocking, 'get_terminal_size', lambda: __import__('os').terminal_size((100, 30)))
+    monkeypatch.setattr(tui_datasets_modal, 'get_terminal_size', lambda: __import__('os').terminal_size((100, 30)))
 
-    assert tui_module.run_tui(options, load_translator("en")) == 0
+    assert tui_runtime.run_tui(options, load_translator("en")) == 0
     summary_intents = [
         intent for intent in submitted if isinstance(intent.payload, V2SummaryRequest)
     ]
@@ -718,7 +761,7 @@ def test_v2_ranking_source_limit_is_a_pane_local_notice() -> None:
         )
     )
     component.set_capability(CustomChartCapability(("day",), ("book",), (), max_items=10))
-    pane = tui_module.TuiCustomPane(
+    pane = tui_models.TuiCustomPane(
         component,
         FixedIntervalScheduler(10, now=0),
         LifecycleOperation("custom-ranking-limit"),
@@ -727,12 +770,12 @@ def test_v2_ranking_source_limit_is_a_pane_local_notice() -> None:
         ).process,
     )
 
-    assert tui_module._custom_top_limit_notice(pane, load_translator("en")) == (
+    assert tui_custom_adjustments._custom_top_limit_notice(pane, load_translator("en")) == (
         "This Dataset can provide at most 10 ranking items.",
     )
 
     pane.body_view = "command"
-    assert tui_module._custom_top_limit_notice(pane, load_translator("en")) == ()
+    assert tui_custom_adjustments._custom_top_limit_notice(pane, load_translator("en")) == ()
 
 def test_custom_dashboard_context_matches_native_timeline_presentation() -> None:
     dashboard = _to_options(
@@ -782,7 +825,7 @@ def test_custom_dashboard_pane_renders_accepted_response_warnings_as_local_notic
         "dashboard:pane:0",
         build_query_runtime(),
     )
-    assert isinstance(pane, tui_module.TuiCustomPane)
+    assert isinstance(pane, tui_models.TuiCustomPane)
     pane.component.configure(
         replace(pane.component.candidate, date_range=DateRange(date(2026, 9, 1), date(2026, 9, 2))),
         data_affecting=False,
@@ -821,7 +864,7 @@ def test_custom_dashboard_pane_renders_accepted_decimal_projection() -> None:
         "dashboard:pane:0",
         build_query_runtime(),
     )
-    assert isinstance(pane, tui_module.TuiCustomPane)
+    assert isinstance(pane, tui_models.TuiCustomPane)
 
     from test_custom_component import response
 
@@ -855,7 +898,7 @@ def test_custom_dashboard_timeline_keeps_x_axis_labels_after_local_clipping(
         "dashboard:pane:0",
         build_query_runtime(),
     )
-    assert isinstance(pane, tui_module.TuiCustomPane)
+    assert isinstance(pane, tui_models.TuiCustomPane)
 
     from test_custom_component import response
 
@@ -866,7 +909,7 @@ def test_custom_dashboard_timeline_keeps_x_axis_labels_after_local_clipping(
     )
     pane.component.configure(configured, data_affecting=False)
     pane.component.accept_response(response())
-    pane.summary = tui_module.CustomDashboardSummary(
+    pane.summary = tui_models.CustomDashboardSummary(
         configured.source,
         FixedIntervalScheduler(60, now=0),
         LifecycleOperation("dashboard:pane:0:summary"),

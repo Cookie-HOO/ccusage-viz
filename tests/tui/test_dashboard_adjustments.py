@@ -1,7 +1,3 @@
-
-
-
-
 from contextlib import nullcontext
 from dataclasses import replace
 from datetime import date
@@ -10,7 +6,21 @@ import pytest
 
 import ccusage_viz.tui.adjustments as tui_adjustments
 import ccusage_viz.tui.controls as tui_controls
-import ccusage_viz.tui.runtime as tui_module
+import ccusage_viz.tui.dashboard_events as tui_dashboard_events
+import ccusage_viz.tui.datasets.blocking as tui_datasets_blocking
+import ccusage_viz.tui.datasets.catalog as tui_datasets_catalog
+import ccusage_viz.tui.datasets.chooser as tui_datasets_chooser
+import ccusage_viz.tui.datasets.modal as tui_datasets_modal
+import ccusage_viz.tui.events as tui_events
+import ccusage_viz.tui.help as tui_help
+import ccusage_viz.tui.history as tui_history
+import ccusage_viz.tui.input as tui_input
+import ccusage_viz.tui.models as tui_models
+import ccusage_viz.tui.painting as tui_painting
+import ccusage_viz.tui.pane_events as tui_pane_events
+import ccusage_viz.tui.pointer as tui_pointer
+import ccusage_viz.tui.runtime as tui_runtime
+import ccusage_viz.tui.session as tui_session
 from ccusage_viz.adjustment_timeout import AdjustmentIdleTimer
 from ccusage_viz.cli.configuration import _to_options
 from ccusage_viz.command_parsing.parser import build_parser
@@ -75,16 +85,47 @@ def test_dashboard_adjustment_paste_resets_idle_timer(monkeypatch: pytest.Monkey
         return event
 
     options = _to_options(build_parser(load_translator("en")).parse_args(["dashboard", "--empty"]))
-    monkeypatch.setattr(tui_module, "AdjustmentIdleTimer", new_timer)
-    monkeypatch.setattr(tui_module, "build_query_runtime", Runtime)
-    monkeypatch.setattr(tui_module, "FramePainter", Screen)
-    monkeypatch.setattr(tui_module, "tui_input_mode", nullcontext)
-    monkeypatch.setattr(tui_module, "read_event", read_input)
-    monkeypatch.setattr(
-        tui_module, "get_terminal_size", lambda: __import__("os").terminal_size((80, 24))
-    )
+    monkeypatch.setattr(tui_models, 'AdjustmentIdleTimer', new_timer)
+    monkeypatch.setattr(tui_session, 'AdjustmentIdleTimer', new_timer)
+    monkeypatch.setattr(tui_models, 'AdjustmentIdleTimer', new_timer)
+    monkeypatch.setattr(tui_events, 'AdjustmentIdleTimer', new_timer)
+    monkeypatch.setattr(tui_session, 'AdjustmentIdleTimer', new_timer)
+    monkeypatch.setattr(tui_pointer, 'AdjustmentIdleTimer', new_timer)
+    monkeypatch.setattr(tui_help, 'AdjustmentIdleTimer', new_timer)
+    monkeypatch.setattr(tui_pointer, 'AdjustmentIdleTimer', new_timer)
+    monkeypatch.setattr(tui_help, 'AdjustmentIdleTimer', new_timer)
+    monkeypatch.setattr(tui_session, 'build_query_runtime', Runtime)
+    monkeypatch.setattr(tui_session, 'FramePainter', Screen)
+    monkeypatch.setattr(tui_adjustments, 'FramePainter', Screen)
+    monkeypatch.setattr(tui_datasets_catalog, 'FramePainter', Screen)
+    monkeypatch.setattr(tui_datasets_chooser, 'FramePainter', Screen)
+    monkeypatch.setattr(tui_runtime, 'tui_input_mode', nullcontext)
+    monkeypatch.setattr(tui_adjustments, 'read_event', read_input)
+    monkeypatch.setattr(tui_input, 'read_event', read_input)
+    monkeypatch.setattr(tui_datasets_catalog, 'read_event', read_input)
+    monkeypatch.setattr(tui_datasets_chooser, 'read_event', read_input)
+    monkeypatch.setattr(tui_events, 'get_terminal_size', lambda: __import__('os').terminal_size((80, 24)))
+    monkeypatch.setattr(tui_runtime, 'get_terminal_size', lambda: __import__('os').terminal_size((80, 24)))
+    monkeypatch.setattr(tui_painting, 'get_terminal_size', lambda: __import__('os').terminal_size((80, 24)))
+    monkeypatch.setattr(tui_dashboard_events, 'get_terminal_size', lambda: __import__('os').terminal_size((80, 24)))
+    monkeypatch.setattr(tui_pointer, 'get_terminal_size', lambda: __import__('os').terminal_size((80, 24)))
+    monkeypatch.setattr(tui_pane_events, 'get_terminal_size', lambda: __import__('os').terminal_size((80, 24)))
+    monkeypatch.setattr(tui_help, 'get_terminal_size', lambda: __import__('os').terminal_size((80, 24)))
+    monkeypatch.setattr(tui_history, 'get_terminal_size', lambda: __import__('os').terminal_size((80, 24)))
+    monkeypatch.setattr(tui_datasets_catalog, 'get_terminal_size', lambda: __import__('os').terminal_size((80, 24)))
+    monkeypatch.setattr(tui_datasets_chooser, 'get_terminal_size', lambda: __import__('os').terminal_size((80, 24)))
+    monkeypatch.setattr(tui_datasets_blocking, 'get_terminal_size', lambda: __import__('os').terminal_size((80, 24)))
+    monkeypatch.setattr(tui_datasets_modal, 'get_terminal_size', lambda: __import__('os').terminal_size((80, 24)))
+    monkeypatch.setattr(tui_painting, 'get_terminal_size', lambda: __import__('os').terminal_size((80, 24)))
+    monkeypatch.setattr(tui_pointer, 'get_terminal_size', lambda: __import__('os').terminal_size((80, 24)))
+    monkeypatch.setattr(tui_help, 'get_terminal_size', lambda: __import__('os').terminal_size((80, 24)))
+    monkeypatch.setattr(tui_history, 'get_terminal_size', lambda: __import__('os').terminal_size((80, 24)))
+    monkeypatch.setattr(tui_datasets_catalog, 'get_terminal_size', lambda: __import__('os').terminal_size((80, 24)))
+    monkeypatch.setattr(tui_datasets_chooser, 'get_terminal_size', lambda: __import__('os').terminal_size((80, 24)))
+    monkeypatch.setattr(tui_datasets_blocking, 'get_terminal_size', lambda: __import__('os').terminal_size((80, 24)))
+    monkeypatch.setattr(tui_datasets_modal, 'get_terminal_size', lambda: __import__('os').terminal_size((80, 24)))
 
-    assert tui_module.run_tui(options, load_translator("en")) == 0
+    assert tui_runtime.run_tui(options, load_translator("en")) == 0
     assert len(timers) == 1
     assert timers[0].remaining() == 180.0
 
@@ -218,11 +259,11 @@ def test_animation_pane_footer_exposes_dashboard_management_without_view() -> No
     parser = build_parser(load_translator("en"))
     options = _to_options(parser.parse_args(["dashboard", "--pane", "animate rain"]))
     pane = _new_pane(options, options.panes[0])
-    assert isinstance(pane, tui_module.TuiAnimationPane)
+    assert isinstance(pane, tui_models.TuiAnimationPane)
 
-    quick = tui_module._animation_adjustment_footer(pane, "quick", load_translator("en"), 120)
-    advanced = tui_module._animation_adjustment_footer(pane, "advanced", load_translator("en"), 120)
-    chinese = tui_module._animation_adjustment_footer(pane, "quick", load_translator("zh"), 120)
+    quick = tui_adjustments._animation_adjustment_footer(pane, "quick", load_translator("en"), 120)
+    advanced = tui_adjustments._animation_adjustment_footer(pane, "advanced", load_translator("en"), 120)
+    chinese = tui_adjustments._animation_adjustment_footer(pane, "quick", load_translator("zh"), 120)
 
     assert "Space" not in quick[1]
     assert "p/P overlay position" in quick[1]
@@ -249,15 +290,15 @@ def test_animation_pane_footer_exposes_dashboard_management_without_view() -> No
     for language in ("en", "zh"):
         assert all(
             display_width(row) <= 24
-            for row in tui_module._animation_adjustment_footer(
+            for row in tui_adjustments._animation_adjustment_footer(
                 pane, "quick", load_translator(language), 24, color=True
             )
         )
 
 def test_empty_pane_footer_exposes_dashboard_management_without_local_actions() -> None:
     translator = load_translator("en")
-    footer = tui_module._empty_pane_adjustment_footer(translator, 120)
-    chinese = tui_module._empty_pane_adjustment_footer(load_translator("zh"), 120)
+    footer = tui_adjustments._empty_pane_adjustment_footer(translator, 120)
+    chinese = tui_adjustments._empty_pane_adjustment_footer(load_translator("zh"), 120)
 
     assert footer[0] == "━━ Dashboard Pane Management ━━"
     assert "r replace" in footer[1]
@@ -276,7 +317,7 @@ def test_empty_pane_footer_exposes_dashboard_management_without_local_actions() 
     for language in ("en", "zh"):
         assert all(
             display_width(row) <= 24
-            for row in tui_module._empty_pane_adjustment_footer(
+            for row in tui_adjustments._empty_pane_adjustment_footer(
                 load_translator(language), 24, color=True
             )
         )
