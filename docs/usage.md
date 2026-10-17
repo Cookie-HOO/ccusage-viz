@@ -485,7 +485,7 @@ deletes an empty pane and compacts the rest without adding a placeholder.
 | --- | --- | --- | --- |
 | `single` | Analog Clock only, without a text overlay or Dashboard frame | `1x1` | `minimal` |
 | `wide` | Timeline, Stack, Ranking, Monitor grouped by model | `2x2` | `framed` |
-| `wide-clock` | Analog Clock, then the standard wide Timeline, Stack, Ranking, and model Monitor panes | `2x2` with `spotlight-wide` and a short first row | `framed` |
+| `wide-clock` | Digital Clock, then the standard wide Timeline, Stack, Ranking, and model Monitor panes | `2x2` with `spotlight-wide` and a compact first row | `framed` |
 | `spotlight-wide` | Timeline, Stack, Ranking | `2x2` with `spotlight-wide` | `framed` |
 | `spotlight-wide2` | Timeline, Stack, Ranking, Monitor grouped by model | `2x2` with `spotlight-wide2` | `framed` |
 | `narrow` | 14-day Timeline, project Ranking, model Monitor | `3x1` | `framed` |
@@ -495,7 +495,7 @@ deletes an empty pane and compacts the rest without adding a placeholder.
 The default `wide` panes use compact density and deliberately use separate
 chart themes/styles. `single`, `wide-clock`, and `narrow-clock` are the clock
 presets: their clock is a complete animation Pane, not a Dashboard header.
-`single` and `wide-clock` use Analog Clock; `narrow-clock` uses Digital Clock.
+`single` uses Analog Clock; `wide-clock` and `narrow-clock` use Digital Clock.
 `spotlight-wide` gives its first pane the leading wide area; `spotlight-wide2`
 gives the first two panes consecutive wide rows.
 

@@ -385,7 +385,7 @@ ccuv dashboard --empty --grid 2x2 \
 | --- | --- | --- | --- |
 | `single` | 仅模拟时钟，无文字叠层和 Dashboard 边框 | `1x1` | `minimal` |
 | `wide` | Timeline、Stack、Ranking、按模型分组的 Monitor | `2x2` | `framed` |
-| `wide-clock` | 模拟时钟，然后是标准 wide 的 Timeline、Stack、Ranking 和模型 Monitor Pane | 带短首行的 `spotlight-wide` `2x2` | `framed` |
+| `wide-clock` | 数字时钟，然后是标准 wide 的 Timeline、Stack、Ranking 和模型 Monitor Pane | 带紧凑首行的 `spotlight-wide` `2x2` | `framed` |
 | `spotlight-wide` | Timeline、Stack、Ranking | 带 `spotlight-wide` 的 `2x2` | `framed` |
 | `spotlight-wide2` | Timeline、Stack、Ranking、按模型分组的 Monitor | 带 `spotlight-wide2` 的 `2x2` | `framed` |
 | `narrow` | 14 天 Timeline、项目 Ranking、模型 Monitor | `3x1` | `framed` |
@@ -393,7 +393,7 @@ ccuv dashboard --empty --grid 2x2 \
 | `all` | 两个 Timeline、Calendar、Ranking、两个 Stack 与四个 Monitor 变体 | `5x2` | `split` |
 
 默认 `wide` Pane 使用 `compact` 密度，并刻意采用不同图表主题/样式。`single`、`wide-clock` 与 `narrow-clock`
-是时钟预设：它们的时钟都是完整的动画 Pane，而不是 Dashboard Header；`single` 与 `wide-clock` 使用模拟时钟，`narrow-clock` 使用数字时钟。`spotlight-wide` 让第一个 Pane
+是时钟预设：它们的时钟都是完整的动画 Pane，而不是 Dashboard Header；`single` 使用模拟时钟，`wide-clock` 与 `narrow-clock` 使用数字时钟。`spotlight-wide` 让第一个 Pane
 占据前导宽区域；`spotlight-wide2` 让前两个 Pane 占据连续的宽行。
 
 内置预设仍是启动模板，不是 `--grid` 的取值。在普通未具名启动组合中，重复 `--pane` 会追加到内置模板 Pane 后；需要时 Host 会扩展其网格以容纳所有 Pane。以 `ccuv dashboard <name>` 启动的具名内置或用户预设则是封闭的：它们拒绝 `--pane` 以及除 `--demo`、`--lang`、`--empty` 和 `--ccusage-bin` 外的所有配置覆盖。

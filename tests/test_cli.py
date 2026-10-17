@@ -808,7 +808,7 @@ def test_bare_dashboard_is_equivalent_to_wide_clock_preset() -> None:
     assert bare.host.refresh_interval == 60
     assert bare.host.sampling_interval == 15
     assert isinstance(bare.panes[0], AnimationPaneConfig)
-    assert bare.panes[0].animation.style == "analog-clock"
+    assert bare.panes[0].animation.style == "digital-clock"
     assert bare.panes[0].overlay.command is not None
     assert bare.panes[0].overlay.command == "ccuv text time-state --run"
     assert tuple(
@@ -1030,19 +1030,19 @@ def test_dashboard_narrow_clock_reuses_narrow_panes_with_short_clock_row() -> No
     assert narrow_clock.host.style == "framed"
 
 
-def test_dashboard_wide_clock_reuses_wide_panes_below_analog_clock_row() -> None:
+def test_dashboard_wide_clock_reuses_wide_panes_below_compact_digital_clock_row() -> None:
     parser = build_parser(load_translator("en"))
 
     wide = _to_options(parser.parse_args(["dashboard", "wide"]))
     wide_clock = _to_options(parser.parse_args(["dashboard", "wide-clock"]))
 
     assert isinstance(wide_clock.panes[0], AnimationPaneConfig)
-    assert wide_clock.panes[0].animation.style == "analog-clock"
+    assert wide_clock.panes[0].animation.style == "digital-clock"
     assert wide_clock.panes[0].overlay.position == "bottom-right"
     assert wide_clock.panes[1:] == wide.panes
     assert wide_clock.host.grid == "2x2"
     assert wide_clock.host.layout == "spotlight-wide"
-    assert wide_clock.host.row_weights == (9, 13, 12)
+    assert wide_clock.host.row_weights == (5, 15, 14)
     assert wide_clock.host.style == "framed"
 
 
@@ -1201,7 +1201,7 @@ def test_dashboard_host_options_use_the_default_preset() -> None:
     )
 
     assert options.host.theme == "nord"
-    assert options.panes[0].animation.style == "analog-clock"
+    assert options.panes[0].animation.style == "digital-clock"
 
 
 def test_dashboard_structural_options_require_content() -> None:

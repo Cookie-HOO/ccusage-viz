@@ -64,11 +64,11 @@ DASHBOARD_PRESETS["narrow-clock"] = DashboardPreset(
     row_weights=(3, 7, 7, 6),
 )
 DASHBOARD_PRESETS["wide-clock"] = DashboardPreset(
-    ("animate analog-clock", *DASHBOARD_PRESETS["wide"].panels),
+    ("animate digital-clock", *DASHBOARD_PRESETS["wide"].panels),
     "2x2",
     layout="spotlight-wide",
     style="framed",
-    row_weights=(9, 13, 12),
+    row_weights=(5, 15, 14),
 )
 DASHBOARD_PRESETS["single"] = DashboardPreset(
     ("animate analog-clock",),
