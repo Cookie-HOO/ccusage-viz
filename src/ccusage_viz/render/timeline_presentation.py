@@ -122,12 +122,16 @@ def render_timeline_plot(
             signals = []
             if use_bars:
                 if len(numeric_points) == 1:
-                    # plotext's native bar spacing requires at least two x
-                    # coordinates and aborts the process on some platforms.
+                    # plotext's native signal and bar spacing both require at
+                    # least two x coordinates on some platforms. A zero-value
+                    # sentinel establishes spacing without adding a visible bar.
                     point, value = numeric_points[0]
                     signals.append(
-                        plt.figure.signal([float(point)], [float(value)], marker=marker).lines(
-                            False
+                        plt.figure.bar(
+                            [float(point), float(point) + 1.0],
+                            [float(value), 0.0],
+                            marker=marker,
+                            width=0.75,
                         )
                     )
                 else:
