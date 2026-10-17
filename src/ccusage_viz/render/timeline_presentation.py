@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Hashable, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
+from math import isfinite
 
 import plotext as plt
 
@@ -95,10 +96,15 @@ def render_timeline_plot(
         else ""
     )
 
-    if any(0 < sum(value is not None for value in item.values) < 2 for item in series):
+    if any(
+        0 < sum(value is not None and isfinite(value) for value in item.values) < 2
+        for item in series
+    ):
         rows = []
         for item in series:
-            observed = tuple(value for value in item.values if value is not None)
+            observed = tuple(
+                value for value in item.values if value is not None and isfinite(value)
+            )
             if observed:
                 rows.append(clip_width(f"{item.label} {float(observed[-1]):g}", context.width))
         return TimelinePlot("\n".join(rows), legend)
@@ -124,7 +130,11 @@ def render_timeline_plot(
                 pixel=plt.pixel(foreground=color_for(item)) if context.color else None,
             )
             raw_points = list(zip(x_values, item.values, strict=True))
-            numeric_points = [(point, value) for point, value in raw_points if value is not None]
+            numeric_points = [
+                (point, value)
+                for point, value in raw_points
+                if value is not None and isfinite(value)
+            ]
             if not numeric_points:
                 continue
             signals = []
@@ -143,7 +153,7 @@ def render_timeline_plot(
                 runs: list[list[tuple[int | float | Decimal, int | float | Decimal]]] = []
                 run: list[tuple[int | float | Decimal, int | float | Decimal]] = []
                 for point, value in raw_points:
-                    if value is None:
+                    if value is None or not isfinite(value):
                         if run:
                             runs.append(run)
                             run = []
