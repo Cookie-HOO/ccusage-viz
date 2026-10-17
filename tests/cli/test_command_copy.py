@@ -165,15 +165,13 @@ def test_wrap_command_breaks_at_tokens_within_display_width() -> None:
 def test_concise_commands_omit_effective_defaults() -> None:
     parser = build_parser(load_translator("en"))
 
-    assert format_command(_to_options(parser.parse_args(["chart", "timeline"]))) == (
-        "ccuv chart timeline --timezone Asia/Shanghai"
-    )
-    assert format_command(_to_options(parser.parse_args(["chart", "ranking"]))) == (
-        "ccuv chart ranking --timezone Asia/Shanghai"
-    )
-    assert format_command(_to_options(parser.parse_args(["chart", "monitor"]))) == (
-        "ccuv chart monitor --timezone Asia/Shanghai"
-    )
+    timeline = _to_options(parser.parse_args(["chart", "timeline"]))
+    ranking = _to_options(parser.parse_args(["chart", "ranking"]))
+    monitor = _to_options(parser.parse_args(["chart", "monitor"]))
+
+    assert format_command(timeline) == f"ccuv chart timeline --timezone {timeline.host.timezone}"
+    assert format_command(ranking) == f"ccuv chart ranking --timezone {ranking.host.timezone}"
+    assert format_command(monitor) == f"ccuv chart monitor --timezone {monitor.host.timezone}"
 
     explicit = _to_options(
         parser.parse_args(
