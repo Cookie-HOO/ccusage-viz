@@ -121,14 +121,24 @@ def render_timeline_plot(
                 continue
             signals = []
             if use_bars:
-                signals.append(
-                    plt.figure.bar(
-                        [float(point) for point, _ in numeric_points],
-                        [float(value) for _, value in numeric_points],
-                        marker=marker,
-                        width=0.75,
+                if len(numeric_points) == 1:
+                    # plotext's native bar spacing requires at least two x
+                    # coordinates and aborts the process on some platforms.
+                    point, value = numeric_points[0]
+                    signals.append(
+                        plt.figure.signal([float(point)], [float(value)], marker=marker).lines(
+                            False
+                        )
                     )
-                )
+                else:
+                    signals.append(
+                        plt.figure.bar(
+                            [float(point) for point, _ in numeric_points],
+                            [float(value) for _, value in numeric_points],
+                            marker=marker,
+                            width=0.75,
+                        )
+                    )
             else:
                 # Source-owned missing observations are factual gaps. Draw
                 # contiguous runs separately rather than joining across them.
