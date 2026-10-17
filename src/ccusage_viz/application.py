@@ -8,7 +8,8 @@ from ccusage_viz.bootstrap import build_provider_registry
 from ccusage_viz.dependency import ensure_provider_dependencies
 from ccusage_viz.errors import UsageError
 from ccusage_viz.i18n import Translator
-from ccusage_viz.options import AnimationLaunch, CustomChartConfig, DashboardLaunch, LaunchConfig
+from ccusage_viz.configuration import focused_dashboard_from_chart
+from ccusage_viz.options import AnimationLaunch, DashboardLaunch, LaunchConfig
 
 
 def _preflight_runtime(options: LaunchConfig) -> None:
@@ -26,26 +27,12 @@ def run(options: LaunchConfig, translator: Translator) -> int:
         run_animation = import_module("ccusage_viz.animate").run_animation
         return run_animation(options, translator)
     ensure_provider_dependencies(options, build_provider_registry(), translator)
-    if isinstance(options, DashboardLaunch):
-        from ccusage_viz.tui import run_tui
+    from ccusage_viz.tui import run_tui
 
-        return run_tui(options, translator)
-    if isinstance(options.chart, CustomChartConfig):
-        if options.chart.kind == "monitor":
-            from ccusage_viz.custom_monitor import run_custom_monitor
-
-            return run_custom_monitor(options, translator)
-        from ccusage_viz.tui import run_custom_standalone
-
-        return run_custom_standalone(options, translator)
-    if options.chart.kind == "monitor":
-        from ccusage_viz.monitor import run_monitor
-
-        return run_monitor(options, translator)
-
-    from ccusage_viz.watch import run_watch
-
-    return run_watch(options, translator)
+    return run_tui(
+        options if isinstance(options, DashboardLaunch) else focused_dashboard_from_chart(options),
+        translator,
+    )
 
 
 def interactive_streams() -> bool:

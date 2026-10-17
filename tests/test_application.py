@@ -74,7 +74,7 @@ def test_preflight_requires_explicit_ascii_for_dumb_terminal(
         "ensure_provider_dependencies",
         lambda current, _registry, _translator: dependency_calls.append(current),
     )
-    monkeypatch.setattr("ccusage_viz.watch.run_watch", lambda *_args: 7)
+    monkeypatch.setattr("ccusage_viz.tui.run_tui", lambda *_args: 7)
 
     if ascii:
         assert application.run(options(ascii=True), load_translator("en")) == 7
@@ -98,9 +98,7 @@ def test_animation_route_skips_provider_dependencies(monkeypatch: pytest.MonkeyP
     assert application.run(animation_options(), load_translator("en")) == 0
 
 
-def test_custom_standalone_routes_to_the_custom_tui_runner(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_chart_routes_to_focused_dashboard_runner(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(application, "interactive_streams", lambda: True)
     monkeypatch.delenv("TERM", raising=False)
     dependency_calls: list[StandaloneLaunch] = []
@@ -117,31 +115,31 @@ def test_custom_standalone_routes_to_the_custom_tui_runner(
             DateRange(date(2026, 1, 1), date(2026, 1, 14)),
         ),
     )
-    received: list[StandaloneLaunch] = []
+    received: list[object] = []
     monkeypatch.setattr(
-        "ccusage_viz.tui.run_custom_standalone",
+        "ccusage_viz.tui.run_tui",
         lambda selected, _translator: received.append(selected) or 17,
-    )
-    monkeypatch.setattr(
-        "ccusage_viz.watch.run_watch",
-        lambda *_args: pytest.fail("custom standalone must not use historical watch"),
     )
 
     assert application.run(custom, load_translator("en")) == 17
-    assert received == [custom]
+    assert len(received) == 1
+    dashboard = received[0]
+    assert dashboard.panes[0].chart == custom.chart
+    assert dashboard.host.grid == "1x1"
+    assert dashboard.host.header_summary == "none"
     assert dependency_calls == [custom]
 
 
-def test_historical_modes_share_one_lifecycle_runner(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_historical_charts_share_the_dashboard_runner(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(application, "interactive_streams", lambda: True)
     monkeypatch.delenv("TERM", raising=False)
     monkeypatch.setattr(application, "ensure_provider_dependencies", lambda *_args: None)
-    received: list[StandaloneLaunch] = []
+    received: list[object] = []
     monkeypatch.setattr(
-        "ccusage_viz.watch.run_watch",
+        "ccusage_viz.tui.run_tui",
         lambda selected, _translator: received.append(selected) or len(received),
     )
 
-    assert application.run(options(no_watch=True), load_translator("en")) == 1
-    assert application.run(options(no_watch=False), load_translator("en")) == 2
-    assert [selected.host.watch for selected in received] == [False, True]
+    assert application.run(options(), load_translator("en")) == 1
+    assert application.run(options(), load_translator("en")) == 2
+    assert all(item.host.grid == "1x1" for item in received)

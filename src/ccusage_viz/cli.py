@@ -249,7 +249,6 @@ def _add_history_shared(
     parser.add_argument(
         "--interval", type=float, default=10.0, metavar="SECONDS", help=tr.text("help.interval")
     )
-    parser.add_argument("--no-watch", action="store_true", help=tr.text("help.no_watch"))
     _add_presentation(parser, tr, command)
 
 
@@ -361,7 +360,6 @@ def _add_monitor(parser: argparse.ArgumentParser, tr: Translator) -> None:
     parser.add_argument(
         "--interval", type=float, default=None, metavar="SECONDS", help=tr.text("help.interval")
     )
-    parser.add_argument("--no-watch", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument(
         "--by", choices=("agent", "model", "project"), help=tr.text("help.monitor_by")
     )
@@ -760,13 +758,7 @@ def _validate_chart(
         raise UsageError(
             "error.style_incompatible", style=chart.presentation.style, mode=by or "total"
         )
-    no_watch = getattr(namespace, "no_watch", False)
-    requested = getattr(namespace, "interval", None)
-    if no_watch and "interval" in explicit:
-        raise UsageError("error.arguments", detail="--interval cannot be combined with --no-watch")
-    if command == "monitor" and no_watch:
-        raise UsageError("error.arguments", detail="monitor does not support --no-watch")
-    interval = requested
+    interval = getattr(namespace, "interval", None)
     if command == "monitor" and interval is None:
         interval = 1.0 if demo is not None else 15.0
     minimum = 1 if command == "monitor" and demo is not None else 5 if command == "monitor" else 2

@@ -512,7 +512,6 @@ def namespace(**overrides: object) -> Namespace:
         "agent": [],
         "model": [],
         "project": [],
-        "no_watch": False,
         "demo": "small",
         "lang": "en",
         "ccusage_bin": "ccusage",
@@ -536,32 +535,16 @@ def namespace(**overrides: object) -> Namespace:
     return Namespace(**values)
 
 
-def test_historical_lifecycle_defaults_and_validation() -> None:
+def test_chart_lifecycle_defaults_and_rejects_removed_watch_options() -> None:
     parser = build_parser(load_translator("en"))
     default = _to_options(parser.parse_args(["chart", "timeline"]))
     assert default.host.interval == 10
     assert default.host.watch
 
-    one_shot = _to_options(
-        parser.parse_args(["chart", "timeline", "--no-watch"]), explicit=frozenset({"no_watch"})
-    )
-    assert not one_shot.host.watch
-
-    with pytest.raises(UsageError, match="error.arguments"):
-        _to_options(
-            parser.parse_args(["chart", "timeline", "--interval", "20", "--no-watch"]),
-            explicit=frozenset({"interval", "no_watch"}),
-        )
-
-
-def test_continuous_routes_reject_ambiguous_lifecycle_options() -> None:
-    parser = build_parser(load_translator("en"))
-    with pytest.raises(UsageError, match="error.arguments"):
-        _to_options(
-            parser.parse_args(["chart", "monitor", "--no-watch"]), explicit=frozenset({"no_watch"})
-        )
     for arguments in (
         ["chart", "timeline", "--watch"],
+        ["chart", "timeline", "--no-watch"],
+        ["chart", "monitor", "--no-watch"],
         ["dashboard", "--watch"],
         ["dashboard", "--no-watch"],
         ["dashboard", "--interval", "20"],
