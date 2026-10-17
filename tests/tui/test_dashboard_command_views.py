@@ -36,7 +36,7 @@ def test_full_dashboard_command_copies_and_round_trips_custom_partition() -> Non
             [
                 "dashboard",
                 "--pane",
-                "chart ranking --dataset router --metric tokens --partition-by logical_model --group-by real_model --top 3",
+                "chart ranking --dataset router --command router --metric tokens --partition-by logical_model --group-by real_model --top 3",
             ]
         )
     )
@@ -80,7 +80,7 @@ def test_dashboard_commands_preserve_local_date_context_and_timezone() -> None:
     reparsed = _to_options(parser.parse_args(shlex.split(full)[1:]))
 
     assert shlex.split(full)[:2] == ["ccuv", "dashboard"]
-    assert "--timezone Asia/Shanghai" in full
+    assert f"--timezone {dashboard.host.timezone}" in full
     assert (
         _header_options(reparsed).chart.date_range.since
         <= _header_options(reparsed).chart.date_range.until
