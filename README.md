@@ -46,6 +46,67 @@ cannot apply the requested timezone.
 > This project is not affiliated with or endorsed by the `ccusage` project or
 > its maintainers.
 
+## Dataset and custom command extensions
+
+Datasets let ccuv visualize metrics owned by external sources without adding
+them to built-in `ccusage` token collection. A Dataset is an executable command:
+ccuv sends it one JSON request on stdin, reads one JSON response from stdout,
+and renders the declared Metrics in focused charts or Dashboard Panes.
+
+### Install an official Dataset
+
+Official Dataset entries are collected in the signed
+[`Cookie-HOO/ccuv-dataset-catalog`](https://github.com/Cookie-HOO/ccuv-dataset-catalog)
+repository.
+
+1. Run `ccuv dataset`.
+2. Press `+` and choose **Browse official datasets**.
+3. Select an entry, review its Metrics, environment requirements, version, and
+   source, then confirm installation.
+
+The official catalog verifies signed metadata. Installation still requires a
+compatible release archive for the current operating system and architecture.
+
+### Register a local command
+
+Register an executable already available on your machine with its exact argv:
+
+```bash
+ccuv dataset add-local /absolute/path/to/my-dataset --profile personal
+ccuv dataset list
+```
+
+Registration immediately runs the command's Probe. Use the Dataset ID returned
+by that Probe—not the executable filename—with `--dataset`. ccuv stores argv
+and starts the executable directly without a shell. Re-run `add-local` after
+changing its Probe metadata; a local registration with the same Dataset ID is
+replaced.
+
+### Install from a GitHub repository
+
+You can also install a compatible Dataset from a specific GitHub repository.
+For example, use the
+[WeRead Dataset](https://github.com/Cookie-HOO/ccuv-dataset-weread):
+
+1. Run `ccuv dataset`, press `+`, and choose **Install from GitHub**.
+2. Enter:
+
+   ```text
+   https://github.com/Cookie-HOO/ccuv-dataset-weread
+   ```
+
+3. Review the discovered release and confirm installation.
+
+The repository must publish a compatible native archive, checksum, and Dataset
+manifest. Installing from an arbitrary GitHub repository does not make it an
+official Dataset; if the repository is also present in the official catalog,
+ccuv uses its verified official artifact path.
+
+For installation, management, Dashboard selection, and troubleshooting, see the
+[Dataset user guide](docs/dataset-user-guide.md). To implement and package a
+Dataset, start with the [Dataset developer guide](docs/dataset-developer-guide.md)
+and [custom command protocol](docs/custom-command-protocol.md).
+
 ## Interactive Help
 
 Dashboard provides contextual Help: press `h` to see the controls for the

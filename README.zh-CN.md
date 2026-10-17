@@ -33,6 +33,51 @@ ccusage-viz 可视化内置的 **Token 消耗** 与由其直接推导的指标�
 
 > 本项目与 `ccusage` 项目及其维护者没有隶属关系，也未获得其背书。
 
+## Dataset 与自定义命令扩展
+
+Dataset 让 ccuv 可视化由外部数据源拥有语义的指标，而无需把它们并入内置的 `ccusage` Token 采集。Dataset 是一个可执行命令：ccuv 向其 stdin 写入一份 JSON 请求，从 stdout 读取一份 JSON 响应，再把它声明的 Metric 渲染到聚焦图表或 Dashboard Pane 中。
+
+### 安装官方 Dataset
+
+官方 Dataset 收录在带签名的
+[`Cookie-HOO/ccuv-dataset-catalog`](https://github.com/Cookie-HOO/ccuv-dataset-catalog)
+仓库中。
+
+1. 运行 `ccuv dataset`。
+2. 按 `+`，选择 **Browse official datasets**。
+3. 选择条目，检查 Metric、环境变量要求、版本和来源，然后确认安装。
+
+官方目录会验证签名元数据；实际安装仍要求该 Dataset 为当前操作系统和架构发布了兼容 archive。
+
+### 注册本地命令
+
+使用命令的精确 argv，注册机器上已有的可执行程序：
+
+```bash
+ccuv dataset add-local /absolute/path/to/my-dataset --profile personal
+ccuv dataset list
+```
+
+注册时会立即运行该命令的 Probe。后续 `--dataset` 应使用 Probe 返回的 Dataset ID，而不是可执行文件名。ccuv 保存 argv 并直接启动程序，不经过 shell。修改 Probe 元数据后可重新运行 `add-local`；相同 Dataset ID 的本地注册会被替换。
+
+### 从指定 GitHub 仓库安装
+
+也可以从指定 GitHub 仓库安装兼容 Dataset。以
+[微信读书 Dataset](https://github.com/Cookie-HOO/ccuv-dataset-weread) 为例：
+
+1. 运行 `ccuv dataset`，按 `+`，选择 **Install from GitHub**。
+2. 输入：
+
+   ```text
+   https://github.com/Cookie-HOO/ccuv-dataset-weread
+   ```
+
+3. 检查发现的 Release，然后确认安装。
+
+仓库必须发布兼容的原生 archive、checksum 和 Dataset manifest。从任意 GitHub 仓库安装并不代表它是官方 Dataset；如果该仓库同时存在于官方目录中，ccuv 会改用经过验证的官方 artifact 路径。
+
+安装、管理、Dashboard 选择与排错请见 [Dataset 使用者指南](docs/dataset-user-guide.zh-CN.md)。实现并打包 Dataset 请从 [Dataset 开发者指南](docs/dataset-developer-guide.zh-CN.md)和[自定义命令协议](docs/custom-command-protocol.zh-CN.md)开始。
+
 ## 交互帮助
 
 Dashboard 提供与当前界面对应的帮助：按 `h` 查看当前可用控制；在图表浏览模式中按 `c` 显示或隐藏控制栏。编辑 Overlay 文本或命令时，请使用 `Ctrl-H`，这样字面量 `h` 仍可输入草稿。
