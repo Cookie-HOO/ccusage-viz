@@ -8,7 +8,7 @@ from time import monotonic
 import pytest
 from test_custom_ranking_scroll import grouped_projection, projection
 
-import ccusage_viz.tui as tui
+import ccusage_viz.tui.runtime as tui
 from ccusage_viz.cli.configuration import _to_options
 from ccusage_viz.command_parsing.parser import build_parser
 from ccusage_viz.custom_component import CustomHistoricalComponent
@@ -873,7 +873,7 @@ def test_wheel_search_editing_resets_scroll_without_data_work(dashboard):
 
 
 def test_notices_audit_and_summary_stay_fixed(dashboard):
-    from test_tui_custom import custom_summary_response
+    from tui.custom_helpers import custom_summary_response
 
     from ccusage_viz.errors import QueryError
 

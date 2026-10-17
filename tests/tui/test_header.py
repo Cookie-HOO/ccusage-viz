@@ -3,7 +3,8 @@ from decimal import Decimal
 
 import pytest
 
-import ccusage_viz.tui as tui_module
+import ccusage_viz.tui.models as tui_models
+import ccusage_viz.tui.runtime as tui_module
 from ccusage_viz.bootstrap import build_query_runtime
 from ccusage_viz.cli.configuration import _to_options
 from ccusage_viz.command_parsing.parser import build_parser
@@ -26,7 +27,8 @@ from ccusage_viz.options import (
     CustomCommandSource,
 )
 from ccusage_viz.terminal import Terminal
-from ccusage_viz.tui import (
+from ccusage_viz.tui.adjustments import _text_view_footer
+from ccusage_viz.tui.header import (
     _dashboard_title_line,
     _header_lines,
     _header_options,
@@ -36,7 +38,6 @@ from ccusage_viz.tui import (
     _reconcile_custom_dashboard_summaries,
     _replace_header_interval,
     _set_header_theme,
-    _text_view_footer,
 )
 
 
@@ -193,7 +194,7 @@ def test_custom_dashboard_summary_reconfiguration_invalidates_replaced_source() 
     header.custom_summaries[initial.dataset_id] = summary
 
     changed = _reconcile_custom_dashboard_summaries(
-        header, (tui_module.CustomDashboardSource(replacement),), now=1
+        header, (tui_models.CustomDashboardSource(replacement),), now=1
     )
 
     assert changed == (summary,)

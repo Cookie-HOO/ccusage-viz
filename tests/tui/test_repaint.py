@@ -5,7 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 
-import ccusage_viz.tui as tui
+import ccusage_viz.tui.models as tui_models
+import ccusage_viz.tui.runtime as tui
 from ccusage_viz.cli.configuration import _to_options
 from ccusage_viz.command_parsing.parser import build_parser
 from ccusage_viz.i18n import load_translator
@@ -54,13 +55,13 @@ def test_animation_ticks_reuse_static_pane(
         def finish(self) -> None:
             pass
 
-    def render(pane: tui.TuiPane, *_args: object, **_kwargs: object) -> tui.PaneRender:
+    def render(pane: tui.TuiPane, *_args: object, **_kwargs: object) -> tui_models.PaneRender:
         index = pane.pane_id
         calls[index].append(now[0])
         if isinstance(pane, tui.TuiAnimationPane):
             # One animation is fast, the other is not due during the test.
             pane.session.next_deadline = now[0] + (1 if index == 0 else 60)
-        return tui.PaneRender(f"pane {index} at {now[0]}")
+        return tui_models.PaneRender(f"pane {index} at {now[0]}")
 
     reads = [0]
 

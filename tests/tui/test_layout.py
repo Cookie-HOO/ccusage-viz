@@ -3,7 +3,10 @@ from contextlib import nullcontext
 
 import pytest
 
-import ccusage_viz.tui as tui_module
+import ccusage_viz.tui.datasets.chooser as tui_chooser
+import ccusage_viz.tui.models as tui_models
+import ccusage_viz.tui.pane_lifecycle as tui_pane_lifecycle
+import ccusage_viz.tui.runtime as tui_module
 from ccusage_viz.cli.configuration import _to_options
 from ccusage_viz.command_parsing.parser import build_parser
 from ccusage_viz.coverage import DateCoverage
@@ -12,24 +15,22 @@ from ccusage_viz.deltas import RefreshRanks
 from ccusage_viz.formatting import display_width
 from ccusage_viz.i18n import load_translator
 from ccusage_viz.query.models import QueryTrigger
-from ccusage_viz.tui import (
-    _adjustment_controls,
-    _choose_layout_shortcut,
-    _choose_pane_type,
+from ccusage_viz.tui.adjustments import _adjustment_controls, _choose_layout_shortcut
+from ccusage_viz.tui.datasets.chooser import _choose_pane_type
+from ccusage_viz.tui.layout import (
     _compose_resolved_panes,
     _frame,
     _grid_for_pane_count,
     _grid_shape,
-    _insert_pane,
-    _local_pane_content,
     _practical_grid,
-    _replace_pane,
     compose_panes,
     pane_at,
     pane_rects,
     parse_grid,
     resolve_panel_layout,
 )
+from ccusage_viz.tui.pane_lifecycle import _insert_pane, _replace_pane
+from ccusage_viz.tui.rendering import _local_pane_content
 from ccusage_viz.tui_input import InputDecoder, KeyEvent
 
 
@@ -247,7 +248,7 @@ def test_pane_chooser_wraps_backward_to_empty_and_escape_cancels(
     decoder = InputDecoder()
     decoder.feed("k\r")
     monkeypatch.setattr(
-        tui_module,
+        tui_chooser,
         "read_event",
         lambda active, timeout: active.next(now=1.0),
     )
@@ -257,11 +258,12 @@ def test_pane_chooser_wraps_backward_to_empty_and_escape_cancels(
     cancelled.feed("\x1b")
     moments = iter((1.0, 1.04))
     monkeypatch.setattr(
-        tui_module,
+        tui_chooser,
         "read_event",
         lambda active, timeout: active.next(now=next(moments)),
     )
     assert _choose_pane_type(Screen(), load_translator("en"), cancelled, height=20) is None
+
 
 
 def test_pane_chooser_uses_operation_specific_copy(
@@ -272,7 +274,7 @@ def test_pane_chooser_uses_operation_specific_copy(
     decoder.feed("\x1b")
     moments = iter((1.0, 1.04))
     monkeypatch.setattr(
-        tui_module,
+        tui_chooser,
         "read_event",
         lambda active, timeout: active.next(now=next(moments)),
     )
@@ -294,6 +296,7 @@ def test_pane_chooser_uses_operation_specific_copy(
         "Replace pane",
         "j/k select · Enter replace · Esc cancel",
     )
+
 
 
 def test_pane_chooser_localizes_names_and_includes_animation() -> None:
@@ -542,8 +545,9 @@ def test_dashboard_pane_height_keys_adjust_only_shared_row_weights(
         )
     )
     monkeypatch.setattr(tui_module, "build_query_runtime", Runtime)
-    monkeypatch.setattr(tui_module, "build_chart_registry", lambda: object())
+    monkeypatch.setattr(tui_pane_lifecycle, "build_chart_registry", lambda: object())
     monkeypatch.setattr(tui_module, "HistoricalChartComponent", Component)
+    monkeypatch.setattr(tui_pane_lifecycle, "HistoricalChartComponent", Component)
     monkeypatch.setattr(tui_module, "FramePainter", Screen)
     monkeypatch.setattr(tui_module, "tui_input_mode", nullcontext)
     monkeypatch.setattr(tui_module, "read_event", lambda _decoder, _timeout: next(keys))
@@ -552,9 +556,9 @@ def test_dashboard_pane_height_keys_adjust_only_shared_row_weights(
         tui_module, "get_terminal_size", lambda: __import__("os").terminal_size((100, 30))
     )
 
-    def render(pane: object, *_args: object) -> tui_module.PaneRender:
+    def render(pane: object, *_args: object) -> tui_models.PaneRender:
         rendered_views.append(pane.body_view)
-        return tui_module.PaneRender("chart")
+        return tui_models.PaneRender("chart")
 
     monkeypatch.setattr(tui_module, "_pane_render", render)
 

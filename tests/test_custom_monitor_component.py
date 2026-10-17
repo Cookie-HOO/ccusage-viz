@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-import ccusage_viz.tui as tui_module
+import ccusage_viz.tui.runtime as tui_module
 from ccusage_viz.chart_models import DistributionCoverage
 from ccusage_viz.custom_models import (
     CustomDimension,

@@ -4,6 +4,8 @@ from decimal import Decimal
 
 import pytest
 
+import ccusage_viz.tui.custom_rendering as tui_custom_rendering
+import ccusage_viz.tui.rendering as tui_rendering
 from ccusage_viz.core.time import DateRange
 from ccusage_viz.custom_models import CustomUnit, LocalizedText
 from ccusage_viz.formatting import strip_ansi
@@ -766,7 +768,6 @@ def test_grouped_maximum_offset_is_stable_when_base_lands_before_final_heading()
 
 
 def test_dashboard_partition_mode_switch_clears_incompatible_viewport_state() -> None:
-    import ccusage_viz.tui as tui
     from ccusage_viz.terminal import Terminal
 
     grouped = GroupedRankingViewport()
@@ -774,7 +775,7 @@ def test_dashboard_partition_mode_switch_clears_incompatible_viewport_state() ->
     model = grouped_projection()
 
     def dispatch(projection: CustomChartProjection) -> None:
-        tui._render_custom_projection(
+        tui_custom_rendering._render_custom_projection(
             projection,
             projection.config,
             load_translator("en"),
@@ -782,7 +783,7 @@ def test_dashboard_partition_mode_switch_clears_incompatible_viewport_state() ->
             accepted_at=None,
             interval=None,
             pending=False,
-            surface=tui.dashboard_pane_surface("ranking"),
+            surface=tui_rendering.dashboard_pane_surface("ranking"),
             ranking_viewport=flat,
             grouped_ranking_viewport=grouped,
         )
@@ -1563,7 +1564,6 @@ def test_density_change_reuses_data_and_preserves_stable_anchor():
 
 
 def test_standalone_custom_ranking_does_not_use_dashboard_viewport(monkeypatch):
-    import ccusage_viz.tui as tui
     from ccusage_viz.custom_component import CustomHistoricalComponent
     from ccusage_viz.terminal import Terminal
 
@@ -1573,9 +1573,9 @@ def test_standalone_custom_ranking_does_not_use_dashboard_viewport(monkeypatch):
     component.accepted_config = model.config
     component.pending_generation = None
     monkeypatch.setattr(
-        tui, "render_custom_ranking_viewport", lambda *a, **kw: pytest.fail("standalone viewport")
+        tui_custom_rendering, "render_custom_ranking_viewport", lambda *a, **kw: pytest.fail("standalone viewport")
     )
-    output = tui._custom_standalone_render(
+    output = tui_custom_rendering._custom_standalone_render(
         component, load_translator("en"), Terminal(100, 12, False, False), pending=False
     )
     assert "Project 99" in output.chart
