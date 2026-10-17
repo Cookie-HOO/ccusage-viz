@@ -6,6 +6,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date, datetime
 from math import ceil
+from threading import RLock
 from typing import Literal, Protocol
 
 import plotext as plt
@@ -67,18 +68,22 @@ class RenderContext:
     audit: RenderAudit | None = None
 
 
+_PLOT_LOCK = RLock()
+
+
 @contextmanager
 def isolated_plot() -> Iterator[None]:
-    """Contain plotext's process-global figure state, including on exceptions."""
-    terminal_limits = tuple(plt.terminal._limit)
-    plt.figure.clear()
-    plt.figure.theme("default")
-    try:
-        yield
-    finally:
+    """Serialize and contain plotext's process-global mutable figure state."""
+    with _PLOT_LOCK:
+        terminal_limits = tuple(plt.terminal._limit)
         plt.figure.clear()
         plt.figure.theme("default")
-        plt.terminal.limit(*terminal_limits)
+        try:
+            yield
+        finally:
+            plt.figure.clear()
+            plt.figure.theme("default")
+            plt.terminal.limit(*terminal_limits)
 
 
 def configure_plot(context: RenderContext) -> None:
