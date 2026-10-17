@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, replace
 from datetime import date, datetime
 from typing import TYPE_CHECKING, Literal, TypeAlias
@@ -194,6 +195,30 @@ class CustomCommandSource:
             raise ValueError("custom source_kind must be command or installed")
 
 
+def custom_command_sources_equivalent(
+    left: CustomCommandSource, right: CustomCommandSource
+) -> bool:
+    """Compare command sources using current-filesystem identity for absolute paths."""
+
+    if (
+        left.dataset_id != right.dataset_id
+        or left.source_kind != right.source_kind
+        or len(left.command_argv) != len(right.command_argv)
+    ):
+        return False
+    for left_arg, right_arg in zip(left.command_argv, right.command_argv, strict=True):
+        if left_arg == right_arg:
+            continue
+        if not (os.path.isabs(left_arg) and os.path.isabs(right_arg)):
+            return False
+        try:
+            if not os.path.samefile(left_arg, right_arg):
+                return False
+        except OSError:
+            return False
+    return True
+
+
 CustomFilters: TypeAlias = tuple[tuple[str, tuple[str, ...]], ...]
 
 
@@ -248,11 +273,21 @@ class ChartPaneConfig:
     attachment_theme: str | None = None
 
 
+CUSTOM_RANKING_ITEM_SPACINGS = ("compact", "space", "line", "dashed")
+
+
 @dataclass(frozen=True, slots=True)
 class CustomChartPaneConfig:
     chart: CustomChartConfig
     attachment_style: str | None = None
     attachment_theme: str | None = None
+    ranking_item_spacing: str = "compact"
+
+    def __post_init__(self) -> None:
+        if self.ranking_item_spacing not in CUSTOM_RANKING_ITEM_SPACINGS:
+            raise ValueError("unsupported custom ranking item spacing")
+        if self.chart.kind != "ranking" and self.ranking_item_spacing != "compact":
+            raise ValueError("custom ranking item spacing requires a ranking chart")
 
 
 @dataclass(frozen=True, slots=True)
@@ -316,7 +351,7 @@ class DashboardLaunch:
             if not isinstance(pane, CustomChartPaneConfig):
                 continue
             previous = sources.setdefault(pane.chart.source.dataset_id, pane.chart.source)
-            if previous != pane.chart.source:
+            if not custom_command_sources_equivalent(previous, pane.chart.source):
                 raise ValueError(
                     "custom dataset ID must use one command configuration across the dashboard"
                 )

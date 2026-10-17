@@ -79,6 +79,7 @@ from ccusage_viz.configuration import (
     default_custom_pane,
     v2_metric_probe_descriptor,
 )
+from ccusage_viz.core.custom_ranking_time import refresh_custom_ranking_range
 from ccusage_viz.core.time import (
     DateRange,
     local_today,
@@ -87,6 +88,7 @@ from ccusage_viz.core.time import (
 from ccusage_viz.coverage import DateCoverage, DateInterval
 from ccusage_viz.custom_component import (
     CustomHistoricalComponent,
+    custom_date_summary_supported,
     custom_replacement_required,
     custom_summary_replacement_required,
 )
@@ -118,9 +120,6 @@ from ccusage_viz.custom_protocol import (
 from ccusage_viz.dashboard import DASHBOARD_PRESETS
 from ccusage_viz.dashboard_history import DashboardHistory
 from ccusage_viz.dashboard_layout import (
-    PaneLayout as ResolvedPaneLayout,
-)
-from ccusage_viz.dashboard_layout import (
     MIN_PANE_HEIGHT,
     MIN_PANE_WIDTH,
     PaneRect,
@@ -130,6 +129,9 @@ from ccusage_viz.dashboard_layout import (
     layout_for_pane_count,
     reconcile_weights,
     resolve_pane_layout,
+)
+from ccusage_viz.dashboard_layout import (
+    PaneLayout as ResolvedPaneLayout,
 )
 from ccusage_viz.dashboard_layout import (
     pane_at as layout_pane_at,
@@ -223,6 +225,7 @@ from ccusage_viz.options import (
     adjust_custom_chart,
     adjust_standalone,
     compatible_styles,
+    custom_command_sources_equivalent,
     is_monitor_ranking_style,
     is_v2_custom_ranking,
     replace_chart_filters,
@@ -598,6 +601,7 @@ class DashboardDatasetModalState:
     draft: CustomPaneDraft = field(default_factory=lambda: CustomPaneDraft())
     error: str | None = None
     future: Future[object] | None = None
+    pending_dataset_id: str | None = None
     entries: tuple[object, ...] = ()
     selected_dataset_id: str | None = None
     artifact: object | None = None
@@ -657,14 +661,14 @@ def _custom_metric_group_switch_available(pane: TuiCustomPane) -> bool:
     metric = next(
         (item for item in descriptor.metrics if item.id == accepted_config.metric_id), None
     )
-    return metric is not None and metric.group_id is not None and any(
-        group.id == metric.group_id for group in descriptor.metric_groups
+    return (
+        metric is not None
+        and metric.group_id is not None
+        and any(group.id == metric.group_id for group in descriptor.metric_groups)
     )
 
 
-def _custom_metric_periods(
-    metric: V2MetricDescriptor, kind: str
-) -> tuple[str, ...]:
+def _custom_metric_periods(metric: V2MetricDescriptor, kind: str) -> tuple[str, ...]:
     """Return the periods declared for one Metric's selected historical chart."""
 
     capability = metric.capabilities.charts.get(kind)
@@ -756,6 +760,23 @@ def _metric_chooser_display_rows(
             )
         )
     return tuple(display_rows)
+
+
+def _metric_chooser_previous_offset(
+    rows: tuple[MetricChooserRow, ...], *, selected_metric_index: int, offset: int
+) -> int | None:
+    """Reveal rows before the first Metric before wrapping its selection."""
+
+    selectable_positions = tuple(
+        position for position, row in enumerate(rows) if row.metric_index is not None
+    )
+    if (
+        not selectable_positions
+        or rows[selectable_positions[0]].metric_index != selected_metric_index
+    ):
+        return None
+    first_position = selectable_positions[0]
+    return first_position - 1 if offset == first_position and first_position > 0 else None
 
 
 def _dataset_metric_chooser_chrome(
@@ -906,15 +927,79 @@ def _new_header(options: DashboardLaunch, runtime: QueryRuntime) -> DashboardHea
     )
 
 
+def _custom_source_conflict(
+    panes: list[TuiPane], source: CustomCommandSource, *, replacing_index: int | None = None
+) -> tuple[CustomCommandSource, CustomCommandSource] | None:
+    """Return the existing and proposed sources when their Dataset commands conflict."""
+
+    for index, pane in enumerate(panes):
+        if index == replacing_index or not isinstance(pane, TuiCustomPane):
+            continue
+        existing = pane.component.candidate.source
+        if existing.dataset_id == source.dataset_id and not custom_command_sources_equivalent(
+            existing, source
+        ):
+            return existing, source
+    return None
+
+
+def _dashboard_custom_source_conflict(
+    panes: list[TuiPane],
+) -> tuple[CustomCommandSource, CustomCommandSource] | None:
+    """Return the first ambiguous pair of Dataset command sources in the Dashboard."""
+
+    sources: dict[str, CustomCommandSource] = {}
+    for pane in panes:
+        if not isinstance(pane, TuiCustomPane):
+            continue
+        source = pane.component.candidate.source
+        previous = sources.setdefault(source.dataset_id, source)
+        if not custom_command_sources_equivalent(previous, source):
+            return previous, source
+    return None
+
+
+def _custom_source_conflict_message(
+    conflict: tuple[CustomCommandSource, CustomCommandSource],
+    translator: Translator,
+    *,
+    preset: bool = False,
+) -> str:
+    """Describe both sides of a Dataset source conflict with shell-safe commands."""
+
+    existing, proposed = conflict
+    heading = translator.text(
+        "status.tui_preset_source_conflict" if preset else "status.custom_dataset_source_conflict",
+        dataset_id=existing.dataset_id,
+    )
+
+    def describe(label: str, source: CustomCommandSource) -> str:
+        kind = translator.text(f"label.custom_source_{source.source_kind}")
+        return translator.text(
+            "status.custom_dataset_source_detail",
+            label=translator.text(label),
+            kind=kind,
+            command=shlex.join(source.command_argv),
+        )
+
+    return "\n".join(
+        (
+            heading,
+            describe("label.custom_source_existing", existing),
+            describe("label.custom_source_proposed", proposed),
+        )
+    )
+
+
 def _custom_dashboard_sources(panes: list[TuiPane]) -> tuple[CustomDashboardSource, ...]:
     """Choose the first visible Pane context for each distinct dataset ID."""
     sources: dict[str, CustomDashboardSource] = {}
     for pane in panes:
         if not isinstance(pane, TuiCustomPane):
             continue
-        config = pane.component.candidate
+        config = pane.component.request_config
         summary_mode = config.metric_summary
-        if summary_mode == "none":
+        if summary_mode == "none" or not custom_date_summary_supported(config):
             continue
         sources.setdefault(
             config.source.dataset_id,
@@ -1526,8 +1611,13 @@ def _new_pane(
                 AnimationRenderer(),
                 AnimationOverlayRuntime(pane_config.overlay),
             )
+        # The public helper remains usable for a single Dashboard pane outside
+        # the Dashboard construction loop; regular Dashboard callers pass a
+        # stable pane-specific owner ID.
+        if owner_id is None:
+            owner_id = "dashboard:pane"
         if not isinstance(owner_id, str):
-            raise TypeError("dashboard chart pane owner id is required")
+            raise TypeError("dashboard chart pane owner id must be a string")
         if isinstance(pane_config, CustomChartPaneConfig):
             started_at = time.monotonic()
             component = (
@@ -1571,9 +1661,12 @@ def _new_pane(
                     FixedIntervalScheduler(options.host.refresh_interval, now=started_at),
                     LifecycleOperation(f"{owner_id}:summary"),
                     filters=pane_config.chart.filters,
+                    metric_id=pane_config.chart.metric_id,
+                    summary_mode=pane_config.chart.metric_summary,
                 ),
                 attachment=attachment,
                 attachment_renderer=attachment_renderer,
+                ranking_item_spacing=pane_config.ranking_item_spacing,
             )
             if attachment is not None:
                 if pane_config.attachment_style is not None:
@@ -1839,6 +1932,7 @@ def _custom_render_context(
     interval: float | None,
     pending: bool,
     surface: HistoricalPresentationSurface,
+    refreshing: bool | None = None,
     controls: SurfaceControls = EMPTY_SURFACE_CONTROLS,
     reserved_summary_rows: int = 0,
 ) -> RenderContext:
@@ -1857,7 +1951,7 @@ def _custom_render_context(
         accepted_at,
         None,
         interval,
-        refreshing=pending,
+        refreshing=pending if refreshing is None else refreshing,
         querying=pending,
         pending=pending,
     )
@@ -1914,15 +2008,40 @@ def _render_custom_failure(
     )
 
 
+def _retain_custom_facts_while_pending(
+    lifecycle: LifecycleOperation[object] | None = None,
+    *,
+    generation: int | None = None,
+    trigger: LifecycleTrigger | None = None,
+) -> bool:
+    """Whether the newest same-generation Custom request may retain accepted facts.
+
+    A periodic refresh can be queued while an older configuration request is
+    still active. The queued intent is then the user's visible next state, so
+    it must win over the active operation when choosing the pending display.
+    """
+
+    if lifecycle is not None:
+        pending = lifecycle.coordinator.pending
+        if pending is not None and pending.generation == generation:
+            trigger = pending.trigger
+        else:
+            operation = lifecycle.operation
+            if operation is not None and operation.generation == generation:
+                trigger = operation.trigger
+    return trigger in {LifecycleTrigger.PERIODIC, LifecycleTrigger.MANUAL}
+
+
 def _render_custom_monitor(
     component: CustomMonitorComponent,
     translator: Translator,
     terminal: Terminal,
     *,
     interval: float,
+    refreshing: bool = False,
 ) -> PaneRender:
     config = component.accepted_config or component.candidate
-    transient = component.accepted_response is None or component.pending
+    transient = component.accepted_response is None or (component.pending and not refreshing)
     context = dashboard_pane_surface("timeline").context(
         terminal,
         translator,
@@ -1939,8 +2058,8 @@ def _render_custom_monitor(
             None,
             None,
             None,
-            querying=transient and component.error is None,
-            pending=transient,
+            querying=(transient or refreshing) and component.error is None,
+            pending=transient or refreshing,
         ),
     )
     if transient:
@@ -2023,6 +2142,7 @@ def _render_custom_projection(
     interval: float | None,
     pending: bool,
     surface: HistoricalPresentationSurface,
+    refreshing: bool | None = None,
     summary: CustomDashboardSummary | None = None,
     controls: SurfaceControls = EMPTY_SURFACE_CONTROLS,
     search_query: str = "",
@@ -2034,6 +2154,7 @@ def _render_custom_projection(
     entry_limit: int | None = None,
     ranking_viewport: RankingViewport | None = None,
     grouped_ranking_viewport: GroupedRankingViewport | None = None,
+    scrollbar_hovered: bool = False,
 ) -> PaneRender:
     context = _custom_render_context(
         config,
@@ -2043,10 +2164,15 @@ def _render_custom_projection(
         interval=interval,
         pending=pending,
         surface=surface,
+        refreshing=refreshing,
         controls=controls,
     )
     summary_render = ""
-    if summary is not None and summary.response is not None:
+    if (
+        summary is not None
+        and summary.response is not None
+        and custom_date_summary_supported(config)
+    ):
         summary_render = render_custom_metrics(
             (summary.response.summary.metric,),
             context,
@@ -2075,6 +2201,7 @@ def _render_custom_projection(
                 interval=interval,
                 pending=pending,
                 surface=surface,
+                refreshing=refreshing,
                 controls=controls,
                 reserved_summary_rows=len(summary_render.splitlines()),
             )
@@ -2111,6 +2238,7 @@ def _render_custom_projection(
             copied_entry_id=copied_entry_id,
             item_spacing=item_spacing,
             scrollbar=True,
+            scrollbar_hovered=scrollbar_hovered,
             copy_all_action=True,
             copied_all=copied_all,
         )
@@ -2166,6 +2294,7 @@ def _pane_render(
     defer_animation_overlay: bool = False,
     ranking_entry_offset: int = 0,
     ranking_entry_limit: int | None = None,
+    scrollbar_hovered: bool = False,
 ) -> PaneRender:
     if isinstance(pane, TuiEmptyPane):
         return PaneRender(
@@ -2178,6 +2307,11 @@ def _pane_render(
         )
     if isinstance(pane, TuiCustomPane):
         component = pane.component
+        display_config = (
+            component.accepted_config or component.candidate
+            if isinstance(component, CustomHistoricalComponent)
+            else None
+        )
         pane.ranking_viewport.active = False
         pane.grouped_ranking_viewport.active = False
         for viewport in (pane.ranking_viewport, pane.grouped_ranking_viewport):
@@ -2185,10 +2319,7 @@ def _pane_render(
             viewport.copy_all_hit = None
             viewport.hits.clear()
         pane.ranking_copy_rows.clear()
-        if (
-            not isinstance(component, CustomHistoricalComponent)
-            or component.candidate.kind != "ranking"
-        ):
+        if display_config is None or display_config.kind != "ranking":
             pane.ranking_viewport.clear()
             pane.grouped_ranking_viewport.clear()
         if (
@@ -2207,7 +2338,13 @@ def _pane_render(
                     format_full_command_display(format_full_command(options), terminal.width)
                 )
             rendered = _render_custom_monitor(
-                component, translator, terminal, interval=pane.interval
+                component,
+                translator,
+                terminal,
+                interval=pane.interval,
+                refreshing=_retain_custom_facts_while_pending(
+                    pane.lifecycle, generation=component.generation
+                ),
             )
             return PaneRender(
                 _append_custom_monitor_attachment(
@@ -2249,39 +2386,63 @@ def _pane_render(
                     view=pane.body_view,
                 )
             )
-        if component.model is None:
-            return PaneRender(translator.text("status.loading"))
-        if component.is_pending:
+        if component.is_pending and (
+            component.model is None
+            or not _retain_custom_facts_while_pending(
+                pane.lifecycle, generation=component.generation
+            )
+        ):
+            active_config = component.request_config
             context = _custom_render_context(
-                component.candidate,
+                active_config,
                 translator,
                 terminal,
                 accepted_at=component.accepted_at,
                 interval=pane.interval,
                 pending=True,
-                surface=dashboard_pane_surface(component.candidate.kind),
+                surface=dashboard_pane_surface(active_config.kind),
             )
-            rendered = render_custom_pending(component.candidate, context, component.presentation)
+            rendered = render_custom_pending(active_config, context, component.presentation)
             audit = render_audit(context)
             return PaneRender("\n".join(line for line in (rendered, audit) if line))
+        if component.model is None:
+            return PaneRender(translator.text("status.loading"))
+        assert display_config is not None
+        retain_accepted = _retain_custom_facts_while_pending(
+            pane.lifecycle, generation=component.generation
+        )
+        data_pending = component.is_pending and not retain_accepted
         rendered = _render_custom_projection(
             component.model,
-            component.accepted_config or component.candidate,
+            display_config,
             translator,
             terminal,
             accepted_at=component.accepted_at,
             interval=pane.interval,
-            pending=component.is_pending or pane.lifecycle.submission is not None,
-            surface=dashboard_pane_surface((component.accepted_config or component.candidate).kind),
-            summary=pane.summary,
+            pending=data_pending,
+            refreshing=component.is_pending or pane.lifecycle.submission is not None,
+            surface=dashboard_pane_surface(display_config.kind),
+            # Keep accepted ranking facts visible while a sub-day request is
+            # pending, but do not pair them with a stale date-only summary.
+            summary=(
+                pane.summary
+                if custom_date_summary_supported(component.candidate)
+                and custom_date_summary_supported(component.request_config)
+                and (
+                    display_config.metric_id is None
+                    or pane.summary is not None
+                    and pane.summary.metric_id == display_config.metric_id
+                )
+                else None
+            ),
             search_query=(
                 pane.ranking_search.query
-                if component.candidate.kind == "ranking" and pane.body_view == "chart"
+                if display_config.kind == "ranking" and pane.body_view == "chart"
                 else ""
             ),
             search_editing=(
                 pane.ranking_search.editing
-                if component.candidate.kind == "ranking" and pane.body_view == "chart"
+                if display_config.kind == "ranking" and pane.body_view == "chart"
                 else False
             ),
             copied_entry_id=(
@@ -2295,17 +2456,18 @@ def _pane_render(
             entry_limit=ranking_entry_limit,
             ranking_viewport=(
                 pane.ranking_viewport
-                if dashboard is not None and component.candidate.kind == "ranking"
+                if dashboard is not None and display_config.kind == "ranking"
                 else None
             ),
             grouped_ranking_viewport=(
                 pane.grouped_ranking_viewport
-                if dashboard is not None and component.candidate.kind == "ranking"
+                if dashboard is not None and display_config.kind == "ranking"
                 else None
             ),
+            scrollbar_hovered=scrollbar_hovered,
         )
         if (
-            component.candidate.kind == "ranking"
+            display_config.kind == "ranking"
             and pane.body_view == "chart"
             and pane.ranking_item_spacing != "compact"
             and not pane.active_ranking_viewport.active
@@ -2324,7 +2486,11 @@ def _pane_render(
         if component.error is not None:
             return PaneRender(
                 rendered.chart,
-                (*rendered.notices, *warning_notices, format_error(component.error, translator, color=False)),
+                (
+                    *rendered.notices,
+                    *warning_notices,
+                    format_error(component.error, translator, color=False),
+                ),
             )
         return PaneRender(rendered.chart, (*rendered.notices, *warning_notices))
     if isinstance(pane, TuiAnimationPane):
@@ -2776,11 +2942,7 @@ def _cycle_custom_partitioning(
             group_by = config.group_by
         elif partition_by is not None:
             group_by = next(
-                (
-                    choice
-                    for choice in groupings
-                    if choice is not None and choice != partition_by
-                ),
+                (choice for choice in groupings if choice is not None and choice != partition_by),
                 None,
             )
             if group_by is None:
@@ -3032,9 +3194,7 @@ def _custom_pane_adjustment_bindings(pane: TuiCustomPane, page: str) -> tuple[tu
                 and (
                     _cycle_custom_partitioning(chart, partitions, capability.group_by, step=1)
                     != chart
-                    or _cycle_custom_partitioning(
-                        chart, partitions, capability.group_by, step=-1
-                    )
+                    or _cycle_custom_partitioning(chart, partitions, capability.group_by, step=-1)
                     != chart
                 )
             ):
@@ -4553,7 +4713,11 @@ def _choose_dataset_pane_config(
                 row.metric_index for row in metric_rows if row.metric_index is not None
             )
             metric_index = next(
-                (index for index in selectable if descriptor.metrics[index].id == descriptor.default_metric_id),
+                (
+                    index
+                    for index in selectable
+                    if descriptor.metrics[index].id == descriptor.default_metric_id
+                ),
                 selectable[0],
             )
             metric_offset = 0
@@ -4615,10 +4779,22 @@ def _choose_dataset_pane_config(
                 if event.value == "\x1b":
                     break
                 if event.value in {"j", "\x1b[B"}:
-                    metric_index = selectable[(selectable.index(metric_index) + 1) % len(selectable)]
+                    metric_index = selectable[
+                        (selectable.index(metric_index) + 1) % len(selectable)
+                    ]
                     continue
                 if event.value in {"k", "\x1b[A"}:
-                    metric_index = selectable[(selectable.index(metric_index) - 1) % len(selectable)]
+                    reveal_offset = _metric_chooser_previous_offset(
+                        metric_display_rows,
+                        selected_metric_index=metric_index,
+                        offset=metric_offset,
+                    )
+                    if reveal_offset is not None:
+                        metric_offset = reveal_offset
+                    else:
+                        metric_index = selectable[
+                            (selectable.index(metric_index) - 1) % len(selectable)
+                        ]
                     continue
                 if event.value in {"\r", "\n"}:
                     metric_id = metric.id
@@ -4743,6 +4919,7 @@ def _custom_standalone_render(
     interval: float | None = None,
     pending: bool,
     summary: CustomDashboardSummary | None = None,
+    pending_trigger: LifecycleTrigger | None = None,
 ) -> PaneRender:
     if component.error is not None and component.model is None:
         return _render_custom_failure(
@@ -4753,21 +4930,24 @@ def _custom_standalone_render(
             interval=interval,
             surface=standalone_surface(component.candidate.kind),
         )
-    if component.model is None:
-        return PaneRender(translator.text("status.loading"))
-    if component.is_pending:
+    if component.is_pending and (
+        component.model is None or not _retain_custom_facts_while_pending(trigger=pending_trigger)
+    ):
+        active_config = component.request_config
         context = _custom_render_context(
-            component.candidate,
+            active_config,
             translator,
             terminal,
             accepted_at=component.accepted_at,
             interval=interval,
             pending=True,
-            surface=standalone_surface(component.candidate.kind),
+            surface=standalone_surface(active_config.kind),
         )
-        rendered = render_custom_pending(component.candidate, context, component.presentation)
+        rendered = render_custom_pending(active_config, context, component.presentation)
         audit = render_audit(context)
         return PaneRender("\n".join(line for line in (rendered, audit) if line))
+    if component.model is None:
+        return PaneRender(translator.text("status.loading"))
     rendered = _render_custom_projection(
         component.model,
         component.accepted_config or component.candidate,
@@ -4775,7 +4955,9 @@ def _custom_standalone_render(
         terminal,
         accepted_at=component.accepted_at,
         interval=interval,
-        pending=pending,
+        pending=component.is_pending
+        and not _retain_custom_facts_while_pending(trigger=pending_trigger),
+        refreshing=pending,
         surface=standalone_surface((component.accepted_config or component.candidate).kind),
         summary=summary,
     )
@@ -4795,6 +4977,7 @@ def _run_custom_standalone_adjustment(
     screen: FramePainter,
     *,
     ascii: bool,
+    timezone: str = "UTC",
 ) -> tuple[CustomChartConfig, bool] | None:
     """Adjust a custom chart without entering Dashboard pane adjustment mode."""
 
@@ -4891,7 +5074,12 @@ def _run_custom_standalone_adjustment(
                         if key in {"p", "P"}
                         else current
                     )
-                    updated = adjust_custom_chart(adjustment, key)
+                    updated = adjust_custom_chart(
+                        adjustment,
+                        key,
+                        now=datetime.now().astimezone(),
+                        timezone=timezone,
+                    )
                 elif (
                     key in {"g", "G"}
                     and not is_v2_custom_ranking(current)
@@ -5026,7 +5214,9 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
             )
         purpose = "comparison" if component.comparison_is_pending else "primary"
         config = (
-            component.candidate if purpose == "primary" else component.comparison_request_config()
+            component.request_config
+            if purpose == "primary"
+            else component.comparison_request_config()
         )
         if config is None:
             raise RuntimeError("custom comparison request is no longer required")
@@ -5057,7 +5247,7 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
     def start_summary(
         operation: OperationToken,
     ) -> tuple[Future[CustomOutcome], Callable[[], None]]:
-        config = component.candidate
+        config = component.request_config
         if options.host.timezone is None:
             raise RuntimeError("custom Dataset requests require a timezone")
         plan = (
@@ -5068,18 +5258,30 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
             )
         )
         summary.select(config.source, config.filters)
-        intent = custom_summary_query_intent(
-            config.source,
-            plan,
-            filters=config.filters,
-            timezone=options.host.timezone,
-            owner_id=operation.owner_id,
-            generation=operation.generation,
-            trigger=query_trigger(operation.trigger),
-            process=options.process,
+        intent = (
+            custom_v2_summary_query_intent(
+                config,
+                plan,
+                timezone=options.host.timezone,
+                owner_id=operation.owner_id,
+                generation=operation.generation,
+                trigger=query_trigger(operation.trigger),
+                process=options.process,
+            )
+            if config.metric_id is not None
+            else custom_summary_query_intent(
+                config.source,
+                plan,
+                filters=config.filters,
+                timezone=options.host.timezone,
+                owner_id=operation.owner_id,
+                generation=operation.generation,
+                trigger=query_trigger(operation.trigger),
+                process=options.process,
+            )
         )
         request = intent.payload
-        if not isinstance(request, CustomSummaryRequest):
+        if not isinstance(request, (CustomSummaryRequest, V2SummaryRequest)):
             raise TypeError("custom standalone summary intent has an unexpected payload")
         summary.requested_period = request.scope
         summary.requested_as_of_date = request.current.until
@@ -5089,12 +5291,12 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
         ), handle.cancel
 
     def request_summary(trigger: LifecycleTrigger, *, replace_active: bool = False) -> bool:
-        if not probe_complete:
+        config = component.request_config
+        if not probe_complete or not custom_date_summary_supported(config):
+            if summary.response is not None or summary.lifecycle.active is not None:
+                summary.invalidate()
             return False
-        source_changed = (
-            summary.source != component.candidate.source
-            or summary.filters != component.candidate.filters
-        )
+        source_changed = summary.source != config.source or summary.filters != config.filters
         if source_changed:
             summary.invalidate()
         try:
@@ -5135,8 +5337,10 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
         if roll_range:
             refreshed = replace(
                 component.candidate,
-                date_range=refresh_date_range(
-                    component.candidate.date_range, timezone=options.host.timezone
+                date_range=refresh_custom_ranking_range(
+                    component.candidate.date_range,
+                    now=datetime.now().astimezone(),
+                    timezone=options.host.timezone,
                 ),
             )
             component.configure(refreshed, data_affecting=refreshed != component.candidate)
@@ -5202,6 +5406,9 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
                 interval=options.host.interval,
                 pending=lifecycle.submission is not None,
                 summary=summary,
+                pending_trigger=lifecycle.operation.trigger
+                if lifecycle.operation is not None
+                else None,
             )
             notices = provisional.notices
         except UsageError as exc:
@@ -5233,6 +5440,9 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
                     interval=options.host.interval,
                     pending=lifecycle.submission is not None,
                     summary=summary,
+                    pending_trigger=lifecycle.operation.trigger
+                    if lifecycle.operation is not None
+                    else None,
                 )
                 body, notices = rendered.chart, rendered.notices
             except UsageError:
@@ -5509,9 +5719,7 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
                                 accepted = component.apply_provider_result(
                                     outcome.result,
                                     purpose=purpose,
-                                    comparison_request_config=(
-                                        outcome.comparison_request_config
-                                    ),
+                                    comparison_request_config=(outcome.comparison_request_config),
                                 )
                                 if accepted:
                                     lifecycle.complete(operation, generation=operation.generation)
@@ -5619,7 +5827,11 @@ def run_custom_standalone(options: StandaloneLaunch, translator: Translator) -> 
                     paint()
                 elif key in {"m", "M"} and body_view == "chart":
                     picked = _run_custom_standalone_adjustment(
-                        component, translator, screen, ascii=options.host.ascii
+                        component,
+                        translator,
+                        screen,
+                        ascii=options.host.ascii,
+                        timezone=options.host.timezone or "UTC",
                     )
                     if picked is not None:
                         updated, data_affecting = picked
@@ -5708,6 +5920,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
     help_was_active = False
     last_click: tuple[int, float] | None = None
     scrollbar_drag: tuple[int, int] | None = None
+    scrollbar_hovered_pane: int | None = None
     copy_feedback = TransientFeedback()
     manual_refresh_operations: set[OperationToken] = set()
     displayed_custom_warnings: set[tuple[str, str]] = set()
@@ -5842,10 +6055,17 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             preset_manager = None
             return
         if isinstance(command, SavePreset):
+            conflict = _dashboard_custom_source_conflict(panes)
+            if conflict is not None:
+                preset_manager = replace(
+                    preset_manager,
+                    notice=_custom_source_conflict_message(conflict, translator, preset=True),
+                )
+                return
             try:
                 record = preset_from_launch(command.name, active_dashboard_launch())
                 DashboardPresetStore(dashboard_preset_state_root()).save(record)
-            except (DashboardPresetStoreError, DashboardPresetValidationError):
+            except (DashboardPresetStoreError, DashboardPresetValidationError, ValueError):
                 preset_manager = replace(preset_manager, notice="preset-save-failed")
             else:
                 current_preset_key = f"user:{command.name}"
@@ -6185,7 +6405,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         summary = pane.summary
         if summary is None:
             raise RuntimeError("custom Pane has no summary lifecycle")
-        config = pane.component.candidate
+        config = pane.component.request_config
         if options.host.timezone is None:
             raise RuntimeError("custom Dataset requests require a timezone")
         plan = (
@@ -6240,7 +6460,11 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         summary = pane.summary
         if summary is None:
             return False
-        config = pane.component.candidate
+        config = pane.component.request_config
+        if not custom_date_summary_supported(config):
+            if summary.response is not None or summary.lifecycle.active is not None:
+                summary.invalidate()
+            return False
         source_changed = summary.source != config.source or summary.filters != config.filters
         if source_changed:
             summary.invalidate()
@@ -6318,8 +6542,10 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 component.configure(
                     replace(
                         component.candidate,
-                        date_range=refresh_date_range(
-                            component.candidate.date_range, timezone=options.host.timezone
+                        date_range=refresh_custom_ranking_range(
+                            component.candidate.date_range,
+                            now=datetime.now().astimezone(),
+                            timezone=options.host.timezone,
                         ),
                     ),
                     data_affecting=True,
@@ -6757,7 +6983,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                             isinstance(failure, CustomProtocolFailure)
                             and failure.code == "unsupported_query"
                             and failure.unsupported is not None
-                            and isinstance(pane.component, (CustomHistoricalComponent, CustomMonitorComponent))
+                            and isinstance(
+                                pane.component, (CustomHistoricalComponent, CustomMonitorComponent)
+                            )
                             and pane.component.switch_target_config is not None
                             and pane.component.v2_descriptor is not None
                         ):
@@ -6788,7 +7016,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                             isinstance(failure, CustomProtocolFailure)
                             and failure.code == "unsupported_query"
                             and failure.unsupported is not None
-                            and isinstance(pane.component, (CustomHistoricalComponent, CustomMonitorComponent))
+                            and isinstance(
+                                pane.component, (CustomHistoricalComponent, CustomMonitorComponent)
+                            )
                             and pane.component.switch_target_config is not None
                             and pane.component.v2_descriptor is not None
                         ):
@@ -7154,6 +7384,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                             if attachment is not None and pane.attachment_enabled
                             else None,
                             attachment.theme if attachment is not None else None,
+                            pane.ranking_item_spacing,
                         ),
                         pane.body_view,
                         attachment.spec.style if attachment is not None else None,
@@ -7259,6 +7490,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     pane.session.set_theme(pane_state.animation_theme, now)
             elif isinstance(pane, TuiCustomPane):
                 assert isinstance(pane_state.config, CustomChartPaneConfig)
+                pane.ranking_item_spacing = pane_state.config.ranking_item_spacing
                 if pane.component.candidate != pane_state.config.chart:
                     current = pane.component.candidate
                     data_affecting = custom_replacement_required(current, pane_state.config.chart)
@@ -8193,6 +8425,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         )
         layout = grid_geometry(size.columns, size.lines, header_rows, 0)
         slot = layout.topology.slot(pane_index)
+
         def can_adjust_axis(
             *, axis: str, weights: tuple[int, ...], index: int
         ) -> tuple[bool, tuple[int, ...]]:
@@ -8215,7 +8448,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 ),
             )
             before = layout.column_sizes if axis == "column" else layout.row_sizes
-            after = candidate_layout.column_sizes if axis == "column" else candidate_layout.row_sizes
+            after = (
+                candidate_layout.column_sizes if axis == "column" else candidate_layout.row_sizes
+            )
             return after != before, candidate
 
         if axis == "column":
@@ -8268,15 +8503,50 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         if (
             isinstance(pane, TuiCustomPane)
             and isinstance(pane.component, CustomHistoricalComponent)
-            and pane.component.candidate.kind == "ranking"
+            and (pane.component.accepted_config or pane.component.candidate).kind == "ranking"
             and pane.body_view == "chart"
             and pane.active_ranking_viewport.active
         ):
             pane.active_ranking_viewport.scroll(event.delta)
 
+    def handle_scrollbar_hover(event: MouseEvent) -> bool:
+        """Track whether unpressed pointer motion is inside a Ranking scrollbar."""
+        nonlocal scrollbar_hovered_pane
+        blocked = (
+            body_view != "chart"
+            or displayed_layout is None
+            or help_overlay is not None
+            or preset_manager is not None
+            or dataset_modal is not None
+            or chooser_overlay is not None
+            or overlay_editor is not None
+            or overlay_history is not None
+            or custom_logs_pane is not None
+        )
+        hovered: int | None = None
+        if not blocked and not event.pressed:
+            assert displayed_layout is not None
+            grid_x = event.x - 1
+            grid_y = event.y - displayed_header_rows - 1
+            selected = layout_pane_at(displayed_layout, grid_x, grid_y)
+            if selected is not None:
+                pane = panes[selected]
+                viewport = pane.active_ranking_viewport if isinstance(pane, TuiCustomPane) else None
+                if viewport is not None and viewport.active and viewport.scrollbar is not None:
+                    rect = displayed_layout.pane(selected)
+                    framed = frame_style != "none" or selected == focused
+                    interior_column = grid_x - rect.left - int(framed)
+                    interior_row = grid_y - rect.top - int(framed)
+                    if viewport.scrollbar.contains(interior_column, interior_row):
+                        hovered = selected
+        if scrollbar_hovered_pane == hovered:
+            return False
+        scrollbar_hovered_pane = hovered
+        return True
+
     def handle_scrollbar_drag(event: MouseEvent) -> bool:
         """Let a press, drag, or track click on a Ranking scrollbar move its body."""
-        nonlocal scrollbar_drag
+        nonlocal scrollbar_drag, scrollbar_hovered_pane
         blocked = (
             body_view != "chart"
             or displayed_layout is None
@@ -8290,6 +8560,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         )
         if blocked:
             scrollbar_drag = None
+            scrollbar_hovered_pane = None
             return False
         # A release ends any capture without consuming other mouse handling.
         if not event.pressed:
@@ -8333,6 +8604,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         interior_column = grid_x - rect.left - int(framed)
         if not bar.contains(interior_column, interior_row):
             return False
+        # Keep the expanded visual state throughout a scrollbar interaction,
+        # including held-button motion reports that are not hover events.
+        scrollbar_hovered_pane = selected
         if bar.on_thumb(interior_row):
             # Capture the thumb; a stationary press must not move the offset.
             scrollbar_drag = (selected, bar.grab_at(interior_row))
@@ -8668,9 +8942,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 cell_height = rect.height
                 if cell_width < MIN_PANE_WIDTH or cell_height < MIN_PANE_HEIGHT:
                     rendered_panes.append(
-                        clip_width(
-                            translator.text("status.tui_pane_too_small"), max(0, cell_width)
-                        )
+                        clip_width(translator.text("status.tui_pane_too_small"), max(0, cell_width))
                         if cell_width > 0 and cell_height > 0
                         else ""
                     )
@@ -8785,7 +9057,10 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         )
                     )
                     continue
-                cache_key = (id(pane), rect, terminal, framed)
+                scrollbar_expanded = index == scrollbar_hovered_pane or (
+                    scrollbar_drag is not None and index == scrollbar_drag[0]
+                )
+                cache_key = (id(pane), rect, terminal, framed, scrollbar_expanded)
                 cached = pane_render_cache.get(index)
                 deadline = _pane_animation_deadline(pane)
                 if (
@@ -8812,6 +9087,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         translator,
                         terminal,
                         dashboard=options,
+                        scrollbar_hovered=scrollbar_expanded,
                     )
                 else:
                     rendered = _pane_render(pane, translator, terminal)
@@ -8906,7 +9182,8 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 if (
                     isinstance(text_pane, TuiCustomPane)
                     and isinstance(text_pane.component, CustomHistoricalComponent)
-                    and text_pane.component.candidate.kind == "ranking"
+                    and (text_pane.component.accepted_config or text_pane.component.candidate).kind
+                    == "ranking"
                 ):
                     capture_custom_ranking_copy_rows(
                         text_pane,
@@ -9114,24 +9391,32 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             controls = translator.text(f"status.tui_{modal.action}_controls")
         elif modal.stage == "source":
             entries = modal.statuses
-            modal.index %= len(entries)
-            rows = []
-            for item_index, status in enumerate(entries):
-                selected = "›" if item_index == modal.index else " "
-                descriptor = status.registration.probe.descriptor
-                rows.append(
-                    f"{selected} {_dataset_title(descriptor.dataset.title, translator)} "
-                    f"{descriptor.version} · {translator.text('status.dataset_ready')}"
+            if not entries:
+                body = translator.text("status.datasets_empty")
+            else:
+                modal.index %= len(entries)
+                rows = []
+                for item_index, status in enumerate(entries):
+                    selected = "›" if item_index == modal.index else " "
+                    descriptor = status.registration.probe.descriptor
+                    rows.append(
+                        f"{selected} {_dataset_title(descriptor.dataset.title, translator)} "
+                        f"{descriptor.version} · {translator.text('status.dataset_ready')}"
+                    )
+                body, modal.offset = _chooser_viewport(
+                    rows,
+                    index=modal.index,
+                    offset=modal.offset,
+                    height=height,
+                    reserved_rows=2 + len(notices),
                 )
-            body, modal.offset = _chooser_viewport(
-                rows,
-                index=modal.index,
-                offset=modal.offset,
-                height=height,
-                reserved_rows=2 + len(notices),
-            )
             title = translator.text("status.dataset_chooser_title")
             controls = translator.text("status.dataset_chooser_controls")
+        elif modal.stage == "source_loading":
+            body = ""
+            title = translator.text("status.dataset_chooser_title")
+            controls = translator.text("status.dataset_chooser_controls")
+            notices = (translator.text("status.loading"),)
         elif modal.stage == "browse":
             if modal.future is not None:
                 body = ""
@@ -9223,9 +9508,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 ascii=options.host.ascii,
             )
             metric_row_index = next(
-                index
-                for index, row in enumerate(metric_rows)
-                if row.metric_index == modal.index
+                index for index, row in enumerate(metric_rows) if row.metric_index == modal.index
             )
             scheme = get_color_scheme(dashboard_theme)
             rows = [
@@ -9284,6 +9567,16 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         nonlocal active_grid, focused, dataset_modal, chooser_overlay
         assert dataset_modal is not None
         modal = dataset_modal
+        if isinstance(choice, CustomChartPaneConfig):
+            source = choice.chart.source
+            conflict = _custom_source_conflict(
+                panes,
+                source,
+                replacing_index=modal.pane_index if modal.action == "replace" else None,
+            )
+            if conflict is not None:
+                modal.error = _custom_source_conflict_message(conflict, translator)
+                return
         dataset_modal = None
         chooser_overlay = None
         if choice is None:
@@ -9308,13 +9601,80 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
 
         record_mutation(("pane", modal.pane_index, modal.action), insert)
 
+    def advance_dataset_modal(status: object) -> bool:
+        """Apply a refreshed source descriptor and report whether it advances the modal."""
+
+        assert dataset_modal is not None
+        modal = dataset_modal
+        modal.draft.dataset_id = status.registration.dataset_id
+        modal.metrics = ()
+        modal.metric_id = None
+        modal.metric_summary = "comparisons"
+        modal.metric_periods = ()
+        modal.metric_titles = None
+        modal.chart_kinds = ()
+        descriptor = status.registration.probe.descriptor
+        if isinstance(descriptor, V2ProbeDescriptor):
+            modal.metrics = descriptor.metrics
+            selectable = tuple(
+                row.metric_index
+                for row in _dataset_metric_chooser_rows(descriptor, translator)
+                if row.metric_index is not None
+            )
+            if not selectable:
+                modal.stage, modal.offset = "source", 0
+                modal.error = translator.text("status.dataset_unavailable")
+                return False
+            modal.index = next(
+                (
+                    position
+                    for position in selectable
+                    if descriptor.metrics[position].id == descriptor.default_metric_id
+                ),
+                selectable[0],
+            )
+            modal.offset = 0
+            modal.stage = "metric"
+            return True
+        modal.chart_kinds = tuple(descriptor.capabilities.charts)
+        if not modal.chart_kinds:
+            modal.stage, modal.offset = "source", 0
+            modal.error = translator.text("status.dataset_unavailable")
+            return False
+        modal.stage, modal.index, modal.offset = "installed", 0, 0
+        return True
+
     def collect_dataset_modal() -> bool:
-        """Consume a completed Dataset catalog request without blocking the Dashboard."""
+        """Consume a completed Dataset modal future without blocking the Dashboard."""
 
         assert dataset_modal is not None
         modal = dataset_modal
         if modal.future is None or not modal.future.done():
             return False
+        if modal.stage == "source_loading":
+            selected_index = modal.index
+            selected_dataset_id = modal.pending_dataset_id
+            try:
+                refreshed = modal.future.result()
+                refreshed_id = refreshed.registration.dataset_id
+                if refreshed_id != selected_dataset_id:
+                    raise UsageError("error.dataset_corrupt", dataset_id=selected_dataset_id)
+                modal.statuses = tuple(
+                    refreshed if item.registration.dataset_id == selected_dataset_id else item
+                    for item in modal.statuses
+                )
+                advanced = advance_dataset_modal(refreshed)
+                if advanced:
+                    modal.error = None
+            except (UsageError, QueryError) as exc:
+                modal.stage, modal.index, modal.offset = "source", selected_index, 0
+                modal.error = format_error(exc, translator)
+            except Exception as exc:
+                modal.stage, modal.index, modal.offset = "source", selected_index, 0
+                modal.error = str(exc)
+            modal.future = None
+            modal.pending_dataset_id = None
+            return True
         if modal.stage == "browse":
             try:
                 modal.entries = tuple(modal.future.result())
@@ -9422,6 +9782,14 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 else:
                     finish_dataset_modal(choice)
             return
+        if modal.stage == "source_loading":
+            if key == "\x1b":
+                if modal.future is not None:
+                    modal.future.cancel()
+                modal.future = None
+                modal.pending_dataset_id = None
+                modal.stage, modal.offset = "source", 0
+            return
         if modal.stage == "source":
             entries = modal.statuses
             if key == "h" and entries:
@@ -9432,11 +9800,11 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 return
             if key == "\x1b":
                 modal.stage, modal.index, modal.offset = "pane", 0, 0
-            elif key in {"j", "\x1b[B"}:
+            elif key in {"j", "\x1b[B"} and entries:
                 modal.index = (modal.index + 1) % len(entries)
-            elif key in {"k", "\x1b[A"}:
+            elif key in {"k", "\x1b[A"} and entries:
                 modal.index = (modal.index - 1) % len(entries)
-            elif key in {"\r", "\n"}:
+            elif key in {"\r", "\n"} and entries:
                 status = entries[modal.index]
                 modal.draft.dataset_id = status.registration.dataset_id
                 modal.metrics = ()
@@ -9445,28 +9813,24 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                 modal.metric_periods = ()
                 modal.metric_titles = None
                 modal.chart_kinds = ()
-                descriptor = status.registration.probe.descriptor
-                if isinstance(descriptor, V2ProbeDescriptor):
-                    modal.metrics = descriptor.metrics
-                    selectable = tuple(
-                        row.metric_index
-                        for row in _dataset_metric_chooser_rows(descriptor, translator)
-                        if row.metric_index is not None
-                    )
-                    modal.index = next(
-                        (
-                            position
-                            for position in selectable
-                            if descriptor.metrics[position].id == descriptor.default_metric_id
-                        ),
-                        selectable[0],
-                    )
-                    modal.offset = 0
-                    modal.stage = "metric"
-                else:
-                    modal.chart_kinds = tuple(descriptor.capabilities.charts)
-                if modal.chart_kinds:
-                    modal.stage, modal.index, modal.offset = "installed", 0, 0
+                modal.error = None
+                # Registered Dataset services refresh the selected probe before
+                # exposing its chart choices. Retain compatibility with simple
+                # injected catalog services that only provide cached statuses.
+                refresh = getattr(modal.service, "refresh", None)
+                if refresh is None:
+                    advance_dataset_modal(status)
+                    return
+                modal.pending_dataset_id = modal.draft.dataset_id
+                modal.stage = "source_loading"
+                modal.future = executor.submit(
+                    cast(Callable[[str], object], refresh),
+                    modal.pending_dataset_id,
+                )
+                # Test and embedded runtimes may complete a probe synchronously;
+                # advance now so the following key targets the metric chooser.
+                if modal.future.done():
+                    collect_dataset_modal()
             return
         if modal.stage == "metric":
             selected = next(
@@ -9485,7 +9849,21 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
             elif key in {"j", "\x1b[B"}:
                 modal.index = selectable[(selectable.index(modal.index) + 1) % len(selectable)]
             elif key in {"k", "\x1b[A"}:
-                modal.index = selectable[(selectable.index(modal.index) - 1) % len(selectable)]
+                width, _height = _dataset_modal_size(modal.pane_index)
+                metric_display_rows = _metric_chooser_display_rows(
+                    _dataset_metric_chooser_rows(selected, translator),
+                    width=width,
+                    ascii=options.host.ascii,
+                )
+                reveal_offset = _metric_chooser_previous_offset(
+                    metric_display_rows,
+                    selected_metric_index=modal.index,
+                    offset=modal.offset,
+                )
+                if reveal_offset is not None:
+                    modal.offset = reveal_offset
+                else:
+                    modal.index = selectable[(selectable.index(modal.index) - 1) % len(selectable)]
             elif key in {"\r", "\n"}:
                 metric = modal.metrics[modal.index]
                 modal.metric_id = metric.id
@@ -9621,8 +9999,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                         metric = next(
                             item
                             for item in modal.metrics
-                            if isinstance(item, V2MetricDescriptor)
-                            and item.id == modal.metric_id
+                            if isinstance(item, V2MetricDescriptor) and item.id == modal.metric_id
                         )
                         metric_periods = _custom_metric_periods(metric, kind)
                     finish_dataset_modal(
@@ -9825,10 +10202,14 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     paint()
                     continue
                 if isinstance(event, MouseEvent):
+                    hover_changed = handle_scrollbar_hover(event)
                     if handle_scrollbar_drag(event):
                         paint()
                         continue
                     if handle_pane_mouse(event):
+                        paint()
+                        continue
+                    if hover_changed:
                         paint()
                     continue
                 # A text/command draft owns every printable key, including u/U/h.
@@ -10228,6 +10609,10 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                             pane_index: int = focused_index,
                         ) -> None:
                             pane.component.configure(config, data_affecting=True)
+                            if pane.summary is not None and not custom_date_summary_supported(
+                                config
+                            ):
+                                pane.summary.invalidate()
                             refresh(
                                 pane_index,
                                 trigger=LifecycleTrigger.CONFIGURATION,
@@ -10241,7 +10626,9 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                             descriptor = component.v2_descriptor
                             metric_id = component.candidate.metric_id
                             if descriptor is None or metric_id is None:
-                                copy_feedback.show(translator.text("status.custom_metric_no_alternative"))
+                                copy_feedback.show(
+                                    translator.text("status.custom_metric_no_alternative")
+                                )
                                 continue
                             from ccusage_viz.custom_metric_switching import cycle_switch_metric
 
@@ -10252,13 +10639,20 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                 step=1 if key == "m" else -1,
                             )
                             if target is None:
-                                copy_feedback.show(translator.text("status.custom_metric_no_alternative"))
+                                copy_feedback.show(
+                                    translator.text("status.custom_metric_no_alternative")
+                                )
                                 continue
-                            component.begin_metric_switch(replace(base, metric_id=target.id))
+                            component.begin_metric_switch(
+                                replace(base, metric_id=target.id),
+                                now=datetime.now().astimezone(),
+                                timezone=options.host.timezone or "UTC",
+                            )
                             refresh(
                                 focused_index,
                                 trigger=LifecycleTrigger.CONFIGURATION,
                                 data_affecting=False,
+                                summary_affecting=True,
                             )
                         elif key == "L":
                             custom_logs_pane = focused_index
@@ -10340,22 +10734,39 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                                 if isinstance(component, CustomHistoricalComponent)
                                 else _custom_period_adjustment_chart(base, capability)
                             )
-                            updated = adjust_custom_chart(period_base, key)
+                            switch_anchor = (
+                                component.switch_anchor
+                                if isinstance(component, CustomHistoricalComponent)
+                                and component.switch_target_config is not None
+                                else None
+                            )
+                            updated = adjust_custom_chart(
+                                period_base,
+                                key,
+                                now=switch_anchor or datetime.now().astimezone(),
+                                timezone=options.host.timezone or "UTC",
+                            )
                             if updated != period_base:
                                 if (
                                     isinstance(component, CustomHistoricalComponent)
                                     and component.switch_target_config is not None
                                 ):
+
                                     def update_pending_metric_period(
                                         config: CustomChartConfig = updated,
                                         component: CustomHistoricalComponent = component,
                                         pane_index: int = focused_index,
                                     ) -> None:
-                                        component.begin_metric_switch(config)
+                                        component.begin_metric_switch(
+                                            config,
+                                            now=component.switch_anchor,
+                                            timezone=options.host.timezone or "UTC",
+                                        )
                                         refresh(
                                             pane_index,
                                             trigger=LifecycleTrigger.CONFIGURATION,
                                             data_affecting=False,
+                                            summary_affecting=True,
                                         )
 
                                     record_mutation(

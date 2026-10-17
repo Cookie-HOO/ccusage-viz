@@ -22,6 +22,12 @@ def test_tui_input_decodes_keys_and_fragmented_mouse_press() -> None:
     assert decoder.next() == MouseEvent(0, 20, 5, True, 0)
 
 
+def test_tui_input_decodes_unpressed_motion() -> None:
+    decoder = InputDecoder()
+    decoder.feed("\x1b[<35;20;5M")
+    assert decoder.next() == MouseEvent(3, 20, 5, False, 0b100000)
+
+
 def test_tui_input_preserves_control_keys() -> None:
     decoder = InputDecoder()
     decoder.feed("\r\n\x0b\x15\x19")
@@ -161,6 +167,8 @@ def test_tui_input_mode_disables_mouse_and_restores_terminal_on_error(
         raise RuntimeError("body failure")
 
     assert output.getvalue() == tui_input_module._MOUSE_ENABLE + tui_input_module._MOUSE_DISABLE
+    assert "?1003h" in tui_input_module._MOUSE_ENABLE
+    assert "?1003l" in tui_input_module._MOUSE_DISABLE
     assert setcbreak_fds == [7]
     assert tcset_calls[0][0:2] == (7, termios.TCSADRAIN)
     assert tcset_calls[0][2][0] == previous[0] & ~(termios.ICRNL | termios.IXON)

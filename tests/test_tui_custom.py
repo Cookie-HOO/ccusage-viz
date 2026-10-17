@@ -1,7 +1,7 @@
 import threading
 from contextlib import nullcontext
 from dataclasses import replace
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -12,11 +12,13 @@ from ccusage_viz.adjustment_timeout import AdjustmentTimeout
 from ccusage_viz.bootstrap import build_query_runtime
 from ccusage_viz.cli import _to_options, build_parser
 from ccusage_viz.configuration import default_custom_pane
+from ccusage_viz.core.custom_ranking_time import TimestampRange
 from ccusage_viz.core.time import DateRange
 from ccusage_viz.custom_component import CustomHistoricalComponent
 from ccusage_viz.custom_models import (
     CustomCapabilities,
     CustomChartCapability,
+    CustomChartDefaults,
     CustomComparison,
     CustomData,
     CustomDataset,
@@ -109,9 +111,7 @@ def test_custom_ranking_project_copy_appends_the_project_link() -> None:
         "Read [documentation](https://example.com/docs)",
         "https://example.com/projects/project",
     ) == (
-        "Project\n"
-        "Read documentation https://example.com/docs\n"
-        "https://example.com/projects/project"
+        "Project\nRead documentation https://example.com/docs\nhttps://example.com/projects/project"
     )
     assert _custom_ranking_clipboard_text("Project", None, None) == "Project"
 
@@ -261,6 +261,28 @@ def test_custom_standalone_renders_accepted_dataset_summary() -> None:
     assert "68 pages" in rendered.chart
 
 
+def test_custom_ranking_pane_restores_preset_item_spacing() -> None:
+    dashboard = _to_options(
+        build_parser(load_translator("en")).parse_args(["dashboard", "--empty"])
+    )
+    chart = CustomChartConfig(
+        "ranking",
+        CustomCommandSource("router", ("router",)),
+        DateRange(date(2026, 9, 1), date(2026, 9, 2)),
+        presentation=ChartPresentation(style="list"),
+    )
+
+    pane = _new_pane(
+        dashboard,
+        tui_module.CustomChartPaneConfig(chart, ranking_item_spacing="dashed"),
+        "dashboard:pane:spacing",
+        build_query_runtime(),
+    )
+
+    assert isinstance(pane, tui_module.TuiCustomPane)
+    assert pane.ranking_item_spacing == "dashed"
+
+
 def test_v2_custom_pane_owns_a_metric_scoped_summary_lifecycle() -> None:
     dashboard = _to_options(
         build_parser(load_translator("en")).parse_args(["dashboard", "--empty"])
@@ -304,6 +326,138 @@ def test_v2_custom_pane_summary_request_uses_the_selected_metric() -> None:
     assert intent.payload.metric_id == "reading_time"
 
 
+def test_pending_metric_switch_rendering_retains_accepted_projection() -> None:
+    from test_custom_component import response
+
+    accepted = CustomChartConfig(
+        "ranking",
+        CustomCommandSource("reading", ("reader", "ccuv")),
+        DateRange(date(2026, 9, 1), date(2026, 9, 2), period="1d"),
+        metric_id="stars",
+    )
+    component = CustomHistoricalComponent(accepted)
+    assert component.accept_response(response())
+    anchor = datetime(2026, 10, 15, 12, tzinfo=UTC)
+    target = V2MetricDescriptor(
+        "recent",
+        LocalizedText("Recent", "最近"),
+        LocalizedText("Recent", "最近"),
+        CustomUnit("count", LocalizedText("count", "次"), "suffix", 0),
+        "sum",
+        V2MetricCapabilities(
+            (),
+            (),
+            {"ranking": tui_module.V2HistoricalChartCapability((), (None,), (), ("10m",))},
+        ),
+        {"ranking": CustomChartDefaults("10m", None, None)},
+    )
+    component.begin_metric_switch(replace(accepted, metric_id="recent"), now=anchor, timezone="UTC")
+    assert component.retry_metric_switch("range.period", target)
+    assert component.request_config.metric_id == "recent"
+    assert component.request_config.date_range == TimestampRange(
+        anchor - timedelta(minutes=10), anchor, relative_until=True, period="10m"
+    )
+
+    standalone = tui_module._custom_standalone_render(
+        component,
+        load_translator("en"),
+        Terminal(160, 24, color=False, ascii=True),
+        pending=True,
+    )
+    pane = tui_module.TuiCustomPane(
+        component,
+        FixedIntervalScheduler(60, now=0),
+        LifecycleOperation("pending-switch"),
+        SimpleNamespace(),
+        probe_complete=True,
+    )
+    dashboard = _pane_render(pane, load_translator("en"), Terminal(160, 24, False, True))
+
+    assert "Ranking · 10m" in standalone.chart
+    assert "Ranking · 10m" in dashboard.chart
+    assert "2026-09-01–2026-09-02" not in standalone.chart
+    assert "2026-09-01–2026-09-02" not in dashboard.chart
+    assert "Loading data…" in standalone.chart
+    assert "Loading data…" in dashboard.chart
+
+
+def test_custom_standalone_refresh_retains_accepted_projection() -> None:
+    from test_custom_component import response
+
+    component = CustomHistoricalComponent(
+        CustomChartConfig(
+            "timeline",
+            CustomCommandSource("reading", ("reader", "ccuv")),
+            DateRange(date(2026, 9, 1), date(2026, 9, 2)),
+        )
+    )
+    assert component.accept_response(response((("total", "10"),)))
+    component.configure(
+        replace(component.candidate, date_range=DateRange(date(2026, 9, 17), date(2026, 9, 30))),
+        data_affecting=True,
+    )
+
+    rendered = tui_module._custom_standalone_render(
+        component,
+        load_translator("zh"),
+        Terminal(80, 16, color=False, ascii=True),
+        pending=True,
+        pending_trigger=LifecycleTrigger.MANUAL,
+    )
+
+    assert "时间趋势 · 2026-09-01–2026-09-02" in rendered.chart
+    assert "时间趋势 · 2026-09-17–2026-09-30" not in rendered.chart
+    assert "正在加载数据…" not in rendered.chart
+
+
+def test_custom_dashboard_refresh_retains_accepted_ranking_with_visible_audit() -> None:
+    from test_custom_component import response
+
+    chart = CustomChartConfig(
+        "ranking",
+        CustomCommandSource("reading", ("reader", "ccuv")),
+        DateRange(date(2026, 9, 1), date(2026, 9, 2)),
+        group_by="book",
+        presentation=replace(ChartPresentation(), density="detailed"),
+    )
+    component = CustomHistoricalComponent(chart)
+    assert component.accept_response(response((("accepted-series-label", "10"),)))
+    component.configure(
+        replace(component.candidate, date_range=DateRange(date(2026, 9, 17), date(2026, 9, 30))),
+        data_affecting=True,
+    )
+    pane = tui_module.TuiCustomPane(
+        component,
+        FixedIntervalScheduler(60, now=0),
+        LifecycleOperation("dashboard-refresh"),
+        SimpleNamespace(),
+        probe_complete=True,
+    )
+
+    # A periodic Router-style refresh may queue behind an active comparison or
+    # configuration request. Its queued intent, not the older active trigger,
+    # controls whether the accepted ranking remains visible.
+    pane.lifecycle.request(
+        LifecycleTrigger.CONFIGURATION,
+        generation=component.generation,
+        now=0,
+        start=lambda _operation: (SimpleNamespace(), lambda: None),
+    )
+    pane.lifecycle.request(
+        LifecycleTrigger.PERIODIC,
+        generation=component.generation,
+        now=1,
+        start=lambda _operation: (SimpleNamespace(), lambda: None),
+    )
+    rendered = _pane_render(pane, load_translator("en"), Terminal(100, 24, False, True))
+
+    assert "accepted-series-label" in rendered.chart
+    assert "2026-09-01–2026-09-02" in rendered.chart
+    assert "2026-09-17–2026-09-30" not in rendered.chart
+    assert "??" not in rendered.chart
+    assert "refreshing" in rendered.chart.lower()
+
+
 def test_custom_standalone_initial_pending_uses_authoritative_legacy_presentation() -> None:
     chart = CustomChartConfig(
         "timeline",
@@ -334,6 +488,106 @@ def test_custom_standalone_initial_pending_uses_authoritative_legacy_presentatio
     assert "Loading data…" in rendered.chart
     assert "opaque-dataset-id" not in rendered.chart
     assert "pages" not in rendered.chart
+
+
+def test_custom_heading_lifecycle_uses_canonical_identity_and_pending_query_marker() -> None:
+    from test_custom_component import response
+
+    chart = CustomChartConfig(
+        "ranking",
+        CustomCommandSource("opaque-source-id", ("reader", "ccuv")),
+        DateRange(date(2026, 9, 1), date(2026, 9, 2), relative_until=True, period="1d"),
+        group_by="book",
+        metric_titles=("Reading metric", "阅读指标"),
+    )
+    component = CustomHistoricalComponent(chart)
+    component.pending_generation = component.generation
+    terminal = Terminal(120, 24, color=False, ascii=True)
+    translator = load_translator("en")
+
+    pending = tui_module._custom_standalone_render(
+        component, translator, terminal, pending=True
+    ).chart
+    assert "Reading metric · Ranking · by book · 1d · querying" in pending
+    assert "opaque-source-id" not in pending
+
+    assert component.accept_response(response())
+    accepted = tui_module._custom_standalone_render(
+        component, translator, terminal, pending=False
+    ).chart
+    assert "Reading · Ranking · by book · 1d" in accepted
+    assert "Reading metric" not in accepted
+    assert "querying" not in accepted
+
+    empty_component = CustomHistoricalComponent(chart)
+    assert empty_component.accept_response(response(()))
+    empty = tui_module._custom_standalone_render(
+        empty_component, translator, terminal, pending=False
+    ).chart
+    assert "Reading · Ranking · by book · 1d" in empty
+    assert "Reading metric" not in empty
+    assert "querying" not in empty
+    assert "No data found for the selected range." in empty
+
+    assert component.fail(RuntimeError("refresh unavailable"), generation=component.generation)
+    same_query_failure = tui_module._custom_standalone_render(
+        component, translator, terminal, pending=False
+    ).chart
+    assert "Reading · Ranking · by book · 1d" in same_query_failure
+    assert "Reading metric" not in same_query_failure
+    assert "querying" not in same_query_failure
+
+    replacement = replace(
+        chart,
+        date_range=DateRange(
+            date(2026, 9, 17), date(2026, 9, 30), relative_until=True, period="14d"
+        ),
+        metric_titles=("Replacement metric", "替换指标"),
+    )
+    component.configure(replacement, data_affecting=True)
+    replacement_pending = tui_module._custom_standalone_render(
+        component, translator, terminal, pending=True
+    ).chart
+    assert "Reading · Ranking · by book · 14d · querying" in replacement_pending
+    assert "Reading metric" not in replacement_pending
+    assert "Replacement metric" not in replacement_pending
+
+    assert component.fail(RuntimeError("replacement unavailable"), generation=component.generation)
+    replacement_failure = tui_module._custom_standalone_render(
+        component, translator, terminal, pending=False
+    ).chart
+    assert "Reading · Ranking · by book · 14d" in replacement_failure
+    assert "Reading metric" not in replacement_failure
+    assert "Replacement metric" not in replacement_failure
+    assert "querying" not in replacement_failure
+
+
+def test_custom_standalone_low_density_refresh_retains_chart_without_audit_row() -> None:
+    from test_custom_component import response
+
+    chart = CustomChartConfig(
+        "timeline",
+        CustomCommandSource("reading", ("reader", "ccuv")),
+        DateRange(date(2026, 9, 1), date(2026, 9, 2)),
+        presentation=replace(ChartPresentation(), density="minimal"),
+    )
+    component = CustomHistoricalComponent(chart)
+    assert component.accept_response(response((("accepted-series-label", "10"),)))
+    component.configure(
+        replace(component.candidate, date_range=DateRange(date(2026, 9, 17), date(2026, 9, 30))),
+        data_affecting=True,
+    )
+
+    rendered = tui_module._custom_standalone_render(
+        component,
+        load_translator("en"),
+        Terminal(80, 16, color=False, ascii=True),
+        pending=True,
+    )
+
+    assert "Loading data…" in rendered.chart
+    assert "accepted-series-label" not in rendered.chart
+    assert "refreshing" not in rendered.chart.lower()
 
 
 def test_custom_capabilities_are_unavailable_after_source_replacement() -> None:
@@ -422,13 +676,9 @@ def test_custom_metric_periods_follow_the_selected_chart_kind() -> None:
             (),
             (),
             {
-                "timeline": tui_module.V2HistoricalChartCapability(
-                    ("day",), (), (), ("7d", "30d")
-                ),
+                "timeline": tui_module.V2HistoricalChartCapability(("day",), (), (), ("7d", "30d")),
                 "calendar": tui_module.V2HistoricalChartCapability(("day",), (), ()),
-                "ranking": tui_module.V2HistoricalChartCapability(
-                    ("day",), (), (), ("all",)
-                ),
+                "ranking": tui_module.V2HistoricalChartCapability(("day",), (), (), ("all",)),
             },
         ),
         {},
@@ -452,9 +702,7 @@ def test_live_capability_periods_replace_stale_pane_periods_for_adjustment() -> 
         ),
         metric_periods=("all",),
     )
-    capability = CustomChartCapability(
-        ("day",), (), (), periods=("1d", "7d")
-    )
+    capability = CustomChartCapability(("day",), (), (), periods=("1d", "7d"))
 
     effective = tui_module._custom_period_adjustment_chart(chart, capability)
 
@@ -477,11 +725,7 @@ def test_pending_metric_switch_uses_target_metric_periods() -> None:
             V2MetricCapabilities(
                 (),
                 (),
-                {
-                    "ranking": tui_module.V2HistoricalChartCapability(
-                        ("day",), (), (), periods
-                    )
-                },
+                {"ranking": tui_module.V2HistoricalChartCapability(("day",), (), (), periods)},
             ),
             {},
             group_id="github",
@@ -501,9 +745,7 @@ def test_pending_metric_switch_uses_target_metric_periods() -> None:
             metric_periods=("all",),
         )
     )
-    component.capability = CustomChartCapability(
-        ("day",), (), (), periods=("all",)
-    )
+    component.capability = CustomChartCapability(("day",), (), (), periods=("all",))
     component.v2_descriptor = V2ProbeDescriptor(
         "revision",
         "1",
@@ -649,12 +891,14 @@ def test_partition_and_group_cycles_skip_each_other_in_both_directions() -> None
     )
     assert (forward_partition.partition_by, forward_partition.group_by) == (None, "real")
     assert (reverse_partition.partition_by, reverse_partition.group_by) == (None, "real")
-    assert tui_module._cycle_custom_grouping(
-        chart, ("logical", "real", "provider"), step=1
-    ).group_by == "provider"
-    assert tui_module._cycle_custom_grouping(
-        chart, ("logical", "real", "provider"), step=-1
-    ).group_by == "provider"
+    assert (
+        tui_module._cycle_custom_grouping(chart, ("logical", "real", "provider"), step=1).group_by
+        == "provider"
+    )
+    assert (
+        tui_module._cycle_custom_grouping(chart, ("logical", "real", "provider"), step=-1).group_by
+        == "provider"
+    )
     assert tui_module._cycle_custom_grouping(chart, ("logical", "real")) == chart
     skipped = tui_module._cycle_custom_partitioning(
         chart, ("logical", "real", "provider"), ("logical", "real", "provider")
@@ -770,6 +1014,105 @@ def test_partition_cycle_preserves_a_legal_current_group_before_catalog_fallback
     assert (updated.partition_by, updated.group_by) == ("logical", "provider")
 
 
+def test_dashboard_subday_ranking_suppresses_summary_and_date_restore_reuses_route(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    chart = CustomChartConfig(
+        "ranking",
+        CustomCommandSource("router", ("router",)),
+        DateRange(date(2026, 10, 15), date(2026, 10, 15), relative_until=True, period="1d"),
+        metric_id="requests",
+        metric_periods=("10m", "1d"),
+    )
+    component = CustomHistoricalComponent(chart)
+    from test_custom_component import response
+
+    assert component.accept_response(response(point_date=date(2026, 10, 15)))
+    component.set_capability(CustomChartCapability((), (None,), (), periods=("10m", "1d")))
+    options = _to_options(
+        build_parser(load_translator("en")).parse_args(
+            ["dashboard", "--empty", "--header-style", "hidden"]
+        )
+    )
+    pane = tui_module.TuiCustomPane(
+        component,
+        FixedIntervalScheduler(3600, now=tui_module.time.monotonic()),
+        LifecycleOperation("subday-summary"),
+        options.process,
+        probe_complete=True,
+    )
+    pane.summary = tui_module.CustomDashboardSummary(
+        chart.source,
+        FixedIntervalScheduler(3600, now=tui_module.time.monotonic()),
+        LifecycleOperation("subday-summary:summary"),
+        response=custom_summary_response(display="STALE SUMMARY"),
+        accepted_period="day",
+        accepted_as_of_date=date(2026, 10, 15),
+    )
+    submitted: list[object] = []
+    frames: list[str] = []
+
+    class FailedHandle:
+        def result(self) -> object:
+            raise QueryError("error.custom_command_protocol")
+
+        def cancel(self) -> None:
+            pass
+
+    class Runtime:
+        def submit(self, intent: object) -> FailedHandle:
+            submitted.append(intent)
+            return FailedHandle()
+
+        def cancel(self) -> None:
+            pass
+
+    class Screen:
+        def __init__(self, _stream: object) -> None:
+            pass
+
+        def paint(self, frame: object, **_kwargs: object) -> None:
+            frames.append("\n".join(frame.rows))  # type: ignore[attr-defined]
+
+        def finish(self) -> None:
+            pass
+
+    # Open adjustments, move 1d -> 10m, manually refresh there, restore 1d,
+    # then manually refresh again so the normal date-summary route is exercised.
+    events = iter(
+        (
+            KeyEvent("m"),
+            KeyEvent("P"),
+            KeyEvent("r"),
+            KeyEvent("p"),
+            KeyEvent("r"),
+            KeyEvent("\x03"),
+        )
+    )
+    monkeypatch.setattr(tui_module, "build_query_runtime", Runtime)
+    monkeypatch.setattr(tui_module, "_new_pane", lambda *_args: pane)
+    monkeypatch.setattr(tui_module, "FramePainter", Screen)
+    monkeypatch.setattr(tui_module, "tui_input_mode", nullcontext)
+    monkeypatch.setattr(tui_module, "read_event", lambda _decoder, _timeout: next(events))
+    monkeypatch.setattr(
+        tui_module, "get_terminal_size", lambda: __import__("os").terminal_size((100, 30))
+    )
+
+    assert tui_module.run_tui(options, load_translator("en")) == 0
+    summary_intents = [
+        intent for intent in submitted if isinstance(intent.payload, V2SummaryRequest)
+    ]
+    timestamp_chart_intents = [
+        intent for intent in submitted if getattr(intent.payload, "start_at", None) is not None
+    ]
+
+    assert timestamp_chart_intents
+    assert len(summary_intents) == 2  # startup and restored date-range manual refresh
+    subday_frames = [frame for frame in frames if "T" in frame and "[" in frame]
+    assert subday_frames
+    assert all("STALE SUMMARY" not in frame for frame in subday_frames)
+
+
 @pytest.mark.parametrize(
     ("key", "partitions", "groupings", "expected", "restricted"),
     (
@@ -792,6 +1135,7 @@ def test_dashboard_partition_interaction_refreshes_or_reports_restriction(
         "ranking",
         CustomCommandSource("router", ("router",)),
         DateRange(date(2026, 1, 1), date(2026, 1, 14)),
+        metric_titles=("Router", "路由"),
     )
     component = CustomHistoricalComponent(chart)
     component.set_capability(
@@ -845,7 +1189,9 @@ def test_dashboard_partition_interaction_refreshes_or_reports_restriction(
     assert tui_module.run_tui(options, load_translator("en")) == 0
     assert (component.candidate.partition_by, component.candidate.group_by) == expected
     configuration_submissions = [
-        intent for intent in submitted if intent.trigger.value == "refresh"  # type: ignore[attr-defined]
+        intent
+        for intent in submitted
+        if intent.trigger.value == "refresh"  # type: ignore[attr-defined]
     ]
     assert bool(configuration_submissions) is not restricted
     if restricted:
@@ -872,9 +1218,7 @@ def test_partition_binding_requires_multiple_effective_choices() -> None:
         LifecycleOperation("restricted-partition"),
         SimpleNamespace(),
     )
-    assert ("g/G", "partition") not in tui_module._custom_pane_adjustment_bindings(
-        pane, "quick"
-    )
+    assert ("g/G", "partition") not in tui_module._custom_pane_adjustment_bindings(pane, "quick")
 
 
 def test_custom_dashboard_adjustment_uses_native_footer() -> None:
@@ -937,7 +1281,9 @@ def _accepted_metric_help_pane() -> tui_module.TuiCustomPane:
     text = LocalizedText("Dataset", "数据集")
     unit = CustomUnit("count", text, "suffix", 0)
 
-    def metric(identifier: str, title: LocalizedText, description: LocalizedText) -> V2MetricDescriptor:
+    def metric(
+        identifier: str, title: LocalizedText, description: LocalizedText
+    ) -> V2MetricDescriptor:
         return V2MetricDescriptor(
             identifier,
             title,
@@ -977,16 +1323,16 @@ def _accepted_metric_help_pane() -> tui_module.TuiCustomPane:
     )
     assert component.apply_provider_result(
         SimpleNamespace(
-            custom_response=V2ChartResponse(
-                "stars", CustomData(()), descriptor, V2Runtime(())
-            )
+            custom_response=V2ChartResponse("stars", CustomData(()), descriptor, V2Runtime(()))
         )
     )
     return tui_module.TuiCustomPane(
         component,
         FixedIntervalScheduler(10, now=0),
         LifecycleOperation("accepted-metric-help"),
-        _to_options(build_parser(load_translator("en")).parse_args(["dashboard", "--empty"])).process,
+        _to_options(
+            build_parser(load_translator("en")).parse_args(["dashboard", "--empty"])
+        ).process,
     )
 
 
@@ -996,7 +1342,9 @@ def test_custom_filter_modal_forces_its_first_frame_and_standalone_restoration(
 ) -> None:
     component = _accepted_metric_help_pane().component
     choice = CustomFilter(
-        "source", LocalizedText("Source", "来源"), (CustomFilterOption("app", LocalizedText("App", "应用")),)
+        "source",
+        LocalizedText("Source", "来源"),
+        (CustomFilterOption("app", LocalizedText("App", "应用")),),
     )
     component.runtime = V2Runtime((choice,))
     force_flags: list[bool] = []
@@ -1013,12 +1361,17 @@ def test_custom_filter_modal_forces_its_first_frame_and_standalone_restoration(
 
     monkeypatch.setattr(tui_module, "input_mode", nullcontext)
     monkeypatch.setattr(tui_module, "read_key", lambda _timeout: next(keys))
-    monkeypatch.setattr(tui_module, "get_terminal_size", lambda: __import__("os").terminal_size((80, 24)))
+    monkeypatch.setattr(
+        tui_module, "get_terminal_size", lambda: __import__("os").terminal_size((80, 24))
+    )
     monkeypatch.setattr(tui_module, "run_custom_filter_editor", editor)
 
-    assert tui_module._run_custom_standalone_adjustment(
-        component, load_translator("en"), Screen(), ascii=True
-    ) is None
+    assert (
+        tui_module._run_custom_standalone_adjustment(
+            component, load_translator("en"), Screen(), ascii=True
+        )
+        is None
+    )
     assert force_flags[:4] == [False, False, True, True]
     assert force_flags[4:] == ([False] if edited is not None else [])
 
@@ -1029,7 +1382,9 @@ def test_dashboard_custom_filter_modal_forces_entry_and_restoration(
 ) -> None:
     pane = _accepted_metric_help_pane()
     choice = CustomFilter(
-        "source", LocalizedText("Source", "来源"), (CustomFilterOption("app", LocalizedText("App", "应用")),)
+        "source",
+        LocalizedText("Source", "来源"),
+        (CustomFilterOption("app", LocalizedText("App", "应用")),),
     )
     pane.component.runtime = V2Runtime((choice,))
     force_flags: list[bool] = []
@@ -1060,11 +1415,15 @@ def test_dashboard_custom_filter_modal_forces_entry_and_restoration(
     monkeypatch.setattr(tui_module, "FramePainter", Screen)
     monkeypatch.setattr(tui_module, "tui_input_mode", nullcontext)
     monkeypatch.setattr(tui_module, "read_event", lambda _decoder, _timeout: next(events))
-    monkeypatch.setattr(tui_module, "get_terminal_size", lambda: __import__("os").terminal_size((80, 24)))
+    monkeypatch.setattr(
+        tui_module, "get_terminal_size", lambda: __import__("os").terminal_size((80, 24))
+    )
     monkeypatch.setattr(tui_module, "run_custom_filter_editor", editor)
 
     assert tui_module.run_tui(options, load_translator("en")) == 0
-    assert any(pair == (True, True) for pair in zip(force_flags, force_flags[1:], strict=False)), force_flags
+    assert any(pair == (True, True) for pair in zip(force_flags, force_flags[1:], strict=False)), (
+        force_flags
+    )
 
 
 def test_dashboard_custom_filter_timeout_forces_restoration(
@@ -1072,7 +1431,9 @@ def test_dashboard_custom_filter_timeout_forces_restoration(
 ) -> None:
     pane = _accepted_metric_help_pane()
     choice = CustomFilter(
-        "source", LocalizedText("Source", "来源"), (CustomFilterOption("app", LocalizedText("App", "应用")),)
+        "source",
+        LocalizedText("Source", "来源"),
+        (CustomFilterOption("app", LocalizedText("App", "应用")),),
     )
     pane.component.runtime = V2Runtime((choice,))
     force_flags: list[bool] = []
@@ -1098,9 +1459,13 @@ def test_dashboard_custom_filter_timeout_forces_restoration(
     monkeypatch.setattr(tui_module, "FramePainter", Screen)
     monkeypatch.setattr(tui_module, "tui_input_mode", nullcontext)
     monkeypatch.setattr(tui_module, "read_event", lambda _decoder, _timeout: next(events))
-    monkeypatch.setattr(tui_module, "get_terminal_size", lambda: __import__("os").terminal_size((80, 24)))
     monkeypatch.setattr(
-        tui_module, "run_custom_filter_editor", lambda *_args, **_kwargs: (_ for _ in ()).throw(AdjustmentTimeout())
+        tui_module, "get_terminal_size", lambda: __import__("os").terminal_size((80, 24))
+    )
+    monkeypatch.setattr(
+        tui_module,
+        "run_custom_filter_editor",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AdjustmentTimeout()),
     )
 
     assert tui_module.run_tui(options, load_translator("en")) == 0
@@ -1126,7 +1491,9 @@ def test_accepted_custom_metric_help_omits_unusable_metadata(missing: str) -> No
         pane.component.v2_descriptor = SimpleNamespace(metrics=())
     else:
         assert pane.component.accepted_config is not None
-        pane.component.accepted_config = replace(pane.component.accepted_config, metric_id="missing")
+        pane.component.accepted_config = replace(
+            pane.component.accepted_config, metric_id="missing"
+        )
 
     assert tui_module._accepted_custom_metric_help_node(pane, load_translator("en")) is None
 
@@ -1224,9 +1591,7 @@ def test_dashboard_help_overlay_shows_committed_localized_v2_metric_and_omits_v1
                     LocalizedText("Daily", "每日"),
                     CustomUnit("count", LocalizedText("Dataset", "数据集"), "suffix", 0),
                 ),
-                CustomCapabilities(
-                    (), (), {"timeline": CustomChartCapability(("day",), (), ())}
-                ),
+                CustomCapabilities((), (), {"timeline": CustomChartCapability(("day",), (), ())}),
                 CustomData(()),
             )
         )
@@ -1261,9 +1626,7 @@ def test_dashboard_help_overlay_omits_monitor_metric_after_descriptorless_accept
                 LocalizedText("Current token rate", "当前令牌速率"),
                 unit,
                 "sum",
-                V2MetricCapabilities(
-                    (), (), {"monitor": V2MonitorCapability(60, 10, (), ())}
-                ),
+                V2MetricCapabilities((), (), {"monitor": V2MonitorCapability(60, 10, (), ())}),
                 {},
             ),
         ),
@@ -1283,7 +1646,9 @@ def test_dashboard_help_overlay_omits_monitor_metric_after_descriptorless_accept
         component,
         FixedIntervalScheduler(10, now=0),
         LifecycleOperation("monitor-v1-metric-help"),
-        _to_options(build_parser(load_translator("en")).parse_args(["dashboard", "--empty"])).process,
+        _to_options(
+            build_parser(load_translator("en")).parse_args(["dashboard", "--empty"])
+        ).process,
     )
 
     help_overlay = _dashboard_help_frames(monkeypatch, pane, language="en", width=80)
@@ -1387,6 +1752,31 @@ def test_custom_monitor_renders_source_owned_monitor_presentations_without_share
     assert "data window" not in bars
 
 
+def test_custom_monitor_retains_accepted_values_only_for_refreshes() -> None:
+    component = _custom_monitor_component()
+    terminal = Terminal(80, 16, color=False, ascii=True)
+
+    periodic = tui_module._render_custom_monitor(
+        component,
+        load_translator("en"),
+        terminal,
+        interval=10,
+        refreshing=True,
+    ).chart
+    assert "Alpha" in periodic
+    assert "querying" in periodic
+
+    component.configure(replace(component.candidate, group_by=None), data_affecting=True)
+    switched = tui_module._render_custom_monitor(
+        component,
+        load_translator("en"),
+        terminal,
+        interval=10,
+    ).chart
+    assert "Loading…" in switched
+    assert "Alpha" not in switched
+
+
 @pytest.mark.parametrize(
     ("style", "view"),
     (
@@ -1404,7 +1794,9 @@ def test_custom_monitor_transient_states_use_canonical_heading(
     component.accepted_response = None
     component.accepted_config = None
     component.configure(
-        replace(component.candidate, presentation=replace(component.candidate.presentation, style=style)),
+        replace(
+            component.candidate, presentation=replace(component.candidate.presentation, style=style)
+        ),
         data_affecting=False,
     )
     component.error = RuntimeError("source failed") if failed else None
@@ -1468,9 +1860,7 @@ def test_custom_monitor_pane_preserves_probe_error_body() -> None:
         SimpleNamespace(),
     )
 
-    rendered = _pane_render(
-        pane, load_translator("en"), Terminal(80, 16, color=False, ascii=True)
-    )
+    rendered = _pane_render(pane, load_translator("en"), Terminal(80, 16, color=False, ascii=True))
 
     assert rendered.error_body
     assert rendered.chart == "probe failed"
@@ -1594,7 +1984,7 @@ def test_grouped_custom_ranking_dispatch_uses_grouped_viewport_and_clears_flat_s
     grouped = tui_module.GroupedRankingViewport()
     rendered = tui_module._render_custom_projection(
         model,
-        model.config,
+        replace(model.config, metric_titles=("Requests", "请求")),
         load_translator("en"),
         Terminal(80, 10, color=False, ascii=True),
         accepted_at=None,
@@ -1861,7 +2251,9 @@ def test_dataset_metric_chooser_groups_declared_metrics_and_keeps_ungrouped_flat
             text,
             unit,
             "sum",
-            V2MetricCapabilities((), (), {"ranking": tui_module.V2HistoricalChartCapability(("day",), (None,), ())}),
+            V2MetricCapabilities(
+                (), (), {"ranking": tui_module.V2HistoricalChartCapability(("day",), (None,), ())}
+            ),
             {},
             group_id=group_id,
         )
@@ -1900,6 +2292,37 @@ def test_dataset_metric_chooser_groups_declared_metrics_and_keeps_ungrouped_flat
         ("legacy-zh", 2),
         ("  └─ 数据集", None),
     ]
+
+
+def test_metric_chooser_previous_offset_reveals_hidden_first_group_heading() -> None:
+    rows = (
+        tui_module.MetricChooserRow("group", "GitHub"),
+        tui_module.MetricChooserRow("metric", "├─ Stars", 0),
+        tui_module.MetricChooserRow("description", "│  └─ Star count"),
+        tui_module.MetricChooserRow("metric", "└─ Forks", 1),
+    )
+
+    assert tui_module._metric_chooser_previous_offset(rows, selected_metric_index=0, offset=1) == 0
+    assert (
+        tui_module._metric_chooser_previous_offset(rows, selected_metric_index=0, offset=0) is None
+    )
+    assert (
+        tui_module._metric_chooser_previous_offset(rows, selected_metric_index=1, offset=1) is None
+    )
+
+
+def test_metric_chooser_previous_offset_requires_immediate_predecessor_hidden() -> None:
+    rows = (
+        tui_module.MetricChooserRow("group", "GitHub"),
+        tui_module.MetricChooserRow("description", "Repository metrics"),
+        tui_module.MetricChooserRow("metric", "├─ Stars", 0),
+        tui_module.MetricChooserRow("description", "│  └─ Star count"),
+        tui_module.MetricChooserRow("metric", "└─ Forks", 1),
+    )
+
+    assert (
+        tui_module._metric_chooser_previous_offset(rows, selected_metric_index=0, offset=1) is None
+    )
 
 
 def test_metric_chooser_display_rows_use_ascii_connectors_and_wrap_descriptions() -> None:
@@ -1961,7 +2384,9 @@ def test_standalone_metric_chooser_uses_ascii_host_setting(
         metric_groups=(V2MetricGroup("github", LocalizedText("GitHub", "GitHub")),),
     )
     status = SimpleNamespace(
-        registration=SimpleNamespace(dataset_id="dataset", probe=SimpleNamespace(descriptor=descriptor))
+        registration=SimpleNamespace(
+            dataset_id="dataset", probe=SimpleNamespace(descriptor=descriptor)
+        )
     )
 
     class DatasetService:
@@ -1977,11 +2402,14 @@ def test_standalone_metric_chooser_uses_ascii_host_setting(
 
     bodies: list[str] = []
     events = iter((KeyEvent("\r"), KeyEvent("j"), KeyEvent("\r"), KeyEvent("\r")))
+
     dashboard = _to_options(
         build_parser(load_translator("en")).parse_args(["dashboard", "--empty", "--ascii"])
     )
     monkeypatch.setattr("ccusage_viz.datasets.service.DatasetService", DatasetService)
-    monkeypatch.setattr(tui_module, "get_terminal_size", lambda: __import__("os").terminal_size((20, 24)))
+    monkeypatch.setattr(
+        tui_module, "get_terminal_size", lambda: __import__("os").terminal_size((20, 24))
+    )
 
     config = tui_module._choose_dataset_pane_config(
         Screen(),
@@ -2000,6 +2428,104 @@ def test_standalone_metric_chooser_uses_ascii_host_setting(
     assert "└" not in metric_body
     assert "\x1b[1mGitHub\x1b[0m" in metric_body
     assert "\x1b[2m|  \\- Long descrip\x1b[0m" in metric_body
+
+
+@pytest.mark.parametrize(
+    ("height", "up_keys"),
+    ((6, 2), (20, 1)),
+    ids=("hidden_heading_revealed_before_wrap", "visible_heading_wraps_immediately"),
+)
+def test_standalone_metric_chooser_up_reveals_hidden_group_heading_before_wrapping(
+    monkeypatch: pytest.MonkeyPatch, height: int, up_keys: int
+) -> None:
+    """The blocking chooser reveals its clipped heading before it wraps selection."""
+
+    text = LocalizedText("Dataset", "数据集")
+    unit = CustomUnit("count", text, "suffix", 0)
+
+    def metric(identifier: str) -> V2MetricDescriptor:
+        return V2MetricDescriptor(
+            identifier,
+            LocalizedText(identifier.title(), identifier),
+            text,
+            unit,
+            "sum",
+            V2MetricCapabilities(
+                (), (), {"ranking": tui_module.V2HistoricalChartCapability(("day",), (None,), ())}
+            ),
+            {},
+            group_id="github",
+        )
+
+    descriptor = V2ProbeDescriptor(
+        "revision",
+        "1",
+        V2Dataset(text, text),
+        (metric("stars"), metric("forks")),
+        (),
+        metric_groups=(V2MetricGroup("github", LocalizedText("GitHub", "GitHub")),),
+    )
+    status = SimpleNamespace(
+        registration=SimpleNamespace(
+            dataset_id="dataset", probe=SimpleNamespace(descriptor=descriptor)
+        )
+    )
+
+    class DatasetService:
+        def ready_registered_sources(self) -> tuple[object, ...]:
+            return (status,)
+
+        def registered_command_source(self, _dataset_id: str) -> CustomCommandSource:
+            return CustomCommandSource("dataset", ("dataset",))
+
+    class Screen:
+        def paint(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+    bodies: list[str] = []
+    navigation = (KeyEvent("j"), KeyEvent("k")) if height == 6 else ()
+    events = iter(
+        (
+            KeyEvent("\r"),
+            *navigation,
+            *(KeyEvent("\x1b[A") for _ in range(up_keys)),
+            KeyEvent("\r"),
+            KeyEvent("\r"),
+        )
+    )
+    dashboard = _to_options(
+        build_parser(load_translator("en")).parse_args(["dashboard", "--empty"])
+    )
+    monkeypatch.setattr("ccusage_viz.datasets.service.DatasetService", DatasetService)
+    monkeypatch.setattr(
+        tui_module, "get_terminal_size", lambda: __import__("os").terminal_size((80, 24))
+    )
+
+    config = tui_module._choose_dataset_pane_config(
+        Screen(),
+        load_translator("en"),
+        InputDecoder(),
+        height=height,
+        dashboard=dashboard,
+        paint_choices=lambda body, *_args: bodies.append(body),
+        read_input=lambda: next(events),
+    )
+
+    assert config is not None
+    assert config.chart.metric_id == "forks"
+    metric_bodies = [body for body in bodies if "Choose a metric" in body]
+    if height == 6:
+        # Down then Up leaves the first Metric selected while its heading is clipped.
+        assert "› ├─ Stars" in metric_bodies[2]
+        assert "GitHub" not in metric_bodies[2]
+        # The first Up is viewport-only; the second wraps to the final Metric.
+        assert "GitHub" in metric_bodies[3]
+        assert "› ├─ Stars" in metric_bodies[3]
+        assert "› └─ Forks" in metric_bodies[4]
+    else:
+        assert "GitHub" in metric_bodies[0]
+        assert "› ├─ Stars" in metric_bodies[0]
+        assert "› └─ Forks" in metric_bodies[1]
 
 
 def test_dashboard_metric_modal_wraps_to_target_pane_and_submits_selected_metric(
@@ -2029,14 +2555,20 @@ def test_dashboard_metric_modal_wraps_to_target_pane_and_submits_selected_metric
         "1",
         V2Dataset(text, text),
         (
-            metric("stars", "A deliberately long description that must wrap inside this narrow pane."),
-            metric("forks", "Another deliberately long description that must not become selectable."),
+            metric(
+                "stars", "A deliberately long description that must wrap inside this narrow pane."
+            ),
+            metric(
+                "forks", "Another deliberately long description that must not become selectable."
+            ),
         ),
         (),
         metric_groups=(V2MetricGroup("github", LocalizedText("GitHub", "GitHub")),),
     )
     status = SimpleNamespace(
-        registration=SimpleNamespace(dataset_id="dataset", probe=SimpleNamespace(descriptor=descriptor))
+        registration=SimpleNamespace(
+            dataset_id="dataset", probe=SimpleNamespace(descriptor=descriptor)
+        )
     )
     submitted: list[str | None] = []
     frames: list[object] = []
@@ -2103,16 +2635,16 @@ def test_dashboard_metric_modal_wraps_to_target_pane_and_submits_selected_metric
     monkeypatch.setattr(tui_module, "FramePainter", Screen)
     monkeypatch.setattr(tui_module, "tui_input_mode", __import__("contextlib").nullcontext)
     monkeypatch.setattr(tui_module, "read_event", lambda _decoder, _timeout: next(events))
-    monkeypatch.setattr(tui_module, "get_terminal_size", lambda: __import__("os").terminal_size((44, 20)))
+    monkeypatch.setattr(
+        tui_module, "get_terminal_size", lambda: __import__("os").terminal_size((44, 20))
+    )
     monkeypatch.setattr(tui_module, "default_custom_pane", record_default_custom_pane)
 
     assert tui_module.run_tui(options, load_translator("en")) == 0
     assert submitted == ["forks"]
 
     metric_frames = [
-        "\n".join(frame.rows)
-        for frame in frames
-        if "rrow pane." in "\n".join(frame.rows)
+        "\n".join(frame.rows) for frame in frames if "rrow pane." in "\n".join(frame.rows)
     ]
     assert metric_frames
     # Pane zero is framed and its interior is 20 columns wide at this terminal
@@ -2136,7 +2668,9 @@ def test_dataset_metric_chooser_keeps_legacy_descriptor_flat() -> None:
         text,
         unit,
         "sum",
-        V2MetricCapabilities((), (), {"ranking": tui_module.V2HistoricalChartCapability(("day",), (None,), ())}),
+        V2MetricCapabilities(
+            (), (), {"ranking": tui_module.V2HistoricalChartCapability(("day",), (None,), ())}
+        ),
         {},
     )
     descriptor = V2ProbeDescriptor("revision", "1", V2Dataset(text, text), (metric,), ())
@@ -2272,7 +2806,7 @@ def test_custom_dashboard_pane_renders_accepted_decimal_projection() -> None:
     rendered = _pane_render(pane, load_translator("en"), Terminal(80, 12, False, True))
 
     assert "Today’s Read 3.50 pages" not in rendered.chart
-    assert "Total · Reading · Timeline · 2026-09-01–2026-09-02" in rendered.chart
+    assert "Reading · Timeline · 2026-09-01–2026-09-02" in rendered.chart
     assert "+" in rendered.chart
     assert "09-01" in rendered.chart
     assert "a · o b · D c" in rendered.chart

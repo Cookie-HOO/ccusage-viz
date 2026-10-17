@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import json
 import tarfile
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -25,7 +26,7 @@ from ccusage_viz.custom_protocol import CustomProbeResponse, V2ProbeResponse
 from ccusage_viz.datasets.archive import sha256_bytes
 from ccusage_viz.datasets.models import ReleaseArtifact
 from ccusage_viz.datasets.service import DatasetService
-from ccusage_viz.errors import UsageError
+from ccusage_viz.errors import QueryError, UsageError
 from ccusage_viz.options import CustomCommandSource
 
 
@@ -203,6 +204,41 @@ def test_refresh_preserves_last_successful_snapshot_when_probe_fails(tmp_path: P
     assert refreshed.availability == "unavailable"
     assert refreshed.registration.probe == created.probe
     assert refreshed.registration.last_probe_error == "command failed"
+
+
+def test_refresh_updates_only_the_named_dataset_probe_snapshot(tmp_path: Path) -> None:
+    first_router_probe = v2_probe()
+    first_books_probe = probe("books")
+    updated_router_probe = V2ProbeResponse(
+        "router", replace(first_router_probe.descriptor, revision="router-2")
+    )
+    responses = iter((first_router_probe, first_books_probe, updated_router_probe))
+    service = DatasetService(root=tmp_path, environ={}, probe_runner=lambda _argv: next(responses))
+    service.register_local_command(("router",))
+    service.register_local_command(("books",))
+
+    refreshed = service.refresh("router")
+
+    assert refreshed.registration.probe.descriptor == updated_router_probe.descriptor
+    assert service.store.load_registration("books").probe.descriptor == first_books_probe.descriptor
+
+
+def test_refresh_preserves_snapshot_when_named_dataset_probe_fails(tmp_path: Path) -> None:
+    responses = iter((v2_probe(), QueryError("error.custom_command_protocol")))
+
+    def run_probe(_argv: tuple[str, ...]) -> V2ProbeResponse:
+        response = next(responses)
+        if isinstance(response, QueryError):
+            raise response
+        return response
+
+    service = DatasetService(root=tmp_path, environ={}, probe_runner=run_probe)
+    created = service.register_local_command(("router",)).registration
+
+    with pytest.raises(QueryError, match="error.custom_command_protocol"):
+        service.refresh("router")
+
+    assert service.store.load_registration("router").probe == created.probe
 
 
 def _archive() -> bytes:

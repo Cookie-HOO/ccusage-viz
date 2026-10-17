@@ -345,6 +345,27 @@ def test_v2_subday_periods_are_ranking_only_and_preserve_declaration_order() -> 
         parse_v2_probe_descriptor(value)
 
 
+def test_v2_default_filters_round_trip_in_registration_snapshot() -> None:
+    value = v2_probe_descriptor()
+    metric = value["metrics"][0]
+    metric["capabilities"]["charts"] = {
+        "ranking": {"group_by": [None], "periods": ["1h"]}
+    }
+    metric["defaults"] = {
+        "ranking": {
+            "period": "1h",
+            "filters": {"request_activity": ["has_requests"]},
+        }
+    }
+
+    descriptor = parse_v2_probe_descriptor(value)
+    wire = v2_probe_descriptor_to_wire(descriptor)
+
+    assert wire["metrics"][0]["defaults"]["ranking"]["filters"] == {  # type: ignore[index]
+        "request_activity": ["has_requests"]
+    }
+
+
 def test_v2_ranking_sort_direction_parses_and_round_trips() -> None:
     value = v2_probe_descriptor()
     value["metrics"][0]["capabilities"]["charts"] = {

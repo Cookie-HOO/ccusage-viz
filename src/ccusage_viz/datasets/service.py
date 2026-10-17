@@ -177,6 +177,43 @@ class DatasetService:
         self.store.save_registration(updated)
         return updated
 
+    def refresh(self, dataset_id: str) -> DatasetRegistrationStatus:
+        """Refresh and persist the descriptor snapshot for one registered Dataset."""
+
+        current = self.store.load_registration(parse_dataset_id(dataset_id))
+        if not current.enabled:
+            return next(
+                item
+                for item in self.registrations()
+                if item.registration.dataset_id == current.dataset_id
+            )
+        argv = (
+            current.source.command_argv
+            if isinstance(current.source, LocalDatasetSource)
+            else self.installed_command_source(current.dataset_id).command_argv
+        )
+        response = self.probe_runner(argv)
+        if response.dataset_id != current.dataset_id:
+            raise UsageError("error.dataset_corrupt", dataset_id=current.dataset_id)
+        now = datetime.now(UTC).isoformat()
+        try:
+            candidate = self._update_candidate(current)
+        except Exception:
+            candidate = current.available_update
+        updated = replace(
+            current,
+            updated_at=now,
+            probe=DatasetProbeSnapshot(current.dataset_id, response.descriptor, now),
+            available_update=candidate,
+            last_probe_error=None,
+        )
+        self.store.save_registration(updated)
+        return next(
+            item
+            for item in self.registrations()
+            if item.registration.dataset_id == current.dataset_id
+        )
+
     def refresh_all(self) -> tuple[DatasetRegistrationStatus, ...]:
         refreshed: list[DatasetRegistrationStatus] = []
         for status in self.registrations():

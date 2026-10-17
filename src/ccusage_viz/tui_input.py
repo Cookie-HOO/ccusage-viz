@@ -43,8 +43,8 @@ class PasteEvent:
 
 InputEvent = KeyEvent | MouseEvent | PasteEvent | WheelEvent
 
-_MOUSE_ENABLE = "\x1b[?1000h\x1b[?1002h\x1b[?1006h\x1b[?2004h"
-_MOUSE_DISABLE = "\x1b[?1000l\x1b[?1002l\x1b[?1006l\x1b[?2004l"
+_MOUSE_ENABLE = "\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h\x1b[?2004h"
+_MOUSE_DISABLE = "\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?2004l"
 _MOUSE_BUTTON_MASK = 0b11
 _MOUSE_MOTION = 0b100000
 _MOUSE_WHEEL = 0b1000000
@@ -231,7 +231,13 @@ class InputDecoder:
             modifiers = button & ~_MOUSE_BUTTON_MASK
             if modifiers & _MOUSE_WHEEL:
                 return wheel[0] if wheel is not None else None
-            return MouseEvent(button & _MOUSE_BUTTON_MASK, x, y, mouse.group(4) == "M", modifiers)
+            return MouseEvent(
+                button & _MOUSE_BUTTON_MASK,
+                x,
+                y,
+                mouse.group(4) == "M" and button & _MOUSE_BUTTON_MASK != 3,
+                modifiers,
+            )
 
         if self.buffer.startswith("\x1b[<"):
             if _SGR_MOUSE_PREFIX.match(self.buffer):

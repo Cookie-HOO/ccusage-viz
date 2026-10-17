@@ -11,6 +11,7 @@ from test_custom_ranking_scroll import grouped_projection, projection
 import ccusage_viz.tui as tui
 from ccusage_viz.cli import _to_options, build_parser
 from ccusage_viz.custom_component import CustomHistoricalComponent
+from ccusage_viz.formatting import strip_ansi
 from ccusage_viz.i18n import load_translator
 from ccusage_viz.lifecycle import FixedIntervalScheduler, LifecycleOperation, LifecycleTrigger
 from ccusage_viz.options import ProcessConfig
@@ -132,9 +133,7 @@ def test_grouped_dashboard_dispatch_wheel_and_hit_translation(dashboard):
         assert pane.grouped_ranking_viewport.active
         assert not pane.ranking_viewport.active
         row, (identity, column, _) = next(
-            (row, hit)
-            for row, hit in pane.ranking_copy_rows.items()
-            if hit[0][0] == "group"
+            (row, hit) for row, hit in pane.ranking_copy_rows.items() if hit[0][0] == "group"
         )
         target.append(identity)
         rect = layouts[-1].pane(0)
@@ -171,9 +170,7 @@ def test_grouped_dashboard_inner_series_copy_uses_group_aware_payload(dashboard)
     def click_series():
         pane = panes[0]
         row, (identity, column, _) = next(
-            (row, hit)
-            for row, hit in pane.ranking_copy_rows.items()
-            if hit[0][0] == "series"
+            (row, hit) for row, hit in pane.ranking_copy_rows.items() if hit[0][0] == "series"
         )
         target.append(identity)
         rect = layouts[-1].pane(0)
@@ -222,6 +219,73 @@ def test_grouped_dashboard_incremental_numeric_search_survives_zero_matches(dash
             verify,
         ]
     )
+
+
+def test_dashboard_scrollbar_hover_expands_and_collapses_thumb(dashboard):
+    run, panes, frames, focuses, layouts, decoder, copied, opened, size = dashboard
+    del decoder, copied, opened
+    size[:] = [160, 12]
+    captured: dict[str, object] = {}
+
+    def hover_thumb():
+        bar = panes[0].ranking_viewport.scrollbar
+        assert bar is not None
+        rect = layouts[-1].pane(0)
+        captured["bar"] = bar
+        captured["rect"] = rect
+        captured["offset"] = panes[0].ranking_viewport.offset
+        captured["focuses"] = len(focuses)
+        return MouseEvent(
+            3,
+            rect.left + bar.column + 1,
+            rect.top + bar.thumb_top + 1,
+            False,
+            0b100000,
+        )
+
+    def verify_hovered():
+        bar = captured["bar"]
+        rect = captured["rect"]
+        assert panes[0].ranking_viewport.offset == captured["offset"]
+        assert len(focuses) == captured["focuses"] + 1
+        row = rect.top + bar.thumb_top
+        assert strip_ansi(frames[-1].rows[row])[rect.left + bar.column] == "█"
+        return MouseEvent(
+            0,
+            rect.left + bar.column + 1,
+            rect.top + bar.thumb_top + 1,
+            True,
+            0,
+        )
+
+    def drag_thumb():
+        bar = captured["bar"]
+        rect = captured["rect"]
+        return MouseEvent(
+            0,
+            rect.left + bar.column + 1,
+            rect.top + bar.top + bar.travel + 1,
+            True,
+            0b100000,
+        )
+
+    def verify_dragged():
+        bar = panes[0].ranking_viewport.scrollbar
+        assert bar is not None
+        rect = captured["rect"]
+        assert panes[0].ranking_viewport.offset > captured["offset"]
+        assert strip_ansi(frames[-1].rows[rect.top + bar.thumb_top])[rect.left + bar.column] == "█"
+        return MouseEvent(0, 1, 1, False, 0)
+
+    def verify_compact():
+        bar = captured["bar"]
+        rect = captured["rect"]
+        row = rect.top + bar.thumb_top
+        assert strip_ansi(frames[-1].rows[row])[rect.left + bar.column] == "│"
+        assert panes[0].ranking_viewport.offset > captured["offset"]
+        return KeyEvent("\x03")
+
+    run([hover_thumb, verify_hovered, drag_thumb, verify_dragged, verify_compact])
 
 
 def test_grouped_dashboard_scrollbar_drag_uses_active_viewport(dashboard):
@@ -728,7 +792,9 @@ def test_frameless_focus_reuses_two_committed_ranking_geometries(dashboard):
     )
 
 
-def test_text_view_pending_and_nonranking_panes_do_not_scroll(dashboard):
+def test_text_view_and_nonranking_panes_do_not_scroll_while_pending_ranking_clears_viewport(
+    dashboard,
+):
     run, panes, frames, focuses, layouts, decoder, *_ = dashboard
 
     def hide_chart():
@@ -739,7 +805,9 @@ def test_text_view_pending_and_nonranking_panes_do_not_scroll(dashboard):
     def pending():
         assert panes[0].ranking_viewport.offset == 1
         panes[0].body_view = "chart"
-        panes[0].component.pending_generation = panes[0].component.generation
+        panes[0].component.configure(
+            replace(panes[0].component.candidate, kind="timeline"), data_affecting=True
+        )
         # Resize forces an actual pending paint on the next loop.
         dashboard[-1][0] = 162
         return None

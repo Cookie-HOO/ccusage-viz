@@ -62,11 +62,13 @@ def _render(
     translator: Translator,
     terminal: Terminal,
     interval: float,
+    *,
+    retain_accepted: bool = False,
 ) -> str:
     """Use the standalone Monitor renderer with Dataset-owned facts and headings."""
 
     config = component.accepted_config or component.candidate
-    transient = component.accepted_response is None or component.pending
+    transient = component.accepted_response is None or (component.pending and not retain_accepted)
     audit = RenderAudit(
         component.accepted_at,
         interval=interval,
@@ -336,7 +338,18 @@ def run_custom_monitor(options: StandaloneLaunch, translator: Translator) -> int
                     else translator.text("status.querying")
                 )
             else:
-                body = _render(component, capability, translator, terminal, options.host.interval)
+                body = _render(
+                    component,
+                    capability,
+                    translator,
+                    terminal,
+                    options.host.interval,
+                    retain_accepted=(
+                        lifecycle.operation is not None
+                        and lifecycle.operation.trigger
+                        in {LifecycleTrigger.PERIODIC, LifecycleTrigger.MANUAL}
+                    ),
+                )
             controls = "r refresh · m adjust · Ctrl-C exit"
             screen.paint(compose_frame(body, "ccuv", controls, (), height=terminal.height))
             with input_mode():

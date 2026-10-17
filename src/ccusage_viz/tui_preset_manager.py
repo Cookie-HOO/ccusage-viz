@@ -339,6 +339,10 @@ def _scroll_for(index: int, current: int, count: int, visible_rows: int) -> int:
 def _render_notice(notice: str | None, translator: Translator) -> str | None:
     if notice is None:
         return None
+    # Controller-originated validation can include concrete, multiline source
+    # details; reducer notices remain stable translation keys.
+    if "\n" in notice:
+        return notice
     return translator.text(f"status.tui_{notice.replace('-', '_')}")
 
 

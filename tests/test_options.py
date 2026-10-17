@@ -54,12 +54,53 @@ from ccusage_viz.options import (
     adjust_custom_chart,
     adjust_standalone,
     compatible_styles,
+    custom_command_sources_equivalent,
     has_complete_content,
     pane_kind,
     replace_chart_filters,
     resolve_date_range,
     validate_custom_partition_selection,
 )
+
+
+def test_custom_command_sources_use_filesystem_identity_for_absolute_paths(tmp_path) -> None:
+    executable = tmp_path / "dataset"
+    database = tmp_path / "catalog.db"
+    executable.write_text("dataset")
+    database.write_text("catalog")
+    executable_alias = tmp_path / "dataset-alias"
+    database_alias = tmp_path / "catalog-alias.db"
+    executable_alias.symlink_to(executable)
+    database_alias.symlink_to(database)
+
+    registered = CustomCommandSource(
+        "reading", (str(executable), "--database", str(database))
+    )
+    equivalent = CustomCommandSource(
+        "reading", (str(executable_alias), "--database", str(database_alias))
+    )
+
+    assert custom_command_sources_equivalent(registered, equivalent)
+    assert not custom_command_sources_equivalent(
+        registered,
+        CustomCommandSource("reading", (str(executable_alias), "--database", "catalog.db")),
+    )
+    DashboardLaunch(
+        ProcessConfig(),
+        DashboardHostConfig(),
+        (
+            CustomChartPaneConfig(
+                CustomChartConfig(
+                    "timeline", registered, DateRange(date(2026, 1, 1), date(2026, 1, 1))
+                )
+            ),
+            CustomChartPaneConfig(
+                CustomChartConfig(
+                    "ranking", equivalent, DateRange(date(2026, 1, 1), date(2026, 1, 1))
+                )
+            ),
+        ),
+    )
 
 
 def _probe_descriptor() -> CustomProbeDescriptor:

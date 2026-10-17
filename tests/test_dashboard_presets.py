@@ -235,6 +235,41 @@ def test_custom_ranking_timestamp_preset_refreshes_relative_and_preserves_fixed(
     assert fixed_chart.chart.date_range == fixed
 
 
+def test_custom_ranking_item_spacing_round_trips_and_old_preset_defaults_compact() -> None:
+    chart = CustomChartConfig(
+        "ranking",
+        _installed_source(),
+        RANGE,
+        group_by="real_model",
+        metric_id="tokens",
+        presentation=ChartPresentation(style="list"),
+    )
+    record = preset_from_launch(
+        "spaced-ranking",
+        _launch(panes=(CustomChartPaneConfig(chart, ranking_item_spacing="dashed"),)),
+        now=NOW,
+    )
+    wire = DashboardPresetDocument((record,)).to_wire()
+    custom_wire = wire["presets"][0]["panes"][0]
+    assert custom_wire["ranking_item_spacing"] == "dashed"
+
+    parsed = DashboardPresetDocument.parse(wire).presets[0].panes[0]
+    assert isinstance(parsed, CustomChartPaneConfig)
+    assert parsed.ranking_item_spacing == "dashed"
+
+    old_wire = deepcopy(wire)
+    del old_wire["presets"][0]["panes"][0]["ranking_item_spacing"]
+    old = DashboardPresetDocument.parse(old_wire).presets[0].panes[0]
+    assert isinstance(old, CustomChartPaneConfig)
+    assert old.ranking_item_spacing == "compact"
+
+
+def test_custom_ranking_item_spacing_rejects_nonranking_chart() -> None:
+    chart = CustomChartConfig("timeline", _installed_source(), RANGE)
+    with pytest.raises(ValueError, match="requires a ranking"):
+        CustomChartPaneConfig(chart, ranking_item_spacing="line")
+
+
 def test_custom_partition_round_trips_and_old_preset_remains_flat() -> None:
     chart = CustomChartConfig(
         "ranking",

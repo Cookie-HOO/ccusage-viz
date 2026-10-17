@@ -176,6 +176,21 @@ def test_render_marks_relationship_and_provenance_with_ascii_fallback() -> None:
     assert "Enter load | s save current" in ascii_text
 
 
+def test_render_preserves_controller_multiline_source_conflict_notice() -> None:
+    notice = "Preset not saved: Dataset reading has conflicting commands:\nExisting source: reader ccuv\nThis source: other-reader ccuv"
+    rendered = render_preset_manager(
+        PresetManagerState(notice=notice),
+        catalog(),
+        load_translator("en"),
+        Terminal(width=80, height=10, color=False, ascii=True),
+    )
+
+    text = "\n".join(rendered.rows)
+    assert "Dataset reading" in text
+    assert "Existing source: reader ccuv" in text
+    assert "This source: other-reader ccuv" in text
+
+
 def test_render_translates_invalid_name_notice_and_clips_narrow_rows() -> None:
     entries = catalog(
         PresetCatalogEntry("user:long", "long-dashboard-preset-name", "user"),

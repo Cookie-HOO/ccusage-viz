@@ -26,6 +26,7 @@ from ccusage_viz.dashboard_layout import layout_bands, parse_layout
 from ccusage_viz.options import (
     CACHE_MODES,
     COMMAND_STYLES,
+    CUSTOM_RANKING_ITEM_SPACINGS,
     DASHBOARD_STYLES,
     DENSITIES,
     GRANULARITIES,
@@ -765,12 +766,15 @@ def _parse_pane(value: object) -> PaneConfig:
                 "metric_summary",
                 "metric_periods",
                 "metric_titles",
+                "ranking_item_spacing",
             )
         )
         payload = dict(wire)
         attachment = _attachment_parse(payload.pop("attachment", None))
         if "partition_by" not in payload:
             payload["partition_by"] = None
+        if "ranking_item_spacing" not in payload:
+            payload["ranking_item_spacing"] = "compact"
         ranking = payload.get("chart_kind") == "ranking" and isinstance(
             payload.get("metric_id"), str
         )
@@ -805,13 +809,9 @@ def _parse_pane(value: object) -> PaneConfig:
             "custom.chart_kind",
         )
         group_by = _optional_string(custom_wire["group_by"], "custom.group_by")
-        partition_by = _optional_string(
-            custom_wire.get("partition_by"), "custom.partition_by"
-        )
+        partition_by = _optional_string(custom_wire.get("partition_by"), "custom.partition_by")
         if partition_by is not None and chart_kind != "ranking":
-            raise DashboardPresetValidationError(
-                "custom.partition_by is supported only by ranking"
-            )
+            raise DashboardPresetValidationError("custom.partition_by is supported only by ranking")
         if partition_by is not None and group_by is None:
             raise DashboardPresetValidationError(
                 "custom.partition_by requires a non-null custom.group_by"
@@ -855,7 +855,15 @@ def _parse_pane(value: object) -> PaneConfig:
             metric_titles=titles,
             partition_by=partition_by,
         )
-        return CustomChartPaneConfig(chart, *attachment)
+        ranking_item_spacing = _choice(
+            custom_wire["ranking_item_spacing"],
+            CUSTOM_RANKING_ITEM_SPACINGS,
+            "custom.ranking_item_spacing",
+        )
+        try:
+            return CustomChartPaneConfig(chart, *attachment, ranking_item_spacing)
+        except ValueError as exc:
+            raise DashboardPresetValidationError(str(exc)) from exc
     if kind == "animation":
         _exact(wire, frozenset(("kind", "style", "overlay")), "animation pane")
         try:
@@ -883,6 +891,7 @@ def _pane_wire(pane: object) -> dict[str, object]:
         )
         if attachment is not None:
             wire["attachment"] = attachment
+        wire["ranking_item_spacing"] = pane.ranking_item_spacing
         return wire
     if isinstance(pane, ChartPaneConfig):
         wire = _chart_wire(pane.chart)
@@ -1050,10 +1059,7 @@ def materialize_preset(
                 panes.append(replace(pane, chart=chart))
                 continue
             source = source_resolver(chart.source.dataset_id)
-            if (
-                source.dataset_id != chart.source.dataset_id
-                or source.source_kind != "installed"
-            ):
+            if source.dataset_id != chart.source.dataset_id or source.source_kind != "installed":
                 raise DashboardPresetValidationError(
                     "custom Dataset resolver returned an unsafe source"
                 )

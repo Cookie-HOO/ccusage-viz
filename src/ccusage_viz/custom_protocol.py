@@ -1506,6 +1506,10 @@ def _defaults_to_wire(value: CustomChartDefaults, *, ranking: bool = False) -> d
         suffix = "h" if value.window_seconds % 3600 == 0 else "m"
         divisor = 3600 if suffix == "h" else 60
         fields["window"] = f"{value.window_seconds // divisor}{suffix}"
+    if "filters" in declared and value.filters:
+        fields["filters"] = {
+            filter_id: list(options) for filter_id, options in value.filters
+        }
     return fields
 
 

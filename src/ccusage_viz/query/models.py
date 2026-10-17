@@ -197,6 +197,7 @@ class PhysicalResult:
     query: PhysicalQuery
     payload: bytes
     diagnostics: bytes = b""
+    executed_query: PhysicalQuery | None = None
 
 
 @dataclass(frozen=True, slots=True)

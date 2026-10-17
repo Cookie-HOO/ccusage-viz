@@ -338,7 +338,11 @@ class QueryCoordinator:
                 pending.remove(index)
                 try:
                     shared = subscription.entry.future.result()
-                    results[index] = replace(shared, query=subscription.query)
+                    results[index] = replace(
+                        shared,
+                        query=subscription.query,
+                        executed_query=shared.executed_query or shared.query,
+                    )
                 except BaseException:
                     if (
                         subscription.query.required
