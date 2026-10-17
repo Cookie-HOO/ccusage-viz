@@ -11,6 +11,7 @@ from ccusage_viz.cli import (
     ShortCircuitKind,
     _explicit_fields,
     _inject_default_command,
+    _rejected_subcommand,
     _to_options,
     build_parser,
     main,
@@ -20,6 +21,7 @@ from ccusage_viz.configuration import standalone_from_chart_pane
 from ccusage_viz.dashboard import DASHBOARD_PRESETS
 from ccusage_viz.dashboard_preset_store import DashboardPresetStore
 from ccusage_viz.dashboard_presets import preset_from_launch
+from ccusage_viz.diagnostics import format_error
 from ccusage_viz.errors import UsageError
 from ccusage_viz.i18n import load_translator
 from ccusage_viz.options import (
@@ -90,6 +92,70 @@ def test_text_and_animate_help_describe_public_interfaces(
         assert option in animate_help
     assert "--overlay-time-band" not in animate_help
     assert "Seconds between command-overlay refreshes" in animate_help
+
+
+def test_invalid_chart_kind_lists_only_chart_kinds_and_suggests_match() -> None:
+    tr = load_translator("en")
+    parser = build_parser(tr)
+
+    with pytest.raises(UsageError) as caught:
+        parser.parse_args(["chart", "timline"])
+
+    assert caught.value.key == "error.invalid_subcommand_suggestion"
+    text = format_error(caught.value, tr)
+    assert "argument KIND: invalid choice: 'timline'" in text
+    assert "Supported commands: timeline, calendar, stack, ranking, monitor" in text
+    assert "Did you mean 'timeline'?" in text
+    assert "dashboard" not in text
+
+
+def test_rejected_subcommand_accepts_repr_quoted_choice_rendering() -> None:
+    assert (
+        _rejected_subcommand(
+            "argument KIND: invalid choice: 'timline' "
+            "(choose from 'timeline', 'calendar')",
+            "KIND",
+            ("timeline", "calendar"),
+        )
+        == "timline"
+    )
+
+
+def test_invalid_dataset_operation_lists_only_dataset_operations() -> None:
+    tr = load_translator("en")
+    parser = build_parser(tr)
+
+    with pytest.raises(UsageError) as caught:
+        parser.parse_args(["dataset", "unknown-operation"])
+
+    text = format_error(caught.value, tr)
+    assert caught.value.key == "error.invalid_subcommand"
+    assert "Supported commands: list, add-local" in text
+    assert "Did you mean" not in text
+    assert "timeline" not in text
+
+
+def test_invalid_chart_kind_guidance_is_localized_in_chinese() -> None:
+    tr = load_translator("zh")
+    parser = build_parser(tr)
+
+    with pytest.raises(UsageError) as caught:
+        parser.parse_args(["chart", "timline"])
+
+    text = format_error(caught.value, tr)
+    assert "支持的命令：timeline, calendar, stack, ranking, monitor" in text
+    assert "你是不是想输入 'timeline'？" in text
+
+
+def test_invalid_option_value_does_not_gain_subcommand_guidance() -> None:
+    tr = load_translator("en")
+    parser = build_parser(tr)
+
+    with pytest.raises(UsageError) as caught:
+        parser.parse_args(["chart", "timeline", "--density", "standard"])
+
+    assert caught.value.key == "error.arguments"
+    assert "Supported commands" not in format_error(caught.value, tr)
 
 
 def test_dataset_cli_parses_manager_and_local_list() -> None:

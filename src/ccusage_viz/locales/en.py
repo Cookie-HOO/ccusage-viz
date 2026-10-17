@@ -215,6 +215,10 @@ MESSAGES = {
     "help.timezone": "IANA timezone for custom Dataset requests (default: local system timezone)",
     "help.ascii": "Use ASCII-only chart marks",
     "error.arguments": "Invalid arguments: {detail}",
+    "error.invalid_subcommand": ("Invalid arguments: {detail}\nSupported commands: {commands}"),
+    "error.invalid_subcommand_suggestion": (
+        "Invalid arguments: {detail}\nSupported commands: {commands}\nDid you mean '{suggestion}'?"
+    ),
     "error.dataset_invalid_id": "Dataset ID {dataset_id} is invalid.",
     "error.dataset_catalog_unavailable": "Official dataset catalog is unavailable.",
     "error.dataset_catalog_invalid": "Official dataset catalog is invalid.",

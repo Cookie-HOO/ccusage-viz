@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import math
 import os
 import re
@@ -8,6 +9,7 @@ import secrets
 import shlex
 import sys
 from dataclasses import dataclass, replace
+from difflib import get_close_matches
 from enum import StrEnum
 from typing import Any, Never, cast
 
@@ -91,6 +93,7 @@ _COMMANDS = (
     "text",
 )
 _TUI_COMMANDS = ("timeline", "calendar", "stack", "ranking", "monitor")
+_DATASET_COMMANDS = ("list", "add-local")
 _CUSTOM_COMMANDS = ("timeline", "calendar", "stack", "ranking")
 _DURATION_PATTERN = re.compile(r"(?P<value>[1-9][0-9]*)(?P<unit>[mh])$")
 _PANE_FORBIDDEN_OPTIONS = frozenset(
@@ -118,12 +121,72 @@ _PANE_FORBIDDEN_OPTIONS = frozenset(
 )
 
 
+def _invalid_subcommand_error(
+    detail: str,
+    rejected: str,
+    choices: tuple[str, ...],
+) -> UsageError:
+    matches = get_close_matches(rejected, choices, n=2, cutoff=0.7)
+    values: dict[str, object] = {
+        "detail": detail,
+        "commands": ", ".join(choices),
+    }
+    if len(matches) == 1:
+        values["suggestion"] = matches[0]
+        return UsageError("error.invalid_subcommand_suggestion", **values)
+    return UsageError("error.invalid_subcommand", **values)
+
+
+def _rejected_subcommand(
+    message: str,
+    metavar: str | None,
+    choices: tuple[str, ...],
+) -> str | None:
+    if metavar is None or not choices:
+        return None
+    rendered_choices = (
+        ", ".join(choices),
+        ", ".join(repr(choice) for choice in choices),
+    )
+    choices_pattern = "|".join(re.escape(rendering) for rendering in rendered_choices)
+    match = re.fullmatch(
+        rf"argument {re.escape(metavar)}: invalid choice: (.+) "
+        rf"\(choose from (?:{choices_pattern})\)",
+        message,
+    )
+    if match is None:
+        return None
+    try:
+        rejected = ast.literal_eval(match.group(1))
+    except (SyntaxError, ValueError):
+        return None
+    return rejected if isinstance(rejected, str) else None
+
+
 class LocalizedParser(argparse.ArgumentParser):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         kwargs.setdefault("allow_abbrev", False)
         super().__init__(*args, **kwargs)
+        self._subcommand_choices: tuple[str, ...] = ()
+        self._subcommand_metavar: str | None = None
+
+    def set_subcommand_choices(self, choices: tuple[str, ...]) -> None:
+        self._subcommand_choices = choices
+        action = next(
+            (action for action in self._actions if isinstance(action, argparse._SubParsersAction)),
+            None,
+        )
+        metavar = action.metavar if action is not None else None
+        self._subcommand_metavar = metavar if isinstance(metavar, str) else None
 
     def error(self, message: str) -> Never:
+        rejected = _rejected_subcommand(
+            message,
+            self._subcommand_metavar,
+            self._subcommand_choices,
+        )
+        if rejected is not None:
+            raise _invalid_subcommand_error(message, rejected, self._subcommand_choices)
         raise UsageError("error.arguments", detail=message)
 
 
@@ -384,6 +447,7 @@ def build_parser(tr: Translator) -> argparse.ArgumentParser:
         "chart", help=tr.text("help.chart"), description=tr.text("help.chart")
     )
     chart_subparsers = chart.add_subparsers(dest="chart_kind", required=True, metavar="KIND")
+    chart.set_subcommand_choices(_TUI_COMMANDS)
 
     def add_custom_source_arguments(chart_parser: argparse.ArgumentParser, command: str) -> None:
         chart_parser.add_argument("--dataset", metavar="ID")
@@ -452,9 +516,10 @@ def build_parser(tr: Translator) -> argparse.ArgumentParser:
     )
     dataset.add_argument("--lang", choices=("en", "zh"), help=tr.text("help.lang"))
     dataset_subparsers = dataset.add_subparsers(dest="dataset_command", metavar="COMMAND")
-    dataset_subparsers.add_parser("list", help=tr.text("help.dataset_list"))
+    dataset.set_subcommand_choices(_DATASET_COMMANDS)
+    dataset_subparsers.add_parser(_DATASET_COMMANDS[0], help=tr.text("help.dataset_list"))
     dataset_local = dataset_subparsers.add_parser(
-        "add-local", help="Register a local Dataset command"
+        _DATASET_COMMANDS[1], help="Register a local Dataset command"
     )
     dataset_local.add_argument("command_argv", nargs=argparse.REMAINDER, metavar="COMMAND")
 

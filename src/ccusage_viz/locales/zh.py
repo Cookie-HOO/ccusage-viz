@@ -215,6 +215,10 @@ MESSAGES = {
     "help.timezone": "用于 custom Dataset 请求的 IANA 时区（默认：本机系统时区）",
     "help.ascii": "仅使用 ASCII 图形字符",
     "error.arguments": "参数无效：{detail}",
+    "error.invalid_subcommand": "参数无效：{detail}\n支持的命令：{commands}",
+    "error.invalid_subcommand_suggestion": (
+        "参数无效：{detail}\n支持的命令：{commands}\n你是不是想输入 '{suggestion}'？"
+    ),
     "error.dataset_invalid_id": "数据集 ID {dataset_id} 无效。",
     "error.dataset_catalog_unavailable": "官方数据集索引暂时不可用。",
     "error.dataset_catalog_invalid": "官方数据集索引无效。",
