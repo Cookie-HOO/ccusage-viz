@@ -55,20 +55,20 @@ ccuv dashboard wide --demo
 
 | Route | Data model | Terminal composition | Main question |
 | --- | --- | --- | --- |
-| Timeline `timeline` | Historical date range | One standalone chart | How does token usage change over time? |
-| Calendar `calendar` | Historical date range | One standalone chart | Which days were active and intense? |
-| Stack `stack` | Historical date range | One standalone chart | How are input, output, and cache tokens composed? |
-| Ranking `ranking` | Historical date range | One standalone chart | Which Agent, model, or project used the most tokens? |
-| Monitor `monitor` | Rolling observation window | One standalone chart | What throughput has this process observed since it started? |
-| `dashboard` | Host-wide cadence plus independent panes | Multi-pane Dashboard | How do several configured charts compare at once? |
-| `custom timeline`, `custom stack`, `custom calendar`, `custom ranking` | Command-returned additive historical series | One standalone chart or a Dashboard pane | How does a command-backed dataset change over time or rank? |
+| Timeline `timeline` | Historical date range | Focused one-Pane Dashboard | How does token usage change over time? |
+| Calendar `calendar` | Historical date range | Focused one-Pane Dashboard | Which days were active and intense? |
+| Stack `stack` | Historical date range | Focused one-Pane Dashboard | How are input, output, and cache tokens composed? |
+| Ranking `ranking` | Historical date range | Focused one-Pane Dashboard | Which Agent, model, or project used the most tokens? |
+| Monitor `monitor` | Rolling observation window | Focused one-Pane Dashboard | What throughput has this process observed since it started? |
+| `dashboard` | Host-wide cadence plus independent panes | Dashboard | How do one or several configured charts compare? |
+| `custom timeline`, `custom stack`, `custom calendar`, `custom ranking` | Command-returned additive historical series | Focused Dashboard or an added Pane | How does a command-backed dataset change over time or rank? |
 | `animate` | No usage data | One standalone animation | Show a local terminal animation without querying a provider. |
 
 Historical routes query a date range. `monitor` instead samples repeated
 cumulative snapshots while the current process runs; it cannot reconstruct
-throughput from before it started. A standalone chart fills the terminal.
-Dashboard is a separate multi-pane host built from the same chart components,
-not a wrapper around a standalone chart.
+throughput from before it started. `ccuv chart KIND ...` adapts its arguments to
+a one-Pane Dashboard with hidden header and summary; after startup it is an
+ordinary Dashboard and can be expanded with more Panes.
 
 <!-- guide:shared-standalone-options -->
 
@@ -125,9 +125,9 @@ Monitor attachment and does not exist as a standalone `animate` or Dashboard
 Animation-pane style. Other Monitor styles do not expose or consume these
 attachment controls.
 
-## Shared standalone CLI reference
+## Focused chart CLI reference
 
-The following options apply to standalone charts as shown. Values in the
+The following options configure the initial Pane created by `ccuv chart`. Values in the
 **Default** column are parser defaults; command-specific defaults are listed in
 later tables.
 
@@ -141,7 +141,7 @@ later tables.
 | `--query-timeout SECONDS` | Positive finite number | `30` | All | Maximum live-query time. This advanced supported option is deliberately hidden from normal `--help`. |
 | `--ascii` | Flag | off | All | Prefer ASCII-safe rendering. Cannot be combined with an explicitly supplied `--theme`. |
 | `--theme THEME` | `classic`, `vivid`, `contrast`, `dracula`, `catppuccin`, `solarized`, `gruvbox`, `nord`, `github`, `mono`, `no-color` | `classic` | All | Chart color scheme; `no-color` disables chart color. |
-| `--density DENSITY` | `minimal`, `compact`, `full`, `detailed` | `detailed` (`full` for Ranking) | All standalone charts | Amount of chart detail and decoration. |
+| `--density DENSITY` | `minimal`, `compact`, `full`, `detailed` | `detailed` (`full` for Ranking) | All focused charts | Amount of chart detail and decoration. |
 | `--style STYLE` | Route-specific; see chart tables | Route-specific | All | Rendering style for the selected chart. |
 | `--legend POSITION` | Timeline: `below-title`, `inside`, `hidden`; Stack: `below-title`, `hidden`; Monitor: `below-title`, `inside`, `hidden`, `values` | `below-title` | Timeline, Stack, Monitor | Legend placement/content. |
 
@@ -160,7 +160,6 @@ the conflict is caused by explicitly specifying a theme. `--ascii` without a
 | `--model VALUE` | Repeatable text | none | Historical routes and Monitor | Filter by a complete model value. |
 | `--project VALUE` | Repeatable text | none | Historical routes and Monitor | Filter by a complete safe project label. |
 | `--interval SECONDS` | Finite number; at least `2` for historical charts | `10` | Historical routes | Refresh cadence while watching. |
-| `--no-watch` | Flag | off | Historical routes | Query once and exit instead of watching. |
 
 All historical dates and natural-day boundaries use the local IANA timezone of
 the host running ccuv. `--timezone AREA/LOCATION` overrides that host default,
@@ -215,10 +214,9 @@ The following combinations are rejected:
 | `--until` without `--since` | An end date needs a start date. |
 | `--since` later than `--until` | Date order is invalid. |
 | Future `--until` | Historical data cannot end in the future. |
-| `--interval` with `--no-watch` | A one-shot invocation has no scheduling interval. |
 | Historical `--interval` below `2` | Historical watching has a two-second minimum. |
 
-Historical charts watch by default. Pass `--no-watch` for a one-shot query.
+Historical charts refresh continuously through the Dashboard host.
 
 ### Density, styles, and grouping
 
@@ -297,7 +295,7 @@ agent plus ccusage version.
 
 <!-- guide:standalone-charts -->
 
-## Standalone chart reference
+## Focused chart reference
 
 ### Timeline `timeline`
 
@@ -406,8 +404,7 @@ timeline marker.
 | `--legend` | `below-title` (default), `inside`, `hidden`, `values` | Legend mode. |
 | `--style` | Monitor styles | Grouped Monitor cannot use `bars`; `list` includes process/item detail. |
 
-`--no-watch` is accepted by the parser for compatibility but hidden from normal
-help and rejected for Monitor: Monitor is always continuous. In total mode it
+Monitor is always continuous. In total mode it
 reports total tokens per minute. Grouped `model` reports model throughput;
 grouped Agent and project views use observed latest-pair token growth.
 
@@ -589,7 +586,7 @@ startup templates; they do not become Dataset presets. All fragments must not in
 host/lifecycle options such as:
 
 ```text
---interval --no-watch --watch --ascii --demo --lang
+--interval --watch --ascii --demo --lang
 --ccusage-bin --query-timeout --pane --grid --refresh-interval
 --sampling-interval --header-style --header-summary --header-interval
 --help --version -h
@@ -598,17 +595,17 @@ host/lifecycle options such as:
 A Dashboard header deliberately runs an unfiltered, all-Agent aggregate query;
 it does not become a summary of the focused Pane's filters. Likewise, Dashboard
 `--style` controls Dashboard chrome while a Pane's `--style` controls that
-chart. Dashboard's sampling cadence is host-wide, so Monitor Pane adjustment
-does not expose standalone Monitor's `i` interval control.
+chart. Dashboard's sampling cadence is host-wide, so Monitor Pane adjustment does not expose a Pane-local interval control.
 
 <!-- guide:interactive-controls -->
 
-## Interactive controls and standalone adjustments
+## Interactive controls and Pane adjustments
 
-### Common standalone controls
+### Common focused-chart controls
 
-These controls apply while the standalone TUI is running unless a view/mode
-restriction is stated:
+A `chart` command enters the normal Dashboard browse mode with one Pane. The
+control footer and contextual Help show the active meaning for the current
+Dashboard or Pane mode:
 
 | Key | Behavior |
 | --- | --- |
@@ -661,9 +658,8 @@ Visual-only changes update the preview immediately; data-affecting changes are
 used by the subsequent configuration refresh after commit.
 
 Adjustment mode closes automatically after **three minutes** with no keyboard or
-mouse interaction. Enter, `Esc`, and that timeout return a standalone interface
-to its chart view. The same Dashboard exits restore ordinary browse mode with the
-Dashboard body and every Pane in chart view. Changes already applied in a picker
+mouse interaction. Enter, `Esc`, and that timeout restore ordinary Dashboard
+browse mode with the body and every Pane in chart view. Changes already applied in a picker
 keep their normal close semantics, while an open filter draft is discarded just
 as with `Esc`. Dashboard layout and Pane-type subpickers also cancel and return
 to browse mode.
@@ -797,6 +793,5 @@ For intermittent `unified_daily` local-Agent-database access failures, see [know
 
 Use `ccuv --help` for the route list and `ccuv <command> --help` for
 localized parser help, for example `ccuv --lang zh dashboard --help`. The
-normal help intentionally omits advanced `--query-timeout`, Dashboard weight
-options, and Monitor's parser-accepted-but-invalid `--no-watch`; this guide
-records them so their constraints are clear.
+normal help intentionally omits advanced `--query-timeout` and Dashboard weight
+options; this guide records them so their constraints are clear.

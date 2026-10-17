@@ -125,10 +125,12 @@ storage is shown as unavailable and protected from overwrites.
 > Dashboard coordinates pane queries: identical in-flight provider requests are
 > shared, avoiding duplicate work while multiple panes refresh.
 
-## Standalone views
+## Focused chart views
 
-Choose a standalone view when you need to focus on one question rather than an
-overview composed from multiple panes.
+`ccuv chart KIND ...` is a shortcut to a focused one-Pane Dashboard: it starts
+with the requested chart, hides the Dashboard header and global summary, and
+then uses the same Pane controls and lifecycle as every Dashboard. You can keep
+it focused, replace the Pane, or expand it into a multi-Pane Dashboard.
 
 | Category | View | Command | Use it for | Preview |
 | --- | --- | --- | --- | --- |
@@ -153,8 +155,8 @@ overview composed from multiple panes.
 > conservative cross-Agent Name aggregation.
 
 > [!TIP]
-> Need several focused charts together? Compose standalone chart commands into a
-> custom Dashboard and choose your own grid or named layout. See the
+> Need several focused charts together? Add Panes from a focused chart session or
+> compose a custom Dashboard and choose your own grid or named layout. See the
 > [usage guide](docs/usage.md).
 
 A declared V2 Dataset can independently rank real models within each logical

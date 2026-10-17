@@ -51,17 +51,16 @@ ccuv dashboard wide --demo
 
 | 路由 | 数据模型 | 终端组成 | 主要问题 |
 | --- | --- | --- | --- |
-| 时间趋势 `timeline` | 历史日期范围 | 单个独立图表 | Token 使用量随时间如何变化？ |
-| 活跃日历 `calendar` | 历史日期范围 | 单个独立图表 | 哪些日期活跃、强度如何？ |
-| 分组构成 `stack` | 历史日期范围 | 单个独立图表 | 输入、输出和缓存 Token 的构成如何？ |
-| 累计排名 `ranking` | 历史日期范围 | 单个独立图表 | 哪个 Agent、模型或项目使用 Token 最多？ |
-| 监测 `monitor` | 滚动观测窗口 | 单个独立图表 | 当前进程观测到了什么吞吐量？ |
+| 时间趋势 `timeline` | 历史日期范围 | 聚焦单 Pane Dashboard | Token 使用量随时间如何变化？ |
+| 活跃日历 `calendar` | 历史日期范围 | 聚焦单 Pane Dashboard | 哪些日期活跃、强度如何？ |
+| 分组构成 `stack` | 历史日期范围 | 聚焦单 Pane Dashboard | 输入、输出和缓存 Token 的构成如何？ |
+| 累计排名 `ranking` | 历史日期范围 | 聚焦单 Pane Dashboard | 哪个 Agent、模型或项目使用 Token 最多？ |
+| 监测 `monitor` | 滚动观测窗口 | 聚焦单 Pane Dashboard | 当前进程观测到了什么吞吐量？ |
 | `dashboard` | Host 全局节奏与独立 Pane | 多 Pane Dashboard | 多个已配置图表如何并排比较？ |
-| `custom timeline`、`custom stack`、`custom calendar`、`custom ranking` | 命令返回、可相加的历史系列 | 单个独立图表或 Dashboard Pane | 命令驱动的数据集如何随时间变化或排名？ |
+| `custom timeline`、`custom stack`、`custom calendar`、`custom ranking` | 命令返回、可相加的历史系列 | 聚焦 Dashboard 或新增 Pane | 命令驱动的数据集如何随时间变化或排名？ |
 
 历史路由查询日期范围。`monitor` 则在当前进程运行期间重复采集累计快照；它不能重建
-启动前的吞吐历史。独立图表占满终端。Dashboard 是单独的多 Pane Host，复用相同的图表组件，
-而不是独立图表的包装器。
+启动前的吞吐历史。`ccuv chart KIND ...` 会将参数转换为隐藏 header 和 summary 的单 Pane Dashboard；启动后它就是普通 Dashboard，可以继续添加 Pane。
 
 ## 动画
 
@@ -105,9 +104,9 @@ Monitor-eligible 效果；随后 `s`/`S` 会循环 term-animate 声明的所有�
 
 <!-- guide:shared-standalone-options -->
 
-## 独立图表共用 CLI 参数
+## 聚焦图表共用 CLI 参数
 
-下列参数按表中所示适用于独立图表。**默认值**是解析器默认值；命令专属默认值在后续表格中列出。
+下列参数配置 `ccuv chart` 创建的初始 Pane。**默认值**是解析器默认值；命令专属默认值在后续表格中列出。
 
 ### 呈现与进程参数
 
@@ -119,7 +118,7 @@ Monitor-eligible 效果；随后 `s`/`S` 会循环 term-animate 声明的所有�
 | `--query-timeout SECONDS` | 正且有限的数字 | `30` | 全部 | 实时查询最长时间。该高级受支持参数刻意不显示在常规 `--help` 中。 |
 | `--ascii` | 标志 | 关闭 | 全部 | 使用 ASCII 兼容渲染。不能和显式提供的 `--theme` 同用。 |
 | `--theme THEME` | `classic`、`vivid`、`contrast`、`dracula`、`catppuccin`、`solarized`、`gruvbox`、`nord`、`github`、`mono`、`no-color` | `classic` | 全部 | 图表配色；`no-color` 关闭图表颜色。 |
-| `--density DENSITY` | `minimal`、`compact`、`full`、`detailed` | `detailed`（Ranking 为 `full`） | 全部独立图表 | 图表细节与装饰的数量。 |
+| `--density DENSITY` | `minimal`、`compact`、`full`、`detailed` | `detailed`（Ranking 为 `full`） | 全部聚焦图表 | 图表细节与装饰的数量。 |
 | `--style STYLE` | 命令专属，见图表表格 | 命令专属 | 全部 | 所选图表的渲染样式。 |
 | `--legend POSITION` | Timeline：`below-title`、`inside`、`hidden`；Stack：`below-title`、`hidden`；Monitor：`below-title`、`inside`、`hidden`、`values` | `below-title` | Timeline、Stack、Monitor | 图例位置/内容。 |
 
@@ -137,7 +136,6 @@ Monitor-eligible 效果；随后 `s`/`S` 会循环 term-animate 声明的所有�
 | `--model VALUE` | 可重复文本 | 无 | 历史路由与 Monitor | 按完整模型值筛选。 |
 | `--project VALUE` | 可重复文本 | 无 | 历史路由与 Monitor | 按完整安全项目标签筛选。 |
 | `--interval SECONDS` | 有限数字；历史图表至少 `2` | `10` | 历史路由 | 监听时的刷新节奏。 |
-| `--no-watch` | 标志 | 关闭 | 历史路由 | 仅查询一次后退出，不持续监听。 |
 
 所有历史日期和自然日边界都使用运行 ccuv 的主机本地 IANA 时区。`--timezone AREA/LOCATION`
 可覆盖主机默认值，ccuv 会在每个 custom Dataset 请求中显式发送解析后的时区。Dashboard
@@ -180,14 +178,13 @@ token，并在完整筛选后项目池的每个 token 前缀树分支中，消�
 | `--until` 没有 `--since` | 结束日期需要起始日期。 |
 | `--since` 晚于 `--until` | 日期顺序无效。 |
 | 未来的 `--until` | 历史数据不能在未来结束。 |
-| `--interval` 与 `--no-watch` | 单次运行没有调度间隔。 |
 | 历史 `--interval` 小于 `2` | 历史监听最小间隔是两秒。 |
 
-历史图表默认持续监听；用 `--no-watch` 可只查询一次。
+历史图表通过 Dashboard Host 持续刷新。
 
 ### 密度、样式与分组
 
-- `minimal` 不显示摘要或审计；`compact` 增加当前值与筛选摘要，适合 Pane；`full` 增加比较和已观测指标但不显示审计页脚；`detailed` 增加该页脚，并且是独立图表默认值。
+- `minimal` 不显示摘要或审计；`compact` 增加当前值与筛选摘要，适合 Pane；`full` 增加比较和已观测指标但不显示审计页脚；`detailed` 增加该页脚，并且是 `chart` 初始 Pane 的默认值。
 - Timeline 样式为 `linear`、`step`、`no-line`、`points`、`line-points`、`stem`、`area`。
   分组 Timeline（`--by ...`）不能使用 `area`。
 - Calendar 样式为 `relative` 和 `grid`。
@@ -240,7 +237,7 @@ Exact 或其他未合并项目。编号从 `0` 开始，只在当前输出内按
 
 <!-- guide:standalone-charts -->
 
-## 独立图表参考
+## 聚焦图表参考
 
 ### 时间趋势 `timeline`
 
@@ -342,7 +339,7 @@ Monitor 在本次运行期间从重复累计快照观测吞吐量。第一个被
 | `--legend` | `below-title`（默认）、`inside`、`hidden`、`values` | 图例模式。 |
 | `--style` | Monitor 样式 | 分组 Monitor 不能使用 `bars`；`list` 包含进程/条目详情。 |
 
-`--no-watch` 为兼容性被解析器接受，但在常规帮助中隐藏，并会被 Monitor 拒绝：Monitor 始终连续运行。
+Monitor 始终连续运行。
 总计模式报告总 Token/分钟。分组 `model` 报告模型吞吐量；分组 Agent 和项目视图使用观测到的
 最新成对 Token 增长。
 
@@ -439,7 +436,7 @@ ccuv dashboard --empty --grid 1x1 \
 | 参数 | 值/默认值 | Host 所有的行为 |
 | --- | --- | --- |
 | `[PRESET]`（可选位置参数） | `single`、`wide`、`wide-clock`、`narrow`、`narrow-clock`、`all`、`spotlight-wide`、`spotlight-wide2`；省略时默认 `wide-clock` | 选择启动模板；不能和 `--grid` 或 `--layout` 同用。 |
-| `--demo [SIZE]`、`--lang`、`--ccusage-bin`、`--query-timeout` | 与独立图表语义相同；所有 Demo 形式都是实时、每次调用活动会变化的异步模拟，裸 Demo 为 `medium`；timeout 默认 `30` | 所有 Pane 的 Provider/进程/输入配置；`--query-timeout` 是隐藏高级配置。 |
+| `--demo [SIZE]`、`--lang`、`--ccusage-bin`、`--query-timeout` | 与聚焦图表语义相同；所有 Demo 形式都是实时、每次调用活动会变化的异步模拟，裸 Demo 为 `medium`；timeout 默认 `30` | 所有 Pane 的 Provider/进程/输入配置；`--query-timeout` 是隐藏高级配置。 |
 | `--ascii` | 关闭 | Host 和 Pane 的 ASCII 渲染；与显式 Pane `--theme` 冲突。 |
 | `--theme THEME` | `classic` | Dashboard 外壳主题，区别于每个 Pane 的图表主题。 |
 | `--grid ROWSxCOLUMNS` | 仅自定义构造 | 所选 Pane 数量的逻辑网格。 |
@@ -464,7 +461,7 @@ Dashboard Host 负责布局、外壳主题/样式、Header、输入循环和节�
 Pane 片段可以包含内置图表命令（`timeline`、`calendar`、`stack`、`ranking` 或 `monitor`）、具有显式样式的 `animate`、`empty`，或 `custom timeline|stack|calendar|ranking` 及图表参数。自定义 Pane 必须提供 `--dataset`：不提供 `--command` 时使用已安装 Dataset，提供 `--command` 时使用任意命令；命令文本以 `shlex.split` 转为 argv，不经 shell 执行。Dashboard 预设仍是仅统计 token 消耗的启动模板，不会变成 Dataset 预设。所有片段均不得包含如下 Host/生命周期参数：
 
 ```text
---interval --no-watch --watch --ascii --demo --lang
+--interval --watch --ascii --demo --lang
 --ccusage-bin --query-timeout --pane --grid --refresh-interval
 --sampling-interval --header-style --header-summary --header-interval
 --help --version -h
@@ -476,9 +473,11 @@ Dashboard Header 刻意运行未筛选、全 Agent 的聚合查询；它不会�
 
 <!-- guide:interactive-controls -->
 
-## 交互控制与独立图表调整
+## 交互控制与 Pane 调整
 
-### 独立图表通用控制
+### 聚焦图表通用控制
+
+`chart` 命令会以一个 Pane 进入普通 Dashboard 浏览模式；控制栏和上下文帮助会显示当前 Dashboard 或 Pane 模式下的实际按键含义。
 
 除非表中指定视图/模式限制，独立 TUI 运行时可使用以下控制：
 
@@ -520,7 +519,7 @@ Timeline、Calendar、Stack 和 Ranking 在图表视图按 `m` 打开调整器�
 **Quick** 和 **Advanced** 页之间切换；`Enter`/换行提交当前候选配置；`Esc` 取消调整器。
 仅视觉修改会立即更新预览；影响数据的修改会在提交后的配置刷新中使用。
 
-调整模式在连续 **3 分钟**内没有键盘或鼠标交互时会自动结束。按 Enter、`Esc` 或发生该超时后，独立图表都会回到图表视图；Dashboard 则回到普通浏览模式，并将 Dashboard 主体和所有 Pane 都恢复为图表视图。已在调整器中生效的修改保留其正常关闭语义；打开的筛选草稿会像按 `Esc` 一样丢弃。Dashboard 的布局和 Pane 类型子选择器同样会取消并返回浏览模式。
+调整模式在连续 **3 分钟**内没有键盘或鼠标交互时会自动结束。按 Enter、`Esc` 或发生该超时后，会回到普通 Dashboard 浏览模式，并将 Dashboard 主体和所有 Pane 都恢复为图表视图。已在调整器中生效的修改保留其正常关闭语义；打开的筛选草稿会像按 `Esc` 一样丢弃。Dashboard 的布局和 Pane 类型子选择器同样会取消并返回浏览模式。
 
 | 图表 | Quick 页 | Advanced 页 |
 | --- | --- | --- |
@@ -625,5 +624,4 @@ Dashboard 有独立的导航和归属规则。浏览模式中：
 关于间歇性的 `unified_daily` 本地 Agent 数据库访问失败，请参阅[已知问题](known-issues.zh-CN.md)。
 
 使用 `ccuv --help` 查看路由列表，使用 `ccuv <command> --help` 查看本地化解析器帮助，例如
-`ccuv --lang zh dashboard --help`。常规帮助刻意省略高级 `--query-timeout`、Dashboard 权重参数和
-Monitor 中“解析器接受但使用无效”的 `--no-watch`；本文记录它们以明确约束。
+`ccuv --lang zh dashboard --help`。常规帮助刻意省略高级 `--query-timeout` 和 Dashboard 权重参数；本文记录它们以明确约束。

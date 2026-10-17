@@ -83,9 +83,9 @@ ccuv dashboard weekly-review --ccusage-bin /opt/bin/ccusage
 > [!TIP]
 > Dashboard 会协调 Pane 查询：多个 Pane 刷新时，相同的进行中 Provider 请求会被共享，避免重复工作。
 
-## 独立视图
+## 聚焦图表视图
 
-当你需要聚焦于单一问题，而不是使用由多个 Pane 组成的总览时，请选择独立视图。
+`ccuv chart KIND ...` 是聚焦单 Pane Dashboard 的快捷入口：它以指定图表启动，隐藏 Dashboard header 和全局 summary，之后完全使用 Dashboard 的 Pane 控制与生命周期。你可以保持单 Pane、替换 Pane，或扩展为多 Pane Dashboard。
 
 | 分类 | 视图 | 命令 | 适用场景 | 预览 |
 | --- | --- | --- | --- | --- |
@@ -108,7 +108,7 @@ ccuv dashboard weekly-review --ccusage-bin /opt/bin/ccusage
 > 使用 `--project-aggregation exact` 可关闭跨 Agent 聚合。
 
 > [!TIP]
-> 想将多个聚焦图表一同查看？可以把独立图表命令组合为自定义 Dashboard，并自行选择网格或命名布局。参阅[使用指南](docs/usage.zh-CN.md)。
+> 想将多个聚焦图表一同查看？可以从聚焦图表会话添加 Pane，或直接组合自定义 Dashboard，并自行选择网格或命名布局。参阅[使用指南](docs/usage.zh-CN.md)。
 
 已声明该能力的 V2 Dataset 可以在每个逻辑模型中独立排列真实模型：
 

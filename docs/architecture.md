@@ -14,19 +14,19 @@ This document describes the implemented architecture of `ccusage-viz`. It is int
 | --- | --- |
 | **Chart Definition** | Stateless catalog entry for one chart type. It gives bootstrap a stable ID and references to separate configuration, data-requirement, processing, rendering, runtime-setting, and inspection collaborators. |
 | **Chart Component** | One running chart instance. It owns its reusable chart payload and lifecycle state—generation, Coverage, accepted data, pending/running/error state, processed model, and rendered content—and receives resolved Host context without taking ownership of Host settings. |
-| **Host** | Product shell that runs and presents Components. Standalone hosts one Component; Dashboard hosts ordered Components in Panes. |
+| **Host** | Product shell that runs and presents Components. Dashboard hosts one or more ordered Components in Panes; animation retains its independent provider-free host. |
 | **Pane** | Dashboard placement and composition context for one Component. It adds geometry, focus, order, and Dashboard-owned cadence; it does not redefine chart semantics. |
 | **Provider** | Data capability that compiles logical requests, executes physical queries, and returns normalized usage data with provenance, resolution, and Coverage. `ccusage`, Demo, and command-backed custom historical sources are built-in Provider implementations. |
 | **Empty Pane** | A temporary Dashboard pane configuration with geometry and focus but no Component, Provider, scheduler, chart data, or summary contribution. |
 
-A Chart Component is the smallest product-level runtime unit shared by Standalone and Dashboard. Smaller functions and services remain reusable below it, but Hosts never reimplement a chart.
+A Chart Component is the smallest product-level runtime unit hosted by Dashboard. Smaller functions and services remain reusable below it, but the Host never reimplements a chart.
 
 A Definition is to a Component what a blueprint is to an instance:
 
 ```text
 Timeline Definition
-├── create(config A) → Timeline Component A → Standalone Host
-├── create(config B) → Timeline Component B → Dashboard Pane 1
+├── create(config A) → Timeline Component A → Dashboard Pane 1
+├── create(config B) → Timeline Component B → Dashboard Pane 2
 └── create(config C) → Timeline Component C → Dashboard Pane 3
 ```
 
@@ -40,18 +40,14 @@ Routing identifies the requested product operation before initializing chart run
 argv
   → Route
     ├── Help / Version       → short circuit
-    ├── Standalone Chart     → one Chart Component + Standalone Host
-    └── Dashboard            → many Chart Components + Dashboard Host
+    ├── Focused Chart        → adapt to one Pane + Dashboard Host
+    ├── Dashboard            → one or many Panes + Dashboard Host
+    └── Animation            → independent provider-free host
 ```
 
 Help and Version do not initialize Providers, inspect chart TTY requirements, enter terminal input mode, or create the execution coordinator.
 
-Standalone and Dashboard use the same Chart Definitions and Components. Their difference is only the Host:
-
-- **Standalone Host:** one Component, one full-screen composition, Standalone Controls, lifecycle, inspection, and command copy.
-- **Dashboard Host:** multiple Components, Header and Summary, Layout and Weights, focus and Pane lifecycle, global Controls, and Dashboard-owned Refresh and Sampling schedulers.
-
-A Dashboard Route does not call the Standalone Route. Both construct Components from the same Definitions and pass them to different Hosts.
+`ccuv chart KIND ...` is a focused Dashboard adapter: it creates a 1×1 Dashboard with one configured Pane and defaults its Header to hidden and Summary to none. After launch it uses the same focus, Pane lifecycle, inspection, command copy, controls, and Refresh/Sampling schedulers as any Dashboard, and users may expand it with more Panes. Normal `ccuv dashboard ...` construction and defaults remain independent of this adapter.
 
 ## Main chart pipeline
 
@@ -59,7 +55,7 @@ Chart products use four conceptual layers:
 
 | Layer | Concepts | Example |
 | --- | --- | --- |
-| **1. Route** | Route, launch request | `ccuv chart monitor` selects the Standalone Monitor operation. `ccuv dashboard` selects Dashboard and describes its Panes. Routing does not own runtime cadence or Component state. |
+| **1. Route** | Route, launch request | `ccuv chart monitor` adapts one Monitor Pane into a focused Dashboard. `ccuv dashboard` directly describes its Panes. Routing does not own runtime cadence or Component state. |
 | **2. Query / Data Acquisition** | Config data scope, Query Intent, Provider, Provider Result | A Monitor Config specifies `by=model` and Filters. The logical planner combines them with Host context to produce a Query Intent. The `ccusage` Provider runs the query and returns normalized cumulative records. |
 | **3. Result Processing** | Processor/projector, semantic Chart Model | Monitor processing uses the Component's previous snapshot and Observer to derive increments, TPM, and time buckets, then projects those semantics to a Timeline or Ranking Model. Historical processing aggregates daily records independently. |
 | **4. Rendering** | Chart renderer, Chart Model, Theme, Style, Chart Render, Host composition, Painter | The selected Timeline or Ranking renderer consumes the projected Model. The Host adds Controls, Header, borders, and other product content to create a complete Frame; the Painter only diffs Frames and writes changed rows. |
@@ -100,7 +96,7 @@ It owns syntax, option conflicts, Preset composition, appended Panes, Pane owner
 
 #### Logical query planning
 
-A shared logical planner produces an independent request for every data consumer—Standalone Component, Dashboard Summary, or Pane Component. It combines the owner's resolved Host context, reusable chart payload, Chart Definition data requirements, generation, trigger, and current Coverage into Provider-neutral scope, missing intervals, required resolution and dimensions, Provider selection, and execution options. The same planner is used in both product forms, so missing-Coverage planning does not diverge between Standalone and Dashboard.
+A shared logical planner produces an independent request for every data consumer—Dashboard Summary or Pane Component. It combines the owner's resolved Host context, reusable chart payload, Chart Definition data requirements, generation, trigger, and current Coverage into Provider-neutral scope, missing intervals, required resolution and dimensions, Provider selection, and execution options. Focused and directly launched Dashboards use the same planner, so missing-Coverage planning cannot diverge by CLI entry point.
 
 A Chart Definition declares what data it needs. It never constructs a `ccusage` command or invokes a Provider itself.
 
@@ -141,14 +137,14 @@ Semantic Chart Model
   → built-in chart renderer
   + declarative Theme / Style
   → Chart Render
-  → Standalone or Dashboard composition
+  → Dashboard composition
   → complete Frame
   → Terminal Painter
 ```
 
 Renderers never query data or write directly to stdout. Status, Controls, Notices, settings, inspection content, and chart bodies are composed into a complete logical Frame. The Painter compares complete Frames and writes only changed terminal rows; a complete logical repaint does not imply an unconditional terminal clear.
 
-Historical presentation has a kind-aware protocol shared by native and Custom adapters for Timeline, Calendar, Stack, and Ranking. Adapters retain their own domain models—Custom measurements remain `Decimal` through projection and formatting—and provide only protocol facts to the selected product surface. The peer surface families are deliberately independent: Standalone A and Dashboard-pane B each have a distinct implementation for every kind, as well as their own operation-bar vocabulary, placement, focus/prompt behavior, and row budget. They may share chart-body primitives but neither is a mode of the other. For example, a Standalone Timeline retains Plotext's upper/right axes, while the Dashboard Timeline pane intentionally keeps only the left/bottom axes. `SurfaceControls` is an explicit surface contract; callback hosts must not reduce it to a generic row-count parameter. Dashboard-owned header, divider, and outer-frame rows are compositor rows, never pane rows.
+Historical presentation has a kind-aware protocol shared by native and Custom adapters for Timeline, Calendar, Stack, and Ranking. Adapters retain their own domain models—Custom measurements remain `Decimal` through projection and formatting—and provide only protocol facts to Dashboard Panes. `SurfaceControls` is an explicit surface contract; callback hosts must not reduce it to a generic row-count parameter. Dashboard-owned header, divider, and outer-frame rows are compositor rows, never pane rows.
 
 Accepted Custom responses remain bound to the query configuration that produced them. While a replacement data query is pending, hosts render the old accepted facts only against their accepted scope; display-local changes may reproject them, but a changed source, kind, range, filter, grouping, or granularity renders pending state instead. The Dashboard header records each Custom summary response's accepted period and as-of date, so comparison wording cannot be relabelled by a newer pending header setting. Its independent native and Custom summary blocks wrap at semantic boundaries with ANSI- and CJK-display-width-aware layout rather than being concatenated and clipped.
 
@@ -156,13 +152,13 @@ Plotext rendering remains behind a serialized adapter because Plotext uses proce
 
 ### Presentation and Scope contract
 
-Chart presentation has four ordered Density values: `minimal`, `compact`, `full`, and `detailed`. Standalone defaults to `detailed`; each new or default Dashboard Pane explicitly uses `compact`. Density belongs to the chart configuration carried by Standalone or Pane. Dashboard has no global chart Density, and changes to Dashboard Theme, Style, Header, Summary, or Layout do not rewrite Pane-owned Density, Theme, Style, Filters, or analysis settings. A Density change advances render revision only; it does not change data Generation or scheduler baselines.
+Chart presentation has four ordered Density values: `minimal`, `compact`, `full`, and `detailed`. A `chart` command may configure the initial Pane density; new Dashboard Panes explicitly use `compact`. Density belongs to the Pane chart configuration. Dashboard has no global chart Density, and changes to Dashboard Theme, Style, Header, Summary, or Layout do not rewrite Pane-owned Density, Theme, Style, Filters, or analysis settings. A Density change advances render revision only; it does not change data Generation or scheduler baselines.
 
 `minimal` retains identity, chart, and compact live state without a summary or audit. `compact` adds the current filtered-Scope total and active Filter-dimension count without comparisons or audit. `full` adds applicable period comparisons and observed metrics without a passive runtime audit footer. `detailed` adds that same complete content plus Host-supplied runtime audit. Controls and correctness-critical Notices are independent of Density. In Dashboard, each Pane formats a bounded local Notice band after resolving its own geometry; Notices are not globally aggregated or deduplicated and cannot consume another Pane's rows.
 
 Time range, based on the host machine's local natural day, and Agent/Model/Project Filters define one chart Summary Scope. Filtering occurs before Summary calculation; By, Top, and Other are later projections and do not alter the Summary total or comparisons. Ranking with hidden Other carries `Top N · X% of total` metadata in its title; when Other is shown, the share is omitted because the chart covers the full filtered Scope. The Dashboard Header Summary is a separate owner with unfiltered data and Coverage, never a projection of Pane state.
 
-A fixed range—including a lone Since whose end is resolved at startup—keeps both resolved bounds and infers no outside-range comparison Coverage. For rolling ranges, the historical Component owns accepted facts, comparison Coverage, missing intervals, supplemental pending/error state, and same-generation merges. Continuous Hosts first render uncovered applicable comparisons as `??`, then schedule only missing intervals; adjacent gaps may merge while disjoint baselines remain separate physical requests. A successful empty covered interval is numeric zero. A supplemental failure retains `??` and adds a local Notice. Historical no-Watch includes required comparison Coverage in its initial atomic request.
+A fixed range—including a lone Since whose end is resolved at startup—keeps both resolved bounds and infers no outside-range comparison Coverage. For rolling ranges, the historical Component owns accepted facts, comparison Coverage, missing intervals, supplemental pending/error state, and same-generation merges. Continuous Hosts first render uncovered applicable comparisons as `??`, then schedule only missing intervals; adjacent gaps may merge while disjoint baselines remain separate physical requests. A successful empty covered interval is numeric zero. A supplemental failure retains `??` and adds a local Notice. Historical focused charts refresh continuously through the Dashboard lifecycle.
 
 ## Runtime state
 
@@ -215,7 +211,6 @@ Refresh, Sampling, debounce, manual refresh, and committed configuration work re
 
 Asynchronous Query workers return immutable completion actions through one serialized runtime queue. Only the runtime owner mutates state, synchronously processes accepted facts, serially renders charts, composes Frames, and paints. Render revision still distinguishes successive visible states, but no render worker or render-completion queue is introduced without measured need. Shutdown stops admission, detaches/cancels work, suppresses late completions, stops painting, and restores terminal state last.
 
-Historical no-Watch uses the same startup, query, acceptance, processing, Frame, and Painter path as Historical Watch, then exits after the first accepted Frame.
 
 ## Built-in capability registries
 
@@ -260,7 +255,7 @@ Animation is a separate resource kind, not a Chart variant and not an implicit p
 
 `term-animate` remains a pure projection dependency. ccuv owns terminal lifecycle, input, viewport allocation, session clocks, repaint deadlines, clipping, and cleanup, while named library themes remain library-owned. It passes active/idle state only to effects that declare state support. An animation Pane owns no Provider, query runtime, scheduler, or lifecycle operation.
 
-Monitor attachments are local to their Monitor Pane or standalone Monitor host and are disabled by default. Users enable one from the advanced ranking/list controls; it then renders after a comparable accepted interval is available and uses ccuv's accepted token-delta decision to choose active versus idle for effects that declare state support. Their repaint deadlines redraw the existing frame only; they never initiate a query. Enabled attachments begin with the `classic` theme; advanced controls cycle all library-declared Monitor effects and then ccuv-local `none`. This transient `none` state retains no catalog effect, creates no provider work, and is unavailable to standalone animation and Dashboard animation panes.
+Monitor attachments are local to their Monitor Pane and are disabled by default. Users enable one from the advanced ranking/list controls; it then renders after a comparable accepted interval is available and uses ccuv's accepted token-delta decision to choose active versus idle for effects that declare state support. Their repaint deadlines redraw the existing frame only; they never initiate a query. Enabled attachments begin with the `classic` theme; advanced controls cycle all library-declared Monitor effects and then ccuv-local `none`. This transient `none` state retains no catalog effect, creates no provider work, and is unavailable to standalone animation and Dashboard animation panes.
 
 Chart Components require Query and Result Processing; animation projection does not. The shared terminal Frame and Painter infrastructure composes their output without turning animation into a chart component or widening chart/provider dependencies.
 

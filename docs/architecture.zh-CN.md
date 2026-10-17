@@ -14,19 +14,19 @@
 | --- | --- |
 | **Chart Definition** | 某类图表的无状态目录项。它向 bootstrap 提供稳定 ID，并引用彼此分离的配置、数据需求、结果处理、渲染、运行时设置和检查协作者。 |
 | **Chart Component** | 一个运行中的图表实例。独立拥有可复用 chart payload 与生命周期状态——generation、Coverage、已接受数据、等待/运行/错误状态、语义模型和渲染内容；它接收已解析的 Host context，但不取得 Host 设置的所有权。 |
-| **Host** | 运行并呈现 Component 的产品外壳。Standalone Host 承载一个 Component；Dashboard Host 在 Pane 中承载多个有序 Component。 |
+| **Host** | 运行并呈现 Component 的产品外壳。Dashboard Host 在 Pane 中承载一个或多个有序 Component；动画保留独立的无 Provider Host。 |
 | **Pane** | 一个 Component 在 Dashboard 中的位置与组合上下文。只增加几何、焦点、顺序和 Dashboard 拥有的节奏，不重新定义图表语义。 |
 | **Provider** | 将逻辑请求编译为物理查询、执行查询，并返回带 provenance、resolution 和 Coverage 的规范化用量数据。`ccusage`、Demo 与命令驱动的自定义历史数据源都是内置 Provider 实现。 |
 | **Empty Pane** | 具有几何与焦点、但没有 Component、Provider、调度、图表数据或汇总贡献的临时 Dashboard Pane 配置。 |
 
-Chart Component 是 Standalone 与 Dashboard 共享的最小产品级运行单元。更小的函数和服务仍可在其下复用，但 Host 不会重新实现图表。
+Chart Component 是 Dashboard 承载的最小产品级运行单元。更小的函数和服务仍可在其下复用，但 Host 不会重新实现图表。
 
 Definition 与 Component 的关系类似蓝图与实例：
 
 ```text
 Timeline Definition
-├── create(config A) → Timeline Component A → Standalone Host
-├── create(config B) → Timeline Component B → Dashboard Pane 1
+├── create(config A) → Timeline Component A → Dashboard Pane 1
+├── create(config B) → Timeline Component B → Dashboard Pane 2
 └── create(config C) → Timeline Component C → Dashboard Pane 3
 ```
 
@@ -40,18 +40,14 @@ Timeline Definition
 argv
   → Route
     ├── Help / Version       → 短接
-    ├── Standalone Chart     → 一个 Chart Component + Standalone Host
-    └── Dashboard            → 多个 Chart Component + Dashboard Host
+    ├── Focused Chart        → 转换为一个 Pane + Dashboard Host
+    ├── Dashboard            → 一个或多个 Pane + Dashboard Host
+    └── Animation            → 独立的无 Provider Host
 ```
 
 Help 与 Version 不初始化 Provider，不检查图表 TTY 条件，不进入终端输入模式，也不创建执行协调器。
 
-Standalone 与 Dashboard 使用相同的 Chart Definition 和 Component，只由不同 Host 承载：
-
-- **Standalone Host：**一个 Component、一份全屏组合、Standalone Controls、生命周期、检查视图和命令复制。
-- **Dashboard Host：**多个 Component、Header 与 Summary、Layout 与 Weights、焦点与 Pane 生命周期、全局 Controls，以及 Dashboard 拥有的 Refresh 和 Sampling 调度器。
-
-Dashboard Route 不调用 Standalone Route。两者都从同一 Definition 创建 Component，再交给不同 Host。
+`ccuv chart KIND ...` 是聚焦 Dashboard 适配器：它创建 1×1 Dashboard 和一个已配置 Pane，并默认隐藏 Header、关闭 Summary。启动后完全复用 Dashboard 的焦点、Pane 生命周期、检查视图、命令复制、Controls 和 Refresh/Sampling 调度器，用户也可继续添加 Pane。普通 `ccuv dashboard ...` 的构造与默认值不经过该适配器。
 
 ## 图表主链路
 
@@ -59,7 +55,7 @@ Dashboard Route 不调用 Standalone Route。两者都从同一 Definition 创�
 
 | 层级 | 所属概念 | 具体例子 |
 | --- | --- | --- |
-| **1. Route** | Route、launch request | `ccuv chart monitor` 选择 Standalone Monitor 操作；`ccuv dashboard` 选择 Dashboard 并描述其中的 Pane。Route 不拥有运行节奏或 Component 状态。 |
+| **1. Route** | Route、launch request | `ccuv chart monitor` 把一个 Monitor Pane 转换为聚焦 Dashboard；`ccuv dashboard` 直接描述其 Pane。Route 不拥有运行节奏或 Component 状态。 |
 | **2. Query / Data Acquisition** | Config 中的数据范围、Query Intent、Provider、Provider Result | Monitor Config 指定 `by=model` 和 Filters；逻辑规划器结合 Host context 生成 Query Intent；`ccusage` Provider 执行查询并返回规范化累计 records。 |
 | **3. Result Processing** | Processor/projector、语义 Chart Model | Monitor processing 使用 Component 保存的 previous snapshot 与 Observer 推导增量、TPM 和时间桶，再投影为 Timeline 或 Ranking Model；历史 processing 独立聚合每日 records。 |
 | **4. Rendering** | Chart renderer、Chart Model、Theme、Style、Chart Render、Host composition、Painter | 选中的 Timeline 或 Ranking renderer 消费投影后的 Model。Host 加入 Controls、Header、边框等产品内容并创建完整 Frame；Painter 只比较 Frame 并写入变化行。 |
@@ -100,7 +96,7 @@ Parse → Compose defaults and Presets → Validate → Resolve startup values �
 
 #### 逻辑查询规划
 
-共享的逻辑规划器为每个数据消费者——Standalone Component、Dashboard Summary 或 Pane Component——分别产生逻辑请求。它把 owner 已解析的 Host context、可复用 chart payload、Chart Definition 数据需求、generation、trigger 与当前 Coverage 合并为 Provider-neutral scope、缺失区间、所需 resolution 与 dimensions、Provider 选择和执行选项。两种产品形态使用同一个规划器，因此 Standalone 与 Dashboard 的缺失 Coverage 规划不会发生分歧。
+共享的逻辑规划器为每个数据消费者——Dashboard Summary 或 Pane Component——分别产生逻辑请求。它把 owner 已解析的 Host context、可复用 chart payload、Chart Definition 数据需求、generation、trigger 与当前 Coverage 合并为 Provider-neutral scope、缺失区间、所需 resolution 与 dimensions、Provider 选择和执行选项。聚焦 Dashboard 与直接启动的 Dashboard 使用同一个规划器，因此 CLI 入口不同不会造成缺失 Coverage 规划分歧。
 
 Chart Definition 只声明需要什么数据，不构造 `ccusage` 命令，也不自行调用 Provider。
 
@@ -141,14 +137,14 @@ Semantic Chart Model
   → 内置图表 renderer
   + 声明式 Theme / Style
   → Chart Render
-  → Standalone 或 Dashboard composition
+  → Dashboard composition
   → 完整 Frame
   → Terminal Painter
 ```
 
 Renderer 不查询数据，也不直接写 stdout。Status、Controls、Notices、设置、检查内容和图表正文会被组合为完整逻辑 Frame。Painter 比较完整 Frame，只写入变化的终端行；完整逻辑重绘不代表无条件清屏。
 
-历史图表具有按 kind 区分、由原生适配器与 Custom 适配器共享的表示协议，覆盖 Timeline、Calendar、Stack 和 Ranking。适配器保留各自的领域模型——Custom 测量值在投影与格式化中始终是 `Decimal`——只向选定的产品表示层提供协议事实。两个对等表示层族刻意独立：Standalone A 与 Dashboard-pane B 对每一种 kind 都有各自实现，各自拥有操作栏词汇、摆放、焦点/提示交互和行预算。二者可以复用图表正文原语，但任何一方都不是另一方的模式。例如 Standalone Timeline 保留 Plotext 的上/右轴，而 Dashboard Timeline Pane 有意只保留左/下轴。`SurfaceControls` 是显式的表面契约；调用 Host 不得把它退化为通用的行数参数。Dashboard 拥有的 Header、分隔线和外框行属于 compositor，绝不计入 Pane。
+历史图表具有按 kind 区分、由原生适配器与 Custom 适配器共享的表示协议，覆盖 Timeline、Calendar、Stack 和 Ranking。适配器保留各自的领域模型——Custom 测量值在投影与格式化中始终是 `Decimal`——只向 Dashboard Pane 提供协议事实。`SurfaceControls` 是显式的表面契约；调用 Host 不得把它退化为通用的行数参数。Dashboard 拥有的 Header、分隔线和外框行属于 compositor，绝不计入 Pane。
 
 已接受的 Custom 响应始终绑定产生它的查询配置。替换数据查询 pending 时，Host 只能依据已接受 Scope 渲染旧事实；仅显示本地的变更可以重新投影，变更 source、kind、范围、filter、grouping 或 granularity 则渲染 pending 状态。Dashboard Header 会保存每个 Custom summary 响应已接受的 period 与 as-of date，因此比较措辞不会被更新但尚未完成的 Header 设置重标。独立的原生与 Custom Summary Block 会按语义边界并根据 ANSI 与 CJK 显示宽度换行，而非拼接后裁剪。
 
@@ -156,13 +152,13 @@ Plotext 使用进程级全局状态，因此其渲染位于串行 adapter 之后
 
 ### 呈现与 Scope 契约
 
-图表呈现按顺序包含四种 Density：`minimal`、`compact`、`full`、`detailed`。Standalone 默认 `detailed`，每个新建或默认 Dashboard Pane 显式使用 `compact`。Density 属于 Standalone 或 Pane 携带的图表配置；Dashboard 不存在全局图表 Density，修改 Dashboard Theme、Style、Header、Summary 或 Layout 也不会改写 Pane 拥有的 Density、Theme、Style、Filters 或分析设置。Density 变化只递增 render revision，不改变 data Generation 或 scheduler 基线。
+图表呈现按顺序包含四种 Density：`minimal`、`compact`、`full`、`detailed`。`chart` 命令可配置初始 Pane density；每个新建 Dashboard Pane 显式使用 `compact`。Density 属于 Pane 携带的图表配置；Dashboard 不存在全局图表 Density，修改 Dashboard Theme、Style、Header、Summary 或 Layout 也不会改写 Pane 拥有的 Density、Theme、Style、Filters 或分析设置。Density 变化只递增 render revision，不改变 data Generation 或 scheduler 基线。
 
 `minimal` 保留身份、图表和紧凑实时状态，不显示摘要或审计；`compact` 增加当前筛选 Scope 总量和有效 Filter 维度数，不显示比较或审计；`full` 增加适用的周期比较和已观测指标，但不显示被动运行审计页脚；`detailed` 在相同完整内容之外增加 Host 提供的运行审计。Controls 与影响正确理解的 Notice 不依赖 Density。Dashboard 在解析每个 Pane 自身几何后，为其格式化有界局部 Notice 区；Notice 不做全局聚合或去重，也不能占用其他 Pane 的行。
 
 基于运行 ccuv 的机器本地自然日的时间范围，以及 Agent/Model/Project Filters 共同定义一个图表 Summary Scope。筛选先于 Summary 计算；By、Top、Other 是后续投影，不改变 Summary 总量或比较值。Ranking 在隐藏 Other 时把 `Top N · 占总量 X%` 元数据放入标题；显示 Other 时图表覆盖完整筛选 Scope，因此省略占比。Dashboard Header Summary 是拥有未筛选数据与 Coverage 的独立 owner，不是 Pane 状态投影。
 
-固定范围——包括启动时解析结束日期的单独 Since——会保留两个解析后的边界，且不推断范围外的比较 Coverage。对于滚动范围，Historical Component 拥有已接受事实、比较 Coverage、缺失区间、补充请求 pending/error 状态和同 generation 合并。持续 Host 先把适用但未覆盖的比较渲染为 `??`，再只调度缺失区间；相邻缺口可以合并，彼此分离的基线保持独立物理请求。成功但为空的已覆盖区间是数值零。补充请求失败时保留 `??` 并添加局部 Notice。Historical no-Watch 把所需比较 Coverage 纳入初始原子请求。
+固定范围——包括启动时解析结束日期的单独 Since——会保留两个解析后的边界，且不推断范围外的比较 Coverage。对于滚动范围，Historical Component 拥有已接受事实、比较 Coverage、缺失区间、补充请求 pending/error 状态和同 generation 合并。持续 Host 先把适用但未覆盖的比较渲染为 `??`，再只调度缺失区间；相邻缺口可以合并，彼此分离的基线保持独立物理请求。成功但为空的已覆盖区间是数值零。补充请求失败时保留 `??` 并添加局部 Notice。聚焦历史图表通过 Dashboard 生命周期持续刷新。
 
 ## 运行时状态
 
@@ -215,7 +211,6 @@ Refresh、Sampling、debounce、手动刷新和已提交配置工作保持为可
 
 异步 Query worker 通过一条串行 runtime queue 返回不可变 completion action。只有 runtime owner 可以修改状态、同步处理已接受事实、串行渲染图表、组合 Frame 与绘制。Render revision 仍用于区分连续可见状态，但没有性能数据时不引入 render worker 或 render completion queue。关闭时依次停止接纳新工作、分离或取消工作、抑制延迟 completion、停止绘制，最后恢复终端状态。
 
-Historical no-Watch 与 Historical Watch 使用相同的启动、查询、接受、处理、Frame 和 Painter 路径，只是在第一份已接受 Frame 后退出。
 
 ## 内置能力 Registry
 
