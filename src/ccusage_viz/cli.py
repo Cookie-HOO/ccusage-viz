@@ -11,7 +11,7 @@ import sys
 from dataclasses import dataclass, replace
 from difflib import get_close_matches
 from enum import StrEnum
-from typing import Any, Never, cast
+from typing import Any, Literal, Never, cast
 
 from ccusage_viz import __version__
 from ccusage_viz.animation import animation_spec, default_animation_spec
@@ -95,6 +95,7 @@ _COMMANDS = (
 _TUI_COMMANDS = ("timeline", "calendar", "stack", "ranking", "monitor")
 _DATASET_COMMANDS = ("list", "add-local")
 _CUSTOM_COMMANDS = ("timeline", "calendar", "stack", "ranking")
+_TEXT_PRESETS = ("time-state",)
 _DURATION_PATTERN = re.compile(r"(?P<value>[1-9][0-9]*)(?P<unit>[mh])$")
 _PANE_FORBIDDEN_OPTIONS = frozenset(
     {
@@ -121,20 +122,23 @@ _PANE_FORBIDDEN_OPTIONS = frozenset(
 )
 
 
-def _invalid_subcommand_error(
+def _invalid_choice_error(
     detail: str,
     rejected: str,
     choices: tuple[str, ...],
+    *,
+    kind: Literal["command", "preset"],
 ) -> UsageError:
     matches = get_close_matches(rejected, choices, n=2, cutoff=0.7)
     values: dict[str, object] = {
         "detail": detail,
-        "commands": ", ".join(choices),
+        "commands" if kind == "command" else "choices": ", ".join(choices),
     }
+    key = "error.invalid_subcommand" if kind == "command" else "error.invalid_preset"
     if len(matches) == 1:
         values["suggestion"] = matches[0]
-        return UsageError("error.invalid_subcommand_suggestion", **values)
-    return UsageError("error.invalid_subcommand", **values)
+        return UsageError(f"{key}_suggestion", **values)
+    return UsageError(key, **values)
 
 
 def _rejected_subcommand(
@@ -167,26 +171,43 @@ class LocalizedParser(argparse.ArgumentParser):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         kwargs.setdefault("allow_abbrev", False)
         super().__init__(*args, **kwargs)
-        self._subcommand_choices: tuple[str, ...] = ()
-        self._subcommand_metavar: str | None = None
+        self._choice_choices: tuple[str, ...] = ()
+        self._choice_metavar: str | None = None
+        self._choice_kind: Literal["command", "preset"] = "command"
+
+    def set_choice_metadata(
+        self,
+        choices: tuple[str, ...],
+        *,
+        metavar: str,
+        kind: Literal["command", "preset"],
+    ) -> None:
+        self._choice_choices = choices
+        self._choice_metavar = metavar
+        self._choice_kind = kind
 
     def set_subcommand_choices(self, choices: tuple[str, ...]) -> None:
-        self._subcommand_choices = choices
         action = next(
             (action for action in self._actions if isinstance(action, argparse._SubParsersAction)),
             None,
         )
         metavar = action.metavar if action is not None else None
-        self._subcommand_metavar = metavar if isinstance(metavar, str) else None
+        if isinstance(metavar, str):
+            self.set_choice_metadata(choices, metavar=metavar, kind="command")
 
     def error(self, message: str) -> Never:
         rejected = _rejected_subcommand(
             message,
-            self._subcommand_metavar,
-            self._subcommand_choices,
+            self._choice_metavar,
+            self._choice_choices,
         )
         if rejected is not None:
-            raise _invalid_subcommand_error(message, rejected, self._subcommand_choices)
+            raise _invalid_choice_error(
+                message,
+                rejected,
+                self._choice_choices,
+                kind=self._choice_kind,
+            )
         raise UsageError("error.arguments", detail=message)
 
 
@@ -561,7 +582,8 @@ def build_parser(tr: Translator) -> argparse.ArgumentParser:
     text = subparsers.add_parser(
         "text", help=tr.text("help.text"), description=tr.text("help.text")
     )
-    text.add_argument("preset", choices=("time-state",), help=tr.text("help.text_preset"))
+    text.add_argument("preset", choices=_TEXT_PRESETS, help=tr.text("help.text_preset"))
+    text.set_choice_metadata(_TEXT_PRESETS, metavar="preset", kind="preset")
     text_mode = text.add_mutually_exclusive_group()
     text_mode.add_argument(
         "--run", action="store_const", const="run", dest="text_mode", help=tr.text("help.text_run")
@@ -621,7 +643,7 @@ def _top_level_typo(raw_args: list[str], error: UsageError) -> UsageError:
     detail = error.values.get("detail")
     if not isinstance(detail, str) or f"unrecognized arguments: {rejected}" not in detail:
         return error
-    return _invalid_subcommand_error(detail, rejected, _COMMANDS)
+    return _invalid_choice_error(detail, rejected, _COMMANDS, kind="command")
 
 
 def _chart_kind(namespace: argparse.Namespace) -> str:

@@ -219,6 +219,10 @@ MESSAGES = {
     "error.invalid_subcommand_suggestion": (
         "参数无效：{detail}\n支持的命令：{commands}\n你是不是想输入 '{suggestion}'？"
     ),
+    "error.invalid_preset": "参数无效：{detail}\n支持的预设：{choices}",
+    "error.invalid_preset_suggestion": (
+        "参数无效：{detail}\n支持的预设：{choices}\n你是不是想输入 '{suggestion}'？"
+    ),
     "error.dataset_invalid_id": "数据集 ID {dataset_id} 无效。",
     "error.dataset_catalog_unavailable": "官方数据集索引暂时不可用。",
     "error.dataset_catalog_invalid": "官方数据集索引无效。",

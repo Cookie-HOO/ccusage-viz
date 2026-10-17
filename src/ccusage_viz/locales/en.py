@@ -219,6 +219,10 @@ MESSAGES = {
     "error.invalid_subcommand_suggestion": (
         "Invalid arguments: {detail}\nSupported commands: {commands}\nDid you mean '{suggestion}'?"
     ),
+    "error.invalid_preset": "Invalid arguments: {detail}\nSupported presets: {choices}",
+    "error.invalid_preset_suggestion": (
+        "Invalid arguments: {detail}\nSupported presets: {choices}\nDid you mean '{suggestion}'?"
+    ),
     "error.dataset_invalid_id": "Dataset ID {dataset_id} is invalid.",
     "error.dataset_catalog_unavailable": "Official dataset catalog is unavailable.",
     "error.dataset_catalog_invalid": "Official dataset catalog is invalid.",

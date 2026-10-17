@@ -159,6 +159,34 @@ def test_invalid_option_value_does_not_gain_subcommand_guidance() -> None:
     assert "Supported commands" not in format_error(caught.value, tr)
 
 
+def test_invalid_text_preset_lists_presets_and_suggests_match() -> None:
+    tr = load_translator("en")
+    with pytest.raises(UsageError) as caught:
+        build_parser(tr).parse_args(["text", "time-stte"])
+    assert caught.value.key == "error.invalid_preset_suggestion"
+    text = format_error(caught.value, tr)
+    assert "argument preset: invalid choice: 'time-stte'" in text
+    assert "Supported presets: time-state" in text
+    assert "Did you mean 'time-state'?" in text
+
+
+def test_invalid_text_preset_guidance_is_localized_in_chinese() -> None:
+    tr = load_translator("zh")
+    with pytest.raises(UsageError) as caught:
+        build_parser(tr).parse_args(["text", "time-stte"])
+    text = format_error(caught.value, tr)
+    assert "支持的预设：time-state" in text
+    assert "你是不是想输入 'time-state'？" in text
+
+
+def test_invalid_text_option_value_has_no_preset_guidance() -> None:
+    tr = load_translator("en")
+    with pytest.raises(UsageError) as caught:
+        build_parser(tr).parse_args(["text", "time-state", "--lang", "bad"])
+    assert caught.value.key == "error.arguments"
+    assert "Supported presets" not in format_error(caught.value, tr)
+
+
 def test_dataset_cli_parses_manager_and_local_list() -> None:
     parser = build_parser(load_translator("en"))
 
