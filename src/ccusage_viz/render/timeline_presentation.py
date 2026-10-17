@@ -95,7 +95,7 @@ def render_timeline_plot(
         else ""
     )
 
-    if use_bars and any(0 < sum(value is not None for value in item.values) < 2 for item in series):
+    if any(0 < sum(value is not None for value in item.values) < 2 for item in series):
         rows = []
         for item in series:
             observed = tuple(value for value in item.values if value is not None)
