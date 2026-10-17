@@ -121,28 +121,17 @@ def render_timeline_plot(
                 continue
             signals = []
             if use_bars:
-                if len(numeric_points) == 1:
-                    # plotext's native signal and bar spacing both require at
-                    # least two x coordinates on some platforms. A zero-value
-                    # sentinel establishes spacing without adding a visible bar.
-                    point, value = numeric_points[0]
-                    signals.append(
-                        plt.figure.bar(
-                            [float(point), float(point) + 1.0],
-                            [float(value), 0.0],
-                            marker=marker,
-                            width=0.75,
-                        )
+                # Missing observations remain visually absent as zero-height
+                # bars. Supplying the complete x sequence also avoids a native
+                # plotext abort for sparse single-point series on Linux.
+                signals.append(
+                    plt.figure.bar(
+                        [float(point) for point, _ in raw_points],
+                        [0.0 if value is None else float(value) for _, value in raw_points],
+                        marker=marker,
+                        width=0.75,
                     )
-                else:
-                    signals.append(
-                        plt.figure.bar(
-                            [float(point) for point, _ in numeric_points],
-                            [float(value) for _, value in numeric_points],
-                            marker=marker,
-                            width=0.75,
-                        )
-                    )
+                )
             else:
                 # Source-owned missing observations are factual gaps. Draw
                 # contiguous runs separately rather than joining across them.
