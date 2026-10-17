@@ -1,4 +1,3 @@
-import threading
 from contextlib import nullcontext
 from datetime import UTC, date, datetime
 from decimal import Decimal
@@ -151,7 +150,6 @@ def _dashboard_help_frames(
             pass
 
         def result(self) -> object:
-            threading.Event().wait(1)
             raise RuntimeError("cancelled test query")
 
     class Runtime:
