@@ -9,7 +9,8 @@ from ccusage_viz.custom_models import (
     V2MonitorCapability,
     V2ProbeDescriptor,
 )
-from ccusage_viz.custom_monitor_component import CustomMonitorComponent, custom_monitor_styles
+from ccusage_viz.custom_monitor_component import CustomMonitorComponent
+from ccusage_viz.custom_monitor_models import custom_monitor_styles
 from ccusage_viz.historical_component import HistoricalChartComponent
 from ccusage_viz.i18n import Translator
 from ccusage_viz.options import (

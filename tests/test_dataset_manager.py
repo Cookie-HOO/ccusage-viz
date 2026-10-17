@@ -14,15 +14,16 @@ from ccusage_viz.custom_models import (
     CustomUnit,
     LocalizedText,
 )
-from ccusage_viz.datasets.manager import (
-    _choose_dataset_source,
-    _manager_help_frame,
-    _manager_help_lines,
+from ccusage_viz.datasets.manager_installation import (
     _official_catalog_rows,
     _read_github_repository,
     _register_official,
-    format_dataset_list,
-    render_dataset_manager,
+)
+from ccusage_viz.datasets.manager_rendering import format_dataset_list, render_dataset_manager
+from ccusage_viz.datasets.manager_runtime import (
+    _choose_dataset_source,
+    _manager_help_frame,
+    _manager_help_lines,
 )
 from ccusage_viz.datasets.models import (
     DatasetProbeSnapshot,

@@ -91,7 +91,7 @@ def test_animation_route_skips_provider_dependencies(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(application, "ensure_provider_dependencies", pytest.fail)
     monkeypatch.setitem(
         sys.modules,
-        "ccusage_viz.animate",
+        "ccusage_viz.animation_host.runtime",
         SimpleNamespace(run_animation=lambda _options, _translator: 0),
     )
 

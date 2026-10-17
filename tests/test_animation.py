@@ -8,20 +8,8 @@ from term_animate.api import curated_catalog
 from term_animate.catalog import Catalog
 from term_animate.models import LogicalState, Pack, ProjectedFrame, StyledCell, StyledRow
 
-import ccusage_viz.animate as animate_module
-from ccusage_viz.animate import (
-    GalleryState,
-    _editor_line_end,
-    _editor_line_start,
-    _editor_next_word,
-    _editor_previous_word,
-    _editor_viewport,
-    _gallery_geometry,
-    _gallery_rows,
-    _overlay_editor_controls,
-    _wait_seconds,
-    cycle_animation_style,
-)
+import ccusage_viz.animation_host.overlay_editor as overlay_editor_module
+import ccusage_viz.animation_host.runtime as animate_module
 from ccusage_viz.animation import (
     AnimationClock,
     AnimationRenderer,
@@ -33,6 +21,16 @@ from ccusage_viz.animation import (
     new_animation_session,
     virtual_wall_time,
 )
+from ccusage_viz.animation_host.gallery import GalleryState, _gallery_geometry, _gallery_rows
+from ccusage_viz.animation_host.overlay_editor import (
+    _editor_line_end,
+    _editor_line_start,
+    _editor_next_word,
+    _editor_previous_word,
+    _editor_viewport,
+    _overlay_editor_controls,
+)
+from ccusage_viz.animation_host.runtime import _wait_seconds, cycle_animation_style
 from ccusage_viz.animation_overlay import AnimationOverlayRuntime, OverlayConfig
 from ccusage_viz.errors import UsageError
 from ccusage_viz.formatting import display_width
@@ -111,11 +109,11 @@ def test_standalone_overlay_editor_ctrl_u_clears_active_draft(monkeypatch, trans
             animate_module.KeyEvent("\r"),
         )
     )
-    monkeypatch.setattr(animate_module, "_terminal", lambda _options: Terminal(100, 5, False, True))
-    monkeypatch.setattr(animate_module, "read_event", lambda _decoder, _timeout: next(events))
+    monkeypatch.setattr(overlay_editor_module, "_terminal", lambda _options: Terminal(100, 5, False, True))
+    monkeypatch.setattr(overlay_editor_module, "read_event", lambda _decoder, _timeout: next(events))
 
     try:
-        animate_module._run_overlay_editor(
+        overlay_editor_module._run_overlay_editor(
             painter,
             overlay,
             object(),
@@ -157,11 +155,13 @@ def test_standalone_overlay_editor_ctrl_h_opens_help_and_del_deletes(
             animate_module.KeyEvent("\r"),
         )
     )
+    monkeypatch.setattr(overlay_editor_module, "_terminal", lambda _options: Terminal(120, 8, False, True))
     monkeypatch.setattr(animate_module, "_terminal", lambda _options: Terminal(120, 8, False, True))
+    monkeypatch.setattr(overlay_editor_module, "read_event", lambda _decoder, _timeout: next(events))
     monkeypatch.setattr(animate_module, "read_event", lambda _decoder, _timeout: next(events))
 
     try:
-        animate_module._run_overlay_editor(
+        overlay_editor_module._run_overlay_editor(
             painter,
             overlay,
             object(),
@@ -197,11 +197,11 @@ def test_standalone_overlay_editor_word_motions_position_insertions(
             animate_module.KeyEvent("\r"),
         )
     )
-    monkeypatch.setattr(animate_module, "_terminal", lambda _options: Terminal(120, 6, False, True))
-    monkeypatch.setattr(animate_module, "read_event", lambda _decoder, _timeout: next(events))
+    monkeypatch.setattr(overlay_editor_module, "_terminal", lambda _options: Terminal(120, 6, False, True))
+    monkeypatch.setattr(overlay_editor_module, "read_event", lambda _decoder, _timeout: next(events))
 
     try:
-        animate_module._run_overlay_editor(
+        overlay_editor_module._run_overlay_editor(
             type("Painter", (), {"paint": lambda *_args, **_kwargs: None})(),
             overlay,
             object(),

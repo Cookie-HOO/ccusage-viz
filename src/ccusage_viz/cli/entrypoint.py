@@ -58,7 +58,8 @@ def main(argv: list[str] | None = None) -> int:
         if hasattr(namespace, "lang") and namespace.lang is None:
             namespace.lang = language
         if namespace.command == "dataset":
-            from ccusage_viz.datasets.manager import format_dataset_list, run_dataset_manager
+            from ccusage_viz.datasets.manager_rendering import format_dataset_list
+            from ccusage_viz.datasets.manager_runtime import run_dataset_manager
             from ccusage_viz.datasets.service import DatasetService
 
             service = DatasetService()

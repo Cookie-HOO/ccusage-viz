@@ -12,11 +12,9 @@ from ccusage_viz.builtin_summary import build_builtin_pane_summary
 from ccusage_viz.configuration import apply_custom_probe_defaults, v2_metric_probe_descriptor
 from ccusage_viz.custom_component import CustomHistoricalComponent
 from ccusage_viz.custom_models import CustomProtocolFailure, V2MonitorCapability
-from ccusage_viz.custom_monitor_component import (
-    CustomMonitorCompletion,
-    CustomMonitorComponent,
-    resolve_metric,
-)
+from ccusage_viz.custom_monitor_component import CustomMonitorComponent
+from ccusage_viz.custom_monitor_defaults import resolve_metric
+from ccusage_viz.custom_monitor_models import CustomMonitorCompletion
 from ccusage_viz.custom_protocol.responses import (
     CustomProbeResponse,
     CustomSummaryResponse,
@@ -251,7 +249,7 @@ def collect(session: TuiSession) -> bool:
                         metric = next((item for item in response.descriptor.metrics if item.id == resolved.metric_id), None)
                         if metric is None or not isinstance(metric.capabilities.charts.get('monitor'), V2MonitorCapability):
                             raise TypeError('custom monitor metric is not supported by runtime probe')
-                        from ccusage_viz.custom_monitor_component import (
+                        from ccusage_viz.custom_monitor_defaults import (
                             apply_custom_monitor_defaults,
                         )
                         resolved, display_window = apply_custom_monitor_defaults(resolved, metric)

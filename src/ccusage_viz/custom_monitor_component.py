@@ -1,11 +1,8 @@
-"""Lifecycle and source-native projections for Dataset V2 Monitor observations."""
-
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from datetime import datetime, time, timedelta, tzinfo
 from decimal import Decimal
-from math import isfinite
 
 from ccusage_viz.chart_models import (
     DistributionCoverage,
@@ -21,9 +18,7 @@ from ccusage_viz.chart_models import (
 )
 from ccusage_viz.custom_metric_switching import normalization_category, normalize_switch_config
 from ccusage_viz.custom_models import (
-    CustomUnit,
     LocalizedText,
-    V2HistoricalChartCapability,
     V2MetricCapabilities,
     V2MetricDescriptor,
     V2MonitorCapability,
@@ -31,114 +26,21 @@ from ccusage_viz.custom_models import (
     V2ProbeDescriptor,
     V2Runtime,
 )
+from ccusage_viz.custom_monitor_models import (
+    _MAX_DISPLAY_WINDOW_SECONDS,
+    CustomMonitorCompletion,
+    CustomMonitorHeadingMetadata,
+    CustomMonitorPoint,
+    CustomMonitorPresentation,
+    CustomMonitorRanking,
+    CustomMonitorRankingEntry,
+    CustomMonitorSeries,
+    CustomMonitorTimeline,
+    custom_monitor_y_axis_max,
+    normalize_custom_monitor_style,
+)
 from ccusage_viz.custom_protocol.responses import V2MonitorResponse
-from ccusage_viz.options import CustomChartConfig, compatible_styles, is_monitor_ranking_style
-from ccusage_viz.render.palette import COLOR_SCHEMES
-
-# This is deliberately the largest local window offered by the Dashboard, rather
-# than a query range.  Dataset Monitor requests remain source-owned.
-_MAX_DISPLAY_WINDOW_SECONDS = 86_400
-
-
-def custom_monitor_y_axis_max(values: list[float]) -> float:
-    """Return a non-degenerate upper bound for source-owned Monitor timelines."""
-
-    maximum = max(values, default=0.0)
-    if not isfinite(maximum) or maximum <= 0:
-        return 1.0
-    return maximum
-
-
-def custom_monitor_styles(aggregation: str, group_by: str | None = None) -> tuple[str, ...]:
-    """Return the complete source-safe Monitor style cycle for an aggregation."""
-    styles = (
-        "bars",
-        "line",
-        "step",
-        "points",
-        "line-points",
-        "ranking",
-        "ranking-dot",
-        "list",
-    )
-    if group_by is not None:
-        styles = tuple(style for style in styles if style != "bars")
-    return (*styles, "cumulative-bars") if aggregation == "sum" else styles
-
-
-def normalize_custom_monitor_style(
-    config: CustomChartConfig, aggregation: str
-) -> CustomChartConfig:
-    """Normalize persisted presentation state against a metric's aggregation."""
-    styles = custom_monitor_styles(aggregation, config.group_by)
-    style = config.presentation.style
-    if style in styles:
-        return config
-    # A value metric restored from a sum metric's state must not silently imply
-    # accumulation; ranking is the nearest non-temporal presentation.
-    fallback = "ranking" if style == "cumulative-bars" else styles[0]
-    return replace(config, presentation=replace(config.presentation, style=fallback))
-
-
-@dataclass(frozen=True, slots=True)
-class CustomMonitorCompletion:
-    generation: int
-    config: CustomChartConfig
-    response: V2MonitorResponse
-
-
-@dataclass(frozen=True, slots=True)
-class CustomMonitorPresentation:
-    """Source-declared metadata needed to present Monitor observations."""
-
-    title: LocalizedText
-    description: LocalizedText
-    unit: CustomUnit
-    aggregation: str
-    capability: V2MonitorCapability
-
-
-@dataclass(frozen=True, slots=True)
-class CustomMonitorHeadingMetadata:
-    metric: str
-    dimension: str | None
-    window_seconds: int
-    status: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class CustomMonitorSeries:
-    key: str
-    label: LocalizedText | None
-    values: tuple[Decimal | None, ...]
-
-
-@dataclass(frozen=True, slots=True)
-class CustomMonitorPoint:
-    """One plotted source-window endpoint; ``None`` preserves an actual gap."""
-
-    ended_at: datetime
-    observation: V2MonitorObservation | None
-
-
-@dataclass(frozen=True, slots=True)
-class CustomMonitorTimeline:
-    points: tuple[CustomMonitorPoint, ...]
-    series: tuple[CustomMonitorSeries, ...]
-
-
-@dataclass(frozen=True, slots=True)
-class CustomMonitorRankingEntry:
-    key: str
-    label: LocalizedText | None
-    value: Decimal
-    description: LocalizedText | None = None
-    display: LocalizedText | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class CustomMonitorRanking:
-    entries: tuple[CustomMonitorRankingEntry, ...]
+from ccusage_viz.options import CustomChartConfig, is_monitor_ranking_style
 
 
 class CustomMonitorComponent:
@@ -880,99 +782,3 @@ class CustomMonitorComponent:
                 raise ValueError("custom Monitor heading requires a resolved Monitor capability")
             return 60
         return capability.window_seconds
-
-
-def resolve_metric(config: CustomChartConfig, descriptor: V2ProbeDescriptor) -> CustomChartConfig:
-    """Resolve an omitted Metric from a V2 Probe without guessing ambiguous sources."""
-    if config.metric_id is not None:
-        metric = next(
-            (metric for metric in descriptor.metrics if metric.id == config.metric_id), None
-        )
-        if metric is None:
-            raise ValueError("selected metric is not declared by runtime probe")
-        chart_capability = metric.capabilities.charts.get(config.kind)
-        periods = (
-            chart_capability.periods
-            if isinstance(chart_capability, V2HistoricalChartCapability)
-            else ()
-        )
-        comparison = (
-            chart_capability.comparison
-            if isinstance(chart_capability, V2HistoricalChartCapability)
-            else "full"
-        )
-        return replace(
-            config,
-            metric_summary=metric.summary,
-            metric_periods=periods,
-            metric_titles=(metric.title.en, metric.title.zh_cn),
-            ranking_comparison=comparison,
-        )
-    selected = descriptor.default_metric_id
-    if selected is None and len(descriptor.metrics) == 1:
-        selected = descriptor.metrics[0].id
-    if selected is None:
-        raise ValueError("dataset declares multiple metrics; specify --metric")
-    metric = next(metric for metric in descriptor.metrics if metric.id == selected)
-    chart_capability = metric.capabilities.charts.get(config.kind)
-    periods = (
-        chart_capability.periods
-        if isinstance(chart_capability, V2HistoricalChartCapability)
-        else ()
-    )
-    comparison = (
-        chart_capability.comparison
-        if isinstance(chart_capability, V2HistoricalChartCapability)
-        else "full"
-    )
-    return replace(
-        config,
-        metric_id=selected,
-        metric_summary=metric.summary,
-        metric_periods=periods,
-        metric_titles=(metric.title.en, metric.title.zh_cn),
-        ranking_comparison=comparison,
-    )
-
-
-def apply_custom_monitor_defaults(
-    config: CustomChartConfig, metric: V2MetricDescriptor
-) -> tuple[CustomChartConfig, int | None]:
-    """Merge safe Dataset Monitor suggestions after Metric selection."""
-    defaults = metric.defaults.get("monitor")
-    capability = metric.capabilities.charts.get("monitor")
-    if defaults is None or not isinstance(capability, V2MonitorCapability):
-        return config, None
-    explicit = config.initial_explicit
-    group_by = config.group_by
-    if (
-        "group_by" not in explicit
-        and (not defaults.declared or "group_by" in defaults.declared)
-        and defaults.group_by in capability.group_by
-    ):
-        group_by = defaults.group_by
-    top = config.top
-    if "top" not in explicit and defaults.top is not None and group_by is not None:
-        top = defaults.top
-    presentation = config.presentation
-    if "color_scheme" not in explicit and defaults.theme in COLOR_SCHEMES:
-        presentation = replace(presentation, theme=defaults.theme)
-    if "style" not in explicit and defaults.style in compatible_styles("monitor", group_by):
-        presentation = replace(presentation, style=defaults.style)
-    other = (
-        defaults.other
-        if "other" not in explicit and defaults.other is not None and metric.aggregation == "sum"
-        else config.other
-    )
-    window = defaults.window_seconds if "window" not in explicit else None
-    return (
-        replace(
-            config,
-            filters=config.filters,
-            presentation=presentation,
-            group_by=group_by,
-            top=top,
-            other=other,
-        ),
-        window,
-    )

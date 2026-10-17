@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from ccusage_viz.animate import _format_overlay_interval
 from ccusage_viz.animation import animation_style_choices
+from ccusage_viz.animation_host.runtime import _format_overlay_interval
 from ccusage_viz.dashboard_layout import fixed_shape
 from ccusage_viz.dashboard_layout import parse_layout as parse_dashboard_layout
 from ccusage_viz.data_view import BodyView

@@ -20,12 +20,7 @@ from ccusage_viz.charts.registry import ChartRegistry
 from ccusage_viz.deltas import RefreshDeltas, RefreshRanks
 from ccusage_viz.domain import UsageRecord
 from ccusage_viz.options import MonitorConfig, StandaloneLaunch, is_monitor_ranking_style
-from ccusage_viz.processing.monitor import (
-    MonitorKey,
-    ObservedTPM,
-    _copy_observer,
-    monitor_counters,
-)
+from ccusage_viz.processing.monitor import MonitorKey, ObservedTPM, _copy_observer, monitor_counters
 from ccusage_viz.project_identity import (
     ExactProjectDisplayKey,
     ProjectDisplayKey,

@@ -3,7 +3,7 @@ from __future__ import annotations
 from shutil import get_terminal_size
 
 from ccusage_viz.adjustment_timeout import AdjustmentIdleTimer
-from ccusage_viz.animate import (
+from ccusage_viz.animation_host.overlay_editor import (
     _editor_line_end,
     _editor_line_start,
     _editor_next_word,

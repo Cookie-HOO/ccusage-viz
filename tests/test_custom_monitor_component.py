@@ -21,12 +21,9 @@ from ccusage_viz.custom_models import (
     V2MonitorObservation,
     V2ProbeDescriptor,
 )
-from ccusage_viz.custom_monitor_component import (
-    CustomMonitorCompletion,
-    CustomMonitorComponent,
-    custom_monitor_styles,
-    resolve_metric,
-)
+from ccusage_viz.custom_monitor_component import CustomMonitorComponent
+from ccusage_viz.custom_monitor_defaults import resolve_metric
+from ccusage_viz.custom_monitor_models import CustomMonitorCompletion, custom_monitor_styles
 from ccusage_viz.custom_protocol.responses import V2MonitorResponse
 from ccusage_viz.i18n import load_translator
 from ccusage_viz.lifecycle import FixedIntervalScheduler, LifecycleOperation

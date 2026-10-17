@@ -7,7 +7,8 @@ import pytest
 from ccusage_viz.coverage import DateCoverage, DateInterval
 from ccusage_viz.domain import ProjectRef, SourceKind, TokenUsage, UsageRecord
 from ccusage_viz.errors import QueryError
-from ccusage_viz.providers.ccusage import CCUSAGE_DEFINITION, CcusageProvider
+from ccusage_viz.providers.ccusage import CcusageProvider
+from ccusage_viz.providers.ccusage_definition import CCUSAGE_DEFINITION
 from ccusage_viz.query.models import (
     DataResolution,
     DataScope,
@@ -451,7 +452,7 @@ def test_fallback_normalization_accepts_pi_local_and_generic_absolute_paths(
     required = provider.resolve_queries(plan, (observation,))
     queries = {query.arguments[0]: query for query in required}
     monkeypatch.setattr(
-        "ccusage_viz.providers.ccusage.resolve_pi_session_cwds",
+        "ccusage_viz.providers.ccusage_fallback.resolve_pi_session_cwds",
         lambda session_ids: {"pi-session": "/local/pi-project"},
     )
 
@@ -528,7 +529,7 @@ def test_project_fallback_normalization_resolves_pi_session_cwd(
         coverage=DateCoverage.from_interval(date(2026, 1, 2), date(2026, 1, 3)),
     )
     monkeypatch.setattr(
-        "ccusage_viz.providers.ccusage.resolve_pi_session_cwds",
+        "ccusage_viz.providers.ccusage_fallback.resolve_pi_session_cwds",
         lambda session_ids: {"pi-session": "/workspace/github-projects"},
     )
     payload = {
@@ -569,7 +570,7 @@ def test_project_fallback_replaces_matching_unverified_observation(
         coverage=DateCoverage.from_interval(date(2026, 1, 3), date(2026, 1, 3)),
     )
     monkeypatch.setattr(
-        "ccusage_viz.providers.ccusage.resolve_pi_session_cwds",
+        "ccusage_viz.providers.ccusage_fallback.resolve_pi_session_cwds",
         lambda session_ids: {"pi-session": "/workspace/github-projects"},
     )
     observation_fragment = CCUSAGE_DEFINITION.provider.normalize(
@@ -726,7 +727,7 @@ def test_codex_normalization_uses_local_session_cwd(monkeypatch: pytest.MonkeyPa
         coverage=DateCoverage.from_interval(date(2026, 1, 3), date(2026, 1, 3)),
     )
     monkeypatch.setattr(
-        "ccusage_viz.providers.ccusage.resolve_codex_session_cwds",
+        "ccusage_viz.providers.ccusage_fallback.resolve_codex_session_cwds",
         lambda session_ids: {"2026/01/03/rollout-test": "/workspace/from-session"},
     )
     payload = {
@@ -762,7 +763,7 @@ def test_codex_normalization_falls_back_without_treating_directory_as_project(
         "codex_sessions",
         coverage=DateCoverage.from_interval(date(2026, 1, 3), date(2026, 1, 3)),
     )
-    monkeypatch.setattr("ccusage_viz.providers.ccusage.resolve_codex_session_cwds", lambda _: {})
+    monkeypatch.setattr("ccusage_viz.providers.ccusage_fallback.resolve_codex_session_cwds", lambda _: {})
     payload = {
         "sessions": [
             {
@@ -797,7 +798,7 @@ def test_codex_incomplete_attribution_retains_session_on_fixed_project_record(
         "codex_sessions",
         coverage=DateCoverage.from_interval(date(2026, 1, 3), date(2026, 1, 3)),
     )
-    monkeypatch.setattr("ccusage_viz.providers.ccusage.resolve_codex_session_cwds", lambda _: {})
+    monkeypatch.setattr("ccusage_viz.providers.ccusage_fallback.resolve_codex_session_cwds", lambda _: {})
     fragment = CCUSAGE_DEFINITION.provider.normalize(
         PhysicalResult(
             query,

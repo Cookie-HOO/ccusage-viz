@@ -6,10 +6,8 @@ from datetime import datetime
 from shutil import get_terminal_size
 
 from ccusage_viz.adjustment_timeout import AdjustmentTimeout
-from ccusage_viz.animate import (
-    cycle_animation_style,
-)
 from ccusage_viz.animation import AnimationSessionState, cycle_monitor_attachment
+from ccusage_viz.animation_host.runtime import cycle_animation_style
 from ccusage_viz.command_copy import copy_command
 from ccusage_viz.custom_component import CustomHistoricalComponent, custom_date_summary_supported
 from ccusage_viz.custom_filter_draft import run_custom_filter_editor

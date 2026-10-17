@@ -45,10 +45,8 @@ from ccusage_viz.custom_models import (
     V2ProbeDescriptor,
     V2Runtime,
 )
-from ccusage_viz.custom_monitor_component import (
-    CustomMonitorCompletion,
-    CustomMonitorComponent,
-)
+from ccusage_viz.custom_monitor_component import CustomMonitorComponent
+from ccusage_viz.custom_monitor_models import CustomMonitorCompletion
 from ccusage_viz.custom_protocol.responses import (
     CustomSummaryResponse,
     V2ChartResponse,

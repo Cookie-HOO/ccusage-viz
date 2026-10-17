@@ -29,7 +29,7 @@ from ccusage_viz.options import (
     TimelineConfig,
 )
 from ccusage_viz.processing.summaries import summary_query_plan
-from ccusage_viz.providers.ccusage import CCUSAGE_DEFINITION
+from ccusage_viz.providers.ccusage_definition import CCUSAGE_DEFINITION
 from ccusage_viz.providers.custom_command import CUSTOM_COMMAND_DEFINITION
 from ccusage_viz.providers.demo import DEMO_DEFINITION
 from ccusage_viz.query.models import QueryTrigger

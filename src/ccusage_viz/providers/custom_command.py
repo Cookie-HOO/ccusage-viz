@@ -16,7 +16,7 @@ from ccusage_viz.custom_protocol.requests import (
     canonical_custom_request_key,
 )
 from ccusage_viz.errors import QueryError
-from ccusage_viz.providers.ccusage import _communicate_bounded, _decode_stderr
+from ccusage_viz.providers.ccusage_process import _communicate_bounded, _decode_stderr
 from ccusage_viz.query.models import (
     DataResolution,
     PhysicalPlan,

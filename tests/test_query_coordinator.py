@@ -14,7 +14,7 @@ import pytest
 from ccusage_viz.coverage import DateCoverage, DateInterval
 from ccusage_viz.domain import SourceKind, TokenUsage, UsageRecord
 from ccusage_viz.errors import QueryError
-from ccusage_viz.providers.ccusage import CCUSAGE_DEFINITION
+from ccusage_viz.providers.ccusage_definition import CCUSAGE_DEFINITION
 from ccusage_viz.providers.demo import DEMO_DEFINITION
 from ccusage_viz.query.coordinator import QueryCoordinator
 from ccusage_viz.query.models import (

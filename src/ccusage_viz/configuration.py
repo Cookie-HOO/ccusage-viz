@@ -229,7 +229,7 @@ def v2_metric_probe_descriptor(
 ) -> CustomProbeDescriptor:
     """Project one V2 historical Metric into the mature V1 historical surface."""
 
-    from ccusage_viz.custom_monitor_component import resolve_metric
+    from ccusage_viz.custom_monitor_defaults import resolve_metric
 
     resolved = resolve_metric(
         CustomChartConfig(

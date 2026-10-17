@@ -8,7 +8,7 @@ if TYPE_CHECKING:
 import time
 from shutil import get_terminal_size
 
-from ccusage_viz.animate import _editor_viewport, _overlay_editor_controls
+from ccusage_viz.animation_host.overlay_editor import _editor_viewport, _overlay_editor_controls
 from ccusage_viz.animation_overlay import OverlayPlacement, render_history_table
 from ccusage_viz.command_copy import format_full_command_display
 from ccusage_viz.custom_component import CustomHistoricalComponent

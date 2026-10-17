@@ -24,7 +24,7 @@ def _preflight_runtime(options: LaunchConfig) -> None:
 def run(options: LaunchConfig, translator: Translator) -> int:
     _preflight_runtime(options)
     if isinstance(options, AnimationLaunch):
-        run_animation = import_module("ccusage_viz.animate").run_animation
+        run_animation = import_module("ccusage_viz.animation_host.runtime").run_animation
         return run_animation(options, translator)
     ensure_provider_dependencies(options, build_provider_registry(), translator)
     from ccusage_viz.tui import run_tui
