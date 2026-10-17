@@ -223,14 +223,15 @@ def test_dashboard_pane_copy_materializes_canonical_standalone_interval() -> Non
     assert format_dashboard_pane_command(
         standalone_from_chart_pane(base, timeline), refresh_interval=30
     ) == (
-        "ccuv chart timeline --period 7d --timezone Asia/Shanghai --interval 30 --density compact"
+        f"ccuv chart timeline --period 7d --timezone {base.host.timezone} "
+        "--interval 30 --density compact"
     )
     assert format_dashboard_pane_command(
         standalone_from_chart_pane(base, stack), refresh_interval=30
-    ) == ("ccuv chart stack --timezone Asia/Shanghai --interval 30 --density compact")
+    ) == (f"ccuv chart stack --timezone {base.host.timezone} --interval 30 --density compact")
     assert format_dashboard_pane_command(
         standalone_from_chart_pane(base, monitor), refresh_interval=30, sampling_interval=15
-    ) == ("ccuv chart monitor --by model --timezone Asia/Shanghai --density compact")
+    ) == (f"ccuv chart monitor --by model --timezone {base.host.timezone} --density compact")
 
 
 def test_dashboard_pane_command_views_wrap_without_affecting_copy_payload() -> None:
