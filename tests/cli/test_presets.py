@@ -22,6 +22,14 @@ from ccusage_viz.options import (
 from ccusage_viz.presets.document import preset_from_launch
 
 
+def test_missing_text_preset_lists_all_presets(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["text", "--lang", "en"]) == 2
+
+    error = capsys.readouterr().err
+    assert "the following arguments are required: preset" in error
+    assert "Supported presets: time-state" in error
+
+
 def test_invalid_text_preset_lists_presets_and_suggests_match() -> None:
     tr = load_translator("en")
     with pytest.raises(UsageError) as caught:
