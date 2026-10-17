@@ -32,7 +32,6 @@ from ccusage_viz.dashboard_preset_store import (
     DashboardPresetStore,
     DashboardPresetStoreCorruptError,
     DashboardPresetStoreError,
-    DashboardPresetStoreNotFoundError,
 )
 from ccusage_viz.dashboard_presets import (
     DashboardPresetValidationError,
@@ -120,6 +119,10 @@ _PANE_FORBIDDEN_OPTIONS = frozenset(
         "-h",
     }
 )
+
+
+def _dashboard_preset_choices(user_names: tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(dict.fromkeys((*DASHBOARD_PRESETS, *user_names)))
 
 
 def _invalid_choice_error(
@@ -1113,6 +1116,7 @@ def _to_options(
     if command == "dashboard":
         timezone = _request_timezone(namespace)
         preset_name = namespace.preset
+        user_records = ()
         if preset_name is not None:
             disallowed = explicit - {"demo", "lang", "empty", "ccusage_bin"}
             if disallowed:
@@ -1125,20 +1129,21 @@ def _to_options(
                     ),
                 )
             try:
-                record = DashboardPresetStore(dashboard_preset_state_root()).get(preset_name)
-            except DashboardPresetStoreNotFoundError:
-                record = None
+                user_records = DashboardPresetStore(dashboard_preset_state_root()).list()
             except DashboardPresetStoreCorruptError:
                 # A damaged user collection must never make a valid built-in unavailable.
                 if preset_name not in DASHBOARD_PRESETS:
                     raise UsageError(
                         "error.arguments", detail="user dashboard preset storage is unavailable"
                     ) from None
-                record = None
             except DashboardPresetStoreError as exc:
                 raise UsageError(
                     "error.arguments", detail="user dashboard preset storage is unavailable"
                 ) from exc
+            record = next(
+                (item for item in user_records if item.name == preset_name),
+                None,
+            )
             if record is not None:
                 from ccusage_viz.datasets.service import DatasetService
 
@@ -1186,7 +1191,12 @@ def _to_options(
             )
         preset = DASHBOARD_PRESETS.get(preset_name)
         if preset_name is not None and preset is None:
-            raise UsageError("error.arguments", detail=f"unknown dashboard preset: {preset_name}")
+            raise _invalid_choice_error(
+                f"unknown dashboard preset: {preset_name}",
+                preset_name,
+                _dashboard_preset_choices(tuple(record.name for record in user_records)),
+                kind="preset",
+            )
         layout = namespace.layout or (preset.layout if preset is not None else None)
         if namespace.empty and preset_name is None:
             grid_text = layout or namespace.grid or "2x2"

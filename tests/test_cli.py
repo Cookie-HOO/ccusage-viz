@@ -20,7 +20,7 @@ from ccusage_viz.cli import (
 )
 from ccusage_viz.configuration import standalone_from_chart_pane
 from ccusage_viz.dashboard import DASHBOARD_PRESETS
-from ccusage_viz.dashboard_preset_store import DashboardPresetStore
+from ccusage_viz.dashboard_preset_store import DashboardPresetStore, DashboardPresetStoreError
 from ccusage_viz.dashboard_presets import preset_from_launch
 from ccusage_viz.diagnostics import format_error
 from ccusage_viz.errors import UsageError
@@ -1019,7 +1019,10 @@ def test_dashboard_spotlight_presets_feature_the_first_pane(
     assert {pane.chart.presentation.density for pane in options.panes} == {"compact"}
 
 
-def test_dashboard_allows_user_preset_names_but_rejects_unknown_ones() -> None:
+def test_dashboard_allows_user_preset_names_but_rejects_unknown_ones(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("ccusage_viz.cli.dashboard_preset_state_root", lambda: tmp_path)
     parser = build_parser(load_translator("en"))
 
     namespace = parser.parse_args(["dashboard", "spotlight-tall"])
@@ -1027,7 +1030,7 @@ def test_dashboard_allows_user_preset_names_but_rejects_unknown_ones() -> None:
 
     with pytest.raises(UsageError) as caught:
         _to_options(namespace)
-    assert caught.value.key == "error.arguments"
+    assert caught.value.key == "error.invalid_preset_suggestion"
 
     with pytest.raises(UsageError) as caught:
         parser.parse_args(["dashboard", "--pane", "timeline", "--layout", "spotlight-tall"])
@@ -1363,11 +1366,185 @@ def test_dashboard_user_preset_allows_ccusage_bin_override(
     assert loaded.was_explicit("ccusage_bin")
 
 
-def test_dashboard_rejects_unknown_preset() -> None:
+def test_unknown_dashboard_preset_lists_builtins_and_suggests_match(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("ccusage_viz.cli.dashboard_preset_state_root", lambda: tmp_path)
+    tr = load_translator("en")
+
+    with pytest.raises(UsageError) as caught:
+        _to_options(build_parser(tr).parse_args(["dashboard", "wid-clock"]))
+
+    text = format_error(caught.value, tr)
+    assert "Supported presets: " + ", ".join(DASHBOARD_PRESETS) in text
+    assert "Did you mean 'wide-clock'?" in text
+
+
+def test_unknown_dashboard_preset_guidance_is_localized_in_chinese(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("ccusage_viz.cli.dashboard_preset_state_root", lambda: tmp_path)
+    tr = load_translator("zh")
+
+    with pytest.raises(UsageError) as caught:
+        _to_options(build_parser(tr).parse_args(["dashboard", "wid-clock"]))
+
+    text = format_error(caught.value, tr)
+    assert "支持的预设：" + ", ".join(DASHBOARD_PRESETS) in text
+    assert "你是不是想输入 'wide-clock'？" in text
+
+
+def test_unknown_dashboard_preset_loads_user_records_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("ccusage_viz.cli.dashboard_preset_state_root", lambda: tmp_path)
+    calls = 0
+    original_list = DashboardPresetStore.list
+
+    def counted_list(store: DashboardPresetStore) -> tuple[object, ...]:
+        nonlocal calls
+        calls += 1
+        return original_list(store)
+
+    monkeypatch.setattr(DashboardPresetStore, "list", counted_list)
+
+    with pytest.raises(UsageError):
+        _to_options(build_parser(load_translator("en")).parse_args(["dashboard", "wid-clock"]))
+
+    assert calls == 1
+
+
+def test_unknown_dashboard_preset_lists_saved_names_after_builtins_and_suggests_them(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    saved = DashboardLaunch(
+        ProcessConfig(),
+        DashboardHostConfig(grid="1x1"),
+        (EmptyPaneConfig(),),
+    )
+    DashboardPresetStore(tmp_path).save(preset_from_launch("my-dashbord", saved))
+    monkeypatch.setattr("ccusage_viz.cli.dashboard_preset_state_root", lambda: tmp_path)
+    tr = load_translator("en")
+
+    with pytest.raises(UsageError) as caught:
+        _to_options(build_parser(tr).parse_args(["dashboard", "my-dashboard"]))
+
+    text = format_error(caught.value, tr)
+    supported = next(line for line in text.splitlines() if line.startswith("Supported presets:"))
+    assert supported == "Supported presets: " + ", ".join((*DASHBOARD_PRESETS, "my-dashbord"))
+    assert "Did you mean 'my-dashbord'?" in text
+
+
+def test_unknown_dashboard_preset_deduplicates_saved_builtin_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    saved = DashboardLaunch(
+        ProcessConfig(),
+        DashboardHostConfig(grid="1x1"),
+        (EmptyPaneConfig(),),
+    )
+    DashboardPresetStore(tmp_path).save(preset_from_launch("wide", saved))
+    monkeypatch.setattr("ccusage_viz.cli.dashboard_preset_state_root", lambda: tmp_path)
+    tr = load_translator("en")
+
+    with pytest.raises(UsageError) as caught:
+        _to_options(build_parser(tr).parse_args(["dashboard", "not-a-preset"]))
+
+    supported = next(
+        line
+        for line in format_error(caught.value, tr).splitlines()
+        if line.startswith("Supported presets:")
+    )
+    assert supported.split(": ", 1)[1].split(", ").count("wide") == 1
+
+
+def test_distant_dashboard_preset_lists_candidates_without_suggestion(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("ccusage_viz.cli.dashboard_preset_state_root", lambda: tmp_path)
+    tr = load_translator("en")
+
+    with pytest.raises(UsageError) as caught:
+        _to_options(build_parser(tr).parse_args(["dashboard", "xyzzy"]))
+
+    text = format_error(caught.value, tr)
+    assert caught.value.key == "error.invalid_preset"
+    assert "Supported presets: " + ", ".join(DASHBOARD_PRESETS) in text
+    assert "Did you mean" not in text
+
+
+def test_unknown_dashboard_preset_preserves_corrupt_store_error_and_builtin_access(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / DashboardPresetStore.filename).write_text("{not-json", encoding="utf-8")
+    monkeypatch.setattr("ccusage_viz.cli.dashboard_preset_state_root", lambda: tmp_path)
     parser = build_parser(load_translator("en"))
 
-    with pytest.raises(UsageError, match="error.arguments"):
-        _to_options(parser.parse_args(["dashboard", "medium"]))
+    with pytest.raises(UsageError) as caught:
+        _to_options(parser.parse_args(["dashboard", "wid-clock"]))
+
+    assert caught.value.key == "error.arguments"
+    assert caught.value.values["detail"] == "user dashboard preset storage is unavailable"
+    builtin = _to_options(parser.parse_args(["dashboard", "wide"]))
+    assert isinstance(builtin, DashboardLaunch)
+    assert builtin.host.grid == "2x2"
+
+
+def test_dashboard_unavailable_store_preserves_existing_error_for_builtin(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("ccusage_viz.cli.dashboard_preset_state_root", lambda: tmp_path)
+
+    def fail_list(_store: DashboardPresetStore) -> tuple[object, ...]:
+        raise DashboardPresetStoreError("unavailable")
+
+    monkeypatch.setattr(DashboardPresetStore, "list", fail_list)
+    parser = build_parser(load_translator("en"))
+
+    with pytest.raises(UsageError) as caught:
+        _to_options(parser.parse_args(["dashboard", "wide"]))
+
+    assert caught.value.key == "error.arguments"
+    assert caught.value.values["detail"] == "user dashboard preset storage is unavailable"
+
+
+def test_dashboard_builtin_and_saved_preset_success_remain_unchanged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("ccusage_viz.cli.dashboard_preset_state_root", lambda: tmp_path)
+    parser = build_parser(load_translator("en"))
+    expected_builtin = _to_options(parser.parse_args(["dashboard", "wide"]))
+    saved = DashboardLaunch(
+        ProcessConfig(ccusage_bin="saved-ccusage", query_timeout=17),
+        DashboardHostConfig(grid="1x1", timezone="UTC"),
+        (EmptyPaneConfig(),),
+    )
+    DashboardPresetStore(tmp_path).save(preset_from_launch("saved-dashboard", saved))
+
+    builtin = _to_options(parser.parse_args(["dashboard", "wide"]))
+    loaded = _to_options(parser.parse_args(["dashboard", "saved-dashboard"]))
+
+    assert isinstance(loaded, DashboardLaunch)
+    assert builtin == expected_builtin
+    assert loaded.process == saved.process
+    assert loaded.host == saved.host
+    assert loaded.panes == saved.panes
+
+
+def test_invalid_dashboard_preset_does_not_reach_runtime(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr("ccusage_viz.cli.dashboard_preset_state_root", lambda: tmp_path)
+
+    def fail_run(*_args: object) -> int:
+        raise AssertionError("runtime must not start")
+
+    monkeypatch.setattr("ccusage_viz.cli.run", fail_run)
+
+    assert main(["dashboard", "wid-clock", "--lang", "en"]) == 2
+    assert "Did you mean 'wide-clock'?" in capsys.readouterr().err
 
 
 def test_dashboard_host_options_use_the_default_preset() -> None:
