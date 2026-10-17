@@ -181,6 +181,11 @@ def _dashboard_help_frames(
     monkeypatch.setattr(tui_structure, "_new_pane", lambda *_args: pane)
     monkeypatch.setattr(tui_history, "_new_pane", lambda *_args: pane)
     monkeypatch.setattr(tui_session, "FramePainter", Screen)
+    monkeypatch.setattr(
+        tui_painting,
+        "_pane_render",
+        lambda *_args, **_kwargs: tui_models.PaneRender("chart"),
+    )
     monkeypatch.setattr(tui_adjustments, "FramePainter", Screen)
     monkeypatch.setattr(tui_datasets_catalog, "FramePainter", Screen)
     monkeypatch.setattr(tui_datasets_chooser, "FramePainter", Screen)
