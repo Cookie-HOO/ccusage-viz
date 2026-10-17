@@ -289,6 +289,8 @@ def test_custom_ranking_partition_cli_and_command_round_trip() -> None:
         "ranking",
         "--dataset",
         "router",
+        "--command",
+        "router",
         "--metric",
         "tokens",
         "--partition-by",
@@ -320,6 +322,8 @@ def test_standalone_command_copy_outputs_and_round_trips_custom_partition() -> N
                 "ranking",
                 "--dataset",
                 "router",
+                "--command",
+                "router",
                 "--metric",
                 "tokens",
                 "--partition-by",
@@ -349,6 +353,8 @@ def test_custom_partition_cli_rejects_invalid_combinations() -> None:
         "ranking",
         "--dataset",
         "router",
+        "--command",
+        "router",
         "--partition-by",
         "model",
         "--group-by",
@@ -358,7 +364,16 @@ def test_custom_partition_cli_rejects_invalid_combinations() -> None:
         _to_options(parser.parse_args(equal), explicit=frozenset({"partition_by", "group_by"}))
     assert "must differ" in str(raised.value.values["detail"])
 
-    wrong_kind = ["chart", "timeline", "--dataset", "router", "--partition-by", "model"]
+    wrong_kind = [
+        "chart",
+        "timeline",
+        "--dataset",
+        "router",
+        "--command",
+        "router",
+        "--partition-by",
+        "model",
+    ]
     with pytest.raises(UsageError) as raised:
         _to_options(parser.parse_args(wrong_kind), explicit=frozenset({"partition_by"}))
     assert "ranking" in str(raised.value.values["detail"])
