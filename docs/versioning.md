@@ -6,6 +6,48 @@
 - **Minor (`0.x.0`)**: substantial new user-facing capabilities or source integrations before 1.0.
 - Before `1.0`, public interfaces may still change between releases.
 
+## 0.3.0
+
+`0.3.0` makes Dataset extensions a first-class data-source capability and
+unifies focused charts with the Dashboard runtime:
+
+- the Dataset manager can register local commands, browse a signed official
+  catalog, and install, update, or remove compatible GitHub release artifacts;
+  installed sources are probed before use and remain explicit executable
+  commands rather than in-process plugins;
+- the new `ccuv.custom/v2` protocol supports multiple described Metrics,
+  source-owned scalar values, historical charts and Ranking, custom Monitor
+  observations, declared periods, grouping and partition dimensions, filters,
+  warnings, and query snapshots, while legacy V1 historical Datasets remain
+  supported;
+- Dataset Panes can select and transactionally switch related Metrics, retain
+  valid source-owned refresh behavior, and expose capability-aware controls and
+  diagnostics without mixing observations or comparison facts across Metrics;
+- Ranking gains grouped and partitioned results, source descriptions and links,
+  scalar values, local search, copy actions, keyboard and pointer scrolling,
+  responsive virtualized rendering, and clearer comparison and Top/Other
+  behavior;
+- `ccuv chart KIND` now launches every focused chart as a one-Pane Dashboard,
+  sharing Pane lifecycle, controls, inspection, rendering, and refresh behavior;
+  named user Dashboard presets can persist trusted local configurations and be
+  managed from the terminal UI;
+- terminal frame diffing, narrow-Pane layout handling, query coordination,
+  project fallback refreshes, CLI typo guidance, headings, Help, and bilingual
+  Dataset documentation received substantial correctness and usability work.
+
+Compatibility notes:
+
+- focused chart commands now live under `ccuv chart`—for example,
+  `ccuv chart timeline` and `ccuv chart monitor`—instead of the previous
+  top-level chart routes;
+- Dataset V2 is an Alpha-stage protocol introduced in this minor release. Its
+  source-owned Metric semantics are separate from ccuv's built-in Token metrics;
+- Dataset commands and executable Overlay commands saved in Dashboard presets
+  are trusted local automation and run when their configuration is loaded.
+
+This release does not add a ccuv-native usage collector or change the meaning of
+built-in Token metrics.
+
 ## 0.2.2
 
 `0.2.2` fixes terminal animation repaint behavior and clarifies Dashboard Help
