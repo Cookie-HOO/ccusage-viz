@@ -2,15 +2,17 @@
 
 [简体中文](custom-command-protocol.zh-CN.md)
 
-`ccuv chart <kind> --dataset ID` adapts a command that can return one additive
-historical metric. It is for data such as reading, CI activity, spend amounts,
-build counts, or byte totals. ccuv owns terminal presentation; the command owns
-the source-specific query and aggregation.
+`ccuv chart <kind> --dataset ID` adapts an executable Dataset command to ccuv.
+The current V2 protocol supports multiple additive or source-owned Metrics,
+historical charts, and source-owned Monitor observations; the legacy V1
+protocol supports one additive historical metric. ccuv owns terminal
+presentation, while the command owns source-specific querying and aggregation.
 
-This is a command protocol, not a plugin or persistence system. Version 1 does
-not support file, HTTP, stdin, Python-plugin, or Monitor sources. It does not
-cache completed command results, discover commands, combine query ranges, or
-support non-additive metrics.
+This is a command protocol, not a plugin or persistence system. ccuv starts the
+executable with one JSON request on stdin and reads one JSON response from
+stdout. It does not load Python plugins, cache completed command results, or
+combine query ranges. Version 1 does not support Monitor or non-additive
+metrics; Version 2 does.
 
 ## Version 2 metrics
 
@@ -421,9 +423,11 @@ deliberately use shell behavior, make the shell part of argv yourself:
 ccuv chart timeline --dataset example --command "sh -lc 'collector | adapter'"
 ```
 
-A custom chart begins with a 14-day, ungrouped total graph and a day-period
-summary. Custom data cannot use `monitor`. The Dashboard pane always exposes
-`p`/`P` to cycle the shared rolling graph range (`7d → 14d → 30d → 90d → 180d → 365d → 1w → 1mo → 1y`). `1w`, `1mo`, and `1y` mean This week, This month, and This year. After the first successful response,
+A legacy V1 chart begins with a 14-day, ungrouped total graph and a day-period
+summary. A V2 Metric may instead declare compatible startup defaults and may
+support `monitor`. A historical Dataset pane exposes `p`/`P` to cycle the
+Metric's declared periods, or the shared fallback range when none are declared
+(`7d → 14d → 30d → 90d → 180d → 365d → 1w → 1mo → 1y`). `1w`, `1mo`, and `1y` mean This week, This month, and This year. After the first successful response,
 it also exposes capability-gated query controls. For ordinary historical
 charts, `g` cycles granularities and `b` cycles total and declared groupings.
 For a grouped-capable Ranking, Quick `g/G` cycles declared outer partitions and
@@ -431,15 +435,15 @@ For a grouped-capable Ranking, Quick `g/G` cycles declared outer partitions and
 dimension, and an unavailable alternative keeps the valid query with a short
 notice. Quick `s/S` changes style. Advanced `s/S` changes Ranking spacing, `o`
 changes Other, and `f` edits filters; filters are Advanced for all Dashboard
-chart panes. Standalone charts retain one unsplit control set. Data-affecting
-partition, grouping, and filter adjustments start a new command query; spacing
-is presentation-only. Source editing
+chart panes. Focused Dataset charts use the same Quick/Advanced Pane controls as Dashboard.
+Data-affecting partition, grouping, and filter adjustments start a new command
+query; spacing is presentation-only. Source editing
 (`e`) and diagnostic Logs (`L`) are also available. Lowercase `l` cycles the
 custom Timeline/Stack legend; uppercase `L` is reserved for Logs.
 
-A standalone custom chart continuously refreshes by issuing `ccuv.custom/v1`
-chart requests to its configured command. It does not run `ccusage` historical
-acquisition or watch processing. A data-affecting replacement immediately
+A focused Dataset chart continuously refreshes by issuing the selected
+Dataset protocol's chart or monitor requests to its configured command. It does
+not run `ccusage` historical acquisition or watch processing. A data-affecting replacement immediately
 shows the candidate chart title and loading state, without stale facts or a
 `querying` annotation. A same-query refresh failure may retain its accepted
 chart with the custom-source error alongside it. A failed replacement query
@@ -506,8 +510,8 @@ Double-click to select, then press r to choose a type
 Double-clicking an empty pane enters its Dashboard management context. It shows
 only Dashboard structure and position controls, not chart-specific settings.
 `r` opens the shared replacement type chooser; `N` and `n` open the insert-before
-and insert-after chooser. Selecting Datasets lets a user choose an installed
-Dataset and then Timeline, Stack, Calendar, or Ranking—no command path is shown.
+and insert-after chooser. Selecting Datasets lets a user choose an installed Dataset, Metric, and one of
+its declared historical or Monitor chart kinds—no command path is shown.
 Selecting Local command uses the advanced Dataset ID and Command fields. The new
 custom pane starts its initial query after replacement; the pane displays the
 resulting source error if that query fails. Insertion can also create an Empty pane.
@@ -525,9 +529,11 @@ Each physical query executes one command process:
 5. ccuv validates the timeout, exit status, JSON, version, IDs, schema, and
    decimal values.
 
-The protocol identifier is `ccuv.custom/v1`. ccuv generates `request_id` for
-each physical execution. Equivalent in-flight Dashboard requests may coalesce,
-so that ID identifies the one shared execution rather than a pane lifecycle.
+The wire identifier is `ccuv.custom/v1` for legacy requests and
+`ccuv.custom/v2` for V2 Probe, chart, summary, and Monitor requests. ccuv
+generates `request_id` for each physical execution. Equivalent in-flight
+Dashboard requests may coalesce, so that ID identifies the one shared execution
+rather than a pane lifecycle.
 
 Every successful chart result remains self-describing: it carries the effective
 capability manifest, localized dataset metadata, and data. Summary facts arrive
@@ -747,10 +753,11 @@ source display text, and returned messages must always include both `en` and
 
 All metric values and comparison base values are decimal **strings** in ordinary
 signed decimal notation. ccuv parses them as exact `Decimal` values. JSON
-numbers, blank strings, scientific notation, `NaN`, and infinities are invalid. Each dataset chart
-metric has one fixed unit and dimension and must be additive. Supported examples
-include counts, amounts, and byte totals. Averages, rates, percentages, unique
-users, min/max values, percentiles, balances, and snapshots are excluded.
+numbers, blank strings, scientific notation, `NaN`, and infinities are invalid.
+A V1 Dataset has one fixed unit and additive metric; supported examples include
+counts, amounts, and byte totals. V2 additionally supports source-owned
+`aggregation: "value"` Metrics whose exact non-additive facts are returned by
+the Dataset, as described above.
 
 For example, the WeRead Dataset currently uses `Asia/Shanghai` for source-date
 semantics. It accepts every valid request timezone; when the requested timezone
@@ -761,12 +768,13 @@ minutes to two decimals: it aggregates raw seconds before converting and
 rounding summaries, so the sum of individually rounded days can differ from a
 total by `0.01` minute.
 
-The command filters the requested inclusive range, applies business rules,
-aggregates by the requested dimension (or returns sole `total` when grouping is
-null), and returns every candidate series. ccuv sorts candidates, calculates
-Top N and Other, cumulative display forms, comparisons, and all presentation.
-Do not pre-select Top N, substitute unsupported requests, or return formatted
-numbers or percentages.
+For V1 and additive V2 date-series responses, the command filters the requested
+inclusive range, applies business rules, aggregates by the requested dimension,
+and returns the requested candidate facts. V2 Ranking instead returns
+source-owned scalar entries and may use `query.top` as the requested raw
+coverage; partitioned Ranking applies that coverage across all Groups as defined
+above. ccuv performs the local projection allowed by the selected protocol and
+Metric. Never silently substitute an unsupported query.
 
 ## Capabilities and charts
 
@@ -790,8 +798,9 @@ compatibility matrix, substitute Total data, or select another period. The
 protocol and projection capability-validate period syntax, grouping,
 applicable non-Ranking granularity, filter IDs, and selected filter option IDs. The Dashboard only shows
 `g`, `b`, and `f` after a successful response declares the corresponding
-capability. Local Top N/Other changes remain display-only and do not start a
-command query.
+capability. In V1, local Top N/Other changes remain display-only. V2 Ranking
+may requery when Top changes because `query.top` also expresses requested
+source coverage; Other is still derived only from entries actually returned.
 
 A V1 Dataset may represent an official period aggregate in a Ranking response
 with one point per entity at the request `end_date`; this legacy coordinate is

@@ -12,8 +12,8 @@
 
 ## 0.3.x
 
-- `0.3.x` 以 Custom Dataset 为公开数据源能力的核心：在保持 Dataset 自己拥有数据源语义的前提下，发展 Dataset 发现、安装、开发者契约、Metric 选择和 Dashboard 交互。
-- 仅在协议、生命周期、资源和兼容性契约明确后，继续发展 Metric Group、分组 Metric 选择、图内切换和 Monitor 行为等相关 Custom Dataset 能力。
+- `0.3.x` 继续强化 Custom Dataset 这一公开数据源能力：在保持 Dataset 自己拥有数据源语义的前提下，发展 Dataset 发现、安装、开发者契约和 Dashboard 交互。
+- 在已经实现的 V2 Metric Group、分组选择、Pane 内关联 Metric 切换、数据源拥有的值和 Custom Monitor 支持之上继续演进。进一步的生命周期或保留行为只在协议、资源和兼容性契约明确后交付。
 - 此发布序列为无法在 `0.2.x` 兼容引入的 Custom Dataset 契约变更预留空间。
 
 ## 需求池

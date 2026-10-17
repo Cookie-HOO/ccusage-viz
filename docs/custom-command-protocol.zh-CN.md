@@ -2,9 +2,9 @@
 
 [English](custom-command-protocol.md)
 
-`ccuv chart <kind> --dataset ID` 用一个命令适配可相加的历史指标，可用于阅读、CI 活动、金额、构建次数或字节总量等数据。ccuv 负责终端呈现；命令负责数据源特有的查询与聚合。
+`ccuv chart <kind> --dataset ID` 将一个可执行 Dataset 命令接入 ccuv。当前 V2 协议支持多个可相加或由数据源拥有的 Metric、历史图表，以及数据源拥有的 Monitor observation；遗留 V1 协议支持一个可相加的历史指标。ccuv 负责终端呈现，命令负责数据源特有的查询与聚合。
 
-这是命令协议，不是插件或持久化系统。v1 不支持文件、HTTP、stdin、Python 插件或 Monitor 数据源；也不支持已完成结果缓存、命令发现、范围合并或不可相加指标。
+这是命令协议，不是插件或持久化系统。ccuv 启动可执行程序，向 stdin 写入一份 JSON 请求，并从 stdout 读取一份 JSON 响应；它不会加载 Python 插件、缓存已完成的命令结果或合并查询范围。V1 不支持 Monitor 或不可相加指标；V2 支持。
 
 ## V2 指标
 
@@ -233,9 +233,9 @@ ccuv chart ranking --dataset router --partition-by logical_model --group-by real
 ccuv chart timeline --dataset example --command "sh -lc 'collector | adapter'"
 ```
 
-自定义图表初始为 14 天、未分组总计的图表窗口和按天汇总；自定义数据不能用于 `monitor`。Dashboard Pane 始终提供 `p`/`P` 在共享滚动范围序列 `7d → 14d → 30d → 90d → 180d → 365d → 1w → 1mo → 1y` 中循环；`1w`、`1mo`、`1y` 分别表示本周、本月和本年。首次成功响应后，才会按 capability 额外提供查询控制。普通历史图表中，`g` 循环粒度，`b` 循环总计与已声明分组。支持分区的 Ranking 中，Quick 页 `g/G` 循环已声明外层分区，`b/B` 循环内部排名维度；两个方向都会跳过与另一个当前维度相同的选择，没有替代项时保留有效查询并短暂提示。Quick 页 `s/S` 调整 style；Advanced 页 `s/S` 调整 Ranking spacing，`o` 调整 Other，`f` 编辑筛选。所有 Dashboard 图表 Pane 的筛选都位于 Advanced；独立图表保留一套不分页控制。分区、分组和筛选会发起新命令查询；spacing 只影响呈现。`r` 打开替换流程，可重新选择 Dataset 并在本地命令模式下编辑命令；`L` 显示诊断日志。小写 `l` 循环自定义 Timeline/Stack 的图例；大写 `L` 专用于日志。
+遗留 V1 图表默认以 14 天、未分组总量图和日周期摘要启动。V2 Metric 可以声明兼容的启动默认值，也可以支持 `monitor`。历史 Dataset Pane 使用 `p`/`P` 循环 Metric 声明的周期；未声明时使用共享 fallback 范围 `7d → 14d → 30d → 90d → 180d → 365d → 1w → 1mo → 1y`；`1w`、`1mo`、`1y` 分别表示本周、本月和本年。首次成功响应后，才会按 capability 额外提供查询控制。普通历史图表中，`g` 循环粒度，`b` 循环总计与已声明分组。支持分区的 Ranking 中，Quick 页 `g/G` 循环已声明外层分区，`b/B` 循环内部排名维度；两个方向都会跳过与另一个当前维度相同的选择，没有替代项时保留有效查询并短暂提示。Quick 页 `s/S` 调整 style；Advanced 页 `s/S` 调整 Ranking spacing，`o` 调整 Other，`f` 编辑筛选。所有 Dashboard 图表 Pane 的筛选都位于 Advanced；聚焦 Dataset 图表使用相同的 Quick/Advanced Pane 控制。分区、分组和筛选会发起新命令查询；spacing 只影响呈现。`r` 打开替换流程，可重新选择 Dataset 并在本地命令模式下编辑命令；`L` 显示诊断日志。小写 `l` 循环自定义 Timeline/Stack 的图例；大写 `L` 专用于日志。
 
-独立运行的自定义图表会持续向配置的命令发送 `ccuv.custom/v1` Chart 请求以刷新数据，不会执行 `ccusage` 的历史采集或 watch 处理。影响数据的替换请求会立即显示候选图表的标题和加载状态，不显示旧事实或“查询中”标记；同一查询的刷新失败可以保留已接受图表并显示错误，但替换查询失败绝不会显示另一选择的数值事实，只保留候选标题、范围和错误。
+聚焦 Dataset 图表会持续向配置命令发出所选 Dataset 协议的 chart 或 monitor 请求，不会执行 `ccusage` 的历史采集或 watch 处理。影响数据的替换请求会立即显示候选图表的标题和加载状态，不显示旧事实或“查询中”标记；同一查询的刷新失败可以保留已接受图表并显示错误，但替换查询失败绝不会显示另一选择的数值事实，只保留候选标题、范围和错误。
 
 ## 在 Dashboard 中使用自定义 Pane
 
@@ -264,7 +264,7 @@ Dashboard 预设以内置 token 消耗统计模板为基础，Dashboard 预设�
 双击选中，然后按 r 选择类型
 ```
 
-双击空 Pane 会进入其 Dashboard 管理上下文，只显示 Dashboard 结构和位置操作，不显示图表专属设置。`r` 打开共用的替换类型选择器；`N` 和 `n` 分别打开前插和后插选择器。选择 Custom 后，再选择 Timeline、Stack、Calendar 或 Ranking，并填写 Dataset ID 和 Command。替换后新的自定义 Pane 会立即发起初始查询；若失败，Pane 会显示对应数据源错误。插入操作也可以创建 Empty Pane。按 `x` 删除 Pane 会压缩其余 Pane，不会自动留下替代空位。
+双击空 Pane 会进入其 Dashboard 管理上下文，只显示 Dashboard 结构和位置操作，不显示图表专属设置。`r` 打开共用的替换类型选择器；`N` 和 `n` 分别打开前插和后插选择器。选择 Dataset 后，可以选择已安装 Dataset、Metric 及其声明的历史或 Monitor 图表类型，且不会显示命令路径；选择 Local command 则使用高级 Dataset ID 与 Command 字段。替换后新的 Dataset Pane 会立即发起初始查询；若失败，Pane 会显示对应数据源错误。插入操作也可以创建 Empty Pane。按 `x` 删除 Pane 会压缩其余 Pane，不会自动留下替代空位。
 
 ## 进程契约
 
@@ -276,9 +276,9 @@ Dashboard 预设以内置 token 消耗统计模板为基础，Dashboard 预设�
 4. stderr 仅是有界诊断输出，绝不是协议数据。
 5. ccuv 验证超时、退出状态、JSON、版本、ID、schema 和十进制数值。
 
-协议标识为 `ccuv.custom/v1`。ccuv 为每次物理执行生成 `request_id`。等价的 Dashboard 进行中请求可能合并，因此该 ID 代表一次共享执行，而不是 Pane 生命周期。
+遗留请求使用 `ccuv.custom/v1`，V2 Probe、chart、summary 和 Monitor 请求使用 `ccuv.custom/v2`。ccuv 为每次物理执行生成 `request_id`。等价的 Dashboard 进行中请求可能合并，因此该 ID 代表一次共享执行，而不是 Pane 生命周期。
 
-每次成功 Chart 响应仍必须自描述，携带该查询有效的 capability、本地化数据集元数据和数据；汇总事实通过独立请求返回。命令必须是无状态的：不能依赖此前的命令进程响应。
+每次成功的查询响应都必须自描述，携带该查询有效的 descriptor/capability、本地化数据集元数据及对应 data 或 observation；汇总事实通过独立请求返回。命令必须是无状态的：不能依赖此前的命令进程响应。
 
 对于非固定范围且密度为 `full` 或 `detailed` 的 Ranking，除非 Ranking capability 声明 `comparison: "none"`，ccuv 会先请求当前范围，再请求紧邻且等长的上一范围。V1 保持日期 series 响应契约；V2 对两次请求都返回标量条目。ccuv 通过平铺 item ID 或分区 `(group.id, series.id)` pair 对齐，自己推导展示的绝对增长量和排名变化；上一周期缺失的条目视为新增，绝不补零。协议不应提供 delta、previous-total 或 previous-rank 字段。上一范围请求失败或不可用时，当前 Ranking 仍会显示，只是不带比较标记。`comparison: "rank"` 只将该响应用于排名变化。固定日期范围和 `all` Ranking 不请求上一范围。亚日范围锚定于同一个 aware 时刻 `T`：当前为 `[T-duration, T)`，前期为 `[T-2*duration, T-duration)`，不得分别读取当前时间而产生间隙或重叠。
 
@@ -413,17 +413,17 @@ Dashboard 每个数据集 ID 显示一项汇总：按 Pane 可见顺序扫描，
 }
 ```
 
-所有指标值与比较基准值都必须是普通带符号十进制表示法的十进制**字符串**。ccuv 将其解析为精确 `Decimal`。JSON 数字、空字符串、科学计数法、`NaN` 和无穷值均无效。每个数据集图表指标只能有一个固定单位和维度，且必须可相加。支持的例子包括计数、金额和字节总量；平均值、比率、百分比、独立用户数、最小/最大值、百分位数、余额和快照不在范围内。
+所有指标值与比较基准值都必须是普通带符号十进制表示法的十进制**字符串**。ccuv 将其解析为精确 `Decimal`。JSON 数字、空字符串、科学计数法、`NaN` 和无穷值均无效。V1 Dataset 只有一个固定单位的可相加指标，适合计数、金额和字节总量等事实。V2 还支持由 Dataset 返回精确不可相加事实的 `aggregation: "value"` Metric，语义见上文。
 
 例如，WeRead Dataset 当前以 `Asia/Shanghai` 作为数据源日期口径。它会接受每个有效的请求时区；当请求时区不是 `Asia/Shanghai` 时，仍按上海口径成功返回数据，并附加 `timezone_not_supported` warning，而不是将成功查询变为错误。Dataset 应准确声明自己的单位与精度；WeRead 的阅读时长单位为分钟，日值和汇总值保留两位小数，汇总先聚合原始秒数再转换并舍入，因此已舍入日值的简单相加可能与汇总相差 `0.01` 分钟。
 
-命令需筛选所请求的闭区间，应用业务规则，按请求维度聚合（未分组则返回唯一 `total`），并返回全部候选系列。ccuv 负责候选排序、Top N、Other、累计显示形式、比较与所有呈现。不要预先挑选 Top N、替换不支持的请求，或返回已经格式化的数字/百分比。
+对于 V1 与可相加的 V2 日期系列响应，命令需筛选请求闭区间、应用业务规则、按请求维度聚合，并返回所请求的候选事实。V2 Ranking 改为返回数据源拥有的标量条目，并可将 `query.top` 作为请求的原始覆盖量；分区 Ranking 按上文定义把覆盖量应用到全部 Group。ccuv 执行所选协议和 Metric 允许的本地投影。不得静默替换不支持的查询。
 
 ## Capabilities 与图表
 
 每次成功响应都返回完整、稳定的 capability manifest。它描述支持的查询面，而不是快捷键映射。v1 只提供枚举的多选筛选；不支持文本/范围/正则筛选、分页、搜索或层级筛选。不支持的分组、筛选、粒度或组合必须被拒绝，不能静默削弱或改写请求。
 
-每个非 Ranking 图表声明允许的粒度；各图表还声明分组维度和筛选。V2 Ranking 即使携带遗留粒度元数据，ccuv 也会忽略。Timeline、Stack 接收总计或分组日期系列；Calendar 必须是未分组的每日总计。V1 Ranking 保持日期系列；V2 Ranking 则为每个平铺或分区内部条目返回一个权威标量 `value`，绝不返回 `points`。数据源特有的能力组合规则由 Dataset 自己负责——例如已声明的分组仅在特定 `range.period` 下可用时，Dataset 应返回关联到原请求的 `unsupported_query`。ccuv 原样发送用户选中的查询：不维护 Dataset 专属兼容矩阵、不替换为总计，也不改选其他时间档位。协议与投影会校验周期语法、分组、适用于非 Ranking 的粒度、筛选 ID 和已选筛选项 ID。Dashboard 只有在成功响应声明相应 capability 后才显示 `g`、`b`、`f`。本地 Top N/Other 调整只影响展示，不会发起命令查询。
+每个非 Ranking 图表声明允许的粒度；各图表还声明分组维度和筛选。V2 Ranking 即使携带遗留粒度元数据，ccuv 也会忽略。Timeline、Stack 接收总计或分组日期系列；Calendar 必须是未分组的每日总计。V1 Ranking 保持日期系列；V2 Ranking 则为每个平铺或分区内部条目返回一个权威标量 `value`，绝不返回 `points`。数据源特有的能力组合规则由 Dataset 自己负责——例如已声明的分组仅在特定 `range.period` 下可用时，Dataset 应返回关联到原请求的 `unsupported_query`。ccuv 原样发送用户选中的查询：不维护 Dataset 专属兼容矩阵、不替换为总计，也不改选其他时间档位。协议与投影会校验周期语法、分组、适用于非 Ranking 的粒度、筛选 ID 和已选筛选项 ID。Dashboard 只有在成功响应声明相应 capability 后才显示 `g`、`b`、`f`。V1 的本地 Top N/Other 调整只影响展示。V2 Ranking 改变 Top 时可能重新查询，因为 `query.top` 同时表达请求的数据源覆盖量；Other 仍只由实际返回的条目推导。
 
 V1 Dataset 可以在 Ranking 响应中为官方周期汇总的每个实体提供一个位于请求 `end_date` 的点；这个遗留坐标不代表按日归因。V2 Dataset 必须改为直接返回条目的标量 `value`，不得提供 point 或伪造日期。两个版本都只有在拥有相应真实数据时，才能为 Timeline、Stack 或 Calendar 声明同一分组。
 

@@ -16,7 +16,7 @@ This document describes the implemented architecture of `ccusage-viz`. It is int
 | **Chart Component** | One running chart instance. It owns its reusable chart payload and lifecycle state—generation, Coverage, accepted data, pending/running/error state, processed model, and rendered content—and receives resolved Host context without taking ownership of Host settings. |
 | **Host** | Product shell that runs and presents Components. Dashboard hosts one or more ordered Components in Panes; animation retains its independent provider-free host. |
 | **Pane** | Dashboard placement and composition context for one Component. It adds geometry, focus, order, and Dashboard-owned cadence; it does not redefine chart semantics. |
-| **Provider** | Data capability that compiles logical requests, executes physical queries, and returns normalized usage data with provenance, resolution, and Coverage. `ccusage`, Demo, and command-backed custom historical sources are built-in Provider implementations. |
+| **Provider** | Data capability that compiles logical requests, executes physical queries, and returns normalized data with provenance and the source-specific coverage contract. `ccusage`, Demo, and command-backed Dataset sources are built-in Provider implementations. |
 | **Empty Pane** | A temporary Dashboard pane configuration with geometry and focus but no Component, Provider, scheduler, chart data, or summary contribution. |
 
 A Chart Component is the smallest product-level runtime unit hosted by Dashboard. Smaller functions and services remain reusable below it, but the Host never reimplements a chart.
@@ -42,10 +42,15 @@ argv
     ├── Help / Version       → short circuit
     ├── Focused Chart        → adapt to one Pane + Dashboard Host
     ├── Dashboard            → one or many Panes + Dashboard Host
-    └── Animation            → independent provider-free host
+    ├── Dataset              → registration / installation manager or text list
+    ├── Animation            → independent provider-free host
+    └── Text                 → provider-free dynamic text preset
 ```
 
-Help and Version do not initialize Providers, inspect chart TTY requirements, enter terminal input mode, or create the execution coordinator.
+Help, Version, and Text do not initialize Providers, inspect chart TTY requirements,
+enter terminal input mode, or create the execution coordinator. Dataset list and
+management use the Dataset store and Probe/install workflows without starting a
+chart Host.
 
 `ccuv chart KIND ...` is a focused Dashboard adapter: it creates a 1×1 Dashboard with one configured Pane and defaults its Header to hidden and Summary to none. After launch it uses the same focus, Pane lifecycle, inspection, command copy, controls, and Refresh/Sampling schedulers as any Dashboard, and users may expand it with more Panes. Normal `ccuv dashboard ...` construction and defaults remain independent of this adapter.
 
@@ -108,7 +113,12 @@ The initial optimization boundary is deliberately narrow:
 
 - deduplicate strictly identical in-flight physical queries;
 - share a Monitor raw cumulative snapshot only where the product has explicitly proven that sharing safe;
-- for custom commands, coalesce only equivalent in-flight executions. Their identity includes argv/execution context, dataset, request kind, range, normalized filters, grouping, granularity, and summary period/as-of date—not chart kind, style, theme, density, legend, Top/Other, layout, or pane position.
+- for Dataset commands, coalesce only equivalent in-flight executions. Identity
+  follows the canonical protocol request, including source/execution context,
+  Dataset and Metric, request/chart kind, range, normalized filters, grouping,
+  partition, applicable granularity, and source-coverage fields such as V2
+  Ranking Top—not presentation-only style, theme, density, legend, layout, or
+  pane position.
 
 Across independent owners, the coordinator does not union date ranges, merge different Filters, construct field supersets, delay ticks to gather batches, reuse completed stale results, reconcile overlapping Sources, or own Interval semantics. This does not prohibit one owner's logical planner from combining adjacent missing Coverage intervals as defined by the product contract.
 
@@ -231,14 +241,19 @@ Built-in Providers are initially:
 
 - `ccusage`: wraps query planning, safe subprocess execution, schema validation, and normalization;
 - Demo: deterministic in-process records with no external dependency check;
-- custom command: a static command adapter for neutral additive historical series. It writes one `ccuv.custom/v1` request to subprocess stdin, validates one stdout response, and retains bounded stderr diagnostics.
+- Dataset command: a static subprocess adapter for the legacy
+  `ccuv.custom/v1` single additive historical metric and the current
+  `ccuv.custom/v2` multi-Metric protocol, including source-owned values,
+  historical Ranking, and Monitor observations. It writes one request to stdin,
+  validates one stdout response, and retains bounded stderr diagnostics.
 
-The custom adapter is not a public plugin registry, source-discovery system, or
-file/HTTP/Python extension point. It performs no completed-result cache, range
-union, overlap merging, batching, or result slicing. Commands provide complete
-candidate records and capabilities; shared processing retains local chart
-projection and presentation behavior. Provider code does not import charts or
-presentation code. Chart code does not invoke Providers or read external storage.
+The Dataset adapter is not a public in-process plugin registry or a direct
+file/HTTP/Python extension point. Dataset discovery and installation resolve to
+registered executable commands; execution performs no completed-result cache,
+range union, overlap merging, or batching. Commands provide protocol facts and
+capabilities; shared processing retains only the local projection and
+presentation behavior permitted by each Metric's aggregation and chart contract.
+Provider code does not import charts or presentation code. Chart code does not invoke Providers or read external storage.
 See the [custom command protocol](custom-command-protocol.md).
 
 ### Charts

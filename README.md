@@ -323,16 +323,16 @@ project attribution only, it may read the matching local session's `session_meta
 never stores or displays session-log content.
 These documents answer the deeper questions:
 
-| Document | What it answers |
-| --- | --- |
-| [Usage guide](docs/usage.md) | How do I install, configure, compose, and adjust charts and Dashboards? |
-| [Custom command protocol](docs/custom-command-protocol.md) | How do I connect an additive historical dataset through a command, use empty Dashboard panes, and implement the JSON contract? |
-| [Dataset developer guide](docs/dataset-developer-guide.md) | How do I build, test locally, Probe, query, package, and publish a Dataset? |
-| [Dataset user guide](docs/dataset-user-guide.md) | How do I install, manage, select, and use local, official, or GitHub Datasets? |
-| [Design philosophy](docs/design-philosophy.md) | Which product boundaries, ownership rules, and presentation principles are intentional? |
-| [Architecture](docs/architecture.md) | How do CLI routes, hosts, panes, providers, processing, and renderers fit together for maintainers? |
-| [Roadmap](docs/roadmap.md) | What is planned, deferred, or open for feedback? |
-| [Known issues](docs/known-issues.md) | Which intermittent `ccusage` problems are recognized, and how can I recover safely? |
+| Type | Document | What it answers |
+| --- | --- | --- |
+| Usage | [Usage guide](docs/usage.md) | How do I install, configure, compose, and adjust charts and Dashboards? |
+| Usage | [Dataset user guide](docs/dataset-user-guide.md) | How do I install, manage, select, and use local, official, or GitHub Datasets? |
+| Extension development | [Custom command protocol](docs/custom-command-protocol.md) | How do I connect an additive historical dataset through a command, use empty Dashboard panes, and implement the JSON contract? |
+| Extension development | [Dataset developer guide](docs/dataset-developer-guide.md) | How do I build, test locally, Probe, query, package, and publish a Dataset? |
+| Project reference | [Design philosophy](docs/design-philosophy.md) | Which product boundaries, ownership rules, and presentation principles are intentional? |
+| Project reference | [Architecture](docs/architecture.md) | How do CLI routes, hosts, panes, providers, processing, and renderers fit together for maintainers? |
+| Project reference | [Roadmap](docs/roadmap.md) | What is planned, deferred, or open for feedback? |
+| Project reference | [Known issues](docs/known-issues.md) | Which intermittent `ccusage` problems are recognized, and how can I recover safely? |
 
 Report reproducible problems with the [bug report form](https://github.com/Cookie-HOO/ccusage-viz/issues/new?template=bug_report.yml), or propose improvements through the [feature request form](https://github.com/Cookie-HOO/ccusage-viz/issues/new?template=feature_request.yml).
 

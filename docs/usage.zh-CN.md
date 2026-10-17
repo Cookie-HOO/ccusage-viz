@@ -57,7 +57,9 @@ ccuv dashboard wide --demo
 | 累计排名 `ranking` | 历史日期范围 | 聚焦单 Pane Dashboard | 哪个 Agent、模型或项目使用 Token 最多？ |
 | 监测 `monitor` | 滚动观测窗口 | 聚焦单 Pane Dashboard | 当前进程观测到了什么吞吐量？ |
 | `dashboard` | Host 全局节奏与独立 Pane | 多 Pane Dashboard | 多个已配置图表如何并排比较？ |
-| `custom timeline`、`custom stack`、`custom calendar`、`custom ranking` | 命令返回、可相加的历史系列 | 聚焦 Dashboard 或新增 Pane | 命令驱动的数据集如何随时间变化或排名？ |
+| 通过 `chart KIND --dataset ID` 使用 Dataset Metric | 命令返回的历史值或 Monitor observation | 聚焦 Dashboard 或新增 Pane | 外部 Dataset Metric 如何变化、排名或呈现当前状态？ |
+| `animate` | 不需要用量数据 | 单个独立动画 | 不查询 Provider，直接显示本地终端动画。 |
+| `text` | 不需要用量数据 | 单个动态文本值 | 为 Overlay 命令生成不依赖 Provider 的文本。 |
 
 历史路由查询日期范围。`monitor` 则在当前进程运行期间重复采集累计快照；它不能重建
 启动前的吞吐历史。`ccuv chart KIND ...` 会将参数转换为隐藏 header 和 summary 的单 Pane Dashboard；启动后它就是普通 Dashboard，可以继续添加 Pane。
@@ -400,7 +402,7 @@ ccuv dashboard --empty --grid 2x2 \
 
 ### 构造自定义 Dashboard
 
-Pane 片段是一个安全引用的图表命令及图表参数。自定义片段形式为 `chart <kind>` 并带有 Dataset ID：不提供 `--command` 时解析已安装 Dataset，开发者自定义命令则提供 `--command`；`empty` 是有效的临时片段。复制后的命令会保留这一数据源选择，并使用 `shlex.join` 序列化自定义 argv，因此 token 边界和中间空 Pane 位置可往返保留：
+Pane 片段是一个安全引用的图表命令及图表参数。Dataset 片段形式为 `chart <kind>` 并带有 Dataset ID：不提供 `--command` 时解析已安装 Dataset，开发者自定义命令则提供 `--command`；`empty` 是有效的临时片段。复制后的命令会保留这一数据源选择，并使用 `shlex.join` 序列化自定义 argv，因此 token 边界和中间空 Pane 位置可往返保留：
 
 ```bash
 ccuv dashboard \
@@ -458,7 +460,7 @@ ccuv dashboard --empty --grid 1x1 \
 Dashboard Host 负责布局、外壳主题/样式、Header、输入循环和节奏。Pane 负责图表选择、范围/窗口、
 分组、Top/Other、筛选、图表主题/样式/密度，以及图表专属配置。
 
-Pane 片段可以包含内置图表命令（`timeline`、`calendar`、`stack`、`ranking` 或 `monitor`）、具有显式样式的 `animate`、`empty`，或 `custom timeline|stack|calendar|ranking` 及图表参数。自定义 Pane 必须提供 `--dataset`：不提供 `--command` 时使用已安装 Dataset，提供 `--command` 时使用任意命令；命令文本以 `shlex.split` 转为 argv，不经 shell 执行。Dashboard 预设仍是仅统计 token 消耗的启动模板，不会变成 Dataset 预设。所有片段均不得包含如下 Host/生命周期参数：
+Pane 片段可以包含图表命令（`timeline`、`calendar`、`stack`、`ranking` 或 `monitor`，可选 `chart` 前缀）、具有显式样式的 `animate`，或 `empty`。Dataset Pane 必须提供 `--dataset`：不提供 `--command` 时使用已安装 Dataset，提供 `--command` 时使用任意命令；命令文本以 `shlex.split` 转为 argv，不经 shell 执行。历史 Dataset Pane 仍兼容旧 `custom` 前缀，但它不是当前推荐写法，也不支持 Monitor。Dashboard 预设仍是仅统计 token 消耗的启动模板，不会变成 Dataset 预设。所有片段均不得包含如下 Host/生命周期参数：
 
 ```text
 --interval --watch --ascii --demo --lang

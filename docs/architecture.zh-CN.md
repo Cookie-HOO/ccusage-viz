@@ -16,7 +16,7 @@
 | **Chart Component** | 一个运行中的图表实例。独立拥有可复用 chart payload 与生命周期状态——generation、Coverage、已接受数据、等待/运行/错误状态、语义模型和渲染内容；它接收已解析的 Host context，但不取得 Host 设置的所有权。 |
 | **Host** | 运行并呈现 Component 的产品外壳。Dashboard Host 在 Pane 中承载一个或多个有序 Component；动画保留独立的无 Provider Host。 |
 | **Pane** | 一个 Component 在 Dashboard 中的位置与组合上下文。只增加几何、焦点、顺序和 Dashboard 拥有的节奏，不重新定义图表语义。 |
-| **Provider** | 将逻辑请求编译为物理查询、执行查询，并返回带 provenance、resolution 和 Coverage 的规范化用量数据。`ccusage`、Demo 与命令驱动的自定义历史数据源都是内置 Provider 实现。 |
+| **Provider** | 将逻辑请求编译为物理查询、执行查询，并返回带 provenance 与数据源特定覆盖契约的规范化数据。`ccusage`、Demo 与命令驱动的 Dataset 数据源都是内置 Provider 实现。 |
 | **Empty Pane** | 具有几何与焦点、但没有 Component、Provider、调度、图表数据或汇总贡献的临时 Dashboard Pane 配置。 |
 
 Chart Component 是 Dashboard 承载的最小产品级运行单元。更小的函数和服务仍可在其下复用，但 Host 不会重新实现图表。
@@ -42,10 +42,12 @@ argv
     ├── Help / Version       → 短接
     ├── Focused Chart        → 转换为一个 Pane + Dashboard Host
     ├── Dashboard            → 一个或多个 Pane + Dashboard Host
-    └── Animation            → 独立的无 Provider Host
+    ├── Dataset              → 注册/安装管理器或文字列表
+    ├── Animation            → 独立的无 Provider Host
+    └── Text                 → 不依赖 Provider 的动态文本预设
 ```
 
-Help 与 Version 不初始化 Provider，不检查图表 TTY 条件，不进入终端输入模式，也不创建执行协调器。
+Help、Version 与 Text 不初始化 Provider，不检查图表 TTY 条件，不进入终端输入模式，也不创建执行协调器。Dataset 列表与管理使用 Dataset store 及 Probe/安装流程，不启动图表 Host。
 
 `ccuv chart KIND ...` 是聚焦 Dashboard 适配器：它创建 1×1 Dashboard 和一个已配置 Pane，并默认隐藏 Header、关闭 Summary。启动后完全复用 Dashboard 的焦点、Pane 生命周期、检查视图、命令复制、Controls 和 Refresh/Sampling 调度器，用户也可继续添加 Pane。普通 `ccuv dashboard ...` 的构造与默认值不经过该适配器。
 
@@ -108,7 +110,7 @@ Chart Definition 只声明需要什么数据，不构造 `ccusage` 命令，也�
 
 - 对严格相同且同时进行的物理查询去重；
 - 只在产品已明确证明安全的场景共享 Monitor 原始累计快照；
-- 自定义命令只合并等价的进行中执行。其身份包含 argv/执行上下文、数据集、请求类型、范围、规范化筛选、分组、粒度和汇总周期/截至日期，不包含图表类型、样式、主题、密度、图例、Top/Other、布局或 Pane 位置。
+- Dataset 命令只合并等价的进行中执行。身份遵循规范协议请求，包含数据源/执行上下文、Dataset 与 Metric、请求/图表类型、范围、规范化筛选、分组、分区、适用粒度，以及 V2 Ranking Top 等数据源覆盖字段；不包含仅影响呈现的样式、主题、密度、图例、布局或 Pane 位置。
 
 协调器不跨独立 owner 合并日期范围，不合并不同 Filter，不构造字段超集，不延迟 Tick 以收集批次，不复用已完成的过时结果，不协调重叠 Source，也不拥有 Interval 语义。这不妨碍单个 owner 的逻辑规划器按产品契约合并相邻的 Coverage 缺口。
 
@@ -231,9 +233,9 @@ Registry 显式注册能力、拒绝重复 ID、保持确定性顺序，并在�
 
 - `ccusage`：封装查询规划、安全子进程执行、Schema 校验和规范化；
 - Demo：提供确定性的进程内记录，不检查外部依赖；
-- custom command：面向中性、可相加历史系列的静态命令适配器。它向子进程 stdin 写入一次 `ccuv.custom/v1` 请求，校验一份 stdout 响应，并保留有界 stderr 诊断。
+- Dataset command：静态子进程适配器，同时支持遗留 `ccuv.custom/v1` 单一可相加历史指标，以及当前 `ccuv.custom/v2` 多 Metric 协议，包括数据源拥有的值、历史 Ranking 和 Monitor observation。它向 stdin 写入一次请求，校验一份 stdout 响应，并保留有界 stderr 诊断。
 
-该自定义适配器不是公开插件 Registry、数据源发现系统，也不是文件/HTTP/Python 扩展点；它不做已完成结果缓存、范围并集、重叠合并、批处理或结果切片。命令提供完整候选记录和 capability，共用处理链保留本地图表投影与呈现行为。Provider 代码不导入图表或展示代码。图表代码不调用 Provider，也不读取外部存储。详见[自定义命令协议](custom-command-protocol.zh-CN.md)。
+Dataset adapter 不是公开的进程内插件 Registry，也不是直接的文件/HTTP/Python 扩展点。Dataset 发现与安装最终解析为已注册的可执行命令；执行层不做已完成结果缓存、范围并集、重叠合并或批处理。命令提供协议事实与 capability；共用处理链仅保留各 Metric 的 aggregation 和图表契约允许的本地投影与呈现行为。Provider 代码不导入图表或展示代码。图表代码不调用 Provider，也不读取外部存储。详见[自定义命令协议](custom-command-protocol.zh-CN.md)。
 
 ### Chart
 

@@ -22,12 +22,13 @@ plans.
 
 ## 0.3.x
 
-- `0.3.x` centers Custom Dataset as a public data-source capability: evolve
-  Dataset discovery, installation, developer contracts, Metric selection, and
-  Dashboard interaction while preserving Dataset ownership of source semantics.
-- Continue developing related Custom Dataset capabilities such as Metric Groups,
-  grouped Metric selection, in-pane switching, and Monitor behavior only when
-  their protocol, lifecycle, resource, and compatibility contracts are explicit.
+- `0.3.x` continues hardening Custom Dataset as a public data-source capability:
+  evolve discovery, installation, developer contracts, and Dashboard interaction
+  while preserving Dataset ownership of source semantics.
+- Build on the implemented V2 Metric Groups, grouped selection, in-pane related
+  Metric switching, source-owned values, and Custom Monitor support. Further
+  lifecycle or retention behavior ships only when its protocol, resource, and
+  compatibility contracts are explicit.
 - This release line provides room for Custom Dataset contract changes that
   cannot be introduced compatibly in `0.2.x`.
 

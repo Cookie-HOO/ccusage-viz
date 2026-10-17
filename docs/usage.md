@@ -61,8 +61,9 @@ ccuv dashboard wide --demo
 | Ranking `ranking` | Historical date range | Focused one-Pane Dashboard | Which Agent, model, or project used the most tokens? |
 | Monitor `monitor` | Rolling observation window | Focused one-Pane Dashboard | What throughput has this process observed since it started? |
 | `dashboard` | Host-wide cadence plus independent panes | Dashboard | How do one or several configured charts compare? |
-| `custom timeline`, `custom stack`, `custom calendar`, `custom ranking` | Command-returned additive historical series | Focused Dashboard or an added Pane | How does a command-backed dataset change over time or rank? |
+| Dataset Metrics via `chart KIND --dataset ID` | Command-returned historical values or Monitor observations | Focused Dashboard or an added Pane | How does an external Dataset Metric change, rank, or behave now? |
 | `animate` | No usage data | One standalone animation | Show a local terminal animation without querying a provider. |
+| `text` | No usage data | One dynamic text value | Generate provider-free text for an Overlay command. |
 
 Historical routes query a date range. `monitor` instead samples repeated
 cumulative snapshots while the current process runs; it cannot reconstruct
@@ -508,7 +509,7 @@ reject `--pane` and every configuration override except `--demo`, `--lang`,
 
 ### Build a custom Dashboard
 
-A pane fragment is one safely quoted chart command plus chart options. A custom
+A pane fragment is one safely quoted chart command plus chart options. A Dataset
 fragment is `chart <kind>` with a Dataset ID and one source mode: an installed
 Dataset uses a bare `--dataset ID`, while an arbitrary developer command uses `--command`.
 `empty` is a valid temporary fragment. The copied command preserves that source
@@ -576,11 +577,13 @@ A Dashboard host owns its layout, shell theme/style, headers, input loop, and
 cadences. A Pane owns chart selection, range/window, grouping, Top/Other,
 filters, chart theme/style/density, and chart-specific configuration.
 
-Pane fragments may contain one built-in chart command (`timeline`, `calendar`,
-`stack`, `ranking`, or `monitor`), `animate` with an explicit style, `empty`, or
-`custom timeline|stack|calendar|ranking` plus chart settings. A custom pane always
-requires `--dataset`; choose exactly one source: a bare `--dataset ID` for an installed
-Dataset, or `--command` for an arbitrary command. Command text becomes argv with
+Pane fragments may contain a chart command (`timeline`, `calendar`, `stack`,
+`ranking`, or `monitor`), optionally prefixed by `chart`, plus `animate` with an
+explicit style or `empty`. A Dataset pane always requires `--dataset`; choose
+exactly one source: a bare `--dataset ID` for an installed Dataset, or `--command`
+for an arbitrary command. The legacy `custom` prefix remains accepted for
+historical Dataset pane fragments but is not the documented form and does not
+support Monitor. Command text becomes argv with
 `shlex.split` and runs without a shell. Dashboard presets remain token-consumption
 startup templates; they do not become Dataset presets. All fragments must not include
 host/lifecycle options such as:
