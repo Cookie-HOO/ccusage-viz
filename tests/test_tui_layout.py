@@ -4,7 +4,8 @@ from contextlib import nullcontext
 import pytest
 
 import ccusage_viz.tui as tui_module
-from ccusage_viz.cli import _to_options, build_parser
+from ccusage_viz.cli.configuration import _to_options
+from ccusage_viz.command_parsing.parser import build_parser
 from ccusage_viz.coverage import DateCoverage
 from ccusage_viz.dashboard_layout import resolve_pane_layout
 from ccusage_viz.deltas import RefreshRanks

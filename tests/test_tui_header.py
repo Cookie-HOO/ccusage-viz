@@ -5,7 +5,8 @@ import pytest
 
 import ccusage_viz.tui as tui_module
 from ccusage_viz.bootstrap import build_query_runtime
-from ccusage_viz.cli import _to_options, build_parser
+from ccusage_viz.cli.configuration import _to_options
+from ccusage_viz.command_parsing.parser import build_parser
 from ccusage_viz.coverage import DateCoverage, DateInterval
 from ccusage_viz.custom_models import (
     CustomComparison,

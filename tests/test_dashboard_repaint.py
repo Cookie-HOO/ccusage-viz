@@ -6,7 +6,8 @@ from types import SimpleNamespace
 import pytest
 
 import ccusage_viz.tui as tui
-from ccusage_viz.cli import _to_options, build_parser
+from ccusage_viz.cli.configuration import _to_options
+from ccusage_viz.command_parsing.parser import build_parser
 from ccusage_viz.i18n import load_translator
 from ccusage_viz.options import EmptyPaneConfig
 from ccusage_viz.tui_input import KeyEvent

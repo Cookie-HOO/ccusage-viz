@@ -15,14 +15,15 @@ from ccusage_viz.adjustment_timeout import AdjustmentIdleTimer
 from ccusage_viz.animation import animation_spec, animation_style_choices
 from ccusage_viz.animation_overlay import OverlayConfig
 from ccusage_viz.bootstrap import build_query_runtime
-from ccusage_viz.cli import _to_options, build_parser
-from ccusage_viz.cli import parse_pane_fragment as parse_dashboard_pane
+from ccusage_viz.cli.configuration import _to_options
 from ccusage_viz.command_copy import (
     format_command,
     format_dashboard_pane_command,
     format_full_command,
     format_full_dashboard_command,
 )
+from ccusage_viz.command_parsing.panes import parse_pane_fragment as parse_dashboard_pane
+from ccusage_viz.command_parsing.parser import build_parser
 from ccusage_viz.configuration import default_custom_pane, standalone_from_chart_pane
 from ccusage_viz.core.time import DateRange
 from ccusage_viz.coverage import DateCoverage, DateInterval

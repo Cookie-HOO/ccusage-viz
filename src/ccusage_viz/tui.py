@@ -5143,7 +5143,7 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
         )
 
     def builtin_preset_launch(name: str) -> DashboardLaunch:
-        from ccusage_viz.cli import parse_pane_fragment
+        from ccusage_viz.command_parsing.panes import parse_pane_fragment
 
         preset = DASHBOARD_PRESETS[name]
         base = DashboardLaunch(

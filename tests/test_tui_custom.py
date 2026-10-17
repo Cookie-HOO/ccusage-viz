@@ -11,7 +11,8 @@ import pytest
 import ccusage_viz.tui as tui_module
 from ccusage_viz.adjustment_timeout import AdjustmentTimeout
 from ccusage_viz.bootstrap import build_query_runtime
-from ccusage_viz.cli import _to_options, build_parser
+from ccusage_viz.cli.configuration import _to_options
+from ccusage_viz.command_parsing.parser import build_parser
 from ccusage_viz.configuration import default_custom_pane
 from ccusage_viz.core.custom_ranking_time import TimestampRange
 from ccusage_viz.core.time import DateRange

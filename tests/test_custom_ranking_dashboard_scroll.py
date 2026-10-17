@@ -9,7 +9,8 @@ import pytest
 from test_custom_ranking_scroll import grouped_projection, projection
 
 import ccusage_viz.tui as tui
-from ccusage_viz.cli import _to_options, build_parser
+from ccusage_viz.cli.configuration import _to_options
+from ccusage_viz.command_parsing.parser import build_parser
 from ccusage_viz.custom_component import CustomHistoricalComponent
 from ccusage_viz.formatting import strip_ansi
 from ccusage_viz.i18n import load_translator
