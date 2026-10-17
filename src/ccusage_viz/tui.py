@@ -266,7 +266,10 @@ from ccusage_viz.render.grouped_ranking_viewport import (
     render_grouped_custom_ranking_viewport,
 )
 from ccusage_viz.render.palette import COLOR_SCHEMES, get_color_scheme
-from ccusage_viz.render.ranking_presentation import copyable_description_text
+from ccusage_viz.render.ranking_presentation import (
+    copyable_description_text,
+    render_ranking_description,
+)
 from ccusage_viz.render.ranking_viewport import RankingViewport
 from ccusage_viz.render.summary import render_custom_metrics, render_summary
 from ccusage_viz.render.surfaces import (
@@ -4219,13 +4222,7 @@ def _official_catalog_item_rows(
         width, 1, translator, color=color, color_scheme=color_scheme
     )
     descriptions = tuple(
-        styled_text(
-            clip_width(f"  {row}", width),
-            get_color_scheme(color_scheme).muted,
-            context,
-            dim=True,
-        )
-        for row in wrapped[:2]
+        "  " + render_ranking_description(row, context) for row in wrapped[:2]
     )
     return (primary, *descriptions)
 

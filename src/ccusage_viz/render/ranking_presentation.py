@@ -301,6 +301,12 @@ def highlight_ranking_match(value: str, query: str, *, context: RenderContext) -
     )
 
 
+def render_ranking_description(value: str, context: RenderContext) -> str:
+    """Render description text with the same muted treatment as Custom Ranking."""
+
+    return _render_highlighted_description(value, "", context)
+
+
 def _render_highlighted_description(value: str, query: str, context: RenderContext) -> str:
     """Render safe links, metadata tags, and star emphasis."""
     scheme = get_color_scheme(context.color_scheme)
