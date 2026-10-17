@@ -2,6 +2,7 @@ from datetime import date
 
 import pytest
 
+from ccusage_viz.core import time as core_time
 from ccusage_viz.core.time import (
     DateRange,
     local_today,
@@ -65,6 +66,14 @@ def test_timezone_helpers_require_iana_names() -> None:
     assert validate_timezone(system_timezone()) == system_timezone()
     with pytest.raises(ValueError, match="invalid IANA"):
         validate_timezone("PST")
+
+
+def test_system_timezone_uses_cross_platform_local_zone_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(core_time, "get_localzone_name", lambda: "Asia/Shanghai")
+
+    assert system_timezone() == "Asia/Shanghai"
 
 
 def test_refresh_date_range_advances_only_rolling_ranges() -> None:

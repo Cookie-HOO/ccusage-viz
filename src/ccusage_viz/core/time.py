@@ -8,6 +8,8 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from tzlocal import get_localzone_name
+
 _PERIOD_PATTERN = re.compile(r"(?P<value>[1-9][0-9]*)(?P<unit>d|w|mo|q|y)$")
 
 
@@ -61,6 +63,11 @@ def validate_timezone(value: str) -> str:
 
 def system_timezone() -> str:
     """Return the local system timezone as an IANA identifier."""
+    try:
+        return validate_timezone(get_localzone_name())
+    except (OSError, ValueError, ZoneInfoNotFoundError):
+        pass
+
     configured = os.environ.get("TZ")
     candidates = (configured,) if configured else ()
     localtime = Path("/etc/localtime")

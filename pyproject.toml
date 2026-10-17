@@ -12,6 +12,7 @@ dependencies = [
   "plotext>=6.1,<7",
   "rfc8785>=0.1,<0.2",
   "term-animate>=0.1.1,<0.2.0",
+  "tzlocal>=5,<6",
 ]
 
 classifiers = [
