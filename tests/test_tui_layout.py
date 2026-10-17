@@ -13,10 +13,10 @@ from ccusage_viz.i18n import load_translator
 from ccusage_viz.query.models import QueryTrigger
 from ccusage_viz.tui import (
     _adjustment_controls,
-    _compose_resolved_panes,
-    _frame,
     _choose_layout_shortcut,
     _choose_pane_type,
+    _compose_resolved_panes,
+    _frame,
     _grid_for_pane_count,
     _grid_shape,
     _insert_pane,

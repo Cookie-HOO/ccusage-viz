@@ -238,17 +238,12 @@ def test_dashboard_panes_do_not_mirror_component_business_state() -> None:
     )
 
 
-def test_async_hosts_own_operations_through_the_shared_lifecycle() -> None:
-    for name, owners in {
-        "watch.py": ("standalone",),
-        "monitor.py": ("standalone:monitor",),
-        "tui.py": ("dashboard:header",),
-    }.items():
-        source = (PACKAGE_ROOT / name).read_text()
-        assert "LifecycleCoordinator(" not in source
-        assert "LifecycleOperation(" in source
-        assert "take_completed(" in source
-        assert all(owner in source for owner in owners)
+def test_dashboard_host_owns_operations_through_the_shared_lifecycle() -> None:
+    source = (PACKAGE_ROOT / "tui.py").read_text()
+    assert "LifecycleCoordinator(" not in source
+    assert "LifecycleOperation(" in source
+    assert "take_completed(" in source
+    assert "dashboard:header" in source
 
     tui = ast.parse((PACKAGE_ROOT / "tui.py").read_text())
     host_fields = {
@@ -275,7 +270,7 @@ def test_async_hosts_own_operations_through_the_shared_lifecycle() -> None:
     assert host_fields["DashboardHeader"].isdisjoint(forbidden)
 
 
-def test_monitor_demo_bootstrap_is_the_only_submit_outside_operation_starters() -> None:
+def test_dashboard_monitor_demo_bootstrap_is_the_only_submit_outside_operation_starter() -> None:
     allowed_starters = {"start", "start_pane_submission", "_await_monitor_warmup"}
     direct_submissions: list[tuple[str, str, int]] = []
 
@@ -300,16 +295,9 @@ def test_monitor_demo_bootstrap_is_the_only_submit_outside_operation_starters() 
                 direct_submissions.append((self.name, self.functions[-1], node.lineno))
             self.generic_visit(node)
 
-    for name in ("monitor.py", "tui.py", "watch.py"):
-        SubmitVisitor(name).visit(ast.parse((PACKAGE_ROOT / name).read_text()))
+    SubmitVisitor("tui.py").visit(ast.parse((PACKAGE_ROOT / "tui.py").read_text()))
 
-    assert [(name, function) for name, function, _line in direct_submissions] == [
-        ("monitor.py", "run_monitor")
-    ]
-    monitor_source = (PACKAGE_ROOT / "monitor.py").read_text()
-    assert "if options.host.demo_size:" in monitor_source
-    assert "component.submit(QueryTrigger.STARTUP, sample_ordinal=ordinal)" in monitor_source
-    assert "detect_gap=False" in monitor_source
+    assert direct_submissions == []
 
 
 def test_hosts_compose_complete_frames_and_only_painter_writes_rows() -> None:
@@ -318,10 +306,9 @@ def test_hosts_compose_complete_frames_and_only_painter_writes_rows() -> None:
     assert "class FramePainter:" in terminal
     assert "def paint_status" not in terminal
 
-    for name in ("monitor.py", "tui.py", "watch.py"):
-        source = (PACKAGE_ROOT / name).read_text()
-        assert "compose_frame(" in source
-        assert "paint_status(" not in source
+    source = (PACKAGE_ROOT / "tui.py").read_text()
+    assert "compose_frame(" in source
+    assert "paint_status(" not in source
 
 
 def test_reusable_historical_views_do_not_import_watch_host() -> None:

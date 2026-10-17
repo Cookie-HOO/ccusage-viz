@@ -5,10 +5,10 @@ import sys
 from importlib import import_module
 
 from ccusage_viz.bootstrap import build_provider_registry
+from ccusage_viz.configuration import focused_dashboard_from_chart
 from ccusage_viz.dependency import ensure_provider_dependencies
 from ccusage_viz.errors import UsageError
 from ccusage_viz.i18n import Translator
-from ccusage_viz.configuration import focused_dashboard_from_chart
 from ccusage_viz.options import AnimationLaunch, DashboardLaunch, LaunchConfig
 
 

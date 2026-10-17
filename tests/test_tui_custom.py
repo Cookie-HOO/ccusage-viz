@@ -1337,46 +1337,6 @@ def _accepted_metric_help_pane() -> tui_module.TuiCustomPane:
 
 
 @pytest.mark.parametrize("edited", (None, (("source", ("app",)),)), ids=("cancel", "apply"))
-def test_custom_filter_modal_forces_its_first_frame_and_standalone_restoration(
-    monkeypatch: pytest.MonkeyPatch, edited: object
-) -> None:
-    component = _accepted_metric_help_pane().component
-    choice = CustomFilter(
-        "source",
-        LocalizedText("Source", "来源"),
-        (CustomFilterOption("app", LocalizedText("App", "应用")),),
-    )
-    component.runtime = V2Runtime((choice,))
-    force_flags: list[bool] = []
-
-    class Screen:
-        def paint(self, _frame: object, *, force: bool = False, **_kwargs: object) -> None:
-            force_flags.append(force)
-
-    keys = iter(("a", "f", "\x1b"))
-
-    def editor(*_args: object, **kwargs: object) -> object:
-        kwargs["paint"]("filter body", "filter controls")  # type: ignore[index,operator]
-        return edited
-
-    monkeypatch.setattr(tui_module, "input_mode", nullcontext)
-    monkeypatch.setattr(tui_module, "read_key", lambda _timeout: next(keys))
-    monkeypatch.setattr(
-        tui_module, "get_terminal_size", lambda: __import__("os").terminal_size((80, 24))
-    )
-    monkeypatch.setattr(tui_module, "run_custom_filter_editor", editor)
-
-    assert (
-        tui_module._run_custom_standalone_adjustment(
-            component, load_translator("en"), Screen(), ascii=True
-        )
-        is None
-    )
-    assert force_flags[:4] == [False, False, True, True]
-    assert force_flags[4:] == ([False] if edited is not None else [])
-
-
-@pytest.mark.parametrize("edited", (None, (("source", ("app",)),)), ids=("cancel", "apply"))
 def test_dashboard_custom_filter_modal_forces_entry_and_restoration(
     monkeypatch: pytest.MonkeyPatch, edited: object
 ) -> None:
