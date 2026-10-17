@@ -21,7 +21,6 @@ from ccusage_viz.cli import (
 from ccusage_viz.configuration import standalone_from_chart_pane
 from ccusage_viz.dashboard import DASHBOARD_PRESETS
 from ccusage_viz.dashboard_preset_store import DashboardPresetStore, DashboardPresetStoreError
-from ccusage_viz.dashboard_presets import preset_from_launch
 from ccusage_viz.diagnostics import format_error
 from ccusage_viz.errors import UsageError
 from ccusage_viz.i18n import load_translator
@@ -40,6 +39,7 @@ from ccusage_viz.options import (
     StandaloneLaunch,
     resolve_date_range,
 )
+from ccusage_viz.presets.document import preset_from_launch
 from ccusage_viz.render.palette import COLOR_SCHEMES
 
 

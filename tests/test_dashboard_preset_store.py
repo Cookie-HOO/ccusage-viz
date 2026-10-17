@@ -13,7 +13,6 @@ from ccusage_viz.dashboard_preset_store import (
     DashboardPresetStoreError,
     DashboardPresetStoreNotFoundError,
 )
-from ccusage_viz.dashboard_presets import DashboardPresetDocument, preset_from_launch
 from ccusage_viz.options import (
     ChartPaneConfig,
     DashboardHostConfig,
@@ -21,6 +20,7 @@ from ccusage_viz.options import (
     ProcessConfig,
     TimelineConfig,
 )
+from ccusage_viz.presets.document import DashboardPresetDocument, preset_from_launch
 
 NOW = datetime(2026, 10, 8, 12, tzinfo=UTC)
 RANGE = DateRange(datetime(2026, 10, 1, tzinfo=UTC).date(), NOW.date())

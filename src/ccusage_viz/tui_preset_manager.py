@@ -10,9 +10,9 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Literal, TypeAlias
 
-from ccusage_viz.dashboard_presets import DashboardPresetValidationError, validate_preset_name
 from ccusage_viz.formatting import clip_width
 from ccusage_viz.i18n import Translator
+from ccusage_viz.presets.values import DashboardPresetValidationError, validate_preset_name
 from ccusage_viz.render.palette import get_color_scheme
 from ccusage_viz.terminal import Frame, Terminal, compose_frame, emphasize
 from ccusage_viz.terminal_ui import controls_line, notice_lines

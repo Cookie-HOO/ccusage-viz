@@ -1,6 +1,6 @@
 """Private, atomic persistence for the Dashboard user-preset collection.
 
-The wire schema and its validation live in :mod:`ccusage_viz.dashboard_presets`.
+The wire schema and its validation live in :mod:`ccusage_viz.presets.document`.
 This module intentionally has no knowledge of panes, launch options, or built-in
 presets: it only protects the user-owned collection document on disk.
 """
@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ccusage_viz.dashboard_presets import DashboardPresetDocument, DashboardPresetRecord
+    from ccusage_viz.presets.document import DashboardPresetDocument, DashboardPresetRecord
 
 
 class DashboardPresetStoreError(RuntimeError):
@@ -73,7 +73,7 @@ class DashboardPresetStore:
 
         # Import lazily so model consumers can import their DTOs without a store
         # dependency and so this module stays narrowly persistence-focused.
-        from ccusage_viz.dashboard_presets import DashboardPresetDocument
+        from ccusage_viz.presets.document import DashboardPresetDocument
 
         try:
             payload = self.path.read_bytes()

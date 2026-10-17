@@ -33,11 +33,6 @@ from ccusage_viz.dashboard_preset_store import (
     DashboardPresetStoreCorruptError,
     DashboardPresetStoreError,
 )
-from ccusage_viz.dashboard_presets import (
-    DashboardPresetValidationError,
-    empty_preset_launch,
-    materialize_preset,
-)
 from ccusage_viz.datasets.paths import dashboard_preset_state_root
 from ccusage_viz.diagnostics import color_enabled, format_error
 from ccusage_viz.errors import UsageError, VizError
@@ -82,6 +77,8 @@ from ccusage_viz.options import (
     compatible_styles,
     resolve_date_range,
 )
+from ccusage_viz.presets.materialize import empty_preset_launch, materialize_preset
+from ccusage_viz.presets.values import DashboardPresetValidationError
 from ccusage_viz.render.palette import COLOR_SCHEMES
 
 _COMMANDS = (
