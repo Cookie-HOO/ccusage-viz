@@ -373,7 +373,10 @@ def test_main_top_level_typo_lists_commands_and_suggests_dashboard(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setattr("ccusage_viz.cli.run", lambda *_args: pytest.fail("runtime must not start"))
+    def fail_run(*_args: object) -> int:
+        raise AssertionError("runtime must not start")
+
+    monkeypatch.setattr("ccusage_viz.cli.run", fail_run)
 
     assert main(["dashbaord", "--lang", "en"]) == 2
 
