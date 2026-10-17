@@ -607,6 +607,23 @@ def _inject_default_command(argv: list[str]) -> list[str]:
     return ["chart", "timeline", *argv]
 
 
+def _top_level_typo(raw_args: list[str], error: UsageError) -> UsageError:
+    if error.key != "error.arguments":
+        return error
+    remaining = list(raw_args)
+    while len(remaining) >= 2 and remaining[0] == "--lang":
+        remaining = remaining[2:]
+    if not remaining:
+        return error
+    rejected = remaining[0]
+    if rejected.startswith("-") or rejected in _COMMANDS or rejected in _TUI_COMMANDS:
+        return error
+    detail = error.values.get("detail")
+    if not isinstance(detail, str) or f"unrecognized arguments: {rejected}" not in detail:
+        return error
+    return _invalid_subcommand_error(detail, rejected, _COMMANDS)
+
+
 def _chart_kind(namespace: argparse.Namespace) -> str:
     return getattr(namespace, "chart_kind", None) or namespace.command or "timeline"
 
@@ -1327,7 +1344,13 @@ def main(argv: list[str] | None = None) -> int:
     tr = load_translator(language)
     try:
         parser = build_parser(tr)
-        namespace = parser.parse_args(args)
+        try:
+            namespace = parser.parse_args(args)
+        except UsageError as error:
+            enriched = _top_level_typo(raw_args, error)
+            if enriched is error:
+                raise
+            raise enriched from error
         if hasattr(namespace, "lang") and namespace.lang is None:
             namespace.lang = language
         if namespace.command == "dataset":

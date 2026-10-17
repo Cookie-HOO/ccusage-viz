@@ -13,6 +13,7 @@ from ccusage_viz.cli import (
     _inject_default_command,
     _rejected_subcommand,
     _to_options,
+    _top_level_typo,
     build_parser,
     main,
     probe_short_circuit,
@@ -36,6 +37,7 @@ from ccusage_viz.options import (
     DashboardLaunch,
     EmptyPaneConfig,
     ProcessConfig,
+    StandaloneLaunch,
     resolve_date_range,
 )
 from ccusage_viz.render.palette import COLOR_SCHEMES
@@ -112,8 +114,7 @@ def test_invalid_chart_kind_lists_only_chart_kinds_and_suggests_match() -> None:
 def test_rejected_subcommand_accepts_repr_quoted_choice_rendering() -> None:
     assert (
         _rejected_subcommand(
-            "argument KIND: invalid choice: 'timline' "
-            "(choose from 'timeline', 'calendar')",
+            "argument KIND: invalid choice: 'timline' (choose from 'timeline', 'calendar')",
             "KIND",
             ("timeline", "calendar"),
         )
@@ -366,6 +367,86 @@ def test_animate_gallery_preserves_positional_initial_style() -> None:
 
 def test_default_command_injection_preserves_animate() -> None:
     assert _inject_default_command(["animate", "rain"]) == ["animate", "rain"]
+
+
+def test_main_top_level_typo_lists_commands_and_suggests_dashboard(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr("ccusage_viz.cli.run", lambda *_args: pytest.fail("runtime must not start"))
+
+    assert main(["dashbaord", "--lang", "en"]) == 2
+
+    error = capsys.readouterr().err
+    assert "unrecognized arguments: dashbaord" in error
+    assert "Supported commands: chart, dashboard, animate, dataset, text" in error
+    assert "Did you mean 'dashboard'?" in error
+
+
+def test_main_top_level_typo_honors_leading_language_option(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert main(["--lang", "zh", "dashbaord"]) == 2
+
+    error = capsys.readouterr().err
+    assert "支持的命令：chart, dashboard, animate, dataset, text" in error
+    assert "你是不是想输入 'dashboard'？" in error
+
+
+def test_distant_top_level_failure_lists_commands_without_suggestion(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert main(["nonsense", "--lang", "en"]) == 2
+
+    error = capsys.readouterr().err
+    assert "Supported commands: chart, dashboard, animate, dataset, text" in error
+    assert "Did you mean" not in error
+
+
+@pytest.mark.parametrize(
+    ("raw_args", "key", "detail"),
+    [
+        (["--period", "14d"], "error.arguments", "unrecognized arguments: --period"),
+        (["dashboard"], "error.arguments", "unrecognized arguments: dashboard"),
+        (["timeline"], "error.arguments", "unrecognized arguments: timeline"),
+        (["dashbaord"], "error.invalid_subcommand", "unrecognized arguments: dashbaord"),
+        (["dashbaord"], "error.arguments", "unrecognized arguments: something-else"),
+    ],
+)
+def test_top_level_typo_returns_original_for_uncertain_failures(
+    raw_args: list[str], key: str, detail: str
+) -> None:
+    original = UsageError(key, detail=detail)
+
+    assert _top_level_typo(raw_args, original) is original
+
+
+def test_option_led_default_chart_route_is_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: list[object] = []
+    monkeypatch.setattr(
+        "ccusage_viz.cli.run",
+        lambda launch, _tr: captured.append(launch) or 0,
+    )
+
+    assert main(["--demo", "small", "--lang", "en"]) == 0
+    assert len(captured) == 1
+    assert isinstance(captured[0], StandaloneLaunch)
+
+
+@pytest.mark.parametrize(
+    ("argv", "expected"),
+    [
+        (["--period", "14d"], ["chart", "timeline", "--period", "14d"]),
+        (["chart", "ranking"], ["chart", "ranking"]),
+        (["dashboard"], ["dashboard"]),
+        (["dataset", "list"], ["dataset", "list"]),
+        (["dashbaord"], ["chart", "timeline", "dashbaord"]),
+    ],
+)
+def test_subcommand_guidance_does_not_change_default_injection(
+    argv: list[str], expected: list[str]
+) -> None:
+    assert _inject_default_command(argv) == expected
 
 
 def test_route_probe_identifies_only_help_and_version() -> None:
