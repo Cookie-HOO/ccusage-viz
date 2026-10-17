@@ -26,18 +26,6 @@ def test_scheduler_uses_a_fixed_baseline_and_coalesces_missed_opportunities() ->
     assert not scheduler.due(now=145)
 
 
-def test_scheduler_pause_resume_preserves_baseline_without_backlog() -> None:
-    scheduler = FixedIntervalScheduler(10, now=100)
-
-    scheduler.pause()
-    assert not scheduler.due(now=135)
-
-    scheduler.resume(now=135)
-    assert scheduler.next_opportunity == 140
-    assert not scheduler.due(now=135)
-    assert scheduler.due(now=140)
-
-
 def test_scheduler_rebuild_starts_a_new_sequence_at_modification_time() -> None:
     scheduler = FixedIntervalScheduler(10, now=100)
 
@@ -142,32 +130,6 @@ def test_operation_replacement_detaches_and_clears_previous_submission() -> None
     assert lifecycle.submission == "manual"
     assert lifecycle.active is not None
     assert lifecycle.active.trigger is LifecycleTrigger.MANUAL
-
-
-def test_operation_pause_clears_automatic_but_keeps_manual_submission() -> None:
-    lifecycle: LifecycleOperation[str] = LifecycleOperation("pane-1")
-    cancelled: list[str] = []
-    lifecycle.request(
-        LifecycleTrigger.PERIODIC,
-        generation=0,
-        now=0,
-        start=lambda _operation: ("periodic", lambda: cancelled.append("periodic")),
-    )
-
-    lifecycle.pause()
-
-    assert cancelled == ["periodic"]
-    assert lifecycle.operation is lifecycle.submission is None
-    lifecycle.resume()
-    lifecycle.request(
-        LifecycleTrigger.MANUAL,
-        generation=0,
-        now=1,
-        start=lambda _operation: ("manual", lambda: cancelled.append("manual")),
-    )
-    lifecycle.pause()
-    assert lifecycle.submission == "manual"
-    assert cancelled == ["periodic"]
 
 
 def test_operation_consumes_a_stale_completion_before_pending_restart() -> None:
@@ -343,48 +305,6 @@ def test_intentional_detach_cancels_subscription_without_creating_an_error() -> 
     assert coordinator.pending is None
 
 
-def test_pause_cancels_automatic_work_but_allows_manual_and_configuration_work() -> None:
-    coordinator = LifecycleCoordinator("pane-1")
-    coordinator.request(LifecycleTrigger.PERIODIC, generation=0, now=0)
-    automatic = coordinator.take_ready(now=0)
-    assert automatic is not None
-    cancelled: list[bool] = []
-    coordinator.attach(automatic, lambda: cancelled.append(True))
-
-    coordinator.pause()
-
-    assert cancelled == [True]
-    coordinator.resume()
-    assert coordinator.pending is None
-    coordinator.pause()
-    assert not coordinator.request(LifecycleTrigger.PERIODIC, generation=0, now=1)
-    assert coordinator.request(LifecycleTrigger.MANUAL, generation=0, now=1)
-    manual = coordinator.take_ready(now=1)
-    assert manual is not None
-    assert manual.trigger is LifecycleTrigger.MANUAL
-    coordinator.abandon(manual)
-
-    assert coordinator.request(LifecycleTrigger.CONFIGURATION, generation=1, now=2)
-    configuration = coordinator.take_ready(now=2)
-    assert configuration is not None
-    assert configuration.trigger is LifecycleTrigger.CONFIGURATION
-
-
-def test_pause_keeps_manual_work_active_until_it_completes() -> None:
-    coordinator = LifecycleCoordinator("pane-1")
-    coordinator.request(LifecycleTrigger.MANUAL, generation=0, now=0)
-    manual = coordinator.take_ready(now=0)
-    assert manual is not None
-    cancelled: list[bool] = []
-    coordinator.attach(manual, lambda: cancelled.append(True))
-
-    coordinator.pause()
-
-    assert coordinator.active == manual
-    assert cancelled == []
-    assert coordinator.complete(manual, generation=0)
-
-
 def test_shutdown_rejects_late_completion_and_new_intent() -> None:
     coordinator = LifecycleCoordinator("pane-1")
     coordinator.request(LifecycleTrigger.STARTUP, generation=0, now=0)
@@ -406,7 +326,6 @@ def test_shutdown_rejects_late_completion_and_new_intent() -> None:
         (LifecycleTrigger.PERIODIC, QueryTrigger.TICK),
         (LifecycleTrigger.MANUAL, QueryTrigger.REFRESH),
         (LifecycleTrigger.CONFIGURATION, QueryTrigger.REFRESH),
-        (LifecycleTrigger.RESUME, QueryTrigger.REFRESH),
     ],
 )
 def test_lifecycle_triggers_map_to_existing_query_contract(

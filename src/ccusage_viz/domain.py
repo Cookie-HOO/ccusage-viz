@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import date
@@ -8,11 +9,12 @@ from types import MappingProxyType
 from typing import TypeAlias
 
 NoticeValue: TypeAlias = str | int | float | bool | None
+_MODEL_SOURCE_PREFIX = re.compile(r"^\[[^]\s]+\]\s+")
 
 
 def model_identity(value: str) -> str:
-    """Return the sole case-insensitive identity and display form for a model."""
-    return value.casefold()
+    """Return the normalized, case-insensitive identity and display form for a model."""
+    return _MODEL_SOURCE_PREFIX.sub("", value).casefold()
 
 
 class Agent(StrEnum):
@@ -24,6 +26,7 @@ class SourceKind(StrEnum):
     UNIFIED_DAILY = "unified_daily"
     CLAUDE_DAILY_PROJECTS = "claude_daily_projects"
     CODEX_SESSIONS = "codex_sessions"
+    PROJECT_SESSIONS = "project_sessions"
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,6 +125,9 @@ class UsageRecord:
     source: SourceKind
     project: ProjectRef | None = None
     models: tuple[ModelBreakdown, ...] = field(default_factory=tuple)
+    attribution: str | None = None
+    source_project: str | None = None
+    session_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

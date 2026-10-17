@@ -8,6 +8,7 @@ from typing import TextIO
 
 from ccusage_viz.errors import UsageError
 from ccusage_viz.options import MINIMUM_SIZES
+from ccusage_viz.terminal_diff import row_updates
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,6 +51,15 @@ def compose_frame(
 
 _HIDE_CURSOR = "\x1b[?25l"
 _SHOW_CURSOR = "\x1b[?25h"
+_RESET_STYLE = "\x1b[0m"
+
+
+def emphasize(text: str, *, color: int, enabled: bool) -> str:
+    """Render a bold themed terminal heading without renderer-global state."""
+
+    if not enabled:
+        return text
+    return f"\x1b[38;5;{color}m\x1b[1m{text}{_RESET_STYLE}"
 
 
 def set_cursor_visible(stream: TextIO, visible: bool) -> None:
@@ -74,8 +84,10 @@ class FramePainter:
         else:
             updates = []
             for index, row in enumerate(frame.rows):
-                if index >= len(self._frame.rows) or self._frame.rows[index] != row:
+                if index >= len(self._frame.rows):
                     updates.append(f"\x1b[{index + 1};1H\x1b[2K{row}")
+                elif self._frame.rows[index] != row:
+                    updates.append(row_updates(self._frame.rows[index], row, index + 1))
             for index in range(len(frame.rows), len(self._frame.rows)):
                 updates.append(f"\x1b[{index + 1};1H\x1b[2K")
             output = "".join(updates)

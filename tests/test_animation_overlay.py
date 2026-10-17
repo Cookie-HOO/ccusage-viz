@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import Future
 from datetime import datetime
 
 import pytest
@@ -47,6 +48,33 @@ def test_overlay_config_rejects_invalid_values() -> None:
         OverlayConfig(text="text", color="orange")
     with pytest.raises(ValueError, match="five"):
         OverlayConfig(command="date", interval=4)
+    for value in (1.5, True, "1"):
+        with pytest.raises(ValueError, match="offsets"):
+            OverlayConfig(text="text", offset_x=value)  # type: ignore[arg-type]
+        with pytest.raises(ValueError, match="offsets"):
+            OverlayConfig(text="text", offset_y=value)  # type: ignore[arg-type]
+
+
+def test_runtime_mirrors_declarative_position_and_offsets_after_adjustments() -> None:
+    runtime = AnimationOverlayRuntime(
+        OverlayConfig(text="hello", position="top-left", offset_x=-2, offset_y=3)
+    )
+    try:
+        assert runtime.presentation.position == "top-left"
+        assert runtime.presentation.offset_x == -2
+        assert runtime.presentation.offset_y == 3
+
+        runtime.cycle_position()
+        runtime.adjust_offset(dx=5, dy=-4)
+        assert runtime.config.position == runtime.presentation.position == "top-center"
+        assert runtime.config.offset_x == runtime.presentation.offset_x == 3
+        assert runtime.config.offset_y == runtime.presentation.offset_y == -1
+
+        runtime.reset_offset()
+        assert runtime.config.offset_x == runtime.presentation.offset_x == 0
+        assert runtime.config.offset_y == runtime.presentation.offset_y == 0
+    finally:
+        runtime.close()
 
 
 def test_sanitize_ansi_keeps_safe_foreground_and_strips_terminal_controls() -> None:
@@ -89,6 +117,34 @@ def _record(
     return ExecutionRecord(
         command, started_at, 0.12, exit_code, timed_out, "hello", "", False, False
     )
+
+
+def test_command_overlay_displays_failure_diagnostic_without_opening_history() -> None:
+    runtime = AnimationOverlayRuntime(OverlayConfig(command="failing-command"))
+    future: Future[ExecutionRecord] = Future()
+    runtime._future = future
+    runtime._future_generation = runtime._generation
+    future.set_result(
+        ExecutionRecord(
+            "failing-command",
+            datetime(2026, 9, 29, 12, 34, 56),
+            0.12,
+            1,
+            False,
+            "partial stdout",
+            "connection refused",
+            False,
+            False,
+        )
+    )
+
+    try:
+        assert runtime.poll(now=0) is True
+        assert runtime.output == "exit 1: connection refused"
+        assert runtime.lines(available_width=80) == ("exit 1: connection refused",)
+        assert runtime.history[0].stderr == "connection refused"
+    finally:
+        runtime.close()
 
 
 def test_command_record_preserves_wall_clock_start_and_monotonic_duration(monkeypatch) -> None:
@@ -242,10 +298,10 @@ def test_placements_hide_outside_vertical_bounds_without_clamping_offsets() -> N
 
         runtime.adjust_offset(dx=-10)
         assert runtime.placements(width=10, height=2) == ()
-        assert runtime.presentation.offset_x == -10
+        assert runtime.config.offset_x == -10
 
         runtime.reset_offset()
-        assert runtime.presentation.position == "top-left"
-        assert runtime.presentation.offset_x == runtime.presentation.offset_y == 0
+        assert runtime.config.position == "top-left"
+        assert runtime.config.offset_x == runtime.config.offset_y == 0
     finally:
         runtime.close()

@@ -2,11 +2,14 @@ from __future__ import annotations
 
 from collections.abc import Hashable, Mapping
 from dataclasses import dataclass
+from typing import cast
 
+from ccusage_viz.chart_models import RankingModel
 from ccusage_viz.formatting import center_text
 from ccusage_viz.historical_component import HistoricalChartComponent
 from ccusage_viz.i18n import Translator
 from ccusage_viz.options import (
+    CustomChartConfig,
     HistoricalChartConfig,
     MonitorConfig,
     RankingConfig,
@@ -15,9 +18,23 @@ from ccusage_viz.options import (
     TimelineConfig,
 )
 from ccusage_viz.render import RenderContext
-from ccusage_viz.render.base import RenderAudit, content_heading, date_range_heading, render_audit
+from ccusage_viz.render.base import render_audit
 from ccusage_viz.render.filters import active_filter_summary
+from ccusage_viz.render.headings import (
+    HeadingSpec,
+    chart_name,
+    compose_heading,
+    heading_period,
+    heading_with_querying,
+)
 from ccusage_viz.render.summary import render_summary_placeholder
+from ccusage_viz.render.surfaces import (
+    EMPTY_SURFACE_CONTROLS,
+    HistoricalPresentationSurface,
+    SurfaceControls,
+    SurfacePresentation,
+    standalone_surface,
+)
 from ccusage_viz.terminal import Terminal
 
 
@@ -28,8 +45,8 @@ class RenderedChart:
 
 
 def historical_chart_config(options: StandaloneLaunch) -> HistoricalChartConfig:
-    if isinstance(options.chart, MonitorConfig):
-        raise TypeError("historical rendering does not support monitor configurations")
+    if isinstance(options.chart, (CustomChartConfig, MonitorConfig)):
+        raise TypeError("historical rendering does not support custom or monitor configurations")
     return options.chart
 
 
@@ -38,21 +55,40 @@ def _title_content(
 ) -> str | None:
     if not normalize_titles:
         return None
-    if options.chart.kind == "timeline":
-        return translator.text(f"label.{options.chart.by or 'total'}")
-    if options.chart.kind == "ranking":
-        return translator.text(f"label.{options.chart.by or 'project'}")
+    chart = historical_chart_config(options)
+    if isinstance(chart, TimelineConfig):
+        return translator.text(f"label.{chart.by or 'total'}")
+    if isinstance(chart, StackConfig):
+        return translator.text(f"label.{chart.by}")
+    if isinstance(chart, RankingConfig):
+        return translator.text(f"label.{chart.by or 'project'}")
     return None
 
 
 def _pending_heading(options: StandaloneLaunch, context: RenderContext) -> str:
     chart = historical_chart_config(options)
-    title = context.translator.text(f"label.{chart.kind}")
-    if isinstance(chart, TimelineConfig) and context.title_content:
-        return content_heading(title, chart.date_range.since, chart.date_range.until, context)
-    if isinstance(chart, RankingConfig) and context.title_content:
-        return content_heading(title, chart.date_range.since, chart.date_range.until, context)
-    return date_range_heading(title, chart.date_range.since, chart.date_range.until, context)
+    dimension = context.title_content
+    partition = None
+    if dimension in {context.translator.text("label.total"), "Total"}:
+        dimension = None
+    if isinstance(chart, RankingConfig) and chart.project_aggregation == "exact":
+        dimension = context.translator.text("label.project")
+        partition = context.translator.text("label.agent")
+    heading = compose_heading(
+        HeadingSpec(
+            metric=context.translator.text("label.tokens_metric"),
+            chart=chart_name(chart.kind, context.translator),
+            dimension=dimension,
+            partition=partition,
+            period=heading_period(
+                context,
+                since=chart.date_range.since,
+                until=chart.date_range.until,
+            ),
+        ),
+        context,
+    )
+    return heading_with_querying(heading, context)
 
 
 def _pending_summary(options: StandaloneLaunch, context: RenderContext) -> str:
@@ -88,9 +124,8 @@ def _context(
     terminal: Terminal,
     *,
     notice_count: int,
-    reserve_prompt: bool,
-    control_rows: int,
-    hide_upper_right_axes: bool,
+    controls: SurfaceControls,
+    surface: HistoricalPresentationSurface,
     ranking_deltas: Mapping[Hashable, float] | None,
     ranking_rank_deltas: Mapping[Hashable, int] | None,
     normalize_titles: bool,
@@ -99,39 +134,31 @@ def _context(
     component: HistoricalChartComponent,
 ) -> RenderContext:
     chart = historical_chart_config(options)
-    return RenderContext(
-        terminal.width,
-        max(
-            1,
-            terminal.height
-            - 1
-            - notice_count
-            - int(reserve_prompt)
-            - control_rows
-            - int(chart.presentation.density == "full"),
-        ),
-        translator,
-        color=terminal.color,
-        ascii=terminal.ascii,
-        color_scheme=chart.presentation.theme,
-        style=chart.presentation.style,
-        legend_position=chart.presentation.legend,
-        hide_upper_right_axes=hide_upper_right_axes,
+    presentation = SurfacePresentation(
+        chart.kind,
+        chart.presentation.theme,
+        chart.presentation.style,
+        chart.presentation.legend,
+        chart.presentation.density,
+        getattr(chart, "weekdays", "show"),
+        chart.date_range.period if chart.date_range.relative_until else None,
+        _title_content(options, translator, normalize_titles),
+        active_filter_summary(chart.filters, translator, width=terminal.width),
+        component.accepted_at,
+        component.snapshot.elapsed if component.snapshot is not None else None,
+        interval,
+        refreshing=refreshing,
+        querying=component.has_pending_unknowns,
+        pending=component.is_pending,
         deltas=ranking_deltas,
         rank_deltas=ranking_rank_deltas,
-        weekday_mode=getattr(chart, "weekdays", "show"),
-        period=chart.date_range.period if chart.date_range.relative_until else None,
-        title_content=_title_content(options, translator, normalize_titles),
-        filter_summary=active_filter_summary(chart.filters, translator, width=terminal.width),
-        density=chart.presentation.density,
-        pending=component.is_pending,
-        audit=RenderAudit(
-            component.accepted_at,
-            component.snapshot.elapsed if component.snapshot is not None else None,
-            interval,
-            refreshing=refreshing,
-            querying=component.has_pending_unknowns,
-        ),
+    )
+    return surface.context(
+        terminal,
+        translator,
+        presentation,
+        notices=notice_count,
+        controls=controls,
     )
 
 
@@ -140,28 +167,30 @@ def render_historical_component(
     translator: Translator,
     terminal: Terminal,
     *,
-    reserve_prompt: bool = False,
-    control_rows: int = 0,
-    hide_upper_right_axes: bool = False,
+    controls: SurfaceControls = EMPTY_SURFACE_CONTROLS,
+    surface: HistoricalPresentationSurface | None = None,
+    normalize_titles: bool = False,
     ranking_deltas: Mapping[Hashable, float] | None = None,
     ranking_rank_deltas: Mapping[Hashable, int] | None = None,
-    normalize_titles: bool = False,
     interval: float | None = None,
     refreshing: bool = False,
+    ranking_search_query: str = "",
+    ranking_search_editing: bool = False,
+    ranking_show_visible_count: bool = False,
 ) -> RenderedChart:
     accepted_options = component.accepted_options
     model = component.model
     if accepted_options is None or model is None:
         raise RuntimeError("historical component has no accepted model")
+    selected_surface = surface or standalone_surface(historical_chart_config(accepted_options).kind)
     if component.is_pending:
         context = _context(
             component.candidate,
             translator,
             terminal,
             notice_count=0,
-            reserve_prompt=reserve_prompt,
-            control_rows=control_rows,
-            hide_upper_right_axes=hide_upper_right_axes,
+            controls=controls,
+            surface=selected_surface,
             ranking_deltas=None,
             ranking_rank_deltas=None,
             normalize_titles=normalize_titles,
@@ -171,19 +200,20 @@ def render_historical_component(
         )
         rendered = _render_pending_historical(component.candidate, context)
         audit = render_audit(context)
-        return RenderedChart(f"{rendered}\n{audit}" if audit else rendered, ())
+        return RenderedChart(rendered.rstrip("\n") + "\n" + audit if audit else rendered, ())
     chart = historical_chart_config(accepted_options)
     visible_notices = model.notices
-    if chart.presentation.density != "minimal" and model.summary is not None:
+    if chart.presentation.density != "minimal" and (
+        model.summary is not None or getattr(model, "summary_notices", ())
+    ):
         visible_notices += getattr(model, "summary_notices", ())
     context = _context(
         accepted_options,
         translator,
         terminal,
         notice_count=len(visible_notices),
-        reserve_prompt=reserve_prompt,
-        control_rows=control_rows,
-        hide_upper_right_axes=hide_upper_right_axes,
+        controls=controls,
+        surface=selected_surface,
         ranking_deltas=ranking_deltas,
         ranking_rank_deltas=ranking_rank_deltas,
         normalize_titles=normalize_titles,
@@ -191,9 +221,20 @@ def render_historical_component(
         refreshing=refreshing,
         component=component,
     )
-    rendered = component.render(context)
+    if isinstance(chart, RankingConfig) and (ranking_search_query or ranking_show_visible_count):
+        from ccusage_viz.render.ranking import render_ranking
+
+        rendered = render_ranking(
+            cast(RankingModel, model),
+            context,
+            search_query=ranking_search_query,
+            search_editing=ranking_search_editing,
+            show_visible_count=ranking_show_visible_count,
+        )  # type: ignore[arg-type]
+    else:
+        rendered = component.definition.renderer(model, context)
     audit = render_audit(context)
     if audit:
-        rendered = f"{rendered}\n{audit}"
+        rendered = rendered.rstrip("\n") + "\n" + audit
     notices = tuple(translator.text(notice.key, **notice.values) for notice in visible_notices)
     return RenderedChart(rendered, notices)

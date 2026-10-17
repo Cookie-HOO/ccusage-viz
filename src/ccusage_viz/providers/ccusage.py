@@ -2,46 +2,49 @@ from __future__ import annotations
 
 import json
 import os
-import signal
 import subprocess
-import time
-from contextlib import suppress
-from dataclasses import dataclass, replace
-from datetime import timedelta
-from threading import Event, Thread
-from typing import Any, Final
+from dataclasses import dataclass, field, replace
+from threading import Event
 
-from ccusage_viz.codex_sessions import resolve_codex_session_cwds
 from ccusage_viz.coverage import DateCoverage, DateInterval
-from ccusage_viz.domain import Notice
+from ccusage_viz.domain import Notice, SourceKind, UsageRecord
 from ccusage_viz.errors import QueryError
-from ccusage_viz.project_identity import normalized_absolute_project_path
+from ccusage_viz.project_identity import make_project_ref, normalized_absolute_project_path
+from ccusage_viz.providers.ccusage_fallback import (
+    _OPERATION_SOURCES,
+    CCUSAGE_PROVIDER,
+    _days,
+    _enrich_codex_project_rows,
+    _exception_agents,
+    _fallback_agent,
+    _fallback_session_cwds,
+    _fallback_source,
+    _FallbackSourceKey,
+    _fixed_project_observation_records,
+    _fragment_query_metadata,
+    _normalized_query_metadata,
+    _project_fallback_query,
+    _project_fallback_replacement_records,
+    _project_observation_query,
+    _ProjectFallbackMemory,
+    _query_dates,
+    _query_metadata,
+    _remembered_fallback_queries,
+    _replace_unverified_records,
+)
+from ccusage_viz.providers.ccusage_process import _communicate_bounded, _decode_stderr
 from ccusage_viz.query.models import (
     DataResolution,
     PhysicalPlan,
     PhysicalQuery,
     PhysicalResult,
     ProviderProvenance,
-    ProviderRef,
     ProviderResult,
     ProviderResultFragment,
     QueryIntent,
-    QueryKind,
 )
-from ccusage_viz.query.provider import ProviderCapabilities, ProviderDefinition
-from ccusage_viz.schema import codex_project_identity, parse_usage_records
-
-CCUSAGE_PROVIDER = ProviderRef("ccusage")
-_STDERR_LIMIT: Final = 16 * 1024
-_TERMINATE_GRACE: Final = 0.25
-_OPERATION_SOURCES = {
-    "unified_daily": QueryKind.UNIFIED_DAILY,
-    "unified_daily_agent_observation": QueryKind.UNIFIED_DAILY,
-    "claude_daily_projects": QueryKind.CLAUDE_DAILY_PROJECTS,
-    "codex_sessions": QueryKind.CODEX_SESSIONS,
-}
-_PROJECT_ATTRIBUTION_SUPPORTED_AGENTS = frozenset({"claude", "codex"})
-_PROJECT_ATTRIBUTION_UNSUPPORTED_AGENTS = frozenset({"antigravity", "opencode"})
+from ccusage_viz.query.provider import ProviderCapabilities
+from ccusage_viz.schema import parse_project_sessions, parse_usage_records
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,6 +56,9 @@ class CcusageProvider:
         execution_options=("chart_kind",),
         dependencies=("ccusage",),
     )
+    _fallback_memory: _ProjectFallbackMemory = field(
+        default_factory=_ProjectFallbackMemory, compare=False, repr=False
+    )
 
     def compile(self, intent: QueryIntent) -> PhysicalPlan:
         if intent.provider.provider_id != self.provider.provider_id:
@@ -63,14 +69,21 @@ class CcusageProvider:
         project_required = "project" in intent.dimensions
         mode = (
             "project_ranking"
+            if project_required and chart_kind == "ranking"
+            else "project_daily"
             if project_required and chart_kind != "monitor"
             else "claude_daily_projects"
             if chart_kind == "monitor" and project_required
             else "unified_daily"
         )
         queries: list[PhysicalQuery] = []
+        fallback_state: tuple[_FallbackSourceKey, int, frozenset[str]] | None = None
+        if mode in {"project_daily", "project_ranking"}:
+            source = _fallback_source(intent.provider, intent.execution_context)
+            revision, agents = self._fallback_memory.begin(source)
+            fallback_state = source, revision, agents
         for interval in intent.missing_intervals:
-            queries.extend(self._compile_interval(intent, interval, mode))
+            queries.extend(self._compile_interval(intent, interval, mode, fallback_state))
         notices = (
             (Notice("notice.daily_project_omitted", {"agent": "Codex"}),)
             if mode == "claude_daily_projects"
@@ -80,7 +93,10 @@ class CcusageProvider:
 
     @staticmethod
     def _compile_interval(
-        intent: QueryIntent, interval: DateInterval, mode: str
+        intent: QueryIntent,
+        interval: DateInterval,
+        mode: str,
+        fallback_state: tuple[_FallbackSourceKey, int, frozenset[str]] | None = None,
     ) -> tuple[PhysicalQuery, ...]:
         since = interval.since.isoformat()
         until = interval.until.isoformat()
@@ -105,13 +121,42 @@ class CcusageProvider:
                     coverage,
                 ),
             )
+        if mode == "project_daily":
+            observation = _project_observation_query(intent, since, until, coverage, fallback_state)
+            fallbacks = _remembered_fallback_queries(observation, fallback_state)
+            return (
+                *CcusageProvider._compile_interval(intent, interval, "claude_daily_projects"),
+                observation,
+                *fallbacks,
+                *tuple(
+                    PhysicalQuery(
+                        intent.provider,
+                        "codex_sessions",
+                        (
+                            "codex",
+                            "session",
+                            "--json",
+                            "--since",
+                            day.isoformat(),
+                            "--until",
+                            day.isoformat(),
+                            "--offline",
+                            "--no-cost",
+                        ),
+                        intent.execution_context,
+                        DateCoverage.from_interval(day, day),
+                    )
+                    for day in _days(interval)
+                ),
+            )
         if mode == "project_ranking":
-            observation = PhysicalQuery(
+            observation = _project_observation_query(intent, since, until, coverage, fallback_state)
+            codex = PhysicalQuery(
                 intent.provider,
-                "unified_daily_agent_observation",
+                "codex_ranking_sessions",
                 (
-                    "daily",
-                    "--by-agent",
+                    "codex",
+                    "session",
                     "--json",
                     "--since",
                     since,
@@ -123,35 +168,11 @@ class CcusageProvider:
                 intent.execution_context,
                 coverage,
             )
-            codex_queries: list[PhysicalQuery] = []
-            day = interval.since
-            while day <= interval.until:
-                daily_coverage = DateCoverage.from_interval(day, day)
-                encoded_day = day.isoformat()
-                codex_queries.append(
-                    PhysicalQuery(
-                        intent.provider,
-                        "codex_sessions",
-                        (
-                            "codex",
-                            "session",
-                            "--json",
-                            "--since",
-                            encoded_day,
-                            "--until",
-                            encoded_day,
-                            "--offline",
-                            "--no-cost",
-                        ),
-                        intent.execution_context,
-                        daily_coverage,
-                    )
-                )
-                day += timedelta(days=1)
             return (
                 *CcusageProvider._compile_interval(intent, interval, "claude_daily_projects"),
                 observation,
-                *codex_queries,
+                *_remembered_fallback_queries(observation, fallback_state),
+                codex,
             )
         if mode != "unified_daily":
             raise ValueError(f"unsupported ccusage query mode: {mode}")
@@ -239,45 +260,51 @@ class CcusageProvider:
                 column=exc.colno,
                 stderr=_decode_stderr(result.diagnostics),
             ) from exc
-        codex_attribution_incomplete = False
-        if result.query.operation == "codex_sessions":
-            data, codex_attribution_incomplete = _enrich_codex_project_rows(data)
-        records = parse_usage_records(_OPERATION_SOURCES[result.query.operation], data)
+        if result.query.operation in {"codex_sessions", "codex_ranking_sessions"}:
+            data = _enrich_codex_project_rows(data)
+        fallback_agent = _fallback_agent(result.query.operation)
+        records = (
+            parse_project_sessions(data, fallback_agent)
+            if fallback_agent is not None
+            else parse_usage_records(_OPERATION_SOURCES[result.query.operation], data)
+        )
         if result.query.operation == "codex_sessions":
             intervals = result.query.coverage.intervals
             if len(intervals) != 1 or intervals[0].since != intervals[0].until:
                 raise QueryError("error.ccusage_codex_date_attribution")
             records = tuple(replace(record, day=intervals[0].since) for record in records)
-        unsupported_agents: tuple[str, ...] = ()
-        unverified_agents: tuple[str, ...] = ()
+        elif result.query.operation == "codex_ranking_sessions":
+            intervals = result.query.coverage.intervals
+            if len(intervals) != 1:
+                raise QueryError("error.ccusage_codex_date_attribution")
+            # Session reports aggregate each session across the requested range.
+            # Project ranking consumes period totals only, so anchor these private
+            # range aggregates at the interval end without claiming daily detail.
+            records = tuple(replace(record, day=intervals[0].until) for record in records)
+        elif fallback_agent is not None:
+            intervals = result.query.coverage.intervals
+            if len(intervals) != 1:
+                raise QueryError("error.ccusage_codex_date_attribution")
+            cwds = _fallback_session_cwds(fallback_agent, records)
+            normalized: list[UsageRecord] = []
+            for record in records:
+                candidate = cwds.get(record.session_id or "") or record.source_project
+                path = (
+                    normalized_absolute_project_path(candidate) if candidate is not None else None
+                )
+                normalized.append(
+                    replace(
+                        record,
+                        day=intervals[0].until,
+                        project=make_project_ref(fallback_agent, path, path_backed=True),
+                        attribution=None,
+                    )
+                    if path is not None
+                    else replace(record, day=intervals[0].until)
+                )
+            records = tuple(normalized)
         if result.query.operation == "unified_daily_agent_observation":
-            observed_agents = {
-                record.agent
-                for record in records
-                if record.agent.casefold() not in _PROJECT_ATTRIBUTION_SUPPORTED_AGENTS
-            }
-            unsupported_agents = tuple(
-                sorted(
-                    (
-                        agent
-                        for agent in observed_agents
-                        if agent.casefold() in _PROJECT_ATTRIBUTION_UNSUPPORTED_AGENTS
-                    ),
-                    key=str.casefold,
-                )
-            )
-            unverified_agents = tuple(
-                sorted(
-                    (
-                        agent
-                        for agent in _agents_without_absolute_project_path(data)
-                        if agent.casefold() not in _PROJECT_ATTRIBUTION_SUPPORTED_AGENTS
-                        and agent.casefold() not in _PROJECT_ATTRIBUTION_UNSUPPORTED_AGENTS
-                    ),
-                    key=str.casefold,
-                )
-            )
-            records = ()
+            records = _fixed_project_observation_records(data, records)
         return ProviderResultFragment(
             records,
             (ProviderProvenance(result.query.provider, result.query.fingerprint),),
@@ -285,61 +312,115 @@ class CcusageProvider:
             DateCoverage()
             if result.query.operation == "unified_daily_agent_observation"
             else result.query.coverage,
-            provider_metadata=(
-                tuple(("unsupported_project_agent", agent) for agent in unsupported_agents)
-                + tuple(("unverified_project_agent", agent) for agent in unverified_agents)
-                + (("codex_project_attribution_incomplete", True),)
-                if codex_attribution_incomplete
-                else tuple(("unsupported_project_agent", agent) for agent in unsupported_agents)
-                + tuple(("unverified_project_agent", agent) for agent in unverified_agents)
+            provider_metadata=_normalized_query_metadata(result.query),
+        )
+
+    def resolve_queries(
+        self,
+        plan: PhysicalPlan,
+        primary_fragments: tuple[ProviderResultFragment, ...],
+    ) -> tuple[PhysicalQuery, ...]:
+        observations = {
+            metadata.observation_id: (metadata, fragment)
+            for fragment in primary_fragments
+            if (metadata := _fragment_query_metadata(fragment)) is not None
+            and metadata.role == "project-observation"
+        }
+        by_revision: dict[tuple[_FallbackSourceKey, int], set[str]] = {}
+        required: list[PhysicalQuery] = []
+        for observation_id, (metadata, fragment) in observations.items():
+            agents = _exception_agents(fragment.records)
+            by_revision.setdefault((metadata.source, metadata.revision), set()).update(agents)
+            observation = next(
+                (
+                    query
+                    for query in plan.queries
+                    if (query_metadata := _query_metadata(query)) is not None
+                    and query_metadata.role == "project-observation"
+                    and query_metadata.observation_id == observation_id
+                ),
+                None,
+            )
+            if observation is None:
+                continue
+            required.extend(
+                _project_fallback_query(observation, metadata, agent, speculative=False)
+                for agent in sorted(agents, key=str.casefold)
+            )
+        for (source, revision), agents in by_revision.items():
+            self._fallback_memory.replace(source, revision, frozenset(agents))
+        return tuple(required)
+
+    def supplemental_queries(
+        self, plan: PhysicalPlan, fragments: tuple[ProviderResultFragment, ...]
+    ) -> tuple[PhysicalQuery, ...]:
+        """Try session reports for agents whose primary records lack a verified path."""
+
+        observation = next(
+            (
+                query
+                for query in plan.queries
+                if query.operation == "unified_daily_agent_observation"
             ),
+            None,
+        )
+        if observation is None:
+            return ()
+        since, until = _query_dates(observation.coverage)
+        if since is None or until is None:
+            return ()
+        agents = tuple(
+            sorted(
+                {
+                    record.agent.casefold()
+                    for fragment in fragments
+                    for record in fragment.records
+                    if record.source is SourceKind.UNIFIED_DAILY
+                    and record.attribution in {"unassigned", "unverified"}
+                }
+            )
+        )
+        return tuple(
+            PhysicalQuery(
+                observation.provider,
+                f"project_fallback_sessions:{agent}",
+                (
+                    agent,
+                    "session",
+                    "--json",
+                    "--since",
+                    since,
+                    "--until",
+                    until,
+                    "--offline",
+                    "--no-cost",
+                ),
+                observation.execution_context,
+                observation.coverage,
+                required=False,
+            )
+            for agent in agents
         )
 
     def assemble(
         self, plan: PhysicalPlan, fragments: tuple[ProviderResultFragment, ...]
     ) -> ProviderResult:
-        records = ()
+        tagged = any(_fragment_query_metadata(fragment) is not None for fragment in fragments)
+        records: tuple[UsageRecord, ...] = ()
         provenance = ()
         coverage = DateCoverage()
         notices = plan.notices
-        unsupported_agents: set[str] = set()
-        unverified_agents: set[str] = set()
-        codex_attribution_incomplete = False
+        if tagged:
+            records = _project_fallback_replacement_records(fragments)
         for fragment in fragments:
-            records += fragment.records
+            metadata = _fragment_query_metadata(fragment)
+            if not tagged or metadata is None:
+                records += fragment.records
             provenance += fragment.provenance
             coverage = coverage.merge(fragment.coverage)
             notices += fragment.notices
-            unsupported_agents.update(
-                value
-                for key, value in fragment.provider_metadata
-                if key == "unsupported_project_agent" and isinstance(value, str)
-            )
-            unverified_agents.update(
-                value
-                for key, value in fragment.provider_metadata
-                if key == "unverified_project_agent" and isinstance(value, str)
-            )
-            codex_attribution_incomplete = codex_attribution_incomplete or any(
-                key == "codex_project_attribution_incomplete"
-                for key, _ in fragment.provider_metadata
-            )
-        if unsupported_agents:
-            notices += (
-                Notice(
-                    "notice.project_agent_attribution_unsupported",
-                    {"agents": ", ".join(sorted(unsupported_agents, key=str.casefold))},
-                ),
-            )
-        if unverified_agents:
-            notices += (
-                Notice(
-                    "notice.project_agent_attribution_unverified",
-                    {"agents": ", ".join(sorted(unverified_agents, key=str.casefold))},
-                ),
-            )
-        if codex_attribution_incomplete:
-            notices += (Notice("notice.codex_project_attribution_incomplete"),)
+        if not tagged:
+            records = _replace_unverified_records(records)
         return ProviderResult(
             records,
             provenance,
@@ -348,164 +429,13 @@ class CcusageProvider:
             notices,
             plan.summary_notices,
             includes_project_attribution=any(
-                query.operation in {"claude_daily_projects", "codex_sessions"}
+                query.operation
+                in {
+                    "claude_daily_projects",
+                    "codex_sessions",
+                    "codex_ranking_sessions",
+                }
                 for query in plan.queries
-            ),
+            )
+            or any(record.project is not None for record in records),
         )
-
-
-def _agents_without_absolute_project_path(data: object) -> set[str]:
-    """Return observed non-Claude agents that lack an absolute project locator."""
-    if not isinstance(data, dict) or not isinstance(daily := data.get("daily"), list):
-        return set()
-    agents: set[str] = set()
-    for day in daily:
-        if not isinstance(day, dict) or not isinstance(rows := day.get("agents"), list):
-            continue
-        for row in rows:
-            if not isinstance(row, dict) or not isinstance(agent := row.get("agent"), str):
-                continue
-            project = row.get("project", row.get("cwd", row.get("projectPath")))
-            if not isinstance(project, str) or normalized_absolute_project_path(project) is None:
-                agents.add(agent)
-    return agents
-
-
-def _enrich_codex_project_rows(data: object) -> tuple[object, bool]:
-    if not isinstance(data, dict):
-        return data, False
-    rows: list[dict[str, Any]] = []
-    for field in ("sessions", "session", "data"):
-        value = data.get(field)
-        if isinstance(value, list):
-            rows = [row for row in value if isinstance(row, dict)]
-            break
-    missing = [
-        row.get("sessionId")
-        for index, row in enumerate(rows)
-        if codex_project_identity(row, f"$.sessions[{index}]") is None
-        and isinstance(row.get("sessionId"), str)
-        and row["sessionId"]
-    ]
-    cwds = resolve_codex_session_cwds(
-        session_id for session_id in missing if isinstance(session_id, str)
-    )
-    incomplete = False
-    for index, row in enumerate(rows):
-        if codex_project_identity(row, f"$.sessions[{index}]") is not None:
-            continue
-        session_id = row.get("sessionId")
-        cwd = cwds.get(session_id) if isinstance(session_id, str) else None
-        if cwd is None:
-            incomplete = True
-        else:
-            row["_ccusage_viz_project_cwd"] = cwd
-    return data, incomplete
-
-
-CCUSAGE_DEFINITION = ProviderDefinition(CcusageProvider())
-
-
-def _communicate_bounded(
-    process: subprocess.Popen[bytes],
-    output_limit: int,
-    timeout: float,
-    cancelled: Event,
-    operation: str,
-) -> tuple[bytes, bytes]:
-    stdout = bytearray()
-    stderr = bytearray()
-    exceeded = Event()
-
-    def drain(pipe, target: bytearray, *, bounded: bool) -> None:
-        while chunk := pipe.read1(64 * 1024):
-            target.extend(chunk)
-            if bounded and len(target) > output_limit:
-                exceeded.set()
-                return
-            if not bounded and len(target) > _STDERR_LIMIT:
-                del target[:-_STDERR_LIMIT]
-
-    assert process.stdout is not None
-    assert process.stderr is not None
-    stdout_thread = Thread(
-        target=drain,
-        args=(process.stdout, stdout),
-        kwargs={"bounded": True},
-        daemon=True,
-    )
-    stderr_thread = Thread(
-        target=drain,
-        args=(process.stderr, stderr),
-        kwargs={"bounded": False},
-        daemon=True,
-    )
-    stdout_thread.start()
-    stderr_thread.start()
-    deadline = time.monotonic() + timeout
-    timed_out = False
-    while process.poll() is None or stdout_thread.is_alive() or stderr_thread.is_alive():
-        if cancelled.is_set():
-            _stop(process)
-            break
-        if exceeded.is_set():
-            _stop(process)
-            break
-        if time.monotonic() >= deadline:
-            timed_out = True
-            _stop(process)
-            break
-        time.sleep(0.01)
-    stdout_thread.join()
-    stderr_thread.join()
-    if cancelled.is_set():
-        raise QueryError("error.ccusage_cancelled", query=operation)
-    if exceeded.is_set():
-        raise QueryError("error.ccusage_output_limit", query=operation, limit=output_limit)
-    if timed_out:
-        raise QueryError("error.ccusage_timeout", query=operation, seconds=timeout)
-    return bytes(stdout), bytes(stderr)
-
-
-def _stop(process: subprocess.Popen[bytes]) -> None:
-    if os.name == "nt":
-        subprocess.run(
-            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
-            check=False,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        with suppress(ChildProcessError):
-            process.wait()
-        return
-    leader_exited = process.poll() is not None
-    _signal_process_group(process, signal.SIGTERM)
-    if leader_exited:
-        time.sleep(_TERMINATE_GRACE)
-        _signal_process_group(process, signal.SIGKILL)
-        with suppress(ChildProcessError):
-            process.wait()
-        return
-    with suppress(subprocess.TimeoutExpired):
-        process.wait(timeout=_TERMINATE_GRACE)
-    _signal_process_group(process, signal.SIGKILL)
-    with suppress(ChildProcessError):
-        process.wait()
-
-
-def _signal_process_group(process: subprocess.Popen[bytes], sig: signal.Signals) -> None:
-    try:
-        os.killpg(process.pid, sig)
-    except ProcessLookupError:
-        return
-    except OSError:
-        with suppress(ProcessLookupError):
-            if sig == signal.SIGTERM:
-                process.terminate()
-            else:
-                process.kill()
-
-
-def _decode_stderr(value: bytes) -> str:
-    return value[-_STDERR_LIMIT:].decode("utf-8", errors="replace")

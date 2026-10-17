@@ -4,6 +4,82 @@ import re
 import unicodedata
 
 _ANSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+_OSC8 = re.compile(r"\x1b]8;;[^\x1b\x07]*(?:\x1b\\|\x07)")
+_TERMINAL_CONTROL = re.compile(r"(?:\x1b\[[0-?]*[ -/]*[@-~]|\x1b]8;;[^\x1b\x07]*(?:\x1b\\|\x07))")
+
+
+def sanitize_terminal_text(value: str, *, preserve_newlines: bool = False) -> str:
+    """Remove terminal control sequences and control characters from untrusted text.
+
+    Unlike :func:`strip_ansi`, this is an input-boundary sanitizer.  It removes
+    arbitrary CSI and OSC sequences (including OSC clipboard commands), the
+    other string controls terminated by ST, and standalone C0/C1 controls.
+    When ``preserve_newlines`` is true, CRLF and CR are normalized to LF and
+    those authored line boundaries are retained.
+    """
+    if preserve_newlines:
+        value = value.replace("\r\n", "\n").replace("\r", "\n")
+    output: list[str] = []
+    position = 0
+    length = len(value)
+    while position < length:
+        code = ord(value[position])
+        if code == 0x1B:
+            position += 1
+            if position >= length:
+                break
+            introducer = value[position]
+            if introducer == "[":
+                position += 1
+                while position < length:
+                    final = ord(value[position])
+                    position += 1
+                    if 0x40 <= final <= 0x7E:
+                        break
+                continue
+            if introducer in "]PX^_":
+                position += 1
+                while position < length:
+                    if value[position] == "\x07":
+                        position += 1
+                        break
+                    if value.startswith("\x1b\\", position):
+                        position += 2
+                        break
+                    position += 1
+                continue
+            # A two-byte escape sequence is itself a terminal command.
+            position += 1
+            continue
+        if code == 0x9B:  # 8-bit CSI
+            position += 1
+            while position < length:
+                final = ord(value[position])
+                position += 1
+                if 0x40 <= final <= 0x7E:
+                    break
+            continue
+        if code in {0x90, 0x9D, 0x98, 0x9E, 0x9F}:  # DCS/OSC/SOS/PM/APC
+            position += 1
+            while position < length:
+                if value[position] in {"\x07", "\x9c"}:
+                    position += 1
+                    break
+                if value.startswith("\x1b\\", position):
+                    position += 2
+                    break
+                position += 1
+            continue
+        if code == 0x0A and preserve_newlines:
+            output.append("\n")
+            position += 1
+            continue
+        if code < 0x20 or 0x7F <= code <= 0x9F:
+            position += 1
+            continue
+        output.append(value[position])
+        position += 1
+    return "".join(output)
 
 
 def format_tokens(value: int) -> str:
@@ -35,7 +111,7 @@ def format_percent(part: int, whole: int) -> str:
 
 
 def strip_ansi(value: str) -> str:
-    return _ANSI.sub("", value)
+    return _TERMINAL_CONTROL.sub("", value)
 
 
 def char_width(char: str) -> int:
@@ -54,31 +130,74 @@ def center_text(value: str, width: int) -> str:
     return " " * max(0, (width - display_width(clipped)) // 2) + clipped
 
 
+def _fitting_prefix(value: str, width: int) -> tuple[str, int, bool]:
+    """Return the ANSI-safe source prefix that fits in ``width`` cells."""
+    part: list[str] = []
+    position = 0
+    used = 0
+    has_character = False
+    while position < len(value):
+        if match := _TERMINAL_CONTROL.match(value, position):
+            part.append(match.group())
+            position = match.end()
+            continue
+        char = value[position]
+        char_width_value = char_width(char)
+        if used + char_width_value > width:
+            break
+        part.append(char)
+        position += 1
+        used += char_width_value
+        has_character = True
+    return "".join(part), position, has_character
+
+
 def wrap_width(value: str, width: int) -> tuple[str, ...]:
-    """Wrap plain text at whitespace without splitting wide characters."""
+    """Wrap text while filling available cells without splitting wide characters.
+
+    Whitespace remains the preferred English break point. A long whitespace-free
+    unit (such as Chinese prose, a URL, or an identifier) fills the remainder
+    of the current line before continuing, rather than wasting that space.
+    Explicit source newlines remain paragraph boundaries.
+    """
     if width <= 0:
         return ()
-    words = value.split()
-    if not words:
-        return ("",)
     rows: list[str] = []
-    row = ""
-    for word in words:
-        candidate = word if not row else f"{row} {word}"
-        if row and display_width(candidate) > width:
+    for source_row in value.splitlines() or [""]:
+        words = source_row.split()
+        if not words:
+            rows.append("")
+            continue
+        row = ""
+        for word in words:
+            separator = "" if not row else " "
+            candidate = f"{row}{separator}{word}"
+            if row and display_width(candidate) > width:
+                remaining = width - display_width(row)
+                if remaining > display_width(separator):
+                    part, consumed, has_visible = _fitting_prefix(
+                        word, remaining - display_width(separator)
+                    )
+                    if has_visible:
+                        row = f"{row}{separator}{part}"
+                        word = word[consumed:]
+                rows.append(row)
+                row = ""
+            while display_width(word) > width:
+                part, consumed, has_visible = _fitting_prefix(word, width)
+                if not has_visible:
+                    # A wide glyph cannot fit a one-cell viewport. Emit and consume it so
+                    # this loop always advances; callers may clip it to their own geometry.
+                    part += word[consumed]
+                    consumed += 1
+                    while match := _TERMINAL_CONTROL.match(word, consumed):
+                        part += match.group()
+                        consumed = match.end()
+                word = word[consumed:]
+                rows.append(part)
+            row = word if not row else f"{row} {word}"
+        if row:
             rows.append(row)
-            row = ""
-        while display_width(word) > width:
-            part = ""
-            for char in word:
-                if display_width(part + char) > width:
-                    break
-                part += char
-            rows.append(part)
-            word = word[len(part) :]
-        row = word if not row else f"{row} {word}"
-    if row:
-        rows.append(row)
     return tuple(rows)
 
 
@@ -89,7 +208,7 @@ def clip_width(value: str, width: int) -> str:
     position = 0
     styled = False
     while position < len(value):
-        match = _ANSI.match(value, position)
+        match = _TERMINAL_CONTROL.match(value, position)
         if match:
             sequence = match.group()
             output.append(sequence)
@@ -108,6 +227,33 @@ def clip_width(value: str, width: int) -> str:
     return "".join(output)
 
 
+def _is_sgr(sequence: str) -> bool:
+    return sequence.startswith("\x1b[") and sequence.endswith("m")
+
+
+def _sgr_resets_style(sequence: str) -> bool:
+    if not _is_sgr(sequence):
+        return False
+    parameters = sequence[2:-1].split(";")
+    index = 0
+    while index < len(parameters):
+        parameter = parameters[index]
+        parameter_value = int(parameter) if parameter.isdigit() else None
+        if not parameter or parameter_value == 0:
+            return True
+        if parameter_value in {38, 48} and index + 1 < len(parameters):
+            color_mode = parameters[index + 1]
+            color_mode_value = int(color_mode) if color_mode.isdigit() else None
+            if color_mode_value == 5:
+                index += 3  # Command, mode, and palette index.
+                continue
+            if color_mode_value == 2:
+                index += 5  # Command, mode, and RGB channels.
+                continue
+        index += 1
+    return False
+
+
 def slice_width(value: str, start: int, width: int) -> str:
     """Return a display-cell slice without splitting ANSI sequences or wide glyphs."""
 
@@ -118,13 +264,22 @@ def slice_width(value: str, start: int, width: int) -> str:
     output: list[str] = []
     position = 0
     used = 0
-    active_sgr = ""
+    active_sgr: list[str] = []
+    active_other = ""
     emitted = False
     while position < len(value):
-        match = _ANSI.match(value, position)
+        match = _TERMINAL_CONTROL.match(value, position)
         if match:
             sequence = match.group()
-            active_sgr = "" if sequence == "\x1b[0m" else sequence
+            if _is_sgr(sequence):
+                if _sgr_resets_style(sequence):
+                    active_sgr.clear()
+                if sequence[2:-1] not in {"", "0"}:
+                    active_sgr.append(sequence)
+                active_other = sequence if active_sgr else ""
+            else:
+                # Preserve the previous behavior for non-SGR controls such as OSC 8.
+                active_other = sequence
             if emitted and used < end:
                 output.append(sequence)
             position = match.end()
@@ -133,15 +288,16 @@ def slice_width(value: str, start: int, width: int) -> str:
         char_width_value = char_width(char)
         if used >= start and used + char_width_value <= end:
             if not emitted:
-                if active_sgr:
-                    output.append(active_sgr)
+                output.extend(active_sgr)
+                if active_other and not _is_sgr(active_other):
+                    output.append(active_other)
                 emitted = True
             output.append(char)
         used += char_width_value
         position += 1
         if used >= end:
             break
-    if emitted and active_sgr:
+    if emitted and active_other:
         output.append("\x1b[0m")
     return "".join(output)
 
@@ -158,7 +314,7 @@ def replace_width(value: str, start: int, replacement: str, *, width: int) -> st
     suffix_sgr = ""
     inserted = False
     while position < len(value) and used < width:
-        match = _ANSI.match(value, position)
+        match = _TERMINAL_CONTROL.match(value, position)
         if match:
             sequence = match.group()
             active_sgr = "" if sequence == "\x1b[0m" else sequence
@@ -208,14 +364,7 @@ def truncate_middle_width(value: str, width: int, *, ellipsis: str = "…") -> s
     left_width = remaining // 2
     right_width = remaining - left_width
     left = clip_width(value, left_width)
-    right = ""
-    used = 0
-    for char in reversed(value):
-        size = char_width(char)
-        if used + size > right_width:
-            break
-        right = char + right
-        used += size
+    right = slice_width(value, display_width(value) - right_width, right_width)
     return left + ellipsis + right
 
 

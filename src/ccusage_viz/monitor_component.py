@@ -19,13 +19,8 @@ from ccusage_viz.charts.definition import ChartDefinition
 from ccusage_viz.charts.registry import ChartRegistry
 from ccusage_viz.deltas import RefreshDeltas, RefreshRanks
 from ccusage_viz.domain import UsageRecord
-from ccusage_viz.options import MonitorConfig, StandaloneLaunch
-from ccusage_viz.processing.monitor import (
-    MonitorKey,
-    ObservedTPM,
-    _copy_observer,
-    monitor_counters,
-)
+from ccusage_viz.options import MonitorConfig, StandaloneLaunch, is_monitor_ranking_style
+from ccusage_viz.processing.monitor import MonitorKey, ObservedTPM, _copy_observer, monitor_counters
 from ccusage_viz.project_identity import (
     ExactProjectDisplayKey,
     ProjectDisplayKey,
@@ -306,16 +301,6 @@ class MonitorComponent:
         self.value_changes.clear()
         self.rank_changes.clear()
 
-    def pause(self) -> None:
-        self.observer.current_interval = None
-        self.clear_changes()
-
-    def resume(self, *, now: float, wall: datetime | None = None) -> None:
-        wall = wall or datetime.now().astimezone()
-        if self.observer.previous is not None:
-            self.observer.rebaseline(self.observer.previous, now, wall)
-        self.clear_changes()
-
     def current_values(
         self, now: float, *, wall: datetime | None = None
     ) -> dict[MonitorKey, float]:
@@ -398,7 +383,7 @@ class MonitorComponent:
         wall: datetime | None = None,
     ) -> TimelineModel | RankingModel | TimeOfDayDistributionModel:
         chart = self._monitor_config(self._active_options())
-        if chart.presentation.style in {"ranking", "list"}:
+        if is_monitor_ranking_style(chart.presentation.style):
             return self.ranking_model(now=now, count=count, wall=wall)
         if chart.presentation.style == "cumulative-bars":
             return self.distribution_model(now=now, wall=wall)
@@ -475,7 +460,7 @@ class MonitorComponent:
         )
         return ObservedScope(
             chart.window_seconds,
-            chart.by or "total",
+            chart.by or "total",  # ty: ignore[invalid-argument-type]
             state,
             chart.filters.agents,
         )

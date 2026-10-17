@@ -31,7 +31,7 @@ jobs:
       - name: Type check
         run: uv run ty check src/ccusage_viz
       - name: Test
-        run: uv run pytest
+        run: uv run pytest -x
 
   build:
     name: Build and smoke test

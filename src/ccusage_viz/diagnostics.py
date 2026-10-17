@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from typing import TextIO
 
+from ccusage_viz.custom_models import CustomProtocolFailure
 from ccusage_viz.errors import QueryError, VizError
 from ccusage_viz.i18n import Translator
 from ccusage_viz.render.palette import get_color_scheme
@@ -107,6 +108,10 @@ def format_error(
     color: bool = False,
     color_scheme: str = "classic",
 ) -> str:
+    if isinstance(error, QueryError):
+        failure = error.values.get("custom_failure")
+        if isinstance(failure, CustomProtocolFailure):
+            return failure.message.zh_cn if translator.language == "zh" else failure.message.en
     if not isinstance(error, VizError):
         return str(error)
     values = dict(error.values)

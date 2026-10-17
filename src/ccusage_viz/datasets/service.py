@@ -1,0 +1,627 @@
+from __future__ import annotations
+
+import os
+import platform as system_platform
+import shutil
+from collections.abc import Callable, Mapping
+from dataclasses import replace
+from datetime import UTC, datetime
+from pathlib import Path
+
+from ccusage_viz.acquisition import custom_probe_query_intent, custom_v2_probe_query_intent
+from ccusage_viz.custom_protocol.responses import CustomProbeResponse, V2ProbeResponse
+from ccusage_viz.datasets.archive import extract_dataset_archive, sha256_bytes
+from ccusage_viz.datasets.github import (
+    download_release_artifact,
+    parse_github_repository,
+    resolve_github_release,
+    resolve_github_repository,
+    resolve_official_artifact,
+)
+from ccusage_viz.datasets.models import (
+    DatasetManifest,
+    DatasetProbeSnapshot,
+    DatasetRegistration,
+    DatasetRegistrationStatus,
+    DatasetStatus,
+    DatasetUpdateCandidate,
+    LocalDatasetSource,
+    ManagedDatasetSource,
+    RegisterResult,
+    ReleaseArtifact,
+    environment_status,
+    parse_dataset_id,
+)
+from ccusage_viz.datasets.paths import dataset_state_root
+from ccusage_viz.datasets.store import DatasetStore
+from ccusage_viz.errors import QueryError, UsageError
+from ccusage_viz.lifecycle import QueryTrigger
+from ccusage_viz.options import CustomCommandSource
+
+
+def host_platform() -> tuple[str, str]:
+    systems = {"Darwin": "darwin", "Linux": "linux", "Windows": "windows"}
+    architectures = {"arm64": "arm64", "aarch64": "arm64", "x86_64": "amd64", "AMD64": "amd64"}
+    return systems.get(
+        system_platform.system(), system_platform.system().lower()
+    ), architectures.get(system_platform.machine(), system_platform.machine().lower())
+
+
+class DatasetService:
+    """Install and resolve datasets while leaving query execution provider-owned."""
+
+    def __init__(
+        self,
+        *,
+        root: Path | None = None,
+        environ: Mapping[str, str] | None = None,
+        platform: tuple[str, str] | None = None,
+        probe_runner: Callable[[tuple[str, ...]], CustomProbeResponse | V2ProbeResponse]
+        | None = None,
+    ) -> None:
+        self.environ = environ
+        self.store = DatasetStore(dataset_state_root(environ=environ) if root is None else root)
+        self.platform = host_platform() if platform is None else platform
+        self.probe_runner = self._run_probe if probe_runner is None else probe_runner
+
+    def _run_probe(self, command_argv: tuple[str, ...]) -> CustomProbeResponse | V2ProbeResponse:
+        from ccusage_viz.bootstrap import build_query_runtime
+
+        source = CustomCommandSource("probe", command_argv)
+        intent = custom_v2_probe_query_intent(
+            source,
+            owner_id="dataset:registration",
+            generation=0,
+            trigger=QueryTrigger.STARTUP,
+        )
+        try:
+            result = build_query_runtime(max_parallel=1).acquire(intent)
+            response = result.custom_response
+            if isinstance(response, V2ProbeResponse):
+                return response
+        except QueryError:
+            pass
+        # Existing command Datasets remain V1 until explicitly migrated.
+        result = build_query_runtime(max_parallel=1).acquire(
+            custom_probe_query_intent(
+                source,
+                owner_id="dataset:registration",
+                generation=0,
+                trigger=QueryTrigger.STARTUP,
+            )
+        )
+        response = result.custom_response
+        if not isinstance(response, CustomProbeResponse):
+            raise RuntimeError("custom probe did not return a probe response")
+        return response
+
+    def registrations(self) -> tuple[DatasetRegistrationStatus, ...]:
+        statuses: list[DatasetRegistrationStatus] = []
+        for registration in self.store.registrations():
+            if not registration.enabled:
+                statuses.append(DatasetRegistrationStatus(registration, "disabled"))
+                continue
+            if registration.last_probe_error is not None:
+                statuses.append(DatasetRegistrationStatus(registration, "unavailable"))
+                continue
+            missing = tuple(
+                item
+                for item in registration.probe.descriptor.environment
+                if item.required and not self._environment_present(item.name)
+            )
+            statuses.append(
+                DatasetRegistrationStatus(
+                    registration,
+                    "setup_required" if missing else "ready",
+                    missing,
+                )
+            )
+        return tuple(statuses)
+
+    def _environment_present(self, name: str) -> bool:
+        return bool((self.environ if self.environ is not None else os.environ).get(name))
+
+    def registered_command_source(self, dataset_id: str) -> CustomCommandSource:
+        registration = self.store.load_registration(parse_dataset_id(dataset_id))
+        status = next(
+            (
+                item
+                for item in self.registrations()
+                if item.registration.dataset_id == registration.dataset_id
+            ),
+            None,
+        )
+        if status is None or not status.ready:
+            raise UsageError(
+                "error.dataset_environment_missing", dataset_id=registration.dataset_id
+            )
+        if isinstance(registration.source, LocalDatasetSource):
+            return CustomCommandSource(registration.dataset_id, registration.source.command_argv)
+        return self.installed_command_source(registration.dataset_id)
+
+    def command_source(self, dataset_id: str) -> CustomCommandSource:
+        """Resolve a managed registration first, then a legacy installed artifact."""
+
+        try:
+            return self.registered_command_source(dataset_id)
+        except UsageError as error:
+            if error.key != "error.dataset_not_installed":
+                raise
+        return self.installed_command_source(dataset_id)
+
+    def discover_local_command(self, command_argv: tuple[str, ...]) -> CustomCommandSource:
+        response = self.probe_runner(command_argv)
+        return CustomCommandSource(parse_dataset_id(response.dataset_id), command_argv)
+
+    def ready_registered_sources(self) -> tuple[DatasetRegistrationStatus, ...]:
+        return tuple(status for status in self.registrations() if status.ready)
+
+    def register_local_command(
+        self, command_argv: tuple[str, ...], *, replace: bool = False
+    ) -> RegisterResult:
+        source = LocalDatasetSource(command_argv)
+        probe = self.probe_runner(source.command_argv)
+        identifier = parse_dataset_id(probe.dataset_id)
+        now = datetime.now(UTC).isoformat()
+        snapshot = DatasetProbeSnapshot(identifier, probe.descriptor, now)
+        candidate = DatasetRegistration(identifier, source, True, now, now, snapshot)
+        try:
+            current = self.store.load_registration(identifier)
+        except UsageError as error:
+            if error.key != "error.dataset_not_installed":
+                raise
+            self.store.save_registration(candidate)
+            return RegisterResult("created", candidate)
+        if not replace:
+            return RegisterResult("conflict", candidate)
+        replacement = replace_registration(current, candidate)
+        self.store.save_registration(replacement)
+        return RegisterResult("replaced", replacement)
+
+    def set_enabled(self, dataset_id: str, enabled: bool) -> DatasetRegistration:
+        current = self.store.load_registration(parse_dataset_id(dataset_id))
+        updated = replace(current, enabled=enabled, updated_at=datetime.now(UTC).isoformat())
+        self.store.save_registration(updated)
+        return updated
+
+    def refresh(self, dataset_id: str) -> DatasetRegistrationStatus:
+        """Refresh and persist the descriptor snapshot for one registered Dataset."""
+
+        current = self.store.load_registration(parse_dataset_id(dataset_id))
+        if not current.enabled:
+            return next(
+                item
+                for item in self.registrations()
+                if item.registration.dataset_id == current.dataset_id
+            )
+        argv = (
+            current.source.command_argv
+            if isinstance(current.source, LocalDatasetSource)
+            else self.installed_command_source(current.dataset_id).command_argv
+        )
+        response = self.probe_runner(argv)
+        if response.dataset_id != current.dataset_id:
+            raise UsageError("error.dataset_corrupt", dataset_id=current.dataset_id)
+        now = datetime.now(UTC).isoformat()
+        try:
+            candidate = self._update_candidate(current)
+        except Exception:
+            candidate = current.available_update
+        updated = replace(
+            current,
+            updated_at=now,
+            probe=DatasetProbeSnapshot(current.dataset_id, response.descriptor, now),
+            available_update=candidate,
+            last_probe_error=None,
+        )
+        self.store.save_registration(updated)
+        return next(
+            item
+            for item in self.registrations()
+            if item.registration.dataset_id == current.dataset_id
+        )
+
+    def refresh_all(self) -> tuple[DatasetRegistrationStatus, ...]:
+        refreshed: list[DatasetRegistrationStatus] = []
+        for status in self.registrations():
+            current = status.registration
+            if not current.enabled:
+                refreshed.append(status)
+                continue
+            now = datetime.now(UTC).isoformat()
+            try:
+                argv = (
+                    current.source.command_argv
+                    if isinstance(current.source, LocalDatasetSource)
+                    else self.installed_command_source(current.dataset_id).command_argv
+                )
+                response = self.probe_runner(argv)
+                if response.dataset_id != current.dataset_id:
+                    raise ValueError("probe declared a different Dataset ID")
+            except Exception as exc:
+                updated = replace(
+                    current,
+                    updated_at=now,
+                    last_probe_error=str(exc),
+                )
+            else:
+                try:
+                    candidate = self._update_candidate(current)
+                except Exception:
+                    candidate = current.available_update
+                updated = replace(
+                    current,
+                    updated_at=now,
+                    probe=DatasetProbeSnapshot(current.dataset_id, response.descriptor, now),
+                    available_update=candidate,
+                    last_probe_error=None,
+                )
+            self.store.save_registration(updated)
+        return self.registrations()
+
+    def update_runtime_probe(
+        self,
+        source: CustomCommandSource,
+        response: CustomProbeResponse | V2ProbeResponse,
+    ) -> bool:
+        """Persist a live Pane Probe only when it matches a registered command."""
+
+        try:
+            current = self.store.load_registration(response.dataset_id)
+        except UsageError:
+            return False
+        if not isinstance(current.source, LocalDatasetSource):
+            return False
+        if current.source.command_argv != source.command_argv:
+            return False
+        now = datetime.now(UTC).isoformat()
+        try:
+            self.store.save_registration(
+                replace(
+                    current,
+                    updated_at=now,
+                    probe=DatasetProbeSnapshot(current.dataset_id, response.descriptor, now),
+                    last_probe_error=None,
+                )
+            )
+        except OSError:
+            return False
+        return True
+
+    def _update_candidate(self, registration: DatasetRegistration) -> DatasetUpdateCandidate | None:
+        if not isinstance(registration.source, ManagedDatasetSource):
+            return None
+        artifact = self._resolved_managed_artifact(registration.source)
+        if (
+            artifact.release_tag == registration.source.release_tag
+            and artifact.asset_name == registration.source.asset_name
+            and artifact.sha256 == registration.source.sha256
+        ):
+            return None
+        return DatasetUpdateCandidate(artifact.release_tag, artifact.asset_name, artifact.sha256)
+
+    def _resolved_managed_artifact(self, source: ManagedDatasetSource) -> ReleaseArtifact:
+        host_os, host_arch = self.platform
+        if source.kind == "official":
+            catalog = self.official_catalog()
+            return resolve_official_artifact(
+                catalog.artifact_for(
+                    source_repository_id(catalog, source.repository), host_os, host_arch
+                ),
+                expected_os=host_os,
+                expected_arch=host_arch,
+            )
+        return resolve_github_repository(repository=source.repository, os=host_os, arch=host_arch)
+
+    def upgrade(self, dataset_id: str) -> DatasetRegistration:
+        identifier = parse_dataset_id(dataset_id)
+        registration = self.store.load_registration(identifier)
+        if registration.available_update is None or not isinstance(
+            registration.source, ManagedDatasetSource
+        ):
+            raise UsageError("error.dataset_no_update", dataset_id=identifier)
+        artifact = self._resolved_managed_artifact(registration.source)
+        if (
+            artifact.release_tag != registration.available_update.release_tag
+            or artifact.asset_name != registration.available_update.asset_name
+            or artifact.sha256 != registration.available_update.sha256
+        ):
+            raise UsageError("error.dataset_update_changed", dataset_id=identifier)
+        installed = self.install_artifact(
+            artifact, download_release_artifact(artifact), replace=True
+        )
+        assert installed.dataset_id == identifier
+        self.register_installed_dataset(identifier, replace=True)
+        return self.store.load_registration(identifier)
+
+    def inspect_artifact(self, artifact: ReleaseArtifact, archive: bytes) -> DatasetManifest:
+        """Validate an archive and return its static manifest without installing it."""
+
+        host_os, host_arch = self.platform
+        staging = self.store.stage_directory()
+        try:
+            staging.rmdir()
+            manifest = extract_dataset_archive(
+                archive,
+                expected_sha256=artifact.sha256,
+                destination=staging,
+                expected_dataset_id=artifact.dataset_id,
+                host_os=host_os,
+                host_arch=host_arch,
+            )
+            manifest_sha256 = sha256_bytes((staging / "manifest.json").read_bytes())
+            if artifact.manifest_sha256 is not None and manifest_sha256 != artifact.manifest_sha256:
+                raise UsageError("error.dataset_manifest_invalid")
+            return manifest
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
+
+    def remove_registration(self, dataset_id: str) -> None:
+        identifier = parse_dataset_id(dataset_id)
+        registration = self.store.load_registration(identifier)
+        self.store.remove_registration(identifier)
+        if isinstance(registration.source, ManagedDatasetSource):
+            self.store.remove(identifier)
+
+    def register_installed_dataset(
+        self, dataset_id: str, *, replace: bool = False
+    ) -> RegisterResult:
+        identifier = parse_dataset_id(dataset_id)
+        installed, manifest, executable = self.store.load(identifier)
+        response = self.probe_runner((str(executable), "ccuv"))
+        if response.dataset_id != manifest.id:
+            raise UsageError("error.dataset_manifest_invalid")
+        now = datetime.now(UTC).isoformat()
+        candidate = DatasetRegistration(
+            identifier,
+            ManagedDatasetSource(
+                installed.source_kind,
+                installed.repository,
+                installed.release_tag,
+                installed.asset_name,
+                installed.sha256,
+            ),
+            True,
+            now,
+            now,
+            DatasetProbeSnapshot(identifier, response.descriptor, now),
+        )
+        try:
+            current = self.store.load_registration(identifier)
+        except UsageError as error:
+            if error.key != "error.dataset_not_installed":
+                raise
+            self.store.save_registration(candidate)
+            return RegisterResult("created", candidate)
+        if not replace:
+            return RegisterResult("conflict", candidate)
+        replacement = replace_registration(current, candidate)
+        self.store.save_registration(replacement)
+        return RegisterResult("replaced", replacement)
+
+    def status(self, dataset_id: str | None = None) -> tuple[DatasetStatus, ...]:
+        if dataset_id is not None:
+            identifier = parse_dataset_id(dataset_id)
+            try:
+                installed, manifest, _ = self.store.load(identifier)
+            except UsageError as error:
+                if (
+                    error.key == "error.dataset_not_installed"
+                    and identifier not in self.store.dataset_ids()
+                ):
+                    return (DatasetStatus(None, None, (), False, dataset_id=identifier),)
+                return (DatasetStatus(None, None, (), True, dataset_id=identifier),)
+            return (DatasetStatus(installed, manifest, environment_status(manifest, self.environ)),)
+        statuses: list[DatasetStatus] = []
+        for identifier in self.store.dataset_ids():
+            try:
+                installed, manifest, _ = self.store.load(identifier)
+            except UsageError:
+                statuses.append(DatasetStatus(None, None, (), True, dataset_id=identifier))
+                continue
+            statuses.append(
+                DatasetStatus(installed, manifest, environment_status(manifest, self.environ))
+            )
+        return tuple(statuses)
+
+    def official_catalog(self):
+        from ccusage_viz.datasets.catalog import fetch_official_catalog
+
+        return fetch_official_catalog()
+
+    def official_entries(self):
+        return self.official_catalog().entries
+
+    def resolve_official(self, dataset_id: str) -> ReleaseArtifact:
+        identifier = parse_dataset_id(dataset_id)
+        catalog = self.official_catalog()
+        host_os, host_arch = self.platform
+        return resolve_official_artifact(
+            catalog.artifact_for(identifier, host_os, host_arch),
+            expected_os=host_os,
+            expected_arch=host_arch,
+        )
+
+    def download_artifact(self, artifact: ReleaseArtifact) -> bytes:
+        return download_release_artifact(artifact)
+
+    def prepare_official_install(
+        self, dataset_id: str
+    ) -> tuple[ReleaseArtifact, bytes, DatasetManifest]:
+        """Resolve, download, and verify an official dataset before confirmation."""
+
+        artifact = self.resolve_official(dataset_id)
+        archive = self.download_artifact(artifact)
+        return artifact, archive, self.inspect_artifact(artifact, archive)
+
+    def install_official(self, dataset_id: str, *, replace: bool = False) -> DatasetStatus:
+        artifact = self.resolve_official(dataset_id)
+        archive = self.download_artifact(artifact)
+        return self.install_artifact(artifact, archive, replace=replace)
+
+    def update_official(
+        self, dataset_id: str | None = None, *, replace: bool = False
+    ) -> tuple[DatasetStatus, ...]:
+        if dataset_id is not None:
+            identifiers = (parse_dataset_id(dataset_id),)
+        else:
+            identifiers = tuple(
+                status.installed.dataset_id
+                for status in self.status()
+                if status.installed is not None and status.installed.source_kind == "official"
+            )
+        catalog = self.official_catalog()
+        host_os, host_arch = self.platform
+        updated: list[DatasetStatus] = []
+        for identifier in identifiers:
+            current = self.status(identifier)[0]
+            if current.corrupt:
+                raise UsageError("error.dataset_corrupt", dataset_id=identifier)
+            if current.installed is None or current.installed.source_kind != "official":
+                raise UsageError("error.dataset_not_official", dataset_id=identifier)
+            artifact = catalog.artifact_for(identifier, host_os, host_arch)
+            if (
+                not replace
+                and current.installed.repository == artifact.repository
+                and current.installed.release_tag == artifact.release_tag
+                and current.installed.asset_name == artifact.asset_name
+                and current.installed.sha256 == artifact.sha256
+                and current.installed.manifest_sha256 == artifact.manifest_sha256
+            ):
+                updated.append(current)
+                continue
+            artifact = resolve_official_artifact(
+                artifact, expected_os=host_os, expected_arch=host_arch
+            )
+            archive = download_release_artifact(artifact)
+            updated.append(self.install_artifact(artifact, archive, replace=True))
+        return tuple(updated)
+
+    def installed_command_source(self, dataset_id: str) -> CustomCommandSource:
+        status = self.status(dataset_id)[0]
+        if status.corrupt:
+            raise UsageError("error.dataset_corrupt", dataset_id=dataset_id)
+        if status.installed is None:
+            raise UsageError("error.dataset_not_installed", dataset_id=dataset_id)
+        if status.manifest is None:
+            raise UsageError("error.dataset_corrupt", dataset_id=dataset_id)
+        if not status.ready:
+            raise UsageError("error.dataset_environment_missing", dataset_id=dataset_id)
+        _, _, executable = self.store.load(dataset_id)
+        return CustomCommandSource(dataset_id, (str(executable), "ccuv"), source_kind="installed")
+
+    def install_artifact(
+        self,
+        artifact: ReleaseArtifact,
+        archive: bytes,
+        *,
+        replace: bool = False,
+    ) -> DatasetStatus:
+        host_os, host_arch = self.platform
+        staging = self.store.stage_directory()
+        try:
+            # Reserve a unique staging name, then let the strict extractor create
+            # it so extraction cannot merge archive members into prior contents.
+            staging.rmdir()
+            manifest = extract_dataset_archive(
+                archive,
+                expected_sha256=artifact.sha256,
+                destination=staging,
+                expected_dataset_id=artifact.dataset_id,
+                host_os=host_os,
+                host_arch=host_arch,
+            )
+            manifest_sha256 = sha256_bytes((staging / "manifest.json").read_bytes())
+            if artifact.manifest_sha256 is not None and manifest_sha256 != artifact.manifest_sha256:
+                raise UsageError("error.dataset_manifest_invalid")
+            try:
+                current, _, _ = self.store.load(manifest.id)
+            except UsageError as error:
+                if error.key not in {"error.dataset_not_installed", "error.dataset_corrupt"}:
+                    raise
+            else:
+                if current.repository != artifact.repository and not replace:
+                    raise UsageError("error.dataset_source_conflict", dataset_id=manifest.id)
+            installed = self.store.install(
+                staged_version=staging,
+                manifest=manifest,
+                source_kind=artifact.source_kind,
+                repository=artifact.repository,
+                release_tag=artifact.release_tag,
+                asset_name=artifact.asset_name,
+                archive_sha256=artifact.sha256,
+            )
+        except Exception:
+            shutil.rmtree(staging, ignore_errors=True)
+            raise
+        return DatasetStatus(installed, manifest, environment_status(manifest, self.environ))
+
+    def resolve_github_repository(self, repository: str) -> ReleaseArtifact:
+        host_os, host_arch = self.platform
+        normalized = parse_github_repository(repository)
+        try:
+            catalog = self.official_catalog()
+            official = catalog.entry_for_repository(normalized)
+        except UsageError as error:
+            if error.key != "error.dataset_catalog_unavailable":
+                raise
+        else:
+            if official is not None:
+                return resolve_official_artifact(
+                    catalog.artifact_for(official.id, host_os, host_arch),
+                    expected_os=host_os,
+                    expected_arch=host_arch,
+                )
+        return resolve_github_repository(repository=normalized, os=host_os, arch=host_arch)
+
+    def install_resolved_github_artifact(
+        self, artifact: ReleaseArtifact, *, replace: bool = False
+    ) -> DatasetStatus:
+        if artifact.source_kind != "github":
+            raise UsageError("error.dataset_invalid_release")
+        archive = download_release_artifact(artifact)
+        return self.install_artifact(artifact, archive, replace=replace)
+
+    def install_github_repository(self, repository: str, *, replace: bool = False) -> DatasetStatus:
+        return self.install_resolved_github_artifact(
+            self.resolve_github_repository(repository), replace=replace
+        )
+
+    def install_github(
+        self,
+        *,
+        repository: str,
+        release_tag: str,
+        asset_name: str,
+        sha256: str,
+        replace: bool = False,
+    ) -> DatasetStatus:
+        artifact = resolve_github_release(
+            repository=repository,
+            release_tag=release_tag,
+            asset_name=asset_name,
+            expected_sha256=sha256,
+        )
+        archive = download_release_artifact(artifact)
+        return self.install_artifact(artifact, archive, replace=replace)
+
+    def remove(self, dataset_id: str) -> None:
+        self.store.remove(dataset_id)
+
+
+def replace_registration(
+    current: DatasetRegistration, candidate: DatasetRegistration
+) -> DatasetRegistration:
+    return replace(
+        candidate,
+        enabled=True,
+        created_at=current.created_at,
+        updated_at=datetime.now(UTC).isoformat(),
+    )
+
+
+def source_repository_id(catalog, repository: str) -> str:
+    entry = catalog.entry_for_repository(repository)
+    if entry is None:
+        raise UsageError("error.dataset_catalog_not_found", dataset_id=repository)
+    return entry.id

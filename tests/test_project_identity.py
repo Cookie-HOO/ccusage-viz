@@ -11,6 +11,7 @@ from ccusage_viz.project_identity import (
     exact_project_display_key,
     exact_project_display_label,
     exact_project_label,
+    fixed_project_ref,
     make_project_ref,
     merged_project_label,
     normalized_absolute_project_path,
@@ -56,6 +57,22 @@ def test_project_identity_is_agent_scoped() -> None:
     assert claude.key != codex.key
 
 
+def test_fixed_project_groups_merge_across_agents_even_with_exact_aggregation() -> None:
+    unassigned = fixed_project_ref("codex", "unassigned")
+    also_unassigned = fixed_project_ref("opencode", "unassigned")
+    unverified = fixed_project_ref("dsh", "unverified")
+    also_unverified = fixed_project_ref("pi", "unverified")
+
+    groups = project_groups(
+        (unassigned, also_unassigned, unverified, also_unverified), aggregation="exact"
+    )
+
+    assert groups[unassigned.key] is groups[also_unassigned.key]
+    assert groups[unassigned.key].label == "Unassigned"
+    assert groups[unverified.key] is groups[also_unverified.key]
+    assert groups[unverified.key].label == "Unverified"
+
+
 @pytest.mark.parametrize(
     ("value", "expected"),
     (
@@ -88,6 +105,18 @@ def test_opaque_claude_labels_strip_only_dynamically_shared_prefix() -> None:
     assert project_label(projects[1], projects) == "other-app"
 
 
+def test_conservative_opaque_labels_do_not_change_codex_path_labels() -> None:
+    claude = make_project_ref("claude", "-Users-me-Projects-first")
+    other_claude = make_project_ref("claude", "-Users-me-Projects-second")
+    codex = make_project_ref("codex", "/workspace/projects/first")
+
+    labels = project_display_names((claude, other_claude, codex))
+
+    assert labels[claude.key] == "Projects-first"
+    assert labels[other_claude.key] == "Projects-second"
+    assert labels[codex.key] == "first"
+
+
 def test_shortened_opaque_labels_are_reused_from_process_cache() -> None:
     _clear_short_opaque_labels()
     first, second = (
@@ -97,7 +126,7 @@ def test_shortened_opaque_labels_are_reused_from_process_cache() -> None:
 
     _populate_ranking_label_cache(first, second)
 
-    assert project_display_names((first,))[first.key] == "first"
+    assert project_display_names((first,))[first.key] == "Projects-first"
 
     _clear_short_opaque_labels()
     assert project_display_names((first,))[first.key] == "-Users-me-Projects-first"
@@ -112,7 +141,7 @@ def test_ranking_cache_uses_the_complete_pool_before_top_selection() -> None:
 
     _populate_ranking_label_cache(first, second, top=1)
 
-    assert project_display_names((second,))[second.key] == "second"
+    assert project_display_names((second,))[second.key] == "Projects-second"
 
 
 def test_process_cache_keeps_the_shortest_verified_opaque_label() -> None:
@@ -125,8 +154,8 @@ def test_process_cache_keeps_the_shortest_verified_opaque_label() -> None:
     _populate_ranking_label_cache(
         project, make_project_ref("claude", "-Users-me-Projects-work-tool")
     )
-    assert project_display_names((project,))[project.key] == "app"
-    assert project_display_names((project,))[project.key] == "app"
+    assert project_display_names((project,))[project.key] == "work-app"
+    assert project_display_names((project,))[project.key] == "work-app"
 
 
 def test_opaque_claude_labels_use_deepest_verified_prefix_per_branch() -> None:
@@ -143,9 +172,9 @@ def test_opaque_claude_labels_use_deepest_verified_prefix_per_branch() -> None:
 
     assert project_display_names(projects) == {
         projects[0].key: "ccusage-viz",
-        projects[1].key: "bytedumpflow",
+        projects[1].key: "py-bytedumpflow",
         projects[2].key: "cmp-xlsx",
-        projects[3].key: "ai",
+        projects[3].key: "my-ai",
         projects[4].key: "ai-tools-custom-proxy",
         projects[5].key: "tauri-dumpflow-desktop",
         projects[6].key: "rust-ccuv-collector",
@@ -162,8 +191,8 @@ def test_opaque_claude_labels_use_prefixes_from_independent_families() -> None:
     )
 
     assert project_display_names(projects) == {
-        projects[0].key: "first",
-        projects[1].key: "second",
+        projects[0].key: "Projects-first",
+        projects[1].key: "Projects-second",
         projects[2].key: "dd0c4ac3a7004796005958e66b",
         projects[3].key: "a3f0ed1d13ec4e7c992a6a23b",
     }
@@ -194,9 +223,9 @@ def test_opaque_claude_labels_are_pool_order_independent_and_preserve_identity()
     reverse = project_display_names(tuple(reversed(projects)))
 
     assert forward == reverse
-    assert forward[projects[0].key] == "Café"
-    assert forward[projects[1].key] == "projects-Café"
-    assert forward[projects[2].key] == "tools"
+    assert forward[projects[0].key] == "Projects-Café"
+    assert forward[projects[1].key] == "me-projects-Café"
+    assert forward[projects[2].key] == "Projects-tools"
     assert projects[0].key == ("claude", "-Users-me-Projects-Café")
 
 
@@ -207,7 +236,7 @@ def test_opaque_claude_labels_back_off_before_empty_suffixes() -> None:
     )
 
     assert project_display_names(projects) == {
-        projects[0].key: "Projects",
+        projects[0].key: "me-Projects",
         projects[1].key: "Projects-app",
     }
 
@@ -233,7 +262,7 @@ def test_opaque_claude_labels_never_accept_raw_identifier_selector() -> None:
         make_project_ref("claude", "-Users-me-Projects-second"),
     )
 
-    assert resolve_projects(("FIRST",), projects) == (projects[0],)
+    assert resolve_projects(("PROJECTS-FIRST",), projects) == (projects[0],)
     with pytest.raises(UsageError):
         resolve_projects((projects[0].raw_id,), projects)
 
@@ -245,7 +274,7 @@ def test_dynamic_display_names_do_not_change_claude_codex_pairing() -> None:
 
     groups = project_groups((claude, other, codex), "name")
 
-    assert project_label(claude, (claude, other, codex)) == "app (claude)"
+    assert project_label(claude, (claude, other, codex)) == "Projects-app"
     assert groups[claude.key] is groups[codex.key]
     assert groups[claude.key].key == ("project", "name", "app")
     assert groups[other.key].key == ("project", "exact", "claude", other.raw_id)

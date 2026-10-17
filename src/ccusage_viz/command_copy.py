@@ -5,11 +5,16 @@ import subprocess
 from dataclasses import replace
 from shutil import which
 
+from ccusage_viz.core.custom_ranking_time import TimestampRange
 from ccusage_viz.formatting import char_width, display_width
 from ccusage_viz.options import (
     COMMAND_DEFAULT_PERIODS,
     AnimationPaneConfig,
+    CustomChartConfig,
+    CustomChartPaneConfig,
+    CustomCommandSource,
     DashboardLaunch,
+    EmptyPaneConfig,
     MonitorConfig,
     PaneConfig,
     RankingConfig,
@@ -17,6 +22,7 @@ from ccusage_viz.options import (
     StandaloneLaunch,
     TimelineConfig,
     compatible_styles,
+    is_v2_custom_ranking,
 )
 
 
@@ -32,14 +38,14 @@ def _default_interval(config: StandaloneLaunch) -> float:
 
 
 def _is_default_top(chart: object, by: str | None, top: int | None) -> bool:
-    if isinstance(chart, RankingConfig):
+    if isinstance(chart, (RankingConfig, StackConfig)):
         return top == 10
     return by is not None and top == 3
 
 
 def _chart_args(config: StandaloneLaunch, *, full: bool, pane: bool = False) -> list[str]:
     chart = config.chart
-    args = [chart.kind]
+    args = [chart.kind] if pane else ["chart", chart.kind]
     if isinstance(chart, MonitorConfig):
         if full or chart.window_seconds != 3600:
             args.extend(("--window", _window_duration(chart.window_seconds)))
@@ -51,33 +57,39 @@ def _chart_args(config: StandaloneLaunch, *, full: bool, pane: bool = False) -> 
             if full or date_range.period != COMMAND_DEFAULT_PERIODS[chart.kind]:
                 args.extend(("--period", date_range.period))
         else:
-            args.extend(("--since", date_range.since.isoformat()))
-            if not date_range.implicit_until:
-                args.extend(("--until", date_range.until.isoformat()))
+            args.extend(("--since", date_range.since.isoformat()))  # ty: ignore[unresolved-attribute]
+            if not date_range.implicit_until:  # ty: ignore[unresolved-attribute]
+                args.extend(("--until", date_range.until.isoformat()))  # ty: ignore[unresolved-attribute]
         if isinstance(chart, (TimelineConfig, StackConfig)):
             if full or chart.granularity != "day":
                 args.extend(("--granularity", chart.granularity))
             if full or chart.weekdays != "show":
                 args.extend(("--weekdays", chart.weekdays))
     by, top = getattr(chart, "by", None), getattr(chart, "top", None)
-    if by is not None and (full or not isinstance(chart, RankingConfig) or by != "project"):
+    if by is not None and (
+        full
+        or not isinstance(chart, (RankingConfig, StackConfig))
+        or (isinstance(chart, RankingConfig) and by != "project")
+        or (isinstance(chart, StackConfig) and by != "composition")
+    ):
         args.extend(("--by", by))
     if top is not None and (full or not _is_default_top(chart, by, top)):
         args.extend(("--top", str(top)))
-    if isinstance(chart, (TimelineConfig, RankingConfig, MonitorConfig)) and (
-        full or chart.project_aggregation != "name"
+    if isinstance(chart, (TimelineConfig, StackConfig, RankingConfig)) and (
+        full or chart.other != "show"
     ):
-        args.extend(("--project-aggregation", chart.project_aggregation))
-    if isinstance(chart, (TimelineConfig, RankingConfig)) and (full or chart.other != "show"):
         args.extend(("--other", chart.other))
     if isinstance(chart, StackConfig) and (full or chart.cache != "combined"):
         args.extend(("--cache", chart.cache))
-    for value in chart.filters.agents:
-        args.extend(("--agent", value))
-    for value in chart.filters.models:
-        args.extend(("--model", value))
-    for value in chart.filters.projects:
-        args.extend(("--project", value))
+    if isinstance(chart, (TimelineConfig, RankingConfig, StackConfig, MonitorConfig)):
+        for value in chart.filters.agents:
+            args.extend(("--agent", value))
+        for value in chart.filters.models:
+            args.extend(("--model", value))
+        for value in chart.filters.projects:
+            args.extend(("--project", value))
+    if not pane and config.host.timezone is not None:
+        args.extend(("--timezone", config.host.timezone))
     if not pane and not isinstance(chart, MonitorConfig):
         if not config.host.watch:
             args.append("--no-watch")
@@ -100,7 +112,8 @@ def _chart_args(config: StandaloneLaunch, *, full: bool, pane: bool = False) -> 
     default_style = compatible_styles(chart.kind, by)[0]
     if full or chart.presentation.style != default_style:
         args.extend(("--style", chart.presentation.style))
-    if full or chart.presentation.density != "full":
+    default_density = "full" if chart.kind == "ranking" else "detailed"
+    if full or chart.presentation.density != default_density:
         args.extend(("--density", chart.presentation.density))
     if chart.kind in {"timeline", "stack", "monitor"} and (
         full or chart.presentation.legend != "below-title"
@@ -111,12 +124,93 @@ def _chart_args(config: StandaloneLaunch, *, full: bool, pane: bool = False) -> 
     return args
 
 
+def _custom_source_args(source: CustomCommandSource) -> list[str]:
+    args = ["--dataset", source.dataset_id]
+    if source.source_kind == "installed":
+        return args
+    return [*args, "--command", shlex.join(source.command_argv)]
+
+
+def _custom_range_args(chart: CustomChartConfig, *, full: bool) -> list[str]:
+    date_range = chart.date_range
+    if isinstance(date_range, TimestampRange):
+        if date_range.period is None:
+            raise ValueError(
+                "fixed timestamp ranges cannot be copied because the CLI has no timestamp-bound flags"
+            )
+        return ["--period", date_range.period]
+    if date_range.relative_until and date_range.period is not None:
+        return (
+            ["--period", date_range.period]
+            if full or date_range.period != COMMAND_DEFAULT_PERIODS[chart.kind]
+            else []
+        )
+    args = ["--since", date_range.since.isoformat()]
+    if not date_range.implicit_until:
+        args.extend(("--until", date_range.until.isoformat()))
+    return args
+
+
+def _custom_chart_args(options: StandaloneLaunch, *, full: bool) -> list[str]:
+    chart = options.chart
+    if not isinstance(chart, CustomChartConfig):
+        raise TypeError("custom command formatting requires a custom chart")
+    args = [
+        "chart",
+        chart.kind,
+        *_custom_source_args(chart.source),
+        *_custom_range_args(chart, full=full),
+    ]
+    for filter_id, option_ids in chart.filters:
+        for option_id in option_ids:
+            args.extend(("--filter", f"{filter_id}={option_id}"))
+    if chart.partition_by is not None:
+        args.extend(("--partition-by", chart.partition_by))
+    if chart.group_by is not None:
+        args.extend(("--group-by", chart.group_by))
+    if chart.top is not None:
+        args.extend(("--top", str(chart.top)))
+    if chart.other != "show":
+        args.extend(("--other", chart.other))
+    if not is_v2_custom_ranking(chart) and chart.granularity != "day":
+        args.extend(("--granularity", chart.granularity))
+    if chart.weekdays != "show":
+        args.extend(("--weekdays", chart.weekdays))
+    if options.host.timezone is not None:
+        args.extend(("--timezone", options.host.timezone))
+    if full:
+        args.extend(("--query-timeout", f"{options.process.query_timeout:g}"))
+    if not options.host.ascii and (full or chart.presentation.theme != "classic"):
+        args.extend(("--theme", chart.presentation.theme))
+    default_style = compatible_styles(chart.kind, chart.group_by)[0]
+    if full or chart.presentation.style != default_style:
+        args.extend(("--style", chart.presentation.style))
+    default_density = "full" if chart.kind == "ranking" else "detailed"
+    if full or chart.presentation.density != default_density:
+        args.extend(("--density", chart.presentation.density))
+    if chart.kind in {"timeline", "stack"} and (full or chart.presentation.legend != "below-title"):
+        args.extend(("--legend", chart.presentation.legend))
+    if options.host.ascii:
+        args.append("--ascii")
+    return args
+
+
 def format_command(options: StandaloneLaunch) -> str:
-    return shlex.join(["ccuv", *_chart_args(options, full=False)])
+    args = (
+        _custom_chart_args(options, full=False)
+        if isinstance(options.chart, CustomChartConfig)
+        else _chart_args(options, full=False)
+    )
+    return shlex.join(["ccuv", *args])
 
 
 def format_full_command(options: StandaloneLaunch) -> str:
-    return shlex.join(["ccuv", *_chart_args(options, full=True)])
+    args = (
+        _custom_chart_args(options, full=True)
+        if isinstance(options.chart, CustomChartConfig)
+        else _chart_args(options, full=True)
+    )
+    return shlex.join(["ccuv", *args])
 
 
 def format_dashboard_pane_command(
@@ -146,10 +240,47 @@ def format_full_dashboard_command(
 ) -> str:
     host = options.host
     args = [options.launcher, "dashboard"]
+    if host.timezone is not None:
+        args.extend(("--timezone", host.timezone))
     from ccusage_viz.configuration import standalone_from_chart_pane
 
     for pane_config in panes or options.panes:
-        if isinstance(pane_config, AnimationPaneConfig):
+        if isinstance(pane_config, EmptyPaneConfig):
+            fragment = "empty"
+        elif isinstance(pane_config, CustomChartPaneConfig):
+            chart = pane_config.chart
+            fragment_args = [
+                "chart",
+                chart.kind,
+                *_custom_source_args(chart.source),
+                *_custom_range_args(chart, full=True),
+            ]
+            for filter_id, option_ids in chart.filters:
+                for option_id in option_ids:
+                    fragment_args.extend(("--filter", f"{filter_id}={option_id}"))
+            if chart.partition_by is not None:
+                fragment_args.extend(("--partition-by", chart.partition_by))
+            if chart.group_by is not None:
+                fragment_args.extend(("--group-by", chart.group_by))
+            if chart.top is not None:
+                fragment_args.extend(("--top", str(chart.top)))
+            if chart.other != "show":
+                fragment_args.extend(("--other", chart.other))
+            if not is_v2_custom_ranking(chart) and chart.granularity != "day":
+                fragment_args.extend(("--granularity", chart.granularity))
+            if chart.weekdays != "show":
+                fragment_args.extend(("--weekdays", chart.weekdays))
+            if chart.presentation.style != compatible_styles(chart.kind, chart.group_by)[0]:
+                fragment_args.extend(("--style", chart.presentation.style))
+            default_density = "full" if chart.kind == "ranking" else "compact"
+            if chart.presentation.density != default_density:
+                fragment_args.extend(("--density", chart.presentation.density))
+            if chart.kind in {"timeline", "stack"} and chart.presentation.legend != "below-title":
+                fragment_args.extend(("--legend", chart.presentation.legend))
+            if chart.presentation.theme != "classic":
+                fragment_args.extend(("--theme", chart.presentation.theme))
+            fragment = shlex.join(fragment_args)
+        elif isinstance(pane_config, AnimationPaneConfig):
             overlay = pane_config.overlay
             fragment_args = ["animate", pane_config.animation.style]
             if overlay.text is not None:
@@ -167,6 +298,10 @@ def format_full_dashboard_command(
                     fragment_args.extend(("--overlay-interval", f"{overlay.interval:g}"))
                 if overlay.max_width != 40:
                     fragment_args.extend(("--overlay-max-width", str(overlay.max_width)))
+                if overlay.offset_x:
+                    fragment_args.extend(("--overlay-offset-x", str(overlay.offset_x)))
+                if overlay.offset_y:
+                    fragment_args.extend(("--overlay-offset-y", str(overlay.offset_y)))
             fragment = shlex.join(fragment_args)
         else:
             fragment = shlex.join(

@@ -9,17 +9,22 @@ from ccusage_viz.formatting import (
     pad_width,
     truncate_middle_width,
     truncate_width,
+    wrap_width,
 )
 from ccusage_viz.project_identity import exact_project_agent
-from ccusage_viz.render.base import (
-    RenderContext,
-    colored_mark,
-    content_heading,
-    date_range_heading,
-    styled_text,
-    title_with_querying,
+from ccusage_viz.render.base import RenderContext, colored_mark, styled_text
+from ccusage_viz.render.headings import (
+    HeadingSpec,
+    chart_name,
+    compose_heading,
+    heading_period,
+    heading_with_querying,
+    monitor_heading_spec,
 )
 from ccusage_viz.render.palette import get_color_scheme
+from ccusage_viz.render.ranking_description import description_visible_text
+from ccusage_viz.render.ranking_entries import RankingPresentationEntry
+from ccusage_viz.render.ranking_historical import render_historical_ranking
 from ccusage_viz.render.summary import render_summary, render_summary_placeholder
 from ccusage_viz.trends import trend_glyph
 
@@ -28,25 +33,17 @@ def _observed_heading(model: RankingModel, context: RenderContext) -> str:
     scope = model.observed_scope
     if scope is None:
         raise ValueError("observed ranking is missing its scope")
-    window = (
-        f"{scope.window_seconds // 3600}h"
-        if scope.window_seconds % 3600 == 0
-        else f"{scope.window_seconds // 60}m"
-    )
-    mode = context.translator.text(f"label.monitor_{scope.mode}_mode")
-    state = (
-        f" · {context.translator.text(f'label.monitor_{scope.state}')}"
-        if scope.state != "ready"
-        else ""
-    )
-    heading = title_with_querying(
-        context.translator.text(
-            "label.monitor_ranking_tokens"
-            if model.metric.unit == "tokens"
-            else "label.monitor_ranking_tpm",
-            mode=mode,
-            window=window,
-            state=state,
+    heading = heading_with_querying(
+        compose_heading(
+            monitor_heading_spec(
+                unit=model.metric.unit,
+                style=context.style if context.style in {"ranking-dot", "list"} else "ranking",
+                window_seconds=scope.window_seconds,
+                mode=scope.mode,
+                state=scope.state,
+                translator=context.translator,
+            ),
+            context,
         ),
         context,
     )
@@ -55,6 +52,14 @@ def _observed_heading(model: RankingModel, context: RenderContext) -> str:
 
 def _entry_value(entry: RankingEntry | ScalarRankingEntry) -> int | float:
     return entry.value if isinstance(entry, ScalarRankingEntry) else entry.usage.total
+
+
+def _is_fallback_project_entry(entry: RankingEntry) -> bool:
+    """Return whether a project row represents non-project attribution."""
+    return entry.key in {
+        ("project", "fixed", "unassigned"),
+        ("project", "fixed", "unverified"),
+    }
 
 
 def _compact_labels(labels: list[str], width: int) -> list[str]:
@@ -117,16 +122,14 @@ def _entry_agent(entry: RankingEntry | ScalarRankingEntry) -> str | None:
     return exact_project_agent(entry.key)
 
 
-def _historical_title(model: RankingModel, context: RenderContext) -> str:
-    return (
-        context.translator.text("label.ranking_agent_project")
-        if model.project_aggregation == "exact"
-        else context.translator.text("label.ranking")
-    )
-
-
-def render_ranking(model: RankingModel, context: RenderContext) -> str:
-    title = _historical_title(model, context)
+def render_ranking(
+    model: RankingModel,
+    context: RenderContext,
+    *,
+    search_query: str = "",
+    search_editing: bool = False,
+    show_visible_count: bool = False,
+) -> str:
     scope = model.observed_scope
     if scope is not None:
         heading = _observed_heading(model, context)
@@ -134,21 +137,33 @@ def render_ranking(model: RankingModel, context: RenderContext) -> str:
         date_range = model.date_range
         if date_range is None:
             raise ValueError("historical ranking is missing its date range")
-        heading_text = (
-            date_range_heading(title, date_range.since, date_range.until, context)
-            if model.project_aggregation == "exact"
-            else content_heading(title, date_range.since, date_range.until, context)
-            if context.title_content
-            else date_range_heading(title, date_range.since, date_range.until, context)
+        dimension = context.title_content
+        partition = None
+        if model.project_aggregation == "exact":
+            dimension = context.translator.text("label.project")
+            partition = context.translator.text("label.agent")
+        heading = compose_heading(
+            HeadingSpec(
+                metric=context.translator.text("label.tokens_metric"),
+                chart=chart_name("ranking", context.translator),
+                dimension=dimension,
+                partition=partition,
+                period=heading_period(
+                    context,
+                    since=date_range.since,
+                    until=date_range.until,
+                ),
+            ),
+            context,
         )
         if not context.pending and model.top is not None and model.top_share is not None:
-            heading_text = context.translator.text(
+            heading = context.translator.text(
                 "label.ranking_top_share",
-                heading=heading_text,
+                heading=heading,
                 top=model.top,
                 share=f"{model.top_share:.1%}",
             )
-        heading = center_text(heading_text, context.width)
+        heading = heading_with_querying(heading, context)
     pending = context.pending and not model.is_observed
     summary = (
         render_summary_placeholder(
@@ -170,9 +185,51 @@ def render_ranking(model: RankingModel, context: RenderContext) -> str:
         return "\n".join(
             line for line in (summary, heading, context.translator.text(message)) if line
         )
+    if not model.is_observed:
+        return render_historical_ranking(
+            tuple(
+                RankingPresentationEntry(
+                    entry.key,
+                    (
+                        f"{agent} {entry.label}"
+                        if (agent := _entry_agent(entry)) is not None
+                        and model.project_aggregation == "exact"
+                        and not entry.is_other
+                        else entry.label
+                    ),
+                    entry.usage.total,
+                    None if entry.previous_usage is None else entry.previous_usage.total,
+                    entry.comparison_ready,
+                    entry.is_other,
+                    entry.previous_rank,
+                    is_fallback=_is_fallback_project_entry(entry),
+                )
+                for entry in model.entries
+            ),
+            heading=heading,
+            value_formatter=lambda value: format_tokens(round(value)),
+            delta_formatter=lambda value: (
+                f"{'+' if value > 0 else '-'}{format_tokens(round(abs(value)))}"
+            ),
+            context=context,
+            summary=summary,
+            pending=pending,
+            total=model.percentage_total.total,
+            search_query=search_query,
+            search_editing=search_editing,
+            show_visible_count=show_visible_count,
+        )
+
     total = None if model.is_observed or pending else model.percentage_total.total
     formatted_values = [
-        "??" if pending else format_tokens(round(_entry_value(entry))) for entry in entries
+        "??"
+        if pending
+        else (
+            entry.display
+            if isinstance(entry, ScalarRankingEntry) and entry.display is not None
+            else format_tokens(round(_entry_value(entry)))
+        )
+        for entry in entries
     ]
     agents = [_entry_agent(entry) for entry in entries]
     separate_fields = model.project_aggregation == "exact" and not model.is_observed
@@ -222,7 +279,7 @@ def render_ranking(model: RankingModel, context: RenderContext) -> str:
     ):
         value = _entry_value(entry)
         length = round(value / maximum * bar_width)
-        if context.style == "dot":
+        if context.style in {"dot", "ranking-dot"}:
             mark = (
                 track * max(0, length - 1)
                 + colored_mark(dot, mark_color, context)
@@ -281,4 +338,27 @@ def render_ranking(model: RankingModel, context: RenderContext) -> str:
                 f"{prefix}{label_text} {mark} "
                 f"{pad_width(formatted, value_width, align='right')} {value_marker}{percentage}"
             )
+        show_description = (
+            model.is_observed
+            and context.style != "list"
+            and context.density in {"full", "detailed"}
+            and isinstance(entry, ScalarRankingEntry)
+            and entry.description
+            and not entry.is_other
+        )
+        if show_description:
+            indent = " " * min(context.width, display_width(prefix))
+            available = max(1, context.width - display_width(indent))
+            desc = description_visible_text(entry.description)
+            desc_rows = wrap_width(desc, available)
+            for index, row in enumerate(desc_rows[:2]):
+                if index == 1 and len(desc_rows) > 2:
+                    row = row.rstrip() + "…"
+                lines.append(
+                    styled_text(
+                        f"{indent}{row}",
+                        scheme.muted,
+                        context,
+                    )
+                )
     return "\n".join(lines)

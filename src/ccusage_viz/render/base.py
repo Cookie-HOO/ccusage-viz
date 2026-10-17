@@ -6,12 +6,14 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date, datetime
 from math import ceil
+from threading import RLock
 from typing import Literal, Protocol
 
 import plotext as plt
 
 from ccusage_viz.formatting import display_width, format_tokens, strip_ansi
 from ccusage_viz.i18n import Translator
+from ccusage_viz.options import Density, has_complete_content
 from ccusage_viz.render.palette import get_color_scheme
 
 
@@ -28,6 +30,20 @@ class RenderAudit:
     cadence: Literal["refresh", "sample"] = "refresh"
     refreshing: bool = False
     querying: bool = False
+
+
+def audit_row_visible(density: Density, audit: RenderAudit | None) -> bool:
+    """Return whether the audit footer occupies one physical render row."""
+    return bool(
+        density == "detailed"
+        and audit is not None
+        and (
+            audit.accepted_at is not None
+            or audit.query_elapsed is not None
+            or audit.interval is not None
+            or audit.refreshing
+        )
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,21 +63,27 @@ class RenderContext:
     period: str | None = None
     title_content: str | None = None
     filter_summary: str | None = None
-    density: Literal["minimal", "compact", "full"] = "full"
+    density: Density = "detailed"
     pending: bool = False
     audit: RenderAudit | None = None
 
 
+_PLOT_LOCK = RLock()
+
+
 @contextmanager
 def isolated_plot() -> Iterator[None]:
-    """Contain plotext's process-global figure state, including on exceptions."""
-    plt.figure.clear()
-    plt.figure.theme("default")
-    try:
-        yield
-    finally:
+    """Serialize and contain plotext's process-global mutable figure state."""
+    with _PLOT_LOCK:
+        terminal_limits = tuple(plt.terminal._limit)
         plt.figure.clear()
         plt.figure.theme("default")
+        try:
+            yield
+        finally:
+            plt.figure.clear()
+            plt.figure.theme("default")
+            plt.terminal.limit(*terminal_limits)
 
 
 def configure_plot(context: RenderContext) -> None:
@@ -97,9 +119,10 @@ _ASCII_PLOT_GLYPHS = str.maketrans(
 
 
 def render_audit(context: RenderContext) -> str:
-    if context.density != "full" or context.audit is None:
-        return ""
     audit = context.audit
+    if not audit_row_visible(context.density, audit):
+        return ""
+    assert audit is not None
     parts = []
     if audit.accepted_at is not None:
         parts.append(
@@ -135,13 +158,18 @@ def render_audit(context: RenderContext) -> str:
 
 
 def title_with_querying(title: str, context: RenderContext) -> str:
-    """Annotate a title with its active scope and incomplete-query state."""
+    """Annotate a title with its active scope and live query state."""
     if context.filter_summary:
         title = f"{title} · {context.filter_summary}"
-    if context.audit is None or not context.audit.querying:
+    if context.audit is None:
+        return title
+    markers = []
+    if context.audit.querying:
+        markers.append(context.translator.text("status.querying"))
+    if not markers:
         return title
     marker = styled_text(
-        context.translator.text("status.querying"),
+        " · ".join(markers),
         get_color_scheme(context.color_scheme).muted,
         context,
         dim=True,
@@ -151,7 +179,12 @@ def title_with_querying(title: str, context: RenderContext) -> str:
 
 def date_range_heading(name: str, since: date, until: date, context: RenderContext) -> str:
     if context.period is not None:
-        return title_with_querying(f"{name} · {context.period}", context)
+        period = {
+            "1w": context.translator.text("label.period_this_week"),
+            "1mo": context.translator.text("label.period_this_month"),
+            "1y": context.translator.text("label.period_this_year"),
+        }.get(context.period, context.period)
+        return title_with_querying(f"{name} · {period}", context)
     date_range = context.translator.text(
         "label.date_range", since=since.isoformat(), until=until.isoformat()
     )
@@ -212,7 +245,7 @@ def observed_start_marker(
         return ObservedStartMarker(position, None, None)
     key = (
         "label.monitor_started_full"
-        if context.density == "full"
+        if has_complete_content(context.density)
         else "label.monitor_started_compact"
     )
     label = context.translator.text(key, time=started_at.strftime("%H:%M"))
@@ -248,7 +281,9 @@ def date_ticks(
     crosses_year = days[0].year != days[-1].year
     usable_width = max(1, context.width - 12)
     if aggregation != "day":
-        period_width = 7 if aggregation == "month" else 7 if aggregation == "quarter" else 4
+        period_width = (
+            5 if aggregation == "week" else 7 if aggregation in {"month", "quarter"} else 4
+        )
         capacity = max(2, usable_width // (period_width + 2))
         step = max(1, ceil((len(days) - 1) / max(1, capacity - 1)))
         positions = list(range(0, len(days), step))
@@ -258,7 +293,9 @@ def date_ticks(
         for index in positions:
             day = days[index]
             labels.append(
-                f"{day.year}-{day.month:02d}"
+                f"{day.month:02d}-{day.day:02d}"
+                if aggregation == "week"
+                else f"{day.year}-{day.month:02d}"
                 if aggregation == "month"
                 else f"{day.year}-Q{(day.month - 1) // 3 + 1}"
                 if aggregation == "quarter"
@@ -354,7 +391,7 @@ def overlay_plot_column(
 
 def plot_height(context: RenderContext, *, text_rows: int) -> int:
     """Size plotext so its axis rows fill the renderer's available chart area."""
-    return max(8, context.height - text_rows + 1)
+    return max(8, context.height - text_rows)
 
 
 def plot_text(context: RenderContext) -> str:

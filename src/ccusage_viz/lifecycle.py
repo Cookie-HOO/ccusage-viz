@@ -18,16 +18,11 @@ class LifecycleTrigger(StrEnum):
     PERIODIC = "periodic"
     MANUAL = "manual"
     CONFIGURATION = "configuration"
-    RESUME = "resume"
 
 
-_AUTOMATIC_TRIGGERS = frozenset(
-    {LifecycleTrigger.STARTUP, LifecycleTrigger.PERIODIC, LifecycleTrigger.RESUME}
-)
 _TRIGGER_PRIORITY = {
     LifecycleTrigger.STARTUP: 1,
     LifecycleTrigger.PERIODIC: 1,
-    LifecycleTrigger.RESUME: 2,
     LifecycleTrigger.MANUAL: 2,
     LifecycleTrigger.CONFIGURATION: 3,
 }
@@ -49,32 +44,22 @@ class OperationToken:
 
 
 class FixedIntervalScheduler:
-    """A fixed-baseline periodic opportunity source with no pause backlog."""
+    """A fixed-baseline periodic opportunity source with no backlog."""
 
-    __slots__ = ("baseline", "enabled", "interval", "next_opportunity", "stopping")
+    __slots__ = ("baseline", "interval", "next_opportunity", "stopping")
 
     def __init__(self, interval: float, *, now: float) -> None:
         self._validate_interval(interval)
         self.interval = interval
         self.baseline = now
         self.next_opportunity = now + interval
-        self.enabled = True
         self.stopping = False
 
     def due(self, *, now: float) -> bool:
-        if self.stopping or not self.enabled or now < self.next_opportunity:
+        if self.stopping or now < self.next_opportunity:
             return False
         self._advance_past(now)
         return True
-
-    def pause(self) -> None:
-        self.enabled = False
-
-    def resume(self, *, now: float) -> None:
-        if self.stopping:
-            return
-        self.enabled = True
-        self._advance_past(now)
 
     def rebuild(self, interval: float, *, now: float) -> None:
         self._validate_interval(interval)
@@ -84,7 +69,6 @@ class FixedIntervalScheduler:
 
     def shutdown(self) -> None:
         self.stopping = True
-        self.enabled = False
 
     def _advance_past(self, now: float) -> None:
         if self.next_opportunity > now:
@@ -114,10 +98,6 @@ class LifecycleOperation(Generic[_Submission]):
     @property
     def active(self) -> OperationToken | None:
         return self.coordinator.active
-
-    @property
-    def paused(self) -> bool:
-        return self.coordinator.paused
 
     def request(
         self,
@@ -191,18 +171,6 @@ class LifecycleOperation(Generic[_Submission]):
             self.operation = None
             self.submission = None
 
-    def pause(self) -> None:
-        previous = self.coordinator.active
-        try:
-            self.coordinator.pause()
-        finally:
-            if previous is not None and self.coordinator.active is None:
-                self.operation = None
-                self.submission = None
-
-    def resume(self) -> None:
-        self.coordinator.resume()
-
     def detach_active(self) -> OperationToken | None:
         operation = self.coordinator.active
         try:
@@ -229,7 +197,6 @@ class LifecycleCoordinator:
         "_generation",
         "_next_operation_id",
         "owner_id",
-        "paused",
         "pending",
         "stopping",
     )
@@ -239,7 +206,6 @@ class LifecycleCoordinator:
             raise ValueError("owner ID must not be empty")
         self.owner_id = owner_id
         self.pending: LifecycleIntent | None = None
-        self.paused = False
         self.stopping = False
         self._active: OperationToken | None = None
         self._cancel_active: Callable[[], None] | None = None
@@ -265,8 +231,6 @@ class LifecycleCoordinator:
             raise ValueError("debounce must be non-negative and finite")
         if self.stopping or generation < self._generation:
             return False
-        if self.paused and trigger in _AUTOMATIC_TRIGGERS:
-            return False
 
         self._generation = generation
         ready_at = now + debounce if trigger is LifecycleTrigger.CONFIGURATION else now
@@ -286,8 +250,6 @@ class LifecycleCoordinator:
 
     def take_ready(self, *, now: float) -> OperationToken | None:
         if self.stopping or self._active is not None or self.pending is None:
-            return None
-        if self.paused and self.pending.trigger in _AUTOMATIC_TRIGGERS:
             return None
         if now < self.pending.ready_at:
             return None
@@ -337,17 +299,6 @@ class LifecycleCoordinator:
             cancel()
         return active
 
-    def pause(self) -> None:
-        self.paused = True
-        if self.pending is not None and self.pending.trigger in _AUTOMATIC_TRIGGERS:
-            self.pending = None
-        if self._active is not None and self._active.trigger in _AUTOMATIC_TRIGGERS:
-            self.detach_active()
-
-    def resume(self) -> None:
-        if not self.stopping:
-            self.paused = False
-
     def shutdown(self) -> None:
         self.stopping = True
         self.pending = None
@@ -360,7 +311,7 @@ def query_trigger(trigger: LifecycleTrigger) -> QueryTrigger:
             return QueryTrigger.STARTUP
         case LifecycleTrigger.PERIODIC:
             return QueryTrigger.TICK
-        case LifecycleTrigger.MANUAL | LifecycleTrigger.CONFIGURATION | LifecycleTrigger.RESUME:
+        case LifecycleTrigger.MANUAL | LifecycleTrigger.CONFIGURATION:
             return QueryTrigger.REFRESH
         case _:
             raise ValueError(f"unknown lifecycle trigger: {trigger!r}")

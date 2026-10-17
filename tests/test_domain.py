@@ -1,6 +1,6 @@
 import pytest
 
-from ccusage_viz.domain import TokenUsage
+from ccusage_viz.domain import TokenUsage, model_identity
 
 
 def test_token_usage_preserves_stack_compatible_other_total() -> None:
@@ -34,3 +34,9 @@ def test_token_usage_difference_returns_delta_or_counter_reset() -> None:
 
     assert current.difference(previous) == TokenUsage(60, 20, 10, 15, 5, 10)
     assert previous.difference(current) is None
+
+
+def test_model_identity_removes_only_leading_source_prefixes() -> None:
+    assert model_identity("[pi] GPT-5.6-Terra") == "gpt-5.6-terra"
+    assert model_identity("gpt-5.6 [pi]") == "gpt-5.6 [pi]"
+    assert model_identity("[pi]gpt-5.6-terra") == "[pi]gpt-5.6-terra"

@@ -29,7 +29,7 @@
    | Dashboard 独立设置 | 作用范围 | Pane 行为 |
    | --- | --- | --- |
    | Layout、Weights、焦点、Pane 顺序 | Dashboard 几何与导航 | 不构成 Pane 配置 |
-   | 全局暂停、Controls | Dashboard 会话外壳 | 图表 Pane 不拥有局部数据暂停或 Controls 状态；调整动画 Pane 时，该 Pane 拥有局部播放暂停 |
+   | Controls | Dashboard 会话外壳 | 图表 Pane 不拥有局部 Controls 状态 |
    | Dashboard Theme、Style | 外壳、Header 与 Summary | 不改变 Pane Theme 或图表 Style |
    | Header Style、Summary 周期 | Dashboard Header | 不改变 Pane Density、Scope 或 Granularity |
 
@@ -48,7 +48,7 @@
    | Theme、Style、Density、Legend | 每个 Pane 独立定义图表呈现；Theme 不继承 Dashboard Theme |
    | 图表专属设置 | 只属于对应 Pane |
 
-   图表 Pane 片段不得包含 Dashboard 或 Host 拥有的生命周期设置，例如 Demo 模式、Watch/Interval、ASCII 或刷新节奏。动画 Pane 片段还可以包含声明式 Overlay 来源及其呈现设置。Standalone 仍独立拥有自己的 Demo 设置、Interval、刷新和暂停行为。每个 Pane 都必须可以独立解释；复制图表 Pane 为 Standalone 时再物化 Dashboard 拥有的必要上下文。
+   图表 Pane 片段不得包含 Dashboard 或 Host 拥有的生命周期设置，例如 Demo 模式、Watch/Interval、ASCII 或刷新节奏。动画 Pane 片段还可以包含声明式 Overlay 来源及其呈现设置。Standalone 仍独立拥有自己的 Demo 设置、Interval 和刷新行为。每个 Pane 都必须可以独立解释；复制图表 Pane 为 Standalone 时再物化 Dashboard 拥有的必要上下文。
 
 2. **命令 Overlay 是有界的受信任本地呈现工作。**
 
@@ -114,7 +114,7 @@
 
 1. **Density 控制狭义图表之外的信息量。**
 
-   Density 只有三种取值。Minimal 保留身份、图表和紧凑运行状态；Compact 增加当前筛选 Scope 的 Token 值与有效 Filter 维度数，不显示比较或审计；Full 增加适用的周期比较和 Host 提供的运行审计。Standalone 默认 Full，新建或默认 Pane 使用 Compact。Dashboard 不存在全局图表 Density。
+   Density 按顺序有四种取值：`minimal`、`compact`、`full`、`detailed`。Minimal 保留身份、图表和紧凑实时状态，不显示摘要或审计；Compact 增加当前筛选 Scope 的 Token 值与有效 Filter 维度数，不显示比较或审计；Full 增加适用的周期比较和已观测指标，但不显示被动运行审计页脚；Detailed 在相同完整内容之外增加 Host 提供的运行审计。Standalone 默认 Detailed，新建或默认 Pane 使用 Compact。Dashboard 不存在全局图表 Density。
 
 2. **Theme、Style 与 Density 各自承担单一职责。**
 
@@ -170,11 +170,11 @@
 
    只有受影响的数值变为未知：纯展示修改只重绘；能够从已接受数据完整计算的修改立即重新处理；需要新数据的修改显示 `??`，直到当前 generation 被接受。过时 completion 不得恢复旧值或清除占位符。Pause 只抑制周期 backlog，不阻止已提交配置或手动刷新产生的显式补齐；该补齐完成后也不会恢复周期调度。
 
-7. **按键表达稳定概念，而不是通用大小写规则。**
+7. **按键表达有作用域的稳定概念。**
 
-   `m` 表示修改当前视觉资源：在 Standalone 中修改当前图表或动画，在 Dashboard 浏览模式中修改已选 Pane。单击选择或准备 Pane；双击进入 Pane 调整。调整中双击另一 Pane 可转移焦点。`d` 打开 Dashboard 全局设置。大写字母通常不反向循环对应小写选项。相关按键也可以分别代表同一概念下稳定且不同的类别：`p` 循环常用尾随周期，`P` 循环常用自然周期至今。界面必须标明当前类别，避免把自然周期误解为尾随时长。
+   `m` 表示修改当前视觉资源：在 Standalone 中修改当前图表或动画，在 Dashboard 浏览模式中修改已选 Pane。单击选择或准备 Pane；双击进入 Pane 调整。调整中双击另一 Pane 可转移焦点。`d` 打开 Dashboard 全局设置。对于展示小写/大写配对的有限有序选择器，小写向前、大写向后，两个方向都会循环；这适用于周期、历史粒度、主题、样式、Pane 视图和 Dashboard Header 汇总范围。
 
-   **例外：**Theme 有较多且会增长的候选，保留 `t` 向前和 `T` 向后切换。`N` 与 `n` 是有意设计的语义对，分别在当前 Pane 列表索引之前或之后插入。其他普通字母操作只接受小写。
+   **例外：**大小写不是通用反向规则。`N` 与 `n` 分别在当前 Pane 列表索引之前或之后插入；`u/U` 仍表示撤销/重做；`H` 表示 Dashboard Header 呈现；`L` 表示自定义诊断或动画历史；页面作用域内的 `P` 保留其声明的 Advanced 项目名称操作。其他控制只有在当前控制栏明确展示方向性配对时才支持大写。
 
 8. **非文本编辑的方向操作同时支持方向键与 `hjkl`。**
 
@@ -228,11 +228,11 @@
 
 1. **Dashboard 使用两条固定 Tick 序列。**
 
-   Refresh Tick 同时向 Summary 和历史 Pane 提供机会；Sampling Tick 同时向 Monitor Pane 提供机会。两条基线在会话中保持固定，不因执行耗时、成功或失败、手动刷新、暂停或继续而移动；修改一个 Interval 只重建对应序列。
+   Refresh Tick 同时向 Summary 和历史 Pane 提供机会；Sampling Tick 同时向 Monitor Pane 提供机会。两条基线在会话中保持固定，不因执行耗时、成功或失败或手动刷新而移动；修改一个 Interval 只重建对应序列。
 
 2. **数据相关调整在防抖后补齐最新状态。**
 
-   设置立即生效并创建新 generation；现有数据足以计算的内容立即更新，缺失部分显示 `??`。只有最新状态仍缺少必要数据时，才在短暂尾沿防抖后提供一次刷新机会。连续调整重置防抖，因此不会为每个中间状态发起查询。固定 Tick、手动刷新或继续若先发生，则满足并取消尚未触发的防抖机会，且不移动 Tick 基线。
+   设置立即生效并创建新 generation；现有数据足以计算的内容立即更新，缺失部分显示 `??`。只有最新状态仍缺少必要数据时，才在短暂尾沿防抖后提供一次刷新机会。连续调整重置防抖，因此不会为每个中间状态发起查询。固定 Tick 或手动刷新若先发生，则满足并取消尚未触发的防抖机会，且不移动 Tick 基线。
 
    **例外：**纯展示调整和能够完全由现有数据计算的调整不安排查询；Interval 变化只重建对应 Tick 序列。
 
@@ -256,9 +256,9 @@
 
 7. **刷新包含结果所需的重新计算与重绘。**
 
-   `r` 始终刷新当前承载数据的上下文；由刷新数据产生的排序、派生计算和完整重绘都是同一次操作的结果，不提供独立的重排或重绘命令。Dashboard 手动刷新向 Header 和图表 Pane 提供立即刷新机会，使绘制缓存失效并覆盖完整 Dashboard；继续执行同样的刷新与重绘后恢复固定 Tick。Resize 自动重算全部几何并清除旧区域，但不要求查询数据。动画播放、Overlay 执行和 Monitor 附件重绘使用各自 Host 本地的 deadline，而不是这项数据刷新操作。完整重绘不等于无条件清屏。
+   `r` 始终刷新当前承载数据的上下文；由刷新数据产生的排序、派生计算和完整重绘都是同一次操作的结果，不提供独立的重排或重绘命令。Dashboard 手动刷新向 Header 和图表 Pane 提供立即刷新机会，使绘制缓存失效并覆盖完整 Dashboard。Resize 自动重算全部几何并清除旧区域，但不要求查询数据。动画播放、Overlay 执行和 Monitor 附件重绘使用各自 Host 本地的 deadline，而不是这项数据刷新操作。完整重绘不等于无条件清屏。
 
-   **例外：**Dashboard 浏览模式的暂停会停止周期数据 Tick，并暂停全部动画 Pane 的播放；暂停期间不产生周期工作或积累 backlog，但手动刷新和用户修改配置后经防抖合并的一次性补齐仍可执行。此类补齐不会恢复周期调度。调整动画 Pane 时，Space 则只控制该 Pane 的播放时钟。Monitor 建立基线、出现采样间隙、暂停/恢复、修改影响数据的配置或检测到计数器重置时，会清空独立的当前观测，直到形成下一组有效采样对；已保留的 Timeline 历史继续可用，不连续处仍显示为 Gap。Monitor 附件使用已接受的 delta 状态决定 active/idle 投影，其 idle 场景可以重绘，但不会推进 Token 观测或发起查询。Standalone Watch 与 Monitor 保留自己的刷新、暂停和 Interval 行为。
+   Monitor 建立基线、出现采样间隙、修改影响数据的配置或检测到计数器重置时，会清空独立的当前观测，直到形成下一组有效采样对；已保留的 Timeline 历史继续可用，不连续处仍显示为 Gap。Monitor 附件使用已接受的 delta 状态决定 active/idle 投影，其 idle 场景可以重绘，但不会推进 Token 观测或发起查询。Standalone Watch 与 Monitor 保留自己的刷新和 Interval 行为。
 
 ## 可复现性与文档边界
 
@@ -268,7 +268,7 @@
 
 2. **Preset 是完整启动模板；运行时布局选择只改变几何。**
 
-   Preset 提供完整的 Dashboard 基础状态，并可在启动命令中接受显式覆盖或追加 Pane；没有 Preset 时，除无参数 `dashboard` 外，必须显式提供 Pane。运行时 `z` 有意不应用 Preset 的内容模板：它保留当前 Pane 列表，只选择对应几何。复制命令展开实际 Pane 状态并保留当前布局，而不依赖来源 Preset 名称。
+   Preset 提供完整的 Dashboard 基础状态，并可在启动命令中接受显式覆盖或追加 Pane；未提供结构配置时，`dashboard` 使用 `wide-clock`。运行时 `z` 有意不应用 Preset 的内容模板：它保留当前 Pane 列表，只选择对应几何。复制命令展开实际 Pane 状态并保留当前布局，而不依赖来源 Preset 名称。
 
 3. **仅在当前运行中存在的呈现状态不进入可复现配置。**
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from collections import defaultdict
 from collections.abc import Iterable
+from datetime import datetime
 from typing import TYPE_CHECKING, Literal
 
 from ccusage_viz.chart_models import (
@@ -12,12 +13,17 @@ from ccusage_viz.chart_models import (
     TimelineModel,
     TimeOfDayDistributionModel,
 )
+from ccusage_viz.custom_models import LocalizedText
 from ccusage_viz.domain import TokenUsage, UsageRecord
 from ccusage_viz.formatting import format_tokens
-from ccusage_viz.options import RankingConfig
+from ccusage_viz.options import MonitorConfig, RankingConfig, is_monitor_distribution
 from ccusage_viz.processing import process_historical
+from ccusage_viz.processing.custom_historical import CustomChartProjection
+from ccusage_viz.processing.custom_ranking import CustomRankingProjection
 from ccusage_viz.processing.filtering import prepare_filtered_scope
 from ccusage_viz.project_identity import (
+    FIXED_UNASSIGNED_PROJECT,
+    FIXED_UNVERIFIED_PROJECT,
     ExactProjectDisplayKey,
     ProjectDisplayKey,
     exact_project_agent,
@@ -30,6 +36,7 @@ from ccusage_viz.project_identity import (
 if TYPE_CHECKING:
     from ccusage_viz.historical_component import UsageSnapshot
     from ccusage_viz.i18n import Translator
+    from ccusage_viz.monitor_component import MonitorComponent
     from ccusage_viz.options import StandaloneLaunch
     from ccusage_viz.processing.monitor import ObservedBucket
     from ccusage_viz.terminal import Terminal
@@ -47,15 +54,25 @@ _BODY_VIEWS: tuple[BodyView, ...] = (
 )
 
 
+def cycle_body_view(view: BodyView, *, step: int = 1) -> BodyView:
+    """Cycle a pane body view in either direction."""
+    return _BODY_VIEWS[(_BODY_VIEWS.index(view) + step) % len(_BODY_VIEWS)]
+
+
 def next_body_view(view: BodyView) -> BodyView:
     """Return the next transient interactive body view."""
-    return _BODY_VIEWS[(_BODY_VIEWS.index(view) + 1) % len(_BODY_VIEWS)]
+    return cycle_body_view(view)
+
+
+def cycle_dashboard_body_view(view: DashboardBodyView, *, step: int = 1) -> DashboardBodyView:
+    """Cycle a full-screen Dashboard body view in either direction."""
+    views: tuple[DashboardBodyView, ...] = ("chart", "full-command")
+    return views[(views.index(view) + step) % len(views)]
 
 
 def next_dashboard_body_view(view: DashboardBodyView) -> DashboardBodyView:
     """Return the next full-screen Dashboard body view."""
-    views: tuple[DashboardBodyView, ...] = ("chart", "full-command")
-    return views[(views.index(view) + 1) % len(views)]
+    return cycle_dashboard_body_view(view)
 
 
 def body_view_copy_kind(view: BodyView) -> CopyKind | None:
@@ -81,11 +98,11 @@ def _usage_values(usage: TokenUsage) -> dict[str, int]:
 
 
 def _historical_model(options: StandaloneLaunch, snapshot: UsageSnapshot):
-    from ccusage_viz.options import MonitorConfig
+    from ccusage_viz.options import CustomChartConfig, MonitorConfig
 
     chart = options.chart
-    if isinstance(chart, MonitorConfig):
-        raise TypeError("historical data views do not support monitor configurations")
+    if isinstance(chart, (CustomChartConfig, MonitorConfig)):
+        raise TypeError("historical data views do not support custom or monitor configurations")
     return process_historical(
         chart,
         snapshot.records,
@@ -114,9 +131,11 @@ def _project_source_rows(
     groups = project_groups(projects, options.project_aggregation)
     projects_by_key = {project.key: project for project in projects}
     usage_by_project: dict[tuple[str, str], TokenUsage] = defaultdict(TokenUsage.zero)
+    source_records_by_project: dict[tuple[str, str], list[UsageRecord]] = defaultdict(list)
     for record in scope.records:
         if record.project is not None:
             usage_by_project[record.project.key] += record.usage
+            source_records_by_project[record.project.key].append(record)
 
     entries = {entry.key: (rank, entry) for rank, entry in enumerate(model.entries, start=1)}
     member_keys = {
@@ -150,6 +169,24 @@ def _project_source_rows(
             continue
         for project_key in member_keys.get(key, ()):
             project = projects_by_key[project_key]
+            if project.raw_id in {FIXED_UNASSIGNED_PROJECT, FIXED_UNVERIFIED_PROJECT}:
+                rows.extend(
+                    {
+                        "rank": rank,
+                        "display_project": entry.label,
+                        "project": entry.label,
+                        "agent": record.agent,
+                        "attribution": record.attribution,
+                        "period": record.day.isoformat() if record.day is not None else None,
+                        "source_project": record.source_project,
+                        "session_id": record.session_id,
+                        "merge_group": merge_groups.get(key),
+                        "is_other": False,
+                        **_usage_values(record.usage),
+                    }
+                    for record in source_records_by_project[project_key]
+                )
+                continue
             rows.append(
                 {
                     "rank": rank,
@@ -296,6 +333,95 @@ def render_snapshot_data(
     return payload
 
 
+def custom_data_payload(
+    projection: CustomChartProjection | CustomRankingProjection, *, language: str
+) -> dict[str, object]:
+    """Return the exact displayed custom projection without Decimal float coercion."""
+
+    def localized(text: LocalizedText) -> str:
+        return text.zh_cn if language == "zh" else text.en
+
+    unit = projection.unit
+    payload: dict[str, object] = {
+        "kind": projection.kind,
+        "unit": {
+            "id": unit.id,
+            "label": localized(unit.label),
+            "placement": unit.placement,
+            "decimal_places": unit.decimal_places,
+        },
+    }
+    if isinstance(projection, CustomRankingProjection):
+        if projection.groups is None:
+            rows = [
+                {
+                    "rank": rank,
+                    "series_id": series.id,
+                    "series": localized(series.label),
+                    "is_other": series.is_other,
+                    "value": format(series.value, "f"),
+                }
+                for rank, series in enumerate(projection.series, 1)
+            ]
+        else:
+            rows = [
+                {
+                    "partition_id": group.id,
+                    "partition": localized(group.label),
+                    "rank": series.rank or rank,
+                    "series_id": series.id,
+                    "series": localized(series.label),
+                    "is_other": series.is_other,
+                    "value": format(series.value, "f"),
+                }
+                for group in projection.groups
+                for rank, series in enumerate(group.series, 1)
+            ]
+        payload["rows"] = rows
+        return payload
+    payload.update(
+        {
+            "range": {
+                "start_date": projection.date_range.since.isoformat(),
+                "end_date": projection.date_range.until.isoformat(),
+            },
+            "granularity": projection.granularity,
+            "rows": [
+                {
+                    "period": day.isoformat(),
+                    "series_id": series.id,
+                    "series": localized(series.label),
+                    "is_other": series.is_other,
+                    "value": format(value, "f"),
+                }
+                for series in projection.series
+                for day, value in zip(projection.days, series.values, strict=True)
+            ],
+        }
+    )
+    return payload
+
+
+def render_custom_data(
+    projection: CustomChartProjection | CustomRankingProjection,
+    *,
+    language: str,
+    translator: Translator,
+    view: Literal["data-table", "data-json"] = "data-table",
+) -> str:
+    """Render the visible custom projection as Markdown or deterministic JSON."""
+    payload = custom_data_payload(projection, language=language)
+    rows = payload["rows"]
+    assert isinstance(rows, list)
+    if not rows:
+        return translator.text("message.no_data")
+    return (
+        json.dumps(payload, indent=2, ensure_ascii=False)
+        if view == "data-json"
+        else _markdown(rows)
+    )
+
+
 def _monitor_display_project(name: ProjectDisplayKey) -> str:
     return f"{name.agent} · {name.label}" if name.agent is not None else name.label
 
@@ -425,3 +551,30 @@ def render_monitor_data(
         else _markdown(rows)
     )
     return payload
+
+
+def render_current_monitor_data(
+    component: MonitorComponent,
+    chart: MonitorConfig,
+    *,
+    translator: Translator,
+    terminal: Terminal,
+    now: float,
+    wall: datetime,
+    view: Literal["data-table", "data-json"] = "data-table",
+) -> str:
+    """Serialize the same observation projection used by the active Monitor chart."""
+    if is_monitor_distribution(chart):
+        return render_monitor_distribution_data(
+            component.distribution_model(now=now, wall=wall),
+            translator=translator,
+            terminal=terminal,
+            view=view,
+        )
+    return render_monitor_data(
+        component.buckets(max(8, min(32, terminal.width // 4)), now=now, wall=wall),
+        by=chart.by,
+        translator=translator,
+        terminal=terminal,
+        view=view,
+    )

@@ -25,16 +25,26 @@ class MouseEvent:
 
 
 @dataclass(frozen=True, slots=True)
+class WheelEvent:
+    """One vertical SGR wheel report; coordinates are terminal cells (1-based)."""
+
+    delta: int
+    x: int
+    y: int
+    modifiers: int = 0
+
+
+@dataclass(frozen=True, slots=True)
 class PasteEvent:
     """One complete terminal bracketed-paste payload."""
 
     value: str
 
 
-InputEvent = KeyEvent | MouseEvent | PasteEvent
+InputEvent = KeyEvent | MouseEvent | PasteEvent | WheelEvent
 
-_MOUSE_ENABLE = "\x1b[?1000h\x1b[?1006h\x1b[?2004h"
-_MOUSE_DISABLE = "\x1b[?1000l\x1b[?1006l\x1b[?2004l"
+_MOUSE_ENABLE = "\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h\x1b[?2004h"
+_MOUSE_DISABLE = "\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?2004l"
 _MOUSE_BUTTON_MASK = 0b11
 _MOUSE_MOTION = 0b100000
 _MOUSE_WHEEL = 0b1000000
@@ -105,10 +115,32 @@ class InputDecoder:
             and _BRACKETED_PASTE_END not in self.buffer[len(_BRACKETED_PASTE_START) :]
         )
 
+    def _peek_wheel(self) -> tuple[WheelEvent, int] | None:
+        mouse = _SGR_MOUSE.match(self.buffer)
+        if mouse is None:
+            return None
+        button, x, y = (int(value) for value in mouse.groups()[:3])
+        if mouse.group(4) != "M" or button & ~0b11100 not in (64, 65) or x < 1 or y < 1:
+            return None
+        return WheelEvent(1 if button & 1 else -1, x, y, button & 0b11100), mouse.end()
+
+    def drain_wheel(self) -> Iterator[WheelEvent]:
+        """Consume only complete consecutive buffered wheels, without pacing or I/O."""
+        while (pending := self._peek_wheel()) is not None:
+            event, end = pending
+            self.buffer = self.buffer[end:]
+            self.control_at = None
+            self.escape_at = None
+            yield event
+        if not self.buffer:
+            self.overloaded = False
+
     def next(self, *, now: float | None = None) -> InputEvent | None:
         now = time.monotonic() if now is None else now
-        if self.pacing_remaining(now=now) > 0 and not self.buffer.startswith(
-            _BRACKETED_PASTE_START
+        if (
+            self.pacing_remaining(now=now) > 0
+            and not self.buffer.startswith(_BRACKETED_PASTE_START)
+            and self._peek_wheel() is None
         ):
             return None
         while self.buffer:
@@ -192,13 +224,20 @@ class InputDecoder:
 
         mouse = _SGR_MOUSE.match(self.buffer)
         if mouse is not None:
+            wheel = self._peek_wheel()
             button, x, y = (int(value) for value in mouse.groups()[:3])
             self.buffer = self.buffer[mouse.end() :]
             self.control_at = None
             modifiers = button & ~_MOUSE_BUTTON_MASK
             if modifiers & _MOUSE_WHEEL:
-                return None
-            return MouseEvent(button & _MOUSE_BUTTON_MASK, x, y, mouse.group(4) == "M", modifiers)
+                return wheel[0] if wheel is not None else None
+            return MouseEvent(
+                button & _MOUSE_BUTTON_MASK,
+                x,
+                y,
+                mouse.group(4) == "M" and button & _MOUSE_BUTTON_MASK != 3,
+                modifiers,
+            )
 
         if self.buffer.startswith("\x1b[<"):
             if _SGR_MOUSE_PREFIX.match(self.buffer):
@@ -251,7 +290,7 @@ def tui_input_mode() -> Iterator[InputDecoder]:
     try:
         tty.setcbreak(descriptor)
         attributes = termios.tcgetattr(descriptor)
-        attributes[0] &= ~termios.ICRNL
+        attributes[0] &= ~(termios.ICRNL | termios.IXON)
         attributes[3] &= ~termios.ISIG
         termios.tcsetattr(descriptor, termios.TCSADRAIN, attributes)
         set_mouse_reporting(True)
@@ -272,7 +311,7 @@ def read_event(decoder: InputDecoder, timeout: float) -> InputEvent | None:
     if decoder.buffer:
         delay = decoder.pacing_remaining()
         if delay > 0:
-            time.sleep(min(timeout, delay))
+            time.sleep(max(0.001, min(timeout, delay)))
             return decoder.next()
         if not decoder.awaiting_paste and not decoder.buffer.startswith("\x1b"):
             return None

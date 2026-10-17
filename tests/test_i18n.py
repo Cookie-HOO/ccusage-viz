@@ -8,12 +8,21 @@ def test_catalogs_have_the_same_keys_and_placeholders() -> None:
     assert EN_MESSAGES.keys() == ZH_MESSAGES.keys()
     assert EN_MESSAGES["label.monitor_sampling"] == "sampling"
     assert ZH_MESSAGES["label.monitor_sampling"] == "采样中"
+    assert (
+        EN_MESSAGES["status.empty_pane_hint"]
+        == "Double-click to select, then press r to choose a type"
+    )
+    assert ZH_MESSAGES["status.empty_pane_hint"] == "双击选中，然后按 r 选择类型"
+    assert ZH_MESSAGES["label.pane_empty"] == "空白 (Empty)"
+    assert ZH_MESSAGES["label.pane_custom"] == "自定义 (Custom)"
     assert EN_MESSAGES["help.grid"] == "Pane grid: ROWSxCOLUMNS"
     assert ZH_MESSAGES["help.grid"] == "Pane 网格：ROWSxCOLUMNS"
     assert "spotlight-wide2" in EN_MESSAGES["help.dashboard_preset"]
     assert "spotlight-wide2" in ZH_MESSAGES["help.dashboard_preset"]
     assert "wide-clock" in EN_MESSAGES["help.dashboard_preset"]
     assert "wide-clock" in ZH_MESSAGES["help.dashboard_preset"]
+    assert "single" in EN_MESSAGES["help.dashboard_preset"]
+    assert "single" in ZH_MESSAGES["help.dashboard_preset"]
     assert "spotlight-" + "tall" not in EN_MESSAGES["help.dashboard_preset"]
     assert "spotlight-" + "tall" not in ZH_MESSAGES["help.dashboard_preset"]
     assert "spotlight-monitor" not in EN_MESSAGES["help.dashboard_preset"]
@@ -24,22 +33,43 @@ def test_catalogs_have_the_same_keys_and_placeholders() -> None:
     assert "高级" not in ZH_MESSAGES["status.tui_global_quick_controls"]
     assert "status.tui_global_advanced_controls" not in EN_MESSAGES
     assert "H header" in EN_MESSAGES["status.tui_global_quick_controls"]
-    assert "p summary period" in EN_MESSAGES["status.tui_global_quick_controls"]
+    assert "p/P summary period" in EN_MESSAGES["status.tui_global_quick_controls"]
     assert "H 页眉" in ZH_MESSAGES["status.tui_global_quick_controls"]
-    assert "p 摘要周期" in ZH_MESSAGES["status.tui_global_quick_controls"]
+    assert "p/P 摘要周期" in ZH_MESSAGES["status.tui_global_quick_controls"]
     assert (
         EN_MESSAGES["status.tui_global_operations"]
-        == "Global operations: u undo · U redo · h open help"
+        == "Global operations: c show or hide controls · u undo · U redo · h open help"
     )
-    assert ZH_MESSAGES["status.tui_global_operations"] == "全局操作：u 撤销 · U 重做 · h 打开帮助"
+    assert (
+        ZH_MESSAGES["status.tui_global_operations"]
+        == "全局操作：c 显示或隐藏控制栏 · u 撤销 · U 重做 · h 打开帮助"
+    )
+    assert (
+        EN_MESSAGES["status.tui_preset_operations"]
+        == "Ctrl-S save as new preset · Ctrl-P manage presets"
+    )
+    assert ZH_MESSAGES["status.tui_preset_operations"] == "Ctrl-S 保存为新预设 · Ctrl-P 管理预设"
     assert " d adjust dashboard " in EN_MESSAGES["status.tui_chart_controls"]
+    assert "c {action}" not in EN_MESSAGES["status.tui_chart_controls"]
     assert " d 调整仪表盘 " in ZH_MESSAGES["status.tui_chart_controls"]
+    assert "c {action}" not in ZH_MESSAGES["status.tui_chart_controls"]
     assert EN_MESSAGES["status.tui_pane_management_divider"] == "━━ Dashboard Pane Management ━━"
     assert ZH_MESSAGES["status.tui_pane_management_divider"] == "━━ Dashboard 子图管理 ━━"
     assert EN_MESSAGES["label.adjust_replace"] == "replace"
     assert ZH_MESSAGES["label.adjust_replace"] == "替换"
     assert EN_MESSAGES["label.adjust_next_pane"] == "select next"
     assert ZH_MESSAGES["label.adjust_next_pane"] == "选择下一项"
+    assert EN_MESSAGES["label.adjust_custom_logs"] == "logs"
+    assert ZH_MESSAGES["label.adjust_custom_logs"] == "日志"
+    assert EN_MESSAGES["label.adjust_chart"] == "adjust chart"
+    assert ZH_MESSAGES["label.adjust_chart"] == "调整图表"
+    assert EN_MESSAGES["label.adjust_partition"] == "partition"
+    assert ZH_MESSAGES["label.adjust_partition"] == "分区"
+    assert (
+        EN_MESSAGES["status.custom_partition_restricted"]
+        == "This chart is limited to its declared partition."
+    )
+    assert ZH_MESSAGES["status.custom_partition_restricted"] == "该图表仅支持能力声明中的分区。"
     assert "status.tui_help_modes" not in EN_MESSAGES
     assert "status.tui_help_current" not in EN_MESSAGES
     for mode in ("browse", "pane", "global"):
@@ -189,13 +219,15 @@ def test_catalogs_have_the_same_keys_and_placeholders() -> None:
     assert "trailing periods" not in EN_MESSAGES["status.tui_help_mode_pages_detail"]
     assert "Dashboard 子图调整" in ZH_MESSAGES["status.tui_help_mode_pages_detail"]
     assert "尾随周期" not in ZH_MESSAGES["status.tui_help_mode_pages_detail"]
-    assert "p trailing presets (7d, 14d" in EN_MESSAGES["status.tui_help_parameter_period"]
+    assert "p/P advance / reverse" in EN_MESSAGES["status.tui_help_parameter_period"]
     assert (
         "P cycles project label detail"
-        in EN_MESSAGES["status.tui_help_parameter_project_label_context"]
+        not in EN_MESSAGES["status.tui_help_parameter_project_label_context"]
     )
-    assert "p 切换尾随预设（7d、14d" in ZH_MESSAGES["status.tui_help_parameter_period"]
-    assert "P 切换项目名称细节" in ZH_MESSAGES["status.tui_help_parameter_project_label_context"]
+    assert "p/P 在当前粒度预设中向前/向后" in ZH_MESSAGES["status.tui_help_parameter_period"]
+    assert (
+        "P 切换项目名称细节" not in ZH_MESSAGES["status.tui_help_parameter_project_label_context"]
+    )
     assert EN_MESSAGES["status.tui_help_section_policy"] == "STRATEGY"
     assert ZH_MESSAGES["status.tui_help_section_policy"] == "策略"
     assert EN_MESSAGES["status.tui_help_summary_scope"] == "SUMMARY SCOPE [COMPUTATION LOGIC]"
@@ -235,19 +267,10 @@ def test_catalogs_have_the_same_keys_and_placeholders() -> None:
         EN_MESSAGES["status.monitor_attachment_settings"] == " · ANIMATION {style} · THEME {theme}"
     )
     assert ZH_MESSAGES["status.monitor_attachment_settings"] == " · 动画 {style} · 主题 {theme}"
-    assert (
-        EN_MESSAGES["status.animation_gallery_controls"]
-        == "Space pause/resume · t/T switch selected theme"
-    )
-    assert ZH_MESSAGES["status.animation_gallery_controls"] == "Space 暂停/继续 · t/T 切换选中主题"
-    assert EN_MESSAGES["status.pause"] == "pause"
-    assert ZH_MESSAGES["status.resume"] == "继续"
-    assert EN_MESSAGES["status.paused"] == "paused"
-    assert ZH_MESSAGES["status.paused"] == "已暂停"
-    assert EN_MESSAGES["status.animation_paused"] == "paused"
-    assert ZH_MESSAGES["status.animation_paused"] == "已暂停"
-    assert EN_MESSAGES["status.dashboard_paused"] == "paused"
-    assert ZH_MESSAGES["status.dashboard_paused"] == "已暂停"
+    assert EN_MESSAGES["status.animation_gallery_controls"] == "t/T switch selected theme"
+    assert ZH_MESSAGES["status.animation_gallery_controls"] == "t/T 切换选中主题"
+    assert EN_MESSAGES["status.hide_controls"] == "hide controls"
+    assert ZH_MESSAGES["status.show_controls"] == "显示控制栏"
 
 
 @pytest.mark.parametrize(

@@ -29,11 +29,16 @@ class Translator:
     language: str
     messages: dict[str, str]
 
+    def dimension(self, value: str) -> str:
+        if value in {"composition", "agent", "model", "project"}:
+            return self.messages[f"label.{value}"]
+        return value
+
     def text(self, key: str, **values: object) -> str:
         rendered_values = values
         dimension = values.get("dimension")
-        if dimension in {"agent", "model", "project"}:
-            rendered_values = {**values, "dimension": self.messages[f"label.{dimension}"]}
+        if isinstance(dimension, str):
+            rendered_values = {**values, "dimension": self.dimension(dimension)}
         return self.messages[key].format(**rendered_values)
 
 

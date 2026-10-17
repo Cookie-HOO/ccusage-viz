@@ -4,7 +4,7 @@ import hashlib
 import json
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import TypeAlias
+from typing import Any, TypeAlias
 
 from ccusage_viz.coverage import DateCoverage, DateInterval
 from ccusage_viz.domain import Notice, UsageRecord
@@ -74,6 +74,7 @@ class QueryIntent:
     dimensions: tuple[str, ...] = ()
     execution_options: tuple[Option, ...] = ()
     execution_context: ExecutionContext | None = None
+    payload: Any = None
     _fingerprint_value: str = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
@@ -132,11 +133,21 @@ class PhysicalQuery:
     execution_context: ExecutionContext | None = None
     coverage: DateCoverage = DateCoverage()
     required: bool = True
+    payload: Any = None
+    scheduling_group: str | None = None
+    scheduling_limit: int | None = None
+    speculative: bool = False
     _fingerprint_value: str = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if not self.operation:
             raise ValueError("physical query operation must not be empty")
+        if (self.scheduling_group is None) != (self.scheduling_limit is None):
+            raise ValueError("scheduling group and limit must be set together")
+        if self.scheduling_group == "":
+            raise ValueError("scheduling group must not be empty")
+        if self.scheduling_limit is not None and self.scheduling_limit < 1:
+            raise ValueError("scheduling limit must be positive")
         object.__setattr__(
             self,
             "_fingerprint_value",
@@ -186,6 +197,7 @@ class PhysicalResult:
     query: PhysicalQuery
     payload: bytes
     diagnostics: bytes = b""
+    executed_query: PhysicalQuery | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -196,6 +208,8 @@ class ProviderResultFragment:
     coverage: DateCoverage
     notices: tuple[Notice, ...] = ()
     provider_metadata: Metadata = ()
+    custom_response: object | None = None
+    diagnostics: bytes = b""
 
 
 @dataclass(frozen=True, slots=True)
@@ -208,6 +222,8 @@ class ProviderResult:
     summary_notices: tuple[Notice, ...] = ()
     provider_metadata: Metadata = ()
     includes_project_attribution: bool = False
+    custom_response: object | None = None
+    diagnostics: bytes = b""
 
 
 class QueryKind(StrEnum):

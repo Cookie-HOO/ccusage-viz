@@ -7,21 +7,22 @@ from datetime import date, datetime
 from enum import StrEnum
 
 from ccusage_viz.acquisition import historical_provider_id, historical_query_intent
-from ccusage_viz.chart_models import RankingModel
+from ccusage_viz.chart_models import PeriodSummary, RankingModel
 from ccusage_viz.charts.definition import ChartDefinition
 from ccusage_viz.charts.registry import ChartRegistry
 from ccusage_viz.coverage import DateCoverage, DateInterval
 from ccusage_viz.domain import Notice, UsageRecord
 from ccusage_viz.options import (
+    CustomChartConfig,
     HistoricalChartConfig,
     MonitorConfig,
-    StackConfig,
+    RankingConfig,
     StandaloneLaunch,
-    TimelineConfig,
+    has_complete_content,
 )
 from ccusage_viz.processing.historical import HistoricalModel
-from ccusage_viz.processing.summaries import required_summary_coverage
-from ccusage_viz.project_identity import ProjectLabelContext, next_project_label_context
+from ccusage_viz.processing.summaries import ranking_comparison_interval
+from ccusage_viz.project_identity import ProjectLabelContext
 from ccusage_viz.query.coordinator import QueryHandle
 from ccusage_viz.query.models import ProviderResult, QueryTrigger
 from ccusage_viz.query.runtime import QueryRuntime
@@ -41,8 +42,12 @@ def historical_replacement_required(
     """
     previous_chart = previous.chart
     candidate_chart = candidate.chart
-    if isinstance(previous_chart, MonitorConfig) or isinstance(candidate_chart, MonitorConfig):
-        raise TypeError("historical replacement checks do not support monitor configurations")
+    if isinstance(previous_chart, (CustomChartConfig, MonitorConfig)) or isinstance(
+        candidate_chart, (CustomChartConfig, MonitorConfig)
+    ):
+        raise TypeError(
+            "historical replacement checks do not support custom or monitor configurations"
+        )
     if type(previous_chart) is not type(candidate_chart):
         raise TypeError("historical replacement checks require matching chart kinds")
     return (
@@ -111,10 +116,12 @@ class HistoricalChartComponent:
         "error",
         "supplemental_error",
         "generation",
+        "include_summary",
         "model",
         "owner_id",
         "pending_generation",
         "project_label_context",
+        "summary",
         "render_revision",
         "runtime",
         "snapshot",
@@ -127,9 +134,10 @@ class HistoricalChartComponent:
         owner_id: str,
         runtime: QueryRuntime | None,
         registry: ChartRegistry,
+        include_summary: bool = True,
     ) -> None:
-        if isinstance(options.chart, MonitorConfig):
-            raise TypeError("historical components do not support monitor configurations")
+        if isinstance(options.chart, (CustomChartConfig, MonitorConfig)):
+            raise TypeError("historical components do not support custom or monitor configurations")
         definition = registry.get(options.chart.kind)
         if not isinstance(options.chart, definition.config_type):
             raise TypeError(f"{definition.chart_id} definition received incompatible configuration")
@@ -140,11 +148,13 @@ class HistoricalChartComponent:
         self.accepted_generation: int | None = None
         self.accepted_options: StandaloneLaunch | None = None
         self.snapshot: UsageSnapshot | None = None
+        self.include_summary = include_summary
         self.model: HistoricalModel | None = None
         self.generation = 0
         self.pending_generation: int | None = None
         self.render_revision = 0
         self.project_label_context: ProjectLabelContext = 0
+        self.summary: PeriodSummary | None = None
         self.accepted_at: datetime | None = None
         self.error: BaseException | None = None
         self.supplemental_error: BaseException | None = None
@@ -161,15 +171,15 @@ class HistoricalChartComponent:
         else:
             self.render_revision += 1
             if self.snapshot is not None and (not self.is_pending or restores_accepted):
-                self.model = self._process(options, self.snapshot)
+                self.model = self._with_summary(self._process(options, self.snapshot))
                 self.accepted_options = options
                 if restores_accepted:
                     self.pending_generation = None
 
     def _candidate_chart(self) -> HistoricalChartConfig:
         chart = self.candidate.chart
-        if isinstance(chart, MonitorConfig):
-            raise TypeError("historical components do not support monitor configurations")
+        if isinstance(chart, (CustomChartConfig, MonitorConfig)):
+            raise TypeError("historical components do not support custom or monitor configurations")
         return chart
 
     @property
@@ -184,7 +194,7 @@ class HistoricalChartComponent:
         chart = self._candidate_chart()
         return (
             self.snapshot is not None
-            and chart.presentation.density == "full"
+            and has_complete_content(chart.presentation.density)
             and self.supplemental_error is None
             and bool(self.missing_comparison_coverage().intervals)
         )
@@ -196,10 +206,11 @@ class HistoricalChartComponent:
     def required_coverage(self) -> DateCoverage:
         chart = self._candidate_chart()
         required = self.display_coverage()
-        if chart.date_range.fixed_bounds or chart.presentation.density != "full":
+        if chart.date_range.fixed_bounds or not has_complete_content(chart.presentation.density):
             return required
-        period = chart.granularity if isinstance(chart, (TimelineConfig, StackConfig)) else "day"
-        return required.merge(required_summary_coverage(chart.date_range.until, period))
+        if isinstance(chart, RankingConfig):
+            return required.merge(DateCoverage((ranking_comparison_interval(chart.date_range),)))
+        return required
 
     def missing_comparison_coverage(self) -> DateCoverage:
         accepted = self.snapshot.coverage if self.snapshot is not None else DateCoverage()
@@ -278,7 +289,7 @@ class HistoricalChartComponent:
         self.pending_generation = None
         self.accepted_options = self.candidate
         self.snapshot = snapshot
-        self.model = model
+        self.model = self._with_summary(model)
         if completion.purpose is HistoricalPurpose.PRIMARY:
             self.error = None
         else:
@@ -299,7 +310,7 @@ class HistoricalChartComponent:
         if purpose is HistoricalPurpose.SUPPLEMENTAL:
             self.supplemental_error = error
             if self.snapshot is not None:
-                self.model = self._process(self.candidate, self.snapshot)
+                self.model = self._with_summary(self._process(self.candidate, self.snapshot))
                 self.render_revision += 1
         else:
             self.pending_generation = None
@@ -356,15 +367,15 @@ class HistoricalChartComponent:
             summary_notices=summary_notices,
         )
 
-    def cycle_project_label_context(self) -> None:
-        """Restore up to two verified opaque label tokens for this session."""
-        chart = self._candidate_chart()
-        if getattr(chart, "by", None) != "project":
-            return
-        self.project_label_context = next_project_label_context(self.project_label_context)
-        self.render_revision += 1
-        if self.snapshot is not None and not self.is_pending:
-            self.model = self._process(self.candidate, self.snapshot)
+    def set_summary(self, summary: PeriodSummary | None) -> None:
+        """Inject an independently acquired pane summary into the chart model."""
+        self.summary = summary
+        if self.model is not None:
+            self.model = self._with_summary(self.model)
+            self.render_revision += 1
+
+    def _with_summary(self, model: HistoricalModel) -> HistoricalModel:
+        return replace(model, summary=self.summary) if not self.include_summary else model
 
     def render(self, context: RenderContext) -> str:
         if self.model is None:
@@ -403,6 +414,7 @@ class HistoricalChartComponent:
             notices=notices,
             summary_notices=snapshot.summary_notices,
             coverage=snapshot.coverage,
+            include_summary=self.include_summary,
             project_label_context=self.project_label_context,
         )
         if not isinstance(model, self.definition.model_type):

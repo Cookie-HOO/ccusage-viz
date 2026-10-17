@@ -240,6 +240,7 @@ class StackModel:
     notices: tuple[Notice, ...] = field(default_factory=tuple)
     summary: PeriodSummary | None = None
     aggregation: str = "day"
+    grouping: str = "composition"
 
     @property
     def total(self) -> TokenUsage:
@@ -254,6 +255,9 @@ class RankingEntry:
     label: str
     usage: TokenUsage
     is_other: bool = False
+    previous_usage: TokenUsage | None = None
+    comparison_ready: bool = False
+    previous_rank: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -263,6 +267,8 @@ class ScalarRankingEntry:
     value: ChartValue
     is_other: bool = False
     agent: str | None = None
+    description: str | None = None
+    display: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

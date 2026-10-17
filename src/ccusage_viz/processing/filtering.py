@@ -142,7 +142,17 @@ def prepare_filtered_scope(
             breakdowns = selected_breakdowns
         available_models.update(model_identity(item.model) for item in breakdowns)
         filtered.append(
-            UsageRecord(record.day, record.agent, usage, record.source, record.project, breakdowns)
+            UsageRecord(
+                record.day,
+                record.agent,
+                usage,
+                record.source,
+                record.project,
+                breakdowns,
+                record.attribution,
+                record.source_project,
+                record.session_id,
+            )
         )
 
     missing_agents = (*unmatched_agents, *(selected_agents - available_agents))

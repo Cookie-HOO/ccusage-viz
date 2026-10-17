@@ -19,17 +19,17 @@ Chinese READMEs. Both landing pages use these exact names and paths.
 
 | File | Used for | Command represented |
 | --- | --- | --- |
-| `standalone-calendar.png` | Calendar heatmap | `ccuv calendar` |
-| `standalone-ranking.png` | Project ranking | `ccuv ranking --by project` |
-| `standalone-stack-composition.png` | Token-composition Stack chart | `ccuv stack` |
-| `standalone-stack-cache-split.png` | Stack chart with cache reads and creation separated | `ccuv stack --cache split` |
-| `standalone-timeline-14d.png` | 14-day Timeline trend | `ccuv timeline` |
-| `standalone-timeline-13mo.png` | 13-month Timeline trend | `ccuv timeline --period 13mo` |
+| `standalone-calendar.png` | Calendar heatmap | `ccuv chart calendar` |
+| `standalone-ranking.png` | Project ranking | `ccuv chart ranking --by project` |
+| `standalone-stack-composition.png` | Token-composition Stack chart | `ccuv chart stack` |
+| `standalone-stack-cache-split.png` | Stack chart with cache reads and creation separated | `ccuv chart stack --cache split` |
+| `standalone-timeline-14d.png` | 14-day Timeline trend | `ccuv chart timeline` |
+| `standalone-timeline-13mo.png` | 13-month Timeline trend | `ccuv chart timeline --period 13mo` |
 | `standalone-animation-gallery.gif` | Animation-style gallery | `ccuv animate --gallery` |
-| `standalone-monitor-throughput.png` | Observed Monitor throughput window | `ccuv monitor` |
-| `standalone-monitor-cumulative-bars.png` | Monitor local-day cumulative token distribution | `ccuv monitor --style cumulative-bars` |
-| `standalone-monitor-ranking.png` | Monitor grouped ranking | `ccuv monitor --by project` |
-| `standalone-monitor-list.png` | Monitor process/list detail | `ccuv monitor` |
+| `standalone-monitor-throughput.png` | Observed Monitor throughput window | `ccuv chart monitor` |
+| `standalone-monitor-cumulative-bars.png` | Monitor local-day cumulative token distribution | `ccuv chart monitor --style cumulative-bars` |
+| `standalone-monitor-ranking.png` | Monitor grouped ranking | `ccuv chart monitor --by project` |
+| `standalone-monitor-list.png` | Monitor process/list detail | `ccuv chart monitor` |
 | `standalone-monitor-animation.gif` | Optional animation attached beneath Monitor ranking or list data | Monitor `m`, then `s` |
 
 Before committing a replacement, inspect it at native size. It must be legible

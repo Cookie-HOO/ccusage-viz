@@ -15,6 +15,8 @@ ProjectAggregation: TypeAlias = Literal["name", "exact"]
 ProjectLabelContext: TypeAlias = Literal[0, 1, 2]
 PROJECT_AGGREGATIONS: tuple[ProjectAggregation, ...] = ("name", "exact")
 ProjectGroupKey: TypeAlias = tuple[str, ...]
+FIXED_UNASSIGNED_PROJECT = "__ccuv_unassigned__"
+FIXED_UNVERIFIED_PROJECT = "__ccuv_unverified__"
 
 _GENERIC_PROJECT_NAMES = frozenset({"project", "unknown", "untitled"})
 _SHORT_OPAQUE_LABELS: dict[tuple[str, str], str] = {}
@@ -106,6 +108,13 @@ def make_project_ref(
     return ProjectRef(agent, raw_id, display, path_backed)
 
 
+def fixed_project_ref(agent: str, attribution: Literal["unassigned", "unverified"]) -> ProjectRef:
+    """Return one global visible bucket for non-project source usage."""
+    if attribution == "unassigned":
+        return ProjectRef(agent, FIXED_UNASSIGNED_PROJECT, "Unassigned")
+    return ProjectRef(agent, FIXED_UNVERIFIED_PROJECT, "Unverified")
+
+
 def _opaque_components(project: ProjectRef) -> tuple[str, ...] | None:
     if project.agent != "claude" or not project.raw_id.startswith("-"):
         return None
@@ -153,16 +162,23 @@ def _opaque_label_candidates(
     components: tuple[str, ...],
     depths: tuple[int, ...],
     context: ProjectLabelContext,
+    *,
+    minimum_suffix_components: int = 2,
 ) -> tuple[_OpaqueLabelCandidate, ...]:
     """Return shortest-first labels backed by verified opaque-token removal."""
+    # Claude's hyphen-flattened IDs retain two suffix tokens by default. The
+    # final token is often too generic to identify a project; a presentation
+    # surface may make a measured-width fallback from a separately proved alias.
+    maximum_removal_depth = max(1, len(components) - minimum_suffix_components)
     candidates = [
         _OpaqueLabelCandidate(
             label,
-            depth,
+            removal_depth,
             cacheable=True,
         )
         for depth in reversed(depths)
-        if _is_safe_display_name(label := "-".join(components[max(0, depth - context) :]))
+        if (removal_depth := min(max(0, depth - context), maximum_removal_depth)) > 0
+        and _is_safe_display_name(label := "-".join(components[removal_depth:]))
     ]
     cached = _SHORT_OPAQUE_LABELS.get(project.key)
     cached_depth = _SHORT_OPAQUE_DEPTHS.get(project.key)
@@ -566,22 +582,29 @@ def project_groups(
     }
     grouped: dict[ProjectGroupKey, list[ProjectRef]] = {}
     for project in pool:
-        alias = pair_aliases.get(project.key)
-        component = component_keys.get(project.key)
-        shared_component = component is not None and len(components[component]) > 1
-        key = (
-            ("project", "name", alias)
-            if alias is not None
-            else ("project", "path", component)
-            if shared_component
-            else ("project", "exact", project.agent, project.raw_id)
-        )
+        if project.raw_id == FIXED_UNASSIGNED_PROJECT:
+            key = ("project", "fixed", "unassigned")
+        elif project.raw_id == FIXED_UNVERIFIED_PROJECT:
+            key = ("project", "fixed", "unverified")
+        else:
+            alias = pair_aliases.get(project.key)
+            component = component_keys.get(project.key)
+            shared_component = component is not None and len(components[component]) > 1
+            key = (
+                ("project", "name", alias)
+                if alias is not None
+                else ("project", "path", component)
+                if shared_component
+                else ("project", "exact", project.agent, project.raw_id)
+            )
         grouped.setdefault(key, []).append(project)
 
     result: dict[tuple[str, str], ProjectGroup] = {}
     for key, members in grouped.items():
         ordered = tuple(sorted(members, key=lambda item: item.key))
-        if key[1] in {"name", "path"}:
+        if key[1] == "fixed":
+            label = "Unassigned" if key[2] == "unassigned" else "Unverified"
+        elif key[1] in {"name", "path"}:
             label = merged_project_label(ordered, pool, labels=labels)
         else:
             label = exact_project_label(ordered[0], pool, labels=labels)

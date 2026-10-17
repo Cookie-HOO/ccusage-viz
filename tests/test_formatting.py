@@ -5,7 +5,10 @@ from ccusage_viz.formatting import (
     display_width,
     format_summary_tokens,
     format_tokens,
+    sanitize_terminal_text,
     slice_width,
+    strip_ansi,
+    truncate_middle_width,
     truncate_width,
     wrap_width,
 )
@@ -40,6 +43,19 @@ def test_summary_token_formatting_has_at_most_two_decimals(value: int, expected:
     assert format_summary_tokens(value) == expected
 
 
+def test_terminal_text_sanitizer_removes_csi_osc_and_controls_but_keeps_unicode() -> None:
+    value = "正常 café\x1b[2Jvisible\x1b]52;c;YXR0YWNr\x07tail\x9b31m!\x00"
+
+    assert sanitize_terminal_text(value) == "正常 cafévisibletail!"
+
+
+def test_terminal_text_sanitizer_can_normalize_and_preserve_newlines() -> None:
+    value = "one\r\ntwo\rthree\nfour\x00"
+
+    assert sanitize_terminal_text(value) == "onetwothreefour"
+    assert sanitize_terminal_text(value, preserve_newlines=True) == "one\ntwo\nthree\nfour"
+
+
 def test_unicode_width_and_truncation() -> None:
     assert display_width("项目a") == 5
     assert clip_width("项目abc", 5) == "项目a"
@@ -63,7 +79,61 @@ def test_slice_width_obeys_display_cell_boundaries_for_wide_and_ansi_text() -> N
     assert display_width(slice_width(value, 3, 3)) == 2
 
 
+def test_middle_truncation_preserves_ansi_styling_on_cjk_right_half() -> None:
+    truncated = truncate_middle_width("\x1b[31mabcdef项目\x1b[0m", 8)
+
+    assert truncated == "\x1b[31mabc\x1b[0m…\x1b[31m项目\x1b[0m"
+    assert strip_ansi(truncated) == "abc…项目"
+    assert display_width(truncated) == 8
+
+
+def test_middle_truncation_replays_compound_sgr_styling_on_right_half() -> None:
+    value = "\x1b[1m\x1b[31mabcdef项目\x1b[0m"
+
+    assert slice_width(value, 6, 4) == "\x1b[1m\x1b[31m项目\x1b[0m"
+    assert truncate_middle_width(value, 8) == (
+        "\x1b[1m\x1b[31mabc\x1b[0m…\x1b[1m\x1b[31m项目\x1b[0m"
+    )
+
+
+def test_slice_width_discards_sgr_state_before_the_latest_reset() -> None:
+    value = "\x1b[1mab\x1b[0m\x1b[31mcdef"
+
+    assert slice_width(value, 4, 2) == "\x1b[31mef\x1b[0m"
+
+
+@pytest.mark.parametrize(
+    "color",
+    ["\x1b[38;5;0m", "\x1b[38;2;0;128;255m"],
+)
+def test_slice_width_keeps_zeroes_in_extended_color_payloads(color: str) -> None:
+    value = f"\x1b[1m{color}abcdef"
+
+    assert slice_width(value, 4, 2) == f"\x1b[1m{color}ef\x1b[0m"
+
+
 def test_wrap_width_preserves_word_boundaries_and_wide_character_widths() -> None:
     assert wrap_width("one two three", 7) == ("one two", "three")
     assert wrap_width("项目项目项目", 4) == ("项目", "项目", "项目")
     assert all(display_width(row) <= 4 for row in wrap_width("项目项目项目", 4))
+
+
+@pytest.mark.parametrize(
+    ("value", "width", "expected"),
+    [
+        ("路由请求数", 1, ("路", "由", "请", "求", "数")),
+        ("🙂a", 1, ("🙂", "a")),
+        ("a路b", 1, ("a", "路", "b")),
+        ("路 由", 1, ("路", "由")),
+        ("\x1b[31m路由\x1b[0m", 1, ("\x1b[31m路", "由\x1b[0m")),
+    ],
+)
+def test_wrap_width_consumes_characters_that_exceed_a_one_cell_viewport(
+    value: str, width: int, expected: tuple[str, ...]
+) -> None:
+    assert wrap_width(value, width) == expected
+
+
+def test_wrap_width_retains_empty_result_for_non_positive_widths() -> None:
+    assert wrap_width("路由", 0) == ()
+    assert wrap_width("route", -1) == ()

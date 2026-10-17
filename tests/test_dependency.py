@@ -12,6 +12,8 @@ from ccusage_viz.dependency import ensure_ccusage, ensure_provider_dependencies
 from ccusage_viz.errors import QueryError
 from ccusage_viz.i18n import load_translator
 from ccusage_viz.options import (
+    CustomChartConfig,
+    CustomCommandSource,
     ProcessConfig,
     StandaloneHostConfig,
     StandaloneLaunch,
@@ -59,6 +61,25 @@ def test_provider_dependency_preflight_uses_effective_provider(
     ensure_provider_dependencies(ccusage, registry, load_translator("en"))
 
     assert calls == [ccusage]
+
+
+def test_custom_standalone_skips_ccusage_dependency_preflight(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    custom = replace(
+        options(),
+        chart=CustomChartConfig(
+            "timeline",
+            CustomCommandSource("reading", ("reader", "ccuv")),
+            DateRange(date(2026, 1, 1), date(2026, 1, 2)),
+        ),
+    )
+    monkeypatch.setattr(
+        "ccusage_viz.dependency.ensure_ccusage",
+        lambda *_args: pytest.fail("custom standalone must not require ccusage"),
+    )
+
+    ensure_provider_dependencies(custom, build_provider_registry(), load_translator("en"))
 
 
 def test_dependency_preflight_skips_existing_ccusage(monkeypatch: pytest.MonkeyPatch) -> None:

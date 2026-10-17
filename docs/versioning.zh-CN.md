@@ -6,6 +6,33 @@
 - **次版本（`0.x.0`）**：`1.0` 前重大的新面向用户能力或数据源集成。
 - 在 `1.0` 前，公开接口仍可能在各个版本之间变化。
 
+## 0.3.0
+
+`0.3.0` 将 Dataset 扩展建设为一等数据源能力，并将聚焦图表统一到 Dashboard 运行时：
+
+- Dataset 管理器可以注册本地命令、浏览带签名的官方目录，以及安装、更新或删除兼容的 GitHub Release artifact；
+  已安装的数据源会在使用前执行 Probe，并始终是显式可执行命令，而不是进程内插件；
+- 新增的 `ccuv.custom/v2` 协议支持多个带描述的 Metric、数据源拥有的标量值、历史图表与 Ranking、
+  Custom Monitor observation、声明式周期、分组与分区维度、筛选、warning 和查询快照；同时继续支持遗留的
+  V1 历史 Dataset；
+- Dataset Pane 可以选择并事务式切换相关 Metric，保留有效的数据源自有刷新行为，并提供能力感知的控制和诊断，
+  且不会在不同 Metric 之间混合 observation 或比较事实；
+- Ranking 新增分组与分区结果、数据源描述与链接、标量值、本地搜索、复制操作、键盘与鼠标滚动、
+  响应式虚拟化渲染，以及更明确的比较和 Top/Other 行为；
+- `ccuv chart KIND` 现在把每个聚焦图表作为单 Pane Dashboard 启动，共享 Pane 生命周期、控制、检查视图、
+  渲染与刷新行为；具名用户 Dashboard 预设可以持久化受信任的本地配置，并可在终端 UI 中管理；
+- 终端帧差分、窄 Pane 布局、查询协调、项目 fallback 刷新、CLI 拼写错误指引、标题、帮助和双语 Dataset 文档
+  均得到大量正确性与易用性改进。
+
+兼容性说明：
+
+- 聚焦图表命令现位于 `ccuv chart` 下，例如 `ccuv chart timeline` 和 `ccuv chart monitor`，不再使用此前的
+  顶层图表路由；
+- Dataset V2 是此 minor 版本引入的 Alpha 阶段协议，其数据源自有 Metric 语义与 ccuv 内置 Token 指标相互独立；
+- Dashboard 预设中保存的 Dataset 命令和可执行 Overlay 命令属于受信任的本地自动化，加载配置时会运行。
+
+本版本不增加 ccuv 原生用量 collector，也不改变内置 Token 指标的含义。
+
 ## 0.2.2
 
 `0.2.2` 修复终端动画重绘行为并澄清 Dashboard 帮助，不改变 Token 收集或 Token 派生指标：

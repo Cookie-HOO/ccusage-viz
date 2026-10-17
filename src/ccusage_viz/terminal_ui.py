@@ -9,7 +9,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 
 from ccusage_viz.errors import UsageError
-from ccusage_viz.formatting import clip_width, display_width
+from ccusage_viz.formatting import clip_width, display_width, wrap_width
 from ccusage_viz.i18n import Translator
 from ccusage_viz.render.base import RenderContext, styled_text
 from ccusage_viz.render.palette import WARNING_COLOR
@@ -113,8 +113,9 @@ def notice_lines(
     glyph = "!" if ascii else "⚠"
     notice_color = 255 if color_scheme == "mono" else WARNING_COLOR
     return tuple(
-        clip_width(styled_text(f"{glyph} {notice}", notice_color, context, bold=True), width)
+        styled_text(row, notice_color, context, bold=True)
         for notice in notices
+        for row in wrap_width(f"{glyph} {notice}", width)
     )
 
 

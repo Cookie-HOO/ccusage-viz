@@ -7,7 +7,8 @@ from ccusage_viz.charts.builtins import (
     TIMELINE_DEFINITION,
 )
 from ccusage_viz.charts.registry import ChartRegistry
-from ccusage_viz.providers.ccusage import CCUSAGE_DEFINITION
+from ccusage_viz.providers.ccusage_definition import CCUSAGE_DEFINITION
+from ccusage_viz.providers.custom_command import CUSTOM_COMMAND_DEFINITION
 from ccusage_viz.providers.demo import DEMO_DEFINITION
 from ccusage_viz.query.coordinator import QueryCoordinator
 from ccusage_viz.query.registry import ProviderRegistry
@@ -28,6 +29,7 @@ def build_provider_registry() -> ProviderRegistry:
     registry = ProviderRegistry()
     registry.register(CCUSAGE_DEFINITION)
     registry.register(DEMO_DEFINITION)
+    registry.register(CUSTOM_COMMAND_DEFINITION)
     registry.freeze()
     return registry
 

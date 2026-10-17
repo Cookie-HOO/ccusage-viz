@@ -3,7 +3,12 @@ from datetime import date
 from ccusage_viz.chart_models import ChangeDirection, ComparisonState
 from ccusage_viz.coverage import DateCoverage, DateInterval
 from ccusage_viz.domain import SourceKind, TokenUsage, UsageRecord
-from ccusage_viz.processing.summaries import build_period_summary, summary_intervals
+from ccusage_viz.processing.summaries import (
+    build_period_summary,
+    required_summary_coverage,
+    summary_intervals,
+    summary_query_plan,
+)
 
 
 def record(day: date, total: int) -> UsageRecord:
@@ -45,15 +50,37 @@ def test_missing_comparison_coverage_hides_only_that_comparison() -> None:
     assert summary.year_over_year_state == ComparisonState.PENDING
 
 
+def test_week_summary_uses_current_partial_week_and_previous_complete_week() -> None:
+    end = date(2026, 3, 18)
+
+    plan = summary_query_plan(end, "week")
+
+    assert plan.current == DateInterval(date(2026, 3, 16), end)
+    assert plan.sequential == DateInterval(date(2026, 3, 9), date(2026, 3, 15))
+    assert plan.year_over_year is None
+    assert required_summary_coverage(end, "week") == DateCoverage(plan.intervals)
+
+
+def test_week_summary_marks_year_over_year_as_unavailable() -> None:
+    end = date(2026, 3, 18)
+    coverage = required_summary_coverage(end, "week")
+    summary = build_period_summary((), end, "week", coverage)
+
+    assert summary is not None
+    assert summary.sequential_state == ComparisonState.READY
+    assert summary.year_over_year is None
+    assert summary.year_over_year_state == ComparisonState.UNAVAILABLE
+
+
 def test_year_summary_marks_year_over_year_as_unavailable() -> None:
     end = date(2026, 3, 15)
     coverage = DateCoverage(summary_intervals(end, "year"))
     summary = build_period_summary((), end, "year", coverage)
 
     assert summary is not None
-    assert summary.sequential_state == ComparisonState.READY
-    assert summary.year_over_year is None
-    assert summary.year_over_year_state == ComparisonState.UNAVAILABLE
+    assert summary.sequential_state == ComparisonState.UNAVAILABLE
+    assert summary.year_over_year is not None
+    assert summary.year_over_year_state == ComparisonState.READY
 
 
 def test_uncovered_current_period_has_no_numeric_summary() -> None:

@@ -4,7 +4,7 @@ import pytest
 
 from ccusage_viz.chart_models import ChangeDirection
 from ccusage_viz.core.time import DateRange
-from ccusage_viz.coverage import DateCoverage
+from ccusage_viz.coverage import DateCoverage, DateInterval
 from ccusage_viz.demo import generate_demo
 from ccusage_viz.domain import ModelBreakdown, Notice, SourceKind, TokenUsage, UsageRecord
 from ccusage_viz.options import Filters, TimelineConfig
@@ -36,6 +36,40 @@ def record(day: int, agent: str, project: str, model: str, total: int) -> UsageR
     )
 
 
+def test_ranking_derives_previous_values_and_ranks_from_raw_coverage() -> None:
+    current = DateRange(date(2026, 1, 8), date(2026, 1, 9))
+    previous = DateInterval(date(2026, 1, 6), date(2026, 1, 7))
+    records = (
+        record(6, "claude", "/work/app", "opus", 200),
+        record(6, "claude", "/work/api", "opus", 100),
+        record(8, "claude", "/work/app", "opus", 100),
+        record(8, "claude", "/work/api", "opus", 300),
+    )
+
+    ranking = build_ranking(
+        records,
+        current,
+        by="project",
+        coverage=DateCoverage((DateInterval(current.since, current.until), previous)),
+        comparison_interval=previous,
+    )
+
+    api, app = ranking.entries
+    assert (api.label, api.usage.total, api.previous_usage.total, api.previous_rank) == (
+        "api",
+        300,
+        100,
+        2,
+    )
+    assert (app.label, app.usage.total, app.previous_usage.total, app.previous_rank) == (
+        "app",
+        100,
+        200,
+        1,
+    )
+    assert api.comparison_ready and app.comparison_ready
+
+
 def test_demo_stack_has_no_other_component() -> None:
     period = DateRange(date(2026, 1, 1), date(2026, 1, 8))
 
@@ -49,6 +83,19 @@ def test_demo_stack_has_no_other_component() -> None:
         "cache_read",
         "cache_creation",
     ]
+
+
+def test_stack_uses_the_requested_native_grouping() -> None:
+    period = DateRange(date(2026, 1, 1), date(2026, 1, 14))
+    records = generate_demo("small", period)
+
+    stack = build_stack(records, period, by="agent", top=2, show_other=True)
+
+    assert stack.grouping == "agent"
+    assert stack.components
+    assert all(
+        component.label not in {"input", "output", "cache"} for component in stack.components
+    )
 
 
 def test_filters_or_within_dimension_and_and_across_dimensions() -> None:
@@ -498,7 +545,7 @@ def test_ranking_summary_uses_only_daily_records_and_marks_session_omission() ->
     assert scope_notice not in ranking.notices
 
 
-def test_ranking_summary_warning_is_hidden_with_the_summary() -> None:
+def test_ranking_summary_warning_is_retained_for_an_external_summary() -> None:
     period = DateRange(date(2026, 1, 1), date(2026, 1, 1))
     scope_notice = Notice("notice.summary_excludes_session_agent", {"agent": "Codex"})
 
@@ -512,7 +559,7 @@ def test_ranking_summary_warning_is_hidden_with_the_summary() -> None:
     )
 
     assert ranking.summary is None
-    assert ranking.summary_notices == ()
+    assert ranking.summary_notices == (scope_notice,)
     assert scope_notice not in ranking.notices
 
 

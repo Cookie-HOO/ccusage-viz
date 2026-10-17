@@ -50,6 +50,19 @@ class ProviderCompiler(Protocol):
     def fingerprint(self, query: PhysicalQuery) -> str: ...
 
 
+class QueryDependencyResolver(Protocol):
+    """Resolve the complete ordered required follow-up set from primary facts.
+
+    Coordinators reuse matching speculative work by provider physical fingerprint.
+    """
+
+    def resolve_queries(
+        self,
+        plan: PhysicalPlan,
+        primary_fragments: tuple[ProviderResultFragment, ...],
+    ) -> tuple[PhysicalQuery, ...]: ...
+
+
 class ProviderExecutor(Protocol):
     def execute(self, query: PhysicalQuery, cancelled: Event) -> PhysicalResult: ...
 

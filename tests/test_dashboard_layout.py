@@ -5,6 +5,7 @@ import inspect
 import pytest
 
 from ccusage_viz.dashboard_layout import (
+    MIN_PANE_WIDTH,
     PaneRect,
     adjust_weight,
     layout_bands,
@@ -204,10 +205,125 @@ def test_weighted_geometry_allocates_shared_logical_bands() -> None:
         row_weights=(2, 1),
     )
 
-    assert layout.column_sizes == (4, 8)
-    assert layout.row_sizes == (8, 4)
-    assert layout.pane(1).width == layout.pane(3).width == 8
-    assert layout.pane(0).height == layout.pane(1).height == 8
+    assert layout.column_sizes == (5, 7)
+    assert layout.row_sizes == (7, 5)
+    assert layout.pane(1).width == layout.pane(3).width == 7
+    assert layout.pane(0).height == layout.pane(1).height == 7
+
+
+def test_weighted_layout_keeps_each_feasible_dashboard_band_at_its_minimum() -> None:
+    layout = resolve_pane_layout(
+        layout="1x2",
+        pane_count=2,
+        width=80,
+        height=3,
+        column_weights=(1, 1_000),
+        row_weights=(1,),
+    )
+
+    assert layout.column_sizes[0] == MIN_PANE_WIDTH
+    assert layout.column_sizes == (MIN_PANE_WIDTH, 75)
+    assert layout.row_sizes == (3,)
+
+
+@pytest.mark.parametrize(
+    ("configured", "width", "height", "divider_style", "axis_sizes"),
+    [
+        # The line divider is dropped when it would prevent one cell per band.
+        ("1x3", 3, 7, "line", (1, 1, 1)),
+        ("3x1", 7, 3, "line", (1, 1, 1)),
+        # Even after dropping the divider, physically impossible axes recover to zero sizes.
+        ("1x3", 1, 7, "line", (0, 0, 0)),
+        ("3x1", 7, 1, "line", (0, 0, 0)),
+        # With no dividers to reclaim, physically impossible axes recover to zero sizes.
+        ("1x3", 2, 7, "none", (0, 0, 0)),
+        ("3x1", 7, 2, "none", (0, 0, 0)),
+    ],
+)
+def test_layout_recovers_impossible_three_band_axes_with_bounded_origins(
+    configured: str,
+    width: int,
+    height: int,
+    divider_style: str,
+    axis_sizes: tuple[int, int, int],
+) -> None:
+    layout = resolve_pane_layout(
+        layout=configured,
+        pane_count=3,
+        width=width,
+        height=height,
+        divider_style=divider_style,
+    )
+
+    assert layout.gutter == 0
+    if configured == "1x3":
+        assert layout.column_gutter == 0
+        assert layout.row_gutter == (0 if divider_style == "none" else 1)
+        assert layout.column_sizes == axis_sizes
+    else:
+        assert layout.column_gutter == (0 if divider_style == "none" else 1)
+        assert layout.row_gutter == 0
+        assert layout.row_sizes == axis_sizes
+    for rect in layout.panes:
+        assert 0 <= rect.left < width
+        assert 0 <= rect.top < height
+
+
+@pytest.mark.parametrize(
+    ("configured", "width", "height", "column_sizes", "row_sizes"),
+    [
+        ("1x3", 11, 7, (3, 3, 3), (7,)),
+        ("3x1", 7, 11, (7,), (3, 3, 3)),
+    ],
+)
+def test_three_band_line_layouts_keep_exact_normal_geometry(
+    configured: str,
+    width: int,
+    height: int,
+    column_sizes: tuple[int, ...],
+    row_sizes: tuple[int, ...],
+) -> None:
+    layout = resolve_pane_layout(
+        layout=configured, pane_count=3, width=width, height=height, divider_style="line"
+    )
+
+    assert layout.column_gutter == layout.row_gutter == layout.gutter == 1
+    assert layout.column_sizes == column_sizes
+    assert layout.row_sizes == row_sizes
+
+
+@pytest.mark.parametrize(
+    ("width", "height", "column_gutter", "row_gutter", "column_sizes", "row_sizes"),
+    [
+        (3, 11, 0, 1, (1, 1, 1), (3, 3, 3)),
+        (11, 3, 1, 0, (3, 3, 3), (1, 1, 1)),
+        (11, 11, 1, 1, (3, 3, 3), (3, 3, 3)),
+    ],
+)
+def test_three_by_three_resolves_gutters_independently_per_axis(
+    width: int,
+    height: int,
+    column_gutter: int,
+    row_gutter: int,
+    column_sizes: tuple[int, int, int],
+    row_sizes: tuple[int, int, int],
+) -> None:
+    layout = resolve_pane_layout(
+        layout="3x3", pane_count=9, width=width, height=height, divider_style="line"
+    )
+
+    assert layout.column_gutter == column_gutter
+    assert layout.row_gutter == row_gutter
+    assert layout.gutter == min(column_gutter, row_gutter)
+    assert layout.column_sizes == column_sizes
+    assert layout.row_sizes == row_sizes
+    assert layout.pane(8) == PaneRect(
+        8,
+        sum(column_sizes[:2]) + 2 * column_gutter,
+        sum(row_sizes[:2]) + 2 * row_gutter,
+        column_sizes[2],
+        row_sizes[2],
+    )
 
 
 def test_layout_bands_describe_configured_spotlight_topology() -> None:

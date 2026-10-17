@@ -17,9 +17,16 @@ from ccusage_viz.options import (
 PACKAGE_ROOT = Path(__file__).parents[1] / "src" / "ccusage_viz"
 
 
+def _tui_source() -> str:
+    paths = sorted((PACKAGE_ROOT / "tui").rglob("*.py"))
+    assert paths
+    return "\n".join(path.read_text() for path in paths)
+
+
 def _forbidden_imports(root: Path, forbidden_imports: set[str]) -> list[str]:
     violations: list[str] = []
-    for path in sorted(root.rglob("*.py")):
+    paths = [root] if root.is_file() else sorted(root.rglob("*.py"))
+    for path in paths:
         tree = ast.parse(path.read_text())
         for node in ast.walk(tree):
             imported = (
@@ -56,10 +63,10 @@ def test_chart_registry_contains_only_the_four_presentation_charts() -> None:
     )
 
 
-def test_density_contract_is_three_state_and_pane_owned() -> None:
-    assert DENSITIES == ("minimal", "compact", "full")
+def test_density_contract_is_four_state_and_pane_owned() -> None:
+    assert DENSITIES == ("minimal", "compact", "full", "detailed")
     assert "standard" not in DENSITIES
-    assert ChartPresentation().density == "full"
+    assert ChartPresentation().density == "detailed"
     assert "density" not in {field.name for field in fields(DashboardHostConfig)}
 
     dashboard = DashboardLaunch(ProcessConfig(), DashboardHostConfig(), ())
@@ -157,7 +164,7 @@ def test_renderers_do_not_import_monitor_runtime_or_data_adapters() -> None:
 
 
 def test_monitor_hosts_do_not_import_the_removed_query_client() -> None:
-    for name in ("monitor.py", "tui.py"):
+    for name in ("tui",):
         assert (
             _forbidden_imports(
                 PACKAGE_ROOT / name,
@@ -169,10 +176,11 @@ def test_monitor_hosts_do_not_import_the_removed_query_client() -> None:
 
 
 def test_dashboard_composes_notices_inside_their_source_panes() -> None:
-    source = (PACKAGE_ROOT / "tui.py").read_text()
+    source = _tui_source()
+    painting = (PACKAGE_ROOT / "tui" / "painting.py").read_text()
 
     assert "def _local_pane_content(" in source
-    assert "_local_pane_content(" in source[source.index("def run_tui(") :]
+    assert "_local_pane_content(" in painting[painting.index("def paint(") :]
     assert "def _unique_notices(" not in source
 
 
@@ -204,7 +212,7 @@ def test_historical_component_owns_incremental_comparison_state() -> None:
 
 
 def test_dashboard_panes_do_not_mirror_component_business_state() -> None:
-    tree = ast.parse((PACKAGE_ROOT / "tui.py").read_text())
+    tree = ast.parse((PACKAGE_ROOT / "tui" / "models.py").read_text())
     panes = tuple(
         node
         for node in tree.body
@@ -238,19 +246,14 @@ def test_dashboard_panes_do_not_mirror_component_business_state() -> None:
     )
 
 
-def test_async_hosts_own_operations_through_the_shared_lifecycle() -> None:
-    for name, owners in {
-        "watch.py": ("standalone",),
-        "monitor.py": ("standalone:monitor",),
-        "tui.py": ("dashboard:header",),
-    }.items():
-        source = (PACKAGE_ROOT / name).read_text()
-        assert "LifecycleCoordinator(" not in source
-        assert "LifecycleOperation(" in source
-        assert "take_completed(" in source
-        assert all(owner in source for owner in owners)
+def test_dashboard_host_owns_operations_through_the_shared_lifecycle() -> None:
+    source = _tui_source()
+    assert "LifecycleCoordinator(" not in source
+    assert "LifecycleOperation(" in source
+    assert "take_completed(" in source
+    assert "dashboard:header" in source
 
-    tui = ast.parse((PACKAGE_ROOT / "tui.py").read_text())
+    tui = ast.parse((PACKAGE_ROOT / "tui" / "models.py").read_text())
     host_fields = {
         class_name: {
             target.id
@@ -275,7 +278,7 @@ def test_async_hosts_own_operations_through_the_shared_lifecycle() -> None:
     assert host_fields["DashboardHeader"].isdisjoint(forbidden)
 
 
-def test_monitor_demo_bootstrap_is_the_only_submit_outside_operation_starters() -> None:
+def test_dashboard_monitor_demo_bootstrap_is_the_only_submit_outside_operation_starter() -> None:
     allowed_starters = {"start", "start_pane_submission", "_await_monitor_warmup"}
     direct_submissions: list[tuple[str, str, int]] = []
 
@@ -300,16 +303,12 @@ def test_monitor_demo_bootstrap_is_the_only_submit_outside_operation_starters() 
                 direct_submissions.append((self.name, self.functions[-1], node.lineno))
             self.generic_visit(node)
 
-    for name in ("monitor.py", "tui.py", "watch.py"):
-        SubmitVisitor(name).visit(ast.parse((PACKAGE_ROOT / name).read_text()))
+    paths = sorted((PACKAGE_ROOT / "tui").rglob("*.py"))
+    assert paths
+    for path in paths:
+        SubmitVisitor(str(path.relative_to(PACKAGE_ROOT))).visit(ast.parse(path.read_text()))
 
-    assert [(name, function) for name, function, _line in direct_submissions] == [
-        ("monitor.py", "run_monitor")
-    ]
-    monitor_source = (PACKAGE_ROOT / "monitor.py").read_text()
-    assert "if options.host.demo_size:" in monitor_source
-    assert "component.submit(QueryTrigger.STARTUP, sample_ordinal=ordinal)" in monitor_source
-    assert "detect_gap=False" in monitor_source
+    assert direct_submissions == []
 
 
 def test_hosts_compose_complete_frames_and_only_painter_writes_rows() -> None:
@@ -318,10 +317,9 @@ def test_hosts_compose_complete_frames_and_only_painter_writes_rows() -> None:
     assert "class FramePainter:" in terminal
     assert "def paint_status" not in terminal
 
-    for name in ("monitor.py", "tui.py", "watch.py"):
-        source = (PACKAGE_ROOT / name).read_text()
-        assert "compose_frame(" in source
-        assert "paint_status(" not in source
+    source = _tui_source()
+    assert "compose_frame(" in source
+    assert "paint_status(" not in source
 
 
 def test_reusable_historical_views_do_not_import_watch_host() -> None:
@@ -330,7 +328,9 @@ def test_reusable_historical_views_do_not_import_watch_host() -> None:
     assert [
         violation
         for violation in violations
-        if violation.split(":", 1)[0] in {"data_view.py", "historical_render.py", "tui.py"}
+        if violation.split(":", 1)[0] in {"data_view.py", "historical_render.py"}
+        or violation.split(":", 1)[0]
+        in {path.name for path in (PACKAGE_ROOT / "tui").rglob("*.py")}
     ] == []
 
 
