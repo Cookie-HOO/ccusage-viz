@@ -459,7 +459,7 @@ def render_grouped_custom_ranking_viewport(
         marker = "⊞" if measure or copied_entry_id != ("group", group.id) else "✓"
         return list(
             render_ranking_heading_row(
-                label=group.label if context.style == "list" else f"{group.label} | {marker}",
+                label=f"{group.label} | {marker}",
                 value=group.display,
                 delta=group.comparison_display,
                 share=(
@@ -722,32 +722,33 @@ def render_grouped_custom_ranking_viewport(
     body = [source_line(viewport.rows[index]) for index in source_indexes]
     viewport.lines = tuple(body)
 
-    if context.style != "list":
-        for screen_index, source_index in enumerate(source_indexes):
-            row = viewport.rows[source_index]
-            if row.kind not in {"group", "series"}:
-                continue
-            identity: GroupedIdentity = (
-                ("group", row.group_id)
-                if row.kind == "group"
-                else ("series", row.group_id, cast(str, row.series_id))
-            )
-            entry = viewport.by_id.get(identity)
-            if isinstance(entry, RankingPresentationEntry) and entry.is_other:
-                continue
-            visible_line = strip_ansi(body[screen_index])
-            marker = max(visible_line.rfind("⊞"), visible_line.rfind("✓"))
-            if marker < 0:
-                continue
-            copy_column = display_width(visible_line[:marker])
-            link_column = (
-                display_width(visible_line.rsplit("→", 1)[0]) if "→" in visible_line else None
-            )
-            if link_column is not None and link_column >= context.width:
-                link_column = None
-            screen_row = viewport.body_top + screen_index
-            if screen_row < context.height and copy_column < context.width:
-                viewport.hits[screen_row] = (identity, copy_column, link_column)
+    for screen_index, source_index in enumerate(source_indexes):
+        row = viewport.rows[source_index]
+        if row.kind not in {"group", "series"}:
+            continue
+        if context.style == "list" and row.kind != "group":
+            continue
+        identity: GroupedIdentity = (
+            ("group", row.group_id)
+            if row.kind == "group"
+            else ("series", row.group_id, cast(str, row.series_id))
+        )
+        entry = viewport.by_id.get(identity)
+        if isinstance(entry, RankingPresentationEntry) and entry.is_other:
+            continue
+        visible_line = strip_ansi(body[screen_index])
+        marker = max(visible_line.rfind("⊞"), visible_line.rfind("✓"))
+        if marker < 0:
+            continue
+        copy_column = display_width(visible_line[:marker])
+        link_column = (
+            display_width(visible_line.rsplit("→", 1)[0]) if "→" in visible_line else None
+        )
+        if link_column is not None and link_column >= context.width:
+            link_column = None
+        screen_row = viewport.body_top + screen_index
+        if screen_row < context.height and copy_column < context.width:
+            viewport.hits[screen_row] = (identity, copy_column, link_column)
 
     rendered = "\n".join((*chrome, *body))
     if (

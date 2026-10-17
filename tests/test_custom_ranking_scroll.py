@@ -210,6 +210,7 @@ def render_grouped(
     scrollbar: bool = False,
     scrollbar_hovered: bool = False,
     copy_all_action: bool = False,
+    copied: tuple[str, ...] | None = None,
 ) -> str:
     return render_grouped_custom_ranking_viewport(
         model,
@@ -220,7 +221,7 @@ def render_grouped(
         search_query=search,
         search_editing=False,
         show_visible_count=True,
-        copied_entry_id=None,
+        copied_entry_id=copied,
         item_spacing=spacing,
         scrollbar=scrollbar,
         scrollbar_hovered=scrollbar_hovered,
@@ -334,7 +335,7 @@ def test_grouped_copy_payloads_include_rendered_numeric_fields() -> None:
     assert "70.0%" not in pending
 
 
-def test_grouped_list_has_no_copy_or_comparison_affordances() -> None:
+def test_grouped_list_keeps_group_copy_affordance_only() -> None:
     viewport = GroupedRankingViewport()
     model = grouped_projection()
     render_grouped(model, viewport, context(density="detailed"))
@@ -351,12 +352,23 @@ def test_grouped_list_has_no_copy_or_comparison_affordances() -> None:
 
     assert viewport.geometry_key != dot_geometry_key
     assert viewport.copy_all_hit is None
-    assert viewport.hits == {}
-    assert "⊞" not in output and "→" not in output
+    assert "⊞" in output and "→" not in output
+    assert any(hit[0] == ("group", "coding") for hit in viewport.hits.values())
+    assert all(hit[0][0] == "group" for hit in viewport.hits.values())
     assert "vs prior" not in output and "Rank Δ" not in output
-    # List mode removes affordances but retains the group label and descriptions.
+    # List mode retains group copy affordances while series rows stay compact.
     assert "Coding Model" in output and "About Coding Model" in output
     assert "Seed" in output and "Details for Seed" in output
+
+    copied = strip_ansi(
+        render_grouped(
+            model,
+            viewport,
+            replace(context(), style="list", density="detailed"),
+            copied=("group", "coding"),
+        )
+    )
+    assert "✓" in copied
 
 
 def test_grouped_copy_all_preserves_empty_groups_and_visible_other_exactly() -> None:
