@@ -47,7 +47,7 @@ from ccusage_viz.custom_models import (
 from ccusage_viz.custom_protocol import CustomChartResponse, CustomProbeResponse
 from ccusage_viz.domain import Notice, SourceKind, TokenUsage, UsageRecord
 from ccusage_viz.errors import QueryError, SchemaError, UsageError
-from ccusage_viz.formatting import display_width
+from ccusage_viz.formatting import display_width, strip_ansi
 from ccusage_viz.historical_component import HistoricalChartComponent, UsageSnapshot
 from ccusage_viz.historical_render import RenderedChart
 from ccusage_viz.i18n import load_translator
@@ -285,6 +285,21 @@ def test_official_catalog_items_separate_identity_from_description() -> None:
     assert len(rows) == 3
     assert not any("Name" in row or "Summary" in row for row in rows)
     assert all(display_width(row) <= 48 for row in rows)
+
+
+def test_official_catalog_description_uses_muted_dim_theme_style() -> None:
+    rows = _official_catalog_rows(
+        _catalog_entries(),
+        load_translator("en"),
+        index=0,
+        width=48,
+        color=True,
+        color_scheme="classic",
+    )
+
+    assert "\x1b[" not in rows[0]
+    assert all("\x1b[" in row for row in rows[1:])
+    assert all(strip_ansi(row).startswith("  ") for row in rows[1:])
 
 
 def test_official_catalog_items_align_chinese_description_at_narrow_width() -> None:

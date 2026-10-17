@@ -4202,6 +4202,8 @@ def _official_catalog_item_rows(
     *,
     selected: bool,
     width: int,
+    color: bool = False,
+    color_scheme: str = "classic",
 ) -> tuple[str, ...]:
     """Render one catalog item with its description as subordinate rows."""
 
@@ -4213,11 +4215,29 @@ def _official_catalog_item_rows(
     wrapped = list(wrap_width(summary, content_width))
     if len(wrapped) > 2:
         wrapped = [wrapped[0], truncate_width(wrapped[1], max(0, content_width - 1)) + "…"]
-    return (primary, *(clip_width(f"  {row}", width) for row in wrapped[:2]))
+    context = RenderContext(
+        width, 1, translator, color=color, color_scheme=color_scheme
+    )
+    descriptions = tuple(
+        styled_text(
+            clip_width(f"  {row}", width),
+            get_color_scheme(color_scheme).muted,
+            context,
+            dim=True,
+        )
+        for row in wrapped[:2]
+    )
+    return (primary, *descriptions)
 
 
 def _official_catalog_rows(
-    entries: tuple[object, ...], translator: Translator, *, index: int, width: int
+    entries: tuple[object, ...],
+    translator: Translator,
+    *,
+    index: int,
+    width: int,
+    color: bool = False,
+    color_scheme: str = "classic",
 ) -> list[str]:
     """Render catalog entries as primary items with subordinate descriptions."""
 
@@ -4225,7 +4245,12 @@ def _official_catalog_rows(
         row
         for item_index, entry in enumerate(entries)
         for row in _official_catalog_item_rows(
-            entry, translator, selected=item_index == index, width=width
+            entry,
+            translator,
+            selected=item_index == index,
+            width=width,
+            color=color,
+            color_scheme=color_scheme,
         )
     ]
 
@@ -4238,10 +4263,17 @@ def _official_catalog_viewport(
     offset: int,
     width: int,
     height: int,
+    color: bool = False,
+    color_scheme: str = "classic",
 ) -> tuple[str, int]:
     blocks = tuple(
         _official_catalog_item_rows(
-            entry, translator, selected=item_index == index, width=width
+            entry,
+            translator,
+            selected=item_index == index,
+            width=width,
+            color=color,
+            color_scheme=color_scheme,
         )
         for item_index, entry in enumerate(entries)
     )
@@ -8541,6 +8573,8 @@ def run_tui(options: DashboardLaunch, translator: Translator) -> int:
                     offset=modal.offset,
                     width=get_terminal_size().columns,
                     height=height,
+                    color=dashboard_theme != "no-color",
+                    color_scheme=dashboard_theme,
                 )
                 title = translator.text("status.dataset_browse_title")
                 controls = translator.text("status.dataset_browse_controls")
