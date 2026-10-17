@@ -40,7 +40,7 @@ from ccusage_viz.render.headings import (
     heading_with_querying,
 )
 from ccusage_viz.render.palette import categorical_colors, get_color_scheme
-from ccusage_viz.render.ranking_presentation import render_historical_ranking
+from ccusage_viz.render.ranking_historical import render_historical_ranking
 from ccusage_viz.render.stack_presentation import (
     normalized_stack_values,
     render_grouped_stack_plot,

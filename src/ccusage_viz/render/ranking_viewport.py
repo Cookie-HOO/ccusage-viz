@@ -19,7 +19,7 @@ from ccusage_viz.scrollbar import Scrollbar
 
 if TYPE_CHECKING:
     from ccusage_viz.render.base import RenderContext
-    from ccusage_viz.render.ranking_presentation import RankingPresentationEntry
+    from ccusage_viz.render.ranking_entries import RankingPresentationEntry
 
 
 def _ranking_clipboard_entry_text(
@@ -34,7 +34,7 @@ def _ranking_clipboard_entry_text(
         parts.append(entry.comparison_display or "")
     if percentage_visible and total:
         parts.append(f"{Decimal(entry.current) / Decimal(total):.1%}")
-    from ccusage_viz.render.ranking_presentation import copyable_description_text
+    from ccusage_viz.render.ranking_description import copyable_description_text
 
     parts.extend((copyable_description_text(entry.description or ""), entry.project_link or ""))
     return "\n".join(part for part in parts if part)
@@ -192,7 +192,7 @@ class RankingViewport:
         )
 
     def prepare_lines(self, *, descriptions: bool, spacing: str) -> None:
-        from ccusage_viz.render.ranking_presentation import description_visible_text
+        from ccusage_viz.render.ranking_description import description_visible_text
 
         heights = []
         starts = [0]

@@ -18,12 +18,9 @@ from ccusage_viz.processing.custom_ranking import (
 )
 from ccusage_viz.render.base import RenderContext
 from ccusage_viz.render.custom_ranking_preparation import prepare_custom_ranking
-from ccusage_viz.render.ranking_presentation import (
-    RankingPresentationEntry,
-    measure_ranking_columns,
-    render_historical_ranking,
-    render_ranking_heading_row,
-)
+from ccusage_viz.render.ranking_columns import measure_ranking_columns, render_ranking_heading_row
+from ccusage_viz.render.ranking_entries import RankingPresentationEntry
+from ccusage_viz.render.ranking_historical import render_historical_ranking
 from ccusage_viz.render.ranking_viewport import RankingColumns
 from ccusage_viz.render.summary import format_custom_value
 

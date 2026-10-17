@@ -265,7 +265,7 @@ from ccusage_viz.render.grouped_ranking_viewport import (
     render_grouped_custom_ranking_viewport,
 )
 from ccusage_viz.render.palette import COLOR_SCHEMES, get_color_scheme
-from ccusage_viz.render.ranking_presentation import (
+from ccusage_viz.render.ranking_description import (
     copyable_description_text,
     render_ranking_description,
 )

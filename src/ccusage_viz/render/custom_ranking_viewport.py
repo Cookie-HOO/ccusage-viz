@@ -11,11 +11,9 @@ from ccusage_viz.processing.custom_historical import CustomChartProjection
 from ccusage_viz.render.base import RenderContext, styled_text
 from ccusage_viz.render.custom_ranking_preparation import prepare_custom_ranking
 from ccusage_viz.render.palette import get_color_scheme
-from ccusage_viz.render.ranking_presentation import (
-    RankingPresentationEntry,
-    measure_ranking_columns,
-    render_historical_ranking,
-)
+from ccusage_viz.render.ranking_columns import measure_ranking_columns
+from ccusage_viz.render.ranking_entries import RankingPresentationEntry
+from ccusage_viz.render.ranking_historical import render_historical_ranking
 from ccusage_viz.render.ranking_viewport import RankingColumns, RankingViewport
 from ccusage_viz.render.summary import format_custom_value
 from ccusage_viz.scrollbar import Scrollbar

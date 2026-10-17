@@ -1398,7 +1398,7 @@ def test_stable_data_changes_invalidate_all_geometry_snapshots(
 
 def test_warm_large_ranking_only_formats_visible_entries(monkeypatch):
     import ccusage_viz.render.custom_ranking_preparation as preparation
-    import ccusage_viz.render.ranking_presentation as presentation
+    import ccusage_viz.render.ranking_historical as presentation
 
     model = projection(10_000, descriptions=True, comparison=True)
     viewport = RankingViewport()

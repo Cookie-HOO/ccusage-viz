@@ -15,10 +15,7 @@ from ccusage_viz.processing.custom_ranking import (
     CustomRankingProjection,
 )
 from ccusage_viz.render.base import RenderContext
-from ccusage_viz.render.ranking_presentation import (
-    RankingPresentationEntry,
-    filter_ranking_entries,
-)
+from ccusage_viz.render.ranking_entries import RankingPresentationEntry, filter_ranking_entries
 from ccusage_viz.render.summary import format_custom_value
 
 RankingEntry = CustomProjectedSeries | CustomProjectedRankingEntry

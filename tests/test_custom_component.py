@@ -74,7 +74,7 @@ from ccusage_viz.render import custom
 from ccusage_viz.render.base import RenderContext
 from ccusage_viz.render.custom import render_custom_projection
 from ccusage_viz.render.palette import categorical_color
-from ccusage_viz.render.ranking_presentation import copyable_description_text
+from ccusage_viz.render.ranking_description import copyable_description_text
 from ccusage_viz.render.summary import format_custom_value, render_custom_summary
 from ccusage_viz.render.timeline_presentation import TimelinePlot
 

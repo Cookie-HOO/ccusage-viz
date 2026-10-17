@@ -22,11 +22,9 @@ from ccusage_viz.render.headings import (
     monitor_heading_spec,
 )
 from ccusage_viz.render.palette import get_color_scheme
-from ccusage_viz.render.ranking_presentation import (
-    RankingPresentationEntry,
-    description_visible_text,
-    render_historical_ranking,
-)
+from ccusage_viz.render.ranking_description import description_visible_text
+from ccusage_viz.render.ranking_entries import RankingPresentationEntry
+from ccusage_viz.render.ranking_historical import render_historical_ranking
 from ccusage_viz.render.summary import render_summary, render_summary_placeholder
 from ccusage_viz.trends import trend_glyph
 

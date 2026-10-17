@@ -19,7 +19,7 @@ from ccusage_viz.formatting import clip_width, display_width, pad_width, wrap_wi
 from ccusage_viz.i18n import Translator
 from ccusage_viz.render.base import RenderContext
 from ccusage_viz.render.palette import get_color_scheme
-from ccusage_viz.render.ranking_presentation import render_ranking_description
+from ccusage_viz.render.ranking_description import render_ranking_description
 from ccusage_viz.terminal import (
     Frame,
     FramePainter,
