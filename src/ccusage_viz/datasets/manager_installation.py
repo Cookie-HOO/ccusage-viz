@@ -95,12 +95,12 @@ def _official_catalog_rows(
         rows.append(
             clip_width(
                 f"{'›' if item_index == selected else ' '} "
-                f"{_text(entry.title, translator)} · {entry.id}",
+                f"{_text(entry.title, translator)} · {entry.id}",  # ty: ignore[unresolved-attribute]
                 width,
             )
         )
         available = max(1, width - 2)
-        description_rows = wrap_width(_text(entry.summary, translator), available)
+        description_rows = wrap_width(_text(entry.summary, translator), available)  # ty: ignore[unresolved-attribute]
         for row_index, row in enumerate(description_rows[:2]):
             if row_index == 1 and len(description_rows) > 2:
                 row = clip_width(row, max(0, available - 1)) + "…"

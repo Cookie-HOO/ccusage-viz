@@ -216,7 +216,7 @@ def builtin_summary_query_plan(options: StandaloneLaunch, *, today: date) -> Sum
         raise TypeError("built-in summary planning only supports historical configurations")
     if chart.date_range.fixed_bounds:
         return range_summary_query_plan(chart.date_range)
-    period = chart.granularity if chart.kind in {"timeline", "stack"} else "day"
+    period = chart.granularity if chart.kind in {"timeline", "stack"} else "day"  # ty: ignore[unresolved-attribute]
     return summary_query_plan(today, cast(SummaryScope, period))
 
 
@@ -305,7 +305,7 @@ def custom_historical_query_intent(
     interval = (
         None
         if timestamp_range is not None
-        else DateInterval(config.date_range.since, config.date_range.until)
+        else DateInterval(config.date_range.since, config.date_range.until)  # ty: ignore[unresolved-attribute]
     )
     request_type = V2ChartRequest if config.metric_id is not None else CustomChartRequest
     request = request_type(
@@ -316,7 +316,7 @@ def custom_historical_query_intent(
         **(
             {"start_at": timestamp_range.start_at, "end_at": timestamp_range.end_at}
             if timestamp_range is not None
-            else {"start_date": interval.since, "end_date": interval.until}
+            else {"start_date": interval.since, "end_date": interval.until}  # ty: ignore[unresolved-attribute]
         ),
         period=config.date_range.period if config.date_range.relative_until else None,
         filters=config.filters,

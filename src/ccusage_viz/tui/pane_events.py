@@ -92,6 +92,7 @@ from ccusage_viz.tui_input import (
 def handle_pane_adjustment(session: TuiSession, event: object, key: object, *, now: float) -> None:
     if key is None:
         return
+    assert isinstance(key, str)
     if key in {"\r", "\n", "\x1b"}:
         end_adjustment(session)
         paint(session)
@@ -110,6 +111,7 @@ def handle_pane_adjustment(session: TuiSession, event: object, key: object, *, n
             paint(session)
             return
         animation_pane = pane
+        handled = True
         if session.adjustment_page == "quick" and key in {"p", "P"}:
             record_mutation(
                 session,
@@ -166,7 +168,9 @@ def handle_pane_adjustment(session: TuiSession, event: object, key: object, *, n
             record_mutation(
                 session,
                 ("pane", session.focused, "overlay-interval"),
-                lambda pane=animation_pane, now=now: pane.overlay.cycle_interval(now=now) and None,
+                lambda pane=animation_pane, now=now: (pane.overlay.cycle_interval(now=now), None)[
+                    1
+                ],
             )
         elif session.adjustment_page == "advanced" and key == "L":
             session.overlay_history = OverlayHistoryState(session.focused)
@@ -178,8 +182,8 @@ def handle_pane_adjustment(session: TuiSession, event: object, key: object, *, n
                 animation_pane.overlay.command_draft,
             )
         else:
-            now = None
-        if now is not None:
+            handled = False
+        if handled:
             paint(session)
             return
     if isinstance(pane, TuiCustomPane) and key in {"v", "V"}:
@@ -266,11 +270,15 @@ def handle_pane_adjustment(session: TuiSession, event: object, key: object, *, n
                     session.translator.text("status.custom_metric_no_alternative")
                 )
                 return
-            component.begin_metric_switch(
-                replace(base, metric_id=target.id),
-                now=datetime.now().astimezone(),
-                timezone=session.options.host.timezone or "UTC",
-            )
+            target_config = replace(base, metric_id=target.id)
+            if isinstance(component, CustomHistoricalComponent):
+                component.begin_metric_switch(
+                    target_config,
+                    now=datetime.now().astimezone(),
+                    timezone=session.options.host.timezone or "UTC",
+                )
+            else:
+                component.begin_metric_switch(target_config)
             refresh(
                 session,
                 focused_index,
@@ -328,7 +336,7 @@ def handle_pane_adjustment(session: TuiSession, event: object, key: object, *, n
                 record_mutation(
                     session,
                     ("pane", focused_index, "custom-monitor-presentation"),
-                    lambda config=updated: component.configure(config, data_affecting=False),
+                    lambda config=updated: component.configure(config, data_affecting=False),  # ty: ignore[invalid-argument-type]
                 )
         elif isinstance(component, CustomMonitorComponent) and key == "w":
             if base.presentation.style == "cumulative-bars":
@@ -342,7 +350,7 @@ def handle_pane_adjustment(session: TuiSession, event: object, key: object, *, n
                 record_mutation(
                     session,
                     ("pane", focused_index, "custom-monitor-window"),
-                    lambda window=window: component.configure_display_window(window),
+                    lambda window=window: component.configure_display_window(window),  # ty: ignore[unresolved-attribute]
                 )
         elif key in {"p", "P"}:
             period_base = (
@@ -430,9 +438,9 @@ def handle_pane_adjustment(session: TuiSession, event: object, key: object, *, n
             key in {"g", "G"}
             and (not is_v2_custom_ranking(base))
             and (capability is not None)
-            and capability.granularities
+            and capability.granularities  # ty: ignore[unresolved-attribute]
         ):
-            values = capability.granularities
+            values = capability.granularities  # ty: ignore[unresolved-attribute]
             current = base.granularity if base.granularity in values else values[0]
             direction = 1 if key == "g" else -1
             updated = replace(base, granularity=_cycle(values, current, direction))
@@ -702,10 +710,10 @@ def handle_pane_adjustment(session: TuiSession, event: object, key: object, *, n
 
         try:
             edited = run_filter_editor(
-                base.chart.filters,
+                base.chart.filters,  # ty: ignore[invalid-argument-type]
                 discover_filter_choices(
                     pane_records(session, pane),
-                    base.chart.filters,
+                    base.chart.filters,  # ty: ignore[invalid-argument-type]
                     include_projects=pane_includes_projects(session, pane),
                 ),
                 session.translator,

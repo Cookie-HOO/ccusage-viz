@@ -101,6 +101,10 @@ class RankingViewport:
     # Heights omit the separator preceding each entry.
     heights: tuple[int, ...] = ()
     hits: dict[int, tuple[str, int, int | None]] = field(default_factory=dict)
+
+    def shift_hits(self, rows: int) -> None:
+        self.hits = {row + rows: hit for row, hit in self.hits.items()}
+
     full_total: int | Decimal = 0
     full_maximum: int | Decimal = 1
     comparison_visible: bool = False

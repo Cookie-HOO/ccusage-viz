@@ -246,7 +246,7 @@ def start_builtin_pane_summary_submission(
             handle,
             operation.generation,
             plan,
-            component.candidate.chart,
+            component.candidate.chart,  # ty: ignore[invalid-argument-type]
         ),
         handle.cancel,
     )
@@ -303,7 +303,7 @@ def start_custom_pane_summary_submission(
     if session.options.host.timezone is None:
         raise RuntimeError("custom Dataset requests require a timezone")
     plan = (
-        range_summary_query_plan(config.date_range)
+        range_summary_query_plan(config.date_range)  # ty: ignore[invalid-argument-type]
         if config.date_range.fixed_bounds
         else summary_query_plan(
             local_today(timezone=session.options.host.timezone),
@@ -447,7 +447,7 @@ def refresh(
                     date_range=refresh_custom_ranking_range(
                         component.candidate.date_range,
                         now=datetime.now().astimezone(),
-                        timezone=session.options.host.timezone,
+                        timezone=session.options.host.timezone,  # ty: ignore[invalid-argument-type]
                     ),
                 ),
                 data_affecting=True,
@@ -495,7 +495,8 @@ def refresh(
             chart=replace(
                 current.chart,
                 date_range=refresh_date_range(
-                    current.chart.date_range, timezone=session.options.host.timezone
+                    current.chart.date_range,  # ty: ignore[invalid-argument-type]
+                    timezone=session.options.host.timezone,
                 ),
             ),
         )
@@ -530,7 +531,7 @@ def start_custom_summary_submission(
     if selection.summary_mode == "none":
         raise RuntimeError("summary disabled for selected metric")
     plan = (
-        range_summary_query_plan(selection.config.date_range)
+        range_summary_query_plan(selection.config.date_range)  # ty: ignore[invalid-argument-type]
         if selection.config is not None and selection.config.date_range.fixed_bounds
         else summary_query_plan(
             local_today(timezone=session.options.host.timezone),
@@ -539,7 +540,7 @@ def start_custom_summary_submission(
     )
     if selection.summary_mode in {"total", "comparisons"} and selection.config is not None:
         if selection.summary_mode == "total":
-            plan = SummaryQueryPlan("total", plan.current)
+            plan = SummaryQueryPlan("total", plan.current)  # ty: ignore[invalid-argument-type]
         intent = custom_v2_summary_query_intent(
             selection.config,
             plan,

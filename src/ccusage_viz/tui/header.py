@@ -187,7 +187,7 @@ def _reconcile_custom_dashboard_summaries(
             FixedIntervalScheduler(header.scheduler.interval, now=now),
             LifecycleOperation(f"dashboard:header:custom:{dataset_id}"),
         )
-        summary.metric_id = selection.config.metric_id
+        summary.metric_id = selection.config.metric_id  # ty: ignore[unresolved-attribute]
         summary.summary_mode = selection.summary_mode
         header.custom_summaries[dataset_id] = summary
         added.append(summary)

@@ -29,6 +29,7 @@ from ccusage_viz.tui.models import (
     OverlayHistoryState,
 )
 from ccusage_viz.tui.pane_lifecycle import _new_pane
+from ccusage_viz.tui_input import InputDecoder
 from ccusage_viz.tui_preset_manager import PresetManagerState
 
 
@@ -98,6 +99,7 @@ class TuiSession:
             int, tuple[tuple[object, ...], str, tuple[DashboardOverlayPlacement, ...]]
         ] = {}
         self.screen = FramePainter(sys.stdout)
+        self.decoder: InputDecoder
         self.history = DashboardHistory(capture_dashboard_state(self))
         self.displayed_layout: ResolvedPaneLayout | None = None
         self.displayed_header_rows = 0

@@ -147,7 +147,7 @@ def process_custom_historical(
         _validate_capability(comparison_response, comparison_config)
         _validate_dates(comparison_response, comparison_config)
 
-    days = _period_axis(config.date_range.since, config.date_range.until, config.granularity)
+    days = _period_axis(config.date_range.since, config.date_range.until, config.granularity)  # ty: ignore[unresolved-attribute]
     if response.data.groups is not None:
         return _process_grouped_ranking(
             response,
@@ -176,7 +176,7 @@ def process_custom_historical(
         days,
         tuple(selected),
         response.dataset.unit,
-        config.date_range,
+        config.date_range,  # ty: ignore[invalid-argument-type]
         config.granularity,
         config,
         _presentation_descriptor(response),
@@ -210,7 +210,7 @@ def _process_grouped_ranking(
         days,
         (),
         response.dataset.unit,
-        config.date_range,
+        config.date_range,  # ty: ignore[invalid-argument-type]
         config.granularity,
         config,
         _presentation_descriptor(response),
@@ -443,8 +443,8 @@ def _bucket_start(day: date, granularity: str) -> date:
 
 def _bucket_overlaps(bucket: date, config: CustomChartConfig) -> bool:
     return (
-        bucket <= config.date_range.until
-        and period_end(bucket, config.granularity) >= config.date_range.since
+        bucket <= config.date_range.until  # ty: ignore[unresolved-attribute]
+        and period_end(bucket, config.granularity) >= config.date_range.since  # ty: ignore[unresolved-attribute]
     )
 
 

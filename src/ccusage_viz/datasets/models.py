@@ -286,10 +286,10 @@ class DatasetManifest:
             )
             metric = DatasetMetric(
                 metric_descriptor.id,
-                metric_descriptor.title,
+                metric_descriptor.title,  # ty: ignore[invalid-argument-type]
                 DatasetUnit(
                     metric_descriptor.unit.id,
-                    metric_descriptor.unit.label,
+                    metric_descriptor.unit.label,  # ty: ignore[invalid-argument-type]
                     metric_descriptor.unit.placement,
                     metric_descriptor.unit.decimal_places,
                 ),
@@ -298,10 +298,10 @@ class DatasetManifest:
         else:
             metric = DatasetMetric(
                 descriptor.dataset.unit.id,
-                descriptor.dataset.title,
+                descriptor.dataset.title,  # ty: ignore[invalid-argument-type]
                 DatasetUnit(
                     descriptor.dataset.unit.id,
-                    descriptor.dataset.unit.label,
+                    descriptor.dataset.unit.label,  # ty: ignore[invalid-argument-type]
                     descriptor.dataset.unit.placement,
                     descriptor.dataset.unit.decimal_places,
                 ),
@@ -321,7 +321,7 @@ class DatasetManifest:
         return cls(
             identifier,
             descriptor.version,
-            value["protocol"],
+            value["protocol"],  # ty: ignore[invalid-argument-type]
             entrypoint,
             platform_os,
             platform_arch,

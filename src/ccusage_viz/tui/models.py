@@ -20,6 +20,13 @@ from ccusage_viz.custom_models import V2HistoricalChartCapability, V2MetricDescr
 from ccusage_viz.custom_monitor_component import CustomMonitorComponent
 from ccusage_viz.custom_protocol.responses import CustomSummaryResponse, V2SummaryResponse
 from ccusage_viz.data_view import BodyView
+from ccusage_viz.datasets.models import (
+    CatalogEntry,
+    DatasetManifest,
+    DatasetRegistrationStatus,
+    ReleaseArtifact,
+)
+from ccusage_viz.datasets.service import DatasetService
 from ccusage_viz.domain import UsageRecord
 from ccusage_viz.errors import UsageError
 from ccusage_viz.historical_component import (
@@ -273,8 +280,8 @@ class DashboardDatasetModalState:
     action: str
     pane_index: int
     initial: CustomChartConfig | None
-    statuses: tuple[object, ...]
-    service: object
+    statuses: tuple[DatasetRegistrationStatus, ...]
+    service: DatasetService
     stage: str = "pane"
     index: int = 0
     offset: int = 0
@@ -282,12 +289,12 @@ class DashboardDatasetModalState:
     error: str | None = None
     future: Future[object] | None = None
     pending_dataset_id: str | None = None
-    entries: tuple[object, ...] = ()
+    entries: tuple[CatalogEntry, ...] = ()
     selected_dataset_id: str | None = None
-    artifact: object | None = None
-    official_preview: tuple[object, bytes, object] | None = None
+    artifact: ReleaseArtifact | None = None
+    official_preview: tuple[ReleaseArtifact, bytes, DatasetManifest] | None = None
     chart_kinds: tuple[str, ...] = ()
-    metrics: tuple[object, ...] = ()
+    metrics: tuple[V2MetricDescriptor, ...] = ()
     metric_id: str | None = None
     metric_summary: str = "comparisons"
     metric_periods: tuple[str, ...] = ()

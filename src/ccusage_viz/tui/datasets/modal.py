@@ -14,6 +14,13 @@ from typing import cast
 from ccusage_viz.command_copy import copy_command
 from ccusage_viz.configuration import default_custom_pane
 from ccusage_viz.custom_models import V2MetricDescriptor, V2ProbeDescriptor
+from ccusage_viz.datasets.models import (
+    CatalogEntry,
+    DatasetManifest,
+    DatasetRegistrationStatus,
+    DatasetStatus,
+    ReleaseArtifact,
+)
 from ccusage_viz.diagnostics import format_error
 from ccusage_viz.errors import QueryError, UsageError
 from ccusage_viz.options import CustomChartConfig, CustomChartPaneConfig, CustomCommandSource
@@ -100,8 +107,6 @@ def _dataset_modal_height(session: TuiSession, pane_index: int) -> int:
 
 
 def _paint_dataset_modal(session: TuiSession) -> None:
-    from ccusage_viz.tui.help import controls
-
     """Render the active Dataset state in its target pane."""
     assert session.dataset_modal is not None
     modal = session.dataset_modal
@@ -333,7 +338,7 @@ def finish_dataset_modal(session: TuiSession, choice: CustomChartPaneConfig | st
     record_mutation(session, ("pane", modal.pane_index, modal.action), insert)
 
 
-def advance_dataset_modal(session: TuiSession, status: object) -> bool:
+def advance_dataset_modal(session: TuiSession, status: DatasetRegistrationStatus) -> bool:
     """Apply a refreshed source descriptor and report whether it advances the modal."""
     assert session.dataset_modal is not None
     modal = session.dataset_modal
@@ -386,7 +391,7 @@ def collect_dataset_modal(session: TuiSession) -> bool:
         selected_index = modal.index
         selected_dataset_id = modal.pending_dataset_id
         try:
-            refreshed = modal.future.result()
+            refreshed = cast(DatasetRegistrationStatus, modal.future.result())
             refreshed_id = refreshed.registration.dataset_id
             if refreshed_id != selected_dataset_id:
                 raise UsageError("error.dataset_corrupt", dataset_id=selected_dataset_id)
@@ -408,7 +413,7 @@ def collect_dataset_modal(session: TuiSession) -> bool:
         return True
     if modal.stage == "browse":
         try:
-            modal.entries = tuple(modal.future.result())
+            modal.entries = cast(tuple[CatalogEntry, ...], modal.future.result())
             modal.error = None
         except UsageError as exc:
             modal.error = format_error(exc, session.translator)
@@ -419,7 +424,7 @@ def collect_dataset_modal(session: TuiSession) -> bool:
     if modal.stage == "installing":
         try:
             modal.future.result()
-            modal.statuses = tuple(modal.service.status())
+            modal.statuses = tuple(modal.service.ready_registered_sources())
             modal.draft.dataset_id = modal.selected_dataset_id or ""
             modal.stage, modal.index, modal.offset = ("installed", 0, 0)
             modal.error = None
@@ -433,7 +438,9 @@ def collect_dataset_modal(session: TuiSession) -> bool:
         return True
     if modal.stage == "browse_loading":
         try:
-            modal.official_preview = cast(tuple[object, bytes, object], modal.future.result())
+            modal.official_preview = cast(
+                tuple[ReleaseArtifact, bytes, DatasetManifest], modal.future.result()
+            )
             modal.stage = "browse_confirm"
             modal.error = None
         except UsageError as exc:
@@ -446,7 +453,7 @@ def collect_dataset_modal(session: TuiSession) -> bool:
         return True
     if modal.stage == "github":
         try:
-            modal.artifact = modal.future.result()
+            modal.artifact = cast(ReleaseArtifact, modal.future.result())
             modal.error = None
         except UsageError as exc:
             modal.error = format_error(exc, session.translator)
@@ -456,12 +463,12 @@ def collect_dataset_modal(session: TuiSession) -> bool:
         return True
     if modal.stage == "github_installing":
         try:
-            status = modal.future.result()
+            status = cast(DatasetStatus, modal.future.result())
             installed = status.installed
             if installed is None:
                 raise UsageError("error.dataset_corrupt")
             modal.draft.dataset_id = installed.dataset_id
-            modal.statuses = tuple(modal.service.status())
+            modal.statuses = tuple(modal.service.ready_registered_sources())
             modal.stage, modal.index, modal.offset = ("installed", 0, 0)
             modal.error = None
         except UsageError as exc:
@@ -477,7 +484,6 @@ def collect_dataset_modal(session: TuiSession) -> bool:
 
 def handle_dataset_modal(session: TuiSession, event: object) -> None:
     from ccusage_viz.tui.help import open_help
-    from ccusage_viz.tui.queries import refresh
 
     """Apply one event to the active Dataset modal without blocking Dashboard work."""
     assert session.dataset_modal is not None
@@ -549,15 +555,9 @@ def handle_dataset_modal(session: TuiSession, event: object) -> None:
             modal.metric_titles = None
             modal.chart_kinds = ()
             modal.error = None
-            refresh = getattr(modal.service, "refresh", None)
-            if refresh is None:
-                advance_dataset_modal(session, status)
-                return
             modal.pending_dataset_id = modal.draft.dataset_id
             modal.stage = "source_loading"
-            modal.future = session.executor.submit(
-                cast(Callable[[str], object], refresh), modal.pending_dataset_id
-            )
+            modal.future = session.executor.submit(modal.service.refresh, modal.pending_dataset_id)
             if modal.future.done():
                 collect_dataset_modal(session)
         return
@@ -616,9 +616,7 @@ def handle_dataset_modal(session: TuiSession, event: object) -> None:
             if key in {"\r", "\n"}:
                 modal.stage = "github_installing"
                 modal.future = session.executor.submit(
-                    cast(
-                        Callable[[object], object], modal.service.install_resolved_github_artifact
-                    ),
+                    modal.service.install_resolved_github_artifact,
                     modal.artifact,
                 )
         elif key in {"\r", "\n"}:
@@ -652,7 +650,7 @@ def handle_dataset_modal(session: TuiSession, event: object) -> None:
                 modal.index = (modal.index - 1) % len(modal.entries)
             elif key in {"\r", "\n"}:
                 selected = modal.entries[modal.index]
-                host_os, host_arch = cast(tuple[str, str], modal.service.platform)
+                host_os, host_arch = modal.service.platform
                 if not any(
                     artifact.os == host_os and artifact.arch == host_arch
                     for artifact in selected.artifacts

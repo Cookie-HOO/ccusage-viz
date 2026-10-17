@@ -70,6 +70,10 @@ class GroupedRankingViewport:
     ] = ()
     by_id: dict[GroupedIdentity, object] = field(default_factory=dict)
     hits: dict[int, tuple[GroupedIdentity, int, int | None]] = field(default_factory=dict)
+
+    def shift_hits(self, rows: int) -> None:
+        self.hits = {row + rows: hit for row, hit in self.hits.items()}
+
     columns: RankingColumns = field(default_factory=RankingColumns)
     comparison_visible: bool = False
     percentage_visible: bool = False

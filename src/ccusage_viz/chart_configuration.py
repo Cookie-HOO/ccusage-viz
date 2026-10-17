@@ -10,7 +10,11 @@ from dataclasses import replace
 from datetime import datetime
 from typing import Any, Never, cast
 
-from ccusage_viz.core.time import resolve_date_range, system_timezone, validate_timezone
+from ccusage_viz.core.time import (
+    resolve_date_range,  # ty: ignore[unresolved-import]
+    system_timezone,
+    validate_timezone,
+)
 from ccusage_viz.errors import UsageError
 from ccusage_viz.i18n import Translator
 from ccusage_viz.options import (
@@ -192,7 +196,7 @@ def build_chart_fragment_parser(tr: Translator) -> argparse.ArgumentParser:
 
     parser = LocalizedParser(add_help=False)
     subparsers = parser.add_subparsers(dest="chart_kind", required=True)
-    add_chart_subcommands(subparsers, tr)
+    add_chart_subcommands(subparsers, tr)  # ty: ignore[invalid-argument-type]
     return parser
 
 
@@ -390,7 +394,7 @@ def custom_chart_from_namespace(
             timezone=timezone,
         )
     return CustomChartConfig(
-        kind=kind,
+        kind=kind,  # ty: ignore[invalid-argument-type]
         source=source,
         date_range=date_range,
         filters=tuple(
@@ -438,9 +442,11 @@ def validate_chart(
     command = chart_kind(namespace)
     if command in {"timeline", "monitor"} and top is not None and by is None:
         raise UsageError("error.top_requires_by")
-    if chart.presentation.style not in compatible_styles(command, by):
+    if chart.presentation.style not in compatible_styles(command, by):  # ty: ignore[unresolved-attribute]
         raise UsageError(
-            "error.style_incompatible", style=chart.presentation.style, mode=by or "total"
+            "error.style_incompatible",
+            style=chart.presentation.style,  # ty: ignore[unresolved-attribute]
+            mode=by or "total",
         )
     no_watch = getattr(namespace, "no_watch", False)
     requested = getattr(namespace, "interval", None)

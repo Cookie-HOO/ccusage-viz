@@ -197,7 +197,7 @@ def _custom_chart_from_namespace(
         timezone=timezone,
     )
     return CustomChartConfig(
-        kind=kind,
+        kind=kind,  # ty: ignore[invalid-argument-type]
         source=source,
         date_range=date_range,
         filters=tuple(

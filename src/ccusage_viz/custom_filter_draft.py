@@ -181,8 +181,8 @@ def run_custom_filter_editor(
                 draft = replace(draft, search_editing=False)
             elif key in {"\x7f", "\b"}:
                 draft = replace(draft, query=draft.query[:-1], option_index=0, viewport_row=0)
-            elif key.isprintable():
-                draft = replace(draft, query=draft.query + key, option_index=0, viewport_row=0)
+            elif key.isprintable():  # ty: ignore[unresolved-attribute]
+                draft = replace(draft, query=draft.query + key, option_index=0, viewport_row=0)  # ty: ignore[unsupported-operator]
             continue
         if key == "\x1b":
             if draft.query:

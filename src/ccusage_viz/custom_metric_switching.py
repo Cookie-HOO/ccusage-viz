@@ -100,7 +100,7 @@ def normalize_switch_config(
             date_range = (
                 DateRange(
                     date(1971, 1, 1),
-                    config.date_range.until,
+                    config.date_range.until,  # ty: ignore[unresolved-attribute]
                     relative_until=True,
                     period="all",
                 )

@@ -59,8 +59,8 @@ class Scrollbar:
         return min(max(0, round(target * self.maximum_offset / self.travel)), self.maximum_offset)
 
     def mark_at(
-        self, row: int, *, ascii: bool, hovered: bool, highlight: str, muted: str
-    ) -> tuple[str, str, bool]:
+        self, row: int, *, ascii: bool, hovered: bool, highlight: int, muted: int
+    ) -> tuple[str, int, bool]:
         """Return the glyph, color, and bold state for one scrollbar gutter cell."""
         if hovered and self.on_thumb(row):
             return ("#" if ascii else "█", highlight, True)

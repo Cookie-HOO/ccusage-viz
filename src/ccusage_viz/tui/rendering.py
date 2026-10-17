@@ -156,7 +156,7 @@ def _pane_render(
                 terminal,
                 accepted_at=component.accepted_at,
                 interval=pane.interval,
-                surface=dashboard_pane_surface(component.candidate.kind),
+                surface=dashboard_pane_surface(component.candidate.kind),  # ty: ignore[invalid-argument-type]
             )
         if pane.body_view == "command":
             assert options is not None
@@ -191,7 +191,7 @@ def _pane_render(
                 accepted_at=component.accepted_at,
                 interval=pane.interval,
                 pending=True,
-                surface=dashboard_pane_surface(active_config.kind),
+                surface=dashboard_pane_surface(active_config.kind),  # ty: ignore[invalid-argument-type]
             )
             rendered = render_custom_pending(active_config, context, component.presentation)
             audit = render_audit(context)
@@ -204,7 +204,7 @@ def _pane_render(
         )
         data_pending = component.is_pending and not retain_accepted
         rendered = _render_custom_projection(
-            component.model,
+            component.model,  # ty: ignore[invalid-argument-type]
             display_config,
             translator,
             terminal,
@@ -212,7 +212,7 @@ def _pane_render(
             interval=pane.interval,
             pending=data_pending,
             refreshing=component.is_pending or pane.lifecycle.submission is not None,
-            surface=dashboard_pane_surface(display_config.kind),
+            surface=dashboard_pane_surface(display_config.kind),  # ty: ignore[invalid-argument-type]
             # Keep accepted ranking facts visible while a sub-day request is
             # pending, but do not pair them with a stale date-only summary.
             summary=(
@@ -236,7 +236,7 @@ def _pane_render(
                 if display_config.kind == "ranking" and pane.body_view == "chart"
                 else False
             ),
-            copied_entry_id=(
+            copied_entry_id=(  # ty: ignore[invalid-argument-type]
                 pane.copied_ranking_entry_id
                 if pane.copied_ranking_until > time.monotonic()
                 else None
@@ -271,7 +271,7 @@ def _pane_render(
                     ascii=terminal.ascii,
                 ),
                 rendered.notices,
-                rendered.error_body,
+                rendered.error_body,  # ty: ignore[invalid-argument-type]
             )
         warning_notices = _custom_response_warning_notices(component, translator)
         if component.error is not None:

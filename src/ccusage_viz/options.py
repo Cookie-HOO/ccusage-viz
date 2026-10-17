@@ -496,7 +496,7 @@ def adjust_chart(chart: ChartConfig, key: str, *, demo: bool = False) -> ChartCo
         theme = _cycle(COLOR_SCHEMES, chart.presentation.theme, 1 if key == "t" else -1)
         return replace(chart, presentation=replace(chart.presentation, theme=theme))
     if key in {"p", "P"} and not isinstance(chart, MonitorConfig):
-        return replace(chart, date_range=_adjust_period(chart.date_range, key, kind=chart.kind))
+        return replace(chart, date_range=_adjust_period(chart.date_range, key, kind=chart.kind))  # ty: ignore[invalid-argument-type]
     if key in {"g", "G"} and isinstance(chart, (TimelineConfig, StackConfig)):
         if not chart.date_range.relative_until:
             return chart

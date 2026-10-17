@@ -453,7 +453,7 @@ def run_dataset_manager(service: DatasetService, translator: Translator) -> int:
                         translator.text(
                             "status.dataset_upgrade_confirm",
                             dataset_id=current.dataset_id,
-                            current=current.source.release_tag,
+                            current=current.source.release_tag,  # ty: ignore[unresolved-attribute]
                             candidate=candidate.release_tag,
                         ),
                         title=translator.text("status.dataset_upgrade_title"),

@@ -460,7 +460,7 @@ class MonitorComponent:
         )
         return ObservedScope(
             chart.window_seconds,
-            chart.by or "total",
+            chart.by or "total",  # ty: ignore[invalid-argument-type]
             state,
             chart.filters.agents,
         )

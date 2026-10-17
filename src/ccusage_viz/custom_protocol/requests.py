@@ -228,6 +228,9 @@ class V2ChartRequest:
             query["granularity"] = self.granularity
         if self.partition_declared:
             query["partition_by"] = self.partition_by
+        assert (self.start_at is not None and self.end_at is not None) or (
+            self.start_date is not None and self.end_date is not None
+        )
         return {
             "protocol": V2_PROTOCOL_VERSION,
             "request_id": self.request_id,
@@ -241,8 +244,8 @@ class V2ChartRequest:
                     {"start_at": self.start_at.isoformat(), "end_at": self.end_at.isoformat()}
                     if self.start_at is not None and self.end_at is not None
                     else {
-                        "start_date": self.start_date.isoformat(),
-                        "end_date": self.end_date.isoformat(),
+                        "start_date": self.start_date.isoformat(),  # ty: ignore[unresolved-attribute]
+                        "end_date": self.end_date.isoformat(),  # ty: ignore[unresolved-attribute]
                     }
                 ),
                 "period": self.period,
@@ -364,6 +367,10 @@ def canonical_custom_request_key(request: CustomRequest) -> tuple[object, ...]:
     )
     common += (request.timezone,)
     if isinstance(request, (CustomChartRequest, V2ChartRequest)):
+        if isinstance(request, V2ChartRequest):
+            assert (request.start_at is not None and request.end_at is not None) or (
+                request.start_date is not None and request.end_date is not None
+            )
         return common + (
             *((request.metric_id,) if isinstance(request, V2ChartRequest) else ()),
             *(
@@ -371,8 +378,13 @@ def canonical_custom_request_key(request: CustomRequest) -> tuple[object, ...]:
                     request.start_at.astimezone(UTC).isoformat(),
                     request.end_at.astimezone(UTC).isoformat(),
                 )
-                if isinstance(request, V2ChartRequest) and request.start_at is not None
-                else (request.start_date.isoformat(), request.end_date.isoformat())
+                if isinstance(request, V2ChartRequest)
+                and request.start_at is not None
+                and request.end_at is not None
+                else (
+                    request.start_date.isoformat(),  # ty: ignore[unresolved-attribute]
+                    request.end_date.isoformat(),  # ty: ignore[unresolved-attribute]
+                )
             ),
             request.period,
             request.filters,

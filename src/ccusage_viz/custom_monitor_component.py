@@ -518,7 +518,7 @@ class CustomMonitorComponent:
                     bucket_start,
                     bucket_end,
                     coverage,
-                    values,
+                    values,  # ty: ignore[invalid-argument-type]
                 )
             )
             bucket_start = bucket_end
@@ -527,16 +527,16 @@ class CustomMonitorComponent:
             keys = ("total",)
         elif self._display_config.top is not None:
             totals = {key: sum(bucket.values.get(key, 0.0) for bucket in buckets) for key in keys}
-            kept = self._top_keys(totals)
+            kept = self._top_keys(totals)  # ty: ignore[invalid-argument-type]
             merged_buckets: list[TimeOfDayBucket] = []
             for bucket in buckets:
-                values = {key: value for key, value in bucket.values.items() if key in kept}
+                values = {key: value for key, value in bucket.values.items() if key in kept}  # ty: ignore[invalid-assignment]
                 if self.aggregation == "sum":
                     other = sum(value for key, value in bucket.values.items() if key not in kept)
                     if other:
                         values["Other"] = other
                 merged_buckets.append(
-                    TimeOfDayBucket(bucket.started_at, bucket.ended_at, bucket.coverage, values)
+                    TimeOfDayBucket(bucket.started_at, bucket.ended_at, bucket.coverage, values)  # ty: ignore[invalid-argument-type]
                 )
             buckets = merged_buckets
             keys = tuple(dict.fromkeys(key for bucket in buckets for key in bucket.values))
@@ -546,7 +546,7 @@ class CustomMonitorComponent:
             tuple(
                 TimeOfDaySeries(
                     key,
-                    ("总计" if language == "zh" else "Total")
+                    ("总计" if language == "zh" else "Total")  # ty: ignore[invalid-argument-type]
                     if key == "total"
                     else labels.get(key, key),
                     key == "Other",
@@ -554,7 +554,7 @@ class CustomMonitorComponent:
                 for key in keys
             ),
             first_start,
-            self.distribution_day_window,  # type: ignore[arg-type]
+            self.distribution_day_window,  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
             "hour",
         )
 
@@ -705,7 +705,7 @@ class CustomMonitorComponent:
             item.key: sum((value for value in item.values if value is not None), start=Decimal())
             for item in series
         }
-        kept = self._top_keys(totals)
+        kept = self._top_keys(totals)  # ty: ignore[invalid-argument-type]
         result = tuple(item for item in series if item.key in kept)
         if self.aggregation != "sum":
             return result

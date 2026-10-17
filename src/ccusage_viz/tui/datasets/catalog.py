@@ -3,8 +3,14 @@ from __future__ import annotations
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from shutil import get_terminal_size
-from typing import cast
 
+from ccusage_viz.datasets.models import (
+    CatalogEntry,
+    DatasetManifest,
+    DatasetStatus,
+    ReleaseArtifact,
+)
+from ccusage_viz.datasets.service import DatasetService
 from ccusage_viz.diagnostics import format_error
 from ccusage_viz.errors import UsageError
 from ccusage_viz.formatting import clip_width, truncate_width, wrap_width
@@ -16,7 +22,7 @@ from ccusage_viz.tui_input import InputDecoder, KeyEvent, PasteEvent, read_event
 
 
 def _official_catalog_item_rows(
-    entry: object,
+    entry: CatalogEntry,
     translator: Translator,
     *,
     selected: bool,
@@ -40,7 +46,7 @@ def _official_catalog_item_rows(
 
 
 def _official_catalog_rows(
-    entries: tuple[object, ...],
+    entries: tuple[CatalogEntry, ...],
     translator: Translator,
     *,
     index: int,
@@ -65,7 +71,7 @@ def _official_catalog_rows(
 
 
 def _official_catalog_viewport(
-    entries: tuple[object, ...],
+    entries: tuple[CatalogEntry, ...],
     translator: Translator,
     *,
     index: int,
@@ -103,7 +109,7 @@ def _official_catalog_viewport(
 
 
 def _official_preview_rows(
-    preview: tuple[object, bytes, object], translator: Translator
+    preview: tuple[ReleaseArtifact, bytes, DatasetManifest], translator: Translator
 ) -> tuple[str, ...]:
     _artifact, _archive, manifest = preview
     descriptor = manifest.descriptor
@@ -124,11 +130,12 @@ def _official_preview_rows(
         else descriptor.dataset.description.en
     )
     charts = " · ".join(
-        translator.text(f"label.pane_{kind}") for kind in descriptor.capabilities.charts
+        translator.text(f"label.pane_{kind}")
+        for kind in descriptor.capabilities.charts  # ty: ignore[unresolved-attribute]
     )
     required = tuple(item.name for item in descriptor.environment if item.required)
     optional = tuple(item.name for item in descriptor.environment if not item.required)
-    return (
+    return (  # ty: ignore[invalid-return-type]
         title,
         description,
         f"{translator.text('status.dataset_column_version')}: {descriptor.version}",
@@ -152,7 +159,7 @@ def _browse_dataset_catalog(
     translator: Translator,
     decoder: InputDecoder,
     *,
-    service: object,
+    service: DatasetService,
     height: int,
     paint_choices: Callable[[str, str, str, tuple[str, ...]], None] | None = None,
     read_input: Callable[[], object] | None = None,
@@ -160,8 +167,8 @@ def _browse_dataset_catalog(
     """Fetch and present verified official datasets without blocking the dashboard."""
 
     executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ccusage-viz-catalog")
-    future = executor.submit(cast(Callable[[], tuple[object, ...]], service.official_entries))
-    entries: tuple[object, ...] | None = None
+    future = executor.submit(service.official_entries)
+    entries: tuple[CatalogEntry, ...] | None = None
     error: str | None = None
     try:
         while entries is None and error is None:
@@ -328,7 +335,7 @@ def _install_github_dataset(
     translator: Translator,
     decoder: InputDecoder,
     *,
-    service: object,
+    service: DatasetService,
     height: int,
     paint_choices: Callable[[str, str, str, tuple[str, ...]], None] | None = None,
     read_input: Callable[[], object] | None = None,
@@ -336,10 +343,10 @@ def _install_github_dataset(
     """Install a verified GitHub dataset from one repository input."""
 
     repository = ""
-    artifact: object | None = None
+    artifact: ReleaseArtifact | None = None
     error: str | None = None
-    resolving: Future[object] | None = None
-    installing: Future[object] | None = None
+    resolving: Future[ReleaseArtifact] | None = None
+    installing: Future[DatasetStatus] | None = None
     executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ccusage-viz-github")
     try:
         while True:

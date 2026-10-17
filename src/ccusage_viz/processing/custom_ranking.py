@@ -108,12 +108,12 @@ def process_custom_ranking(
             for item in (metric.capabilities.partition_by or metric.capabilities.group_by)
         },
     )
-    direction = capability.sort_direction
+    direction = capability.sort_direction  # ty: ignore[unresolved-attribute]
     previous_data = comparison_response.data if comparison_response is not None else None
     if response.data.groups is not None:
         groups = _project_groups(
             response.data.groups,
-            previous_data.groups if previous_data is not None else None,
+            previous_data.groups if previous_data is not None else None,  # ty: ignore[invalid-argument-type]
             config,
             direction,
         )
@@ -124,14 +124,14 @@ def process_custom_ranking(
             config,
             presentation,
             comparison_response is not None,
-            capability.show_percentage,
+            capability.show_percentage,  # ty: ignore[unresolved-attribute]
             groups,
         )
     series, _, _ = _project_entries(
         response.data.series,
         config,
         direction,
-        {item.id: item for item in previous_data.series} if previous_data is not None else None,
+        {item.id: item for item in previous_data.series} if previous_data is not None else None,  # ty: ignore[invalid-argument-type]
         include_rank=False,
     )
     return CustomRankingProjection(
@@ -141,7 +141,7 @@ def process_custom_ranking(
         config,
         presentation,
         comparison_response is not None,
-        capability.show_percentage,
+        capability.show_percentage,  # ty: ignore[unresolved-attribute]
     )
 
 

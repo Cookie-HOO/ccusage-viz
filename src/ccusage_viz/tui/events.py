@@ -142,7 +142,7 @@ def dispatch_event(session: TuiSession, event: object, *, now: float) -> None:
             record_mutation(
                 session,
                 ("pane", pane_index, "overlay-source"),
-                lambda pane=animation_pane: pane.overlay.apply_draft(mode, draft),
+                lambda pane=animation_pane: pane.overlay.apply_draft(mode, draft),  # ty: ignore[invalid-argument-type]
             )
             session.overlay_editor = None
         elif key in {"\n", "\x0b"}:
@@ -280,7 +280,7 @@ def dispatch_event(session: TuiSession, event: object, *, now: float) -> None:
     if isinstance(event, MouseEvent):
         return
     if session.focused is not None and _ranking_search_eligible(session.panes[session.focused]):
-        search = session.panes[session.focused].ranking_search
+        search = session.panes[session.focused].ranking_search  # ty: ignore[unresolved-attribute]
         if search.editing:
             if isinstance(event, PasteEvent):
                 search.query += event.value

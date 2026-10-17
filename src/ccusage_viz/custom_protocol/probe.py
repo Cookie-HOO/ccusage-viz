@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from typing import Literal, cast
 
 from ccusage_viz.core.custom_ranking_time import parse_subday_period
 from ccusage_viz.core.time import parse_period
@@ -101,9 +102,9 @@ def _parse_capabilities(value: object) -> CustomCapabilities:
             _group_by_tuple(chart.get("group_by"), f"chart {kind} group_by"),
             _string_tuple(chart.get("filters"), f"chart {kind} filters"),
             max_items,
-            descriptions_default,  # type: ignore[arg-type]
+            cast(Literal["expanded", "collapsed"], descriptions_default),
             (),
-            comparison,  # type: ignore[arg-type]
+            cast(Literal["full", "rank", "none"], comparison),
             show_percentage,
             refresh_interval_seconds,
         )
@@ -254,7 +255,7 @@ def _parse_v2_metric(value: object) -> V2MetricDescriptor:
         aggregation,  # type: ignore[arg-type]
         capabilities := _parse_v2_capabilities(source.get("capabilities")),
         _parse_v2_defaults(source.get("defaults"), capabilities),
-        summary,  # type: ignore[arg-type]
+        cast(Literal["comparisons", "total", "none"], summary),
         group_id,
     )
 
@@ -303,13 +304,14 @@ def _parse_v2_capabilities(value: object) -> V2MetricCapabilities:
                 raise CustomProtocolError(
                     "v2 monitor refresh_interval_seconds must be a positive integer"
                 )
-            charts[kind] = V2MonitorCapability(window_seconds, refresh, group_by, ())
+            monitor_group_by = cast(tuple[str, ...], group_by)
+            charts[kind] = V2MonitorCapability(window_seconds, refresh, monitor_group_by, ())
             rate_label = chart.get("rate_label")
             if rate_label is not None:
                 charts[kind] = V2MonitorCapability(
                     window_seconds,
                     refresh,
-                    group_by,
+                    monitor_group_by,
                     (),
                     _parse_localized(rate_label, "v2 monitor rate_label"),
                 )
@@ -385,11 +387,11 @@ def _parse_v2_capabilities(value: object) -> V2MetricCapabilities:
                 (),
                 periods,
                 max_items,
-                descriptions_default,  # type: ignore[arg-type]
-                comparison,  # type: ignore[arg-type]
+                cast(Literal["expanded", "collapsed"], descriptions_default),
+                cast(Literal["full", "rank", "none"], comparison),
                 show_percentage,
                 refresh_interval_seconds,
-                sort_direction,  # type: ignore[arg-type]
+                cast(Literal["ascending", "descending"], sort_direction),
                 partition_by,
             )
         else:
@@ -577,5 +579,5 @@ def _parse_filter(value: object) -> CustomFilter:
         _string(source.get("id"), "filter ID"),
         _parse_localized(source.get("label"), "filter label"),
         tuple(CustomFilterOption(item.id, item.label) for item in options),
-        mode,  # type: ignore[arg-type]
+        cast(Literal["multi_select", "single_select"], mode),
     )

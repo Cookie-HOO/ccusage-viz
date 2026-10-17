@@ -57,9 +57,9 @@ def _chart_args(config: StandaloneLaunch, *, full: bool, pane: bool = False) -> 
             if full or date_range.period != COMMAND_DEFAULT_PERIODS[chart.kind]:
                 args.extend(("--period", date_range.period))
         else:
-            args.extend(("--since", date_range.since.isoformat()))
-            if not date_range.implicit_until:
-                args.extend(("--until", date_range.until.isoformat()))
+            args.extend(("--since", date_range.since.isoformat()))  # ty: ignore[unresolved-attribute]
+            if not date_range.implicit_until:  # ty: ignore[unresolved-attribute]
+                args.extend(("--until", date_range.until.isoformat()))  # ty: ignore[unresolved-attribute]
         if isinstance(chart, (TimelineConfig, StackConfig)):
             if full or chart.granularity != "day":
                 args.extend(("--granularity", chart.granularity))

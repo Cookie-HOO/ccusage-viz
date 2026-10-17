@@ -131,7 +131,7 @@ def _option_int(value: object, name: str) -> int:
     if isinstance(value, bool):
         raise ValueError(f"{name} must be an integer")
     try:
-        return int(value)
+        return int(value)  # ty: ignore[invalid-argument-type]
     except (TypeError, ValueError) as exc:
         raise ValueError(f"{name} must be an integer") from exc
 

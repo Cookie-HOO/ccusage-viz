@@ -184,7 +184,7 @@ def execute_preset_command(session: TuiSession, command: object) -> None:
         conflict = _dashboard_custom_source_conflict(session.panes)
         if conflict is not None:
             session.preset_manager = replace(
-                session.preset_manager,
+                session.preset_manager,  # ty: ignore[invalid-argument-type]
                 notice=_custom_source_conflict_message(conflict, session.translator, preset=True),
             )
             return
@@ -192,7 +192,7 @@ def execute_preset_command(session: TuiSession, command: object) -> None:
             record = preset_from_launch(command.name, active_dashboard_launch(session))
             DashboardPresetStore(dashboard_preset_state_root()).save(record)
         except (DashboardPresetStoreError, DashboardPresetValidationError, ValueError):
-            session.preset_manager = replace(session.preset_manager, notice="preset-save-failed")
+            session.preset_manager = replace(session.preset_manager, notice="preset-save-failed")  # ty: ignore[invalid-argument-type]
         else:
             session.current_preset_key = f"user:{command.name}"
         return
@@ -202,7 +202,7 @@ def execute_preset_command(session: TuiSession, command: object) -> None:
                 command.key.removeprefix("user:")
             )
         except DashboardPresetStoreError:
-            session.preset_manager = replace(session.preset_manager, notice="preset-delete-failed")
+            session.preset_manager = replace(session.preset_manager, notice="preset-delete-failed")  # ty: ignore[invalid-argument-type]
         else:
             if session.current_preset_key == command.key:
                 session.current_preset_key = None
@@ -228,7 +228,7 @@ def execute_preset_command(session: TuiSession, command: object) -> None:
 
             record_mutation(session, ("preset", "load", command.key), apply_loaded_preset)
         except (DashboardPresetStoreError, DashboardPresetValidationError, UsageError):
-            session.preset_manager = replace(session.preset_manager, notice="preset-load-failed")
+            session.preset_manager = replace(session.preset_manager, notice="preset-load-failed")  # ty: ignore[invalid-argument-type]
         else:
             session.current_preset_key = command.key
             session.preset_manager = None

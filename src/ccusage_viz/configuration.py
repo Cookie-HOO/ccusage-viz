@@ -297,7 +297,7 @@ def default_custom_pane(
             date_range,
             presentation=presentation,
             metric_id=metric_id,
-            metric_summary=metric_summary,  # type: ignore[arg-type]
+            metric_summary=metric_summary,  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
             metric_periods=metric_periods,
             metric_titles=metric_titles,
         )

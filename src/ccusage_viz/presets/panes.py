@@ -183,7 +183,7 @@ def _parse_builtin_chart(value: Mapping[str, object]) -> ChartPaneConfig:
         )
         chart = TimelineConfig(
             kind,
-            date_range,
+            date_range,  # ty: ignore[invalid-argument-type]
             filters,
             presentation,
             _optional_choice(
@@ -199,7 +199,7 @@ def _parse_builtin_chart(value: Mapping[str, object]) -> ChartPaneConfig:
         )
     elif kind == "calendar":
         _exact(options, frozenset(), "calendar options")
-        chart = CalendarConfig(kind, date_range, filters, presentation)
+        chart = CalendarConfig(kind, date_range, filters, presentation)  # ty: ignore[invalid-argument-type]
     elif kind == "stack":
         wire = _exact(
             options,
@@ -210,7 +210,7 @@ def _parse_builtin_chart(value: Mapping[str, object]) -> ChartPaneConfig:
         )
         chart = StackConfig(
             kind,
-            date_range,
+            date_range,  # ty: ignore[invalid-argument-type]
             filters,
             presentation,
             _choice(wire["cache"], CACHE_MODES, "stack.cache"),
@@ -227,7 +227,7 @@ def _parse_builtin_chart(value: Mapping[str, object]) -> ChartPaneConfig:
         )
         chart = RankingConfig(
             kind,
-            date_range,
+            date_range,  # ty: ignore[invalid-argument-type]
             filters,
             presentation,
             _choice(wire["by"], ("composition", "agent", "model", "project"), "ranking.by"),

@@ -4,6 +4,7 @@ import time
 from collections.abc import Iterable
 from dataclasses import replace
 from datetime import datetime
+from typing import Any
 
 from ccusage_viz.command_copy import format_command, format_full_command
 from ccusage_viz.custom_component import CustomHistoricalComponent, custom_date_summary_supported
@@ -86,10 +87,11 @@ def _pane_copy_payload(
             return format_command(active)
         if view == "full-command":
             return format_full_command(active)
-        if pane.component.model is None:
+        component = pane.component
+        if not isinstance(component, CustomHistoricalComponent) or component.model is None:
             return translator.text("status.loading")
         return render_custom_data(
-            pane.component.model,
+            component.model,
             language=translator.language,
             translator=translator,
             view=view,
@@ -138,6 +140,7 @@ def _custom_render_context(
     reserved_summary_rows: int = 0,
 ) -> RenderContext:
     """Adapt Custom semantics to the selected kind-specific product surface."""
+    assert config.kind != "monitor"
     is_ungrouped_timeline = config.kind == "timeline" and config.group_by is None
     presentation = SurfacePresentation(
         config.kind,
@@ -198,6 +201,7 @@ def _render_custom_failure(
         pending=False,
         surface=surface,
     )
+    assert component.error is not None
     return PaneRender(
         "\n\n".join(
             (
@@ -210,7 +214,7 @@ def _render_custom_failure(
 
 
 def _retain_custom_facts_while_pending(
-    lifecycle: LifecycleOperation[object] | None = None,
+    lifecycle: LifecycleOperation[Any] | None = None,
     *,
     generation: int | None = None,
     trigger: LifecycleTrigger | None = None,
@@ -430,33 +434,46 @@ def _render_custom_projection(
                 - active_viewport.reserved_rows,
             ),
         )
-        render_args = dict(
-            heading=custom_heading(config, context, projection.presentation).strip(),
-            descriptions_visible=config.presentation.density in {"full", "detailed"},
-            search_query=search_query,
-            search_editing=search_editing,
-            show_visible_count=True,
-            copied_entry_id=copied_entry_id,
-            item_spacing=item_spacing,
-            scrollbar=True,
-            scrollbar_hovered=scrollbar_hovered,
-            copy_all_action=True,
-            copied_all=copied_all,
-        )
+        heading = custom_heading(config, context, projection.presentation).strip()
+        descriptions_visible = config.presentation.density in {"full", "detailed"}
         current_projection = replace(projection, config=config)
         if grouped:
             assert isinstance(active_viewport, GroupedRankingViewport)
             rendered = render_grouped_custom_ranking_viewport(
-                current_projection, context, active_viewport, **render_args
+                current_projection,
+                context,
+                active_viewport,
+                heading=heading,
+                descriptions_visible=descriptions_visible,
+                search_query=search_query,
+                search_editing=search_editing,
+                show_visible_count=True,
+                copied_entry_id=copied_entry_id,
+                item_spacing=item_spacing,
+                scrollbar=True,
+                scrollbar_hovered=scrollbar_hovered,
+                copy_all_action=True,
+                copied_all=copied_all,
             )
         else:
             assert isinstance(active_viewport, RankingViewport)
             rendered = render_custom_ranking_viewport(
-                current_projection, context, active_viewport, **render_args
+                current_projection,
+                context,
+                active_viewport,
+                heading=heading,
+                descriptions_visible=descriptions_visible,
+                search_query=search_query,
+                search_editing=search_editing,
+                show_visible_count=True,
+                copied_entry_id=copied_entry_id,
+                item_spacing=item_spacing,
+                scrollbar=True,
+                scrollbar_hovered=scrollbar_hovered,
+                copy_all_action=True,
+                copied_all=copied_all,
             )
-        active_viewport.hits = {
-            row + summary_rows: hit for row, hit in active_viewport.hits.items()
-        }
+        active_viewport.shift_hits(summary_rows)
         if active_viewport.copy_all_hit is not None:
             row, column = active_viewport.copy_all_hit
             active_viewport.copy_all_hit = (row + summary_rows, column)
@@ -572,7 +589,7 @@ def _custom_standalone_actions(
     actions: list[tuple[str, str]] = [("p/P", "period")]
     chart = component.candidate
     if capability is not None:
-        if not is_v2_custom_ranking(chart) and len(capability.granularities) > 1:
+        if not is_v2_custom_ranking(chart) and len(capability.granularities) > 1:  # ty: ignore[unresolved-attribute]
             actions.append(("g/G", "granularity"))
         if chart.kind != "calendar" and capability.group_by:
             actions.append(("b/B", "group"))
@@ -610,7 +627,7 @@ def _custom_standalone_render(
             terminal,
             accepted_at=component.accepted_at,
             interval=interval,
-            surface=standalone_surface(component.candidate.kind),
+            surface=standalone_surface(component.candidate.kind),  # ty: ignore[invalid-argument-type]
         )
     if component.is_pending and (
         component.model is None or not _retain_custom_facts_while_pending(trigger=pending_trigger)
@@ -623,7 +640,7 @@ def _custom_standalone_render(
             accepted_at=component.accepted_at,
             interval=interval,
             pending=True,
-            surface=standalone_surface(active_config.kind),
+            surface=standalone_surface(active_config.kind),  # ty: ignore[invalid-argument-type]
         )
         rendered = render_custom_pending(active_config, context, component.presentation)
         audit = render_audit(context)
@@ -631,7 +648,7 @@ def _custom_standalone_render(
     if component.model is None:
         return PaneRender(translator.text("status.loading"))
     rendered = _render_custom_projection(
-        component.model,
+        component.model,  # ty: ignore[invalid-argument-type]
         component.accepted_config or component.candidate,
         translator,
         terminal,
@@ -640,7 +657,7 @@ def _custom_standalone_render(
         pending=component.is_pending
         and not _retain_custom_facts_while_pending(trigger=pending_trigger),
         refreshing=pending,
-        surface=standalone_surface((component.accepted_config or component.candidate).kind),
+        surface=standalone_surface((component.accepted_config or component.candidate).kind),  # ty: ignore[invalid-argument-type]
         summary=summary,
     )
     return (

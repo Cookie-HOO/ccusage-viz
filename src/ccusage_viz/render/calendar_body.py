@@ -51,7 +51,7 @@ def calendar_statistics(
 
     return CalendarStatistics(
         active_days,
-        average,
+        average,  # ty: ignore[invalid-argument-type]
         peak[0] if peak else None,
         peak[1] if peak else None,
         current_streak,

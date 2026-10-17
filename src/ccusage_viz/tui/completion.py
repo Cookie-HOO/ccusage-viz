@@ -446,7 +446,7 @@ def collect(session: TuiSession) -> bool:
                                 pane.component,
                                 pane.attachment,
                                 now=time.monotonic(),
-                                wall=pane.component.accepted_at,
+                                wall=pane.component.accepted_at,  # ty: ignore[invalid-argument-type]
                                 translator=session.translator,
                             )
                         changed = True
@@ -484,7 +484,7 @@ def collect(session: TuiSession) -> bool:
             except Exception as exc:
                 if pane.lifecycle.accepts(operation, generation=operation.generation):
                     pane.lifecycle.abandon(operation)
-                    if pane.component.fail(exc, generation=operation.generation, purpose="primary"):
+                    if pane.component.fail(exc, generation=operation.generation, purpose="primary"):  # ty: ignore[unknown-argument]
                         record_custom_log(
                             session,
                             pane,

@@ -198,7 +198,7 @@ def _custom_capability_for_component(
         config = component.accepted_config or component.candidate
         if component.capability is None or config.metric_id is None:
             return None
-        return component.capability.charts.get("monitor")
+        return component.capability.charts.get("monitor")  # ty: ignore[invalid-return-type]
 
     return component.capability
 
@@ -334,7 +334,7 @@ def _custom_pane_adjustment_bindings(pane: TuiCustomPane, page: str) -> tuple[tu
         if _custom_metric_group_switch_available(pane):
             actions.insert(0, ("m/M", "metric"))
         if capability is not None:
-            partitions = capability.partition_by
+            partitions = capability.partition_by  # ty: ignore[unresolved-attribute]
             if (
                 chart.kind == "ranking"
                 and partitions is not None
@@ -346,7 +346,7 @@ def _custom_pane_adjustment_bindings(pane: TuiCustomPane, page: str) -> tuple[tu
                 )
             ):
                 actions.append(("g/G", "partition"))
-            elif chart.kind != "ranking" and len(capability.granularities) > 1:
+            elif chart.kind != "ranking" and len(capability.granularities) > 1:  # ty: ignore[unresolved-attribute]
                 actions.append(("g/G", "granularity"))
             if chart.kind != "calendar":
                 actions.append(("b/B", "group"))
