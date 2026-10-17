@@ -95,4 +95,14 @@ class LocalizedParser(argparse.ArgumentParser):
                 self._choice_choices,
                 kind=self._choice_kind,
             )
+        if (
+            self._choice_kind == "preset"
+            and self._choice_metavar is not None
+            and message == f"the following arguments are required: {self._choice_metavar}"
+        ):
+            raise UsageError(
+                "error.invalid_preset",
+                detail=message,
+                choices=", ".join(self._choice_choices),
+            )
         raise UsageError("error.arguments", detail=message)

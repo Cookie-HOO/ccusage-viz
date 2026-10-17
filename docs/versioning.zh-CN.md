@@ -6,6 +6,19 @@
 - **次版本（`0.x.0`）**：`1.0` 前重大的新面向用户能力或数据源集成。
 - 在 `1.0` 前，公开接口仍可能在各个版本之间变化。
 
+## 0.3.1
+
+`0.3.1` 强化跨平台启动和小型 CLI 失败路径，并替换无法工作的 DSH 安装说明：
+
+- 本地时区发现现在会优先使用 `tzlocal`，再进入已有的 Unix 导向 fallback；因此 Windows
+  以及没有 `/etc/localtime` 的其他主机也能为日期边界和复制命令解析 IANA 时区；
+- 省略必需的 `ccuv text` 预设时，现在会通过与无效预设相同的本地化错误路径列出支持的预设；
+- README 不再建议通过 npm 的 Git 依赖流程安装 pnpm monorepo，而是链接到固定版本的非官方
+  [`Cookie-HOO/ccusage-dsh`](https://github.com/Cookie-HOO/ccusage-dsh) 发行版；
+  其校验和验证安装脚本为 Windows、macOS 和 Linux 提供启用 DSH 的原生构建。
+
+DSH 发行版仍与 ccuv 相互独立：本版本不会增加 ccuv 原生 collector，也不改变内置 Token Metric 语义。
+
 ## 0.3.0
 
 `0.3.0` 将 Dataset 扩展建设为一等数据源能力，并将聚焦图表统一到 Dashboard 运行时：

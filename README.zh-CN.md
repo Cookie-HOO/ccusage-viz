@@ -4,7 +4,7 @@
 
 [![PyPI](https://img.shields.io/pypi/v/ccusage-viz.svg)](https://pypi.org/project/ccusage-viz/) [![Python](https://img.shields.io/pypi/pyversions/ccusage-viz.svg)](https://pypi.org/project/ccusage-viz/) [![License: GPL v3](https://img.shields.io/badge/License-GPL%20v3-blue.svg)](LICENSE) [![CI](https://github.com/Cookie-HOO/ccusage-viz/actions/workflows/ci.yml/badge.svg)](https://github.com/Cookie-HOO/ccusage-viz/actions/workflows/ci.yml)
 
-> **Alpha · 0.3.0** — 在 1.0 前接口仍可能变化。当前方向请见[路线图](docs/roadmap.zh-CN.md)。
+> **Alpha · 0.3.1** — 在 1.0 前接口仍可能变化。当前方向请见[路线图](docs/roadmap.zh-CN.md)。
 
 `ccusage-viz` 是面向 [`ccusage`](https://github.com/ryoppippi/ccusage) Token
 数据的独立、非官方终端可视化工具。它把 `ccusage` 命令输出转换为交互式终端图表，
@@ -232,15 +232,28 @@ npm install -g ccusage
 npm 不可用时，请手动安装 [`ccusage`](https://github.com/ryoppippi/ccusage)。
 
 > [!TIP]
-> 已发布的 `ccusage` 包不包含 DeepSeek Harness（DSH）统计。非官方
-> [`oksure/ccusage` 的 DSH 分支](https://github.com/oksure/ccusage/tree/contrib/dsh-usage-adapter)
-> 提供 `ccusage dsh` 报告。请使用下面的命令安装该分支，替代已发布的 npm 包：
+> 已发布的 `ccusage` 包不包含 DeepSeek Harness（DSH）统计。非官方的固定版本
+> [`Cookie-HOO/ccusage-dsh`](https://github.com/Cookie-HOO/ccusage-dsh)
+> 为 Windows、macOS 和 Linux 提供经过验证且支持 `ccusage dsh` 报告的原生构建。
 >
-> ```bash
-> npm install -g "git+https://github.com/oksure/ccusage.git#contrib/dsh-usage-adapter"
+> Windows x64（PowerShell）：
+>
+> ```powershell
+> irm https://raw.githubusercontent.com/Cookie-HOO/ccusage-dsh/main/install.ps1 | iex
+> ccuv dashboard --ccusage-bin "$env:LOCALAPPDATA\Programs\ccusage-dsh\ccusage-dsh.exe"
 > ```
 >
-> 该分支可能与上游产生偏差；ccuv 本身没有 DSH collector。
+> macOS 或 Linux：
+>
+> ```bash
+> curl -fsSL https://raw.githubusercontent.com/Cookie-HOO/ccusage-dsh/main/install.sh | sh
+> ccuv dashboard --ccusage-bin "$HOME/.local/bin/ccusage-dsh"
+> ```
+>
+> 安装脚本会验证 Release 校验和；也可以从
+> [最新 Release](https://github.com/Cookie-HOO/ccusage-dsh/releases/latest)
+> 手动下载 archive 和校验和。该项目仍是可能与上游产生偏差的非官方 fork；ccuv
+> 本身没有 DSH collector。
 
 ## 延伸阅读
 
