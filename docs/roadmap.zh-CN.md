@@ -2,19 +2,18 @@
 
 [English](roadmap.md)
 
-`ccusage-viz` 当前版本为 **0.2.2**。本路线图描述公开产品契约和已排序的需求池，不是私有实现计划。
+`ccusage-viz` 当前版本为 **0.3.0**。本路线图描述公开产品契约和已排序的需求池，不是私有实现计划。
 
-## 0.2.x
+## 已在 0.2.x 交付
 
-- `0.2.x` 将终端动画建设为一等呈现能力：无 Provider 的 standalone 动画、ccuv 自有的 gallery 浏览、明确的 Dashboard 动画 Pane、时钟预设，以及可选的状态感知 Monitor 附件。动画只影响呈现，不改变 Token 或 Dataset 数据语义。
-- 持续完善 Dashboard 布局、Pane 调度和全局摘要，不增加兼容性别名。
-- 评估面向长范围 Watch 和 Dashboard 历史 Pane 的、识别 interval 的已完成结果缓存，以及有界的最近/历史刷新。当前轮询在正确性、失效语义和数据源特定语义验证完成前保持不变。
+- 终端动画成为一等呈现能力，包括无 Provider 的 standalone 动画、ccuv 自有的 gallery 浏览、明确的 Dashboard 动画 Pane、时钟预设，以及可选的状态感知 Monitor 附件。动画只影响呈现，不改变 Token 或 Dataset 数据语义。
 
-## 0.3.x
+## 当前 0.3.x 发布线
 
-- `0.3.x` 继续强化 Custom Dataset 这一公开数据源能力：在保持 Dataset 自己拥有数据源语义的前提下，发展 Dataset 发现、安装、开发者契约和 Dashboard 交互。
-- 在已经实现的 V2 Metric Group、分组选择、Pane 内关联 Metric 切换、数据源拥有的值和 Custom Monitor 支持之上继续演进。进一步的生命周期或保留行为只在协议、资源和兼容性契约明确后交付。
-- 此发布序列为无法在 `0.2.x` 兼容引入的 Custom Dataset 契约变更预留空间。
+- `0.3.0` 将 Custom Dataset 建设为一等公开数据源能力，包括 Dataset 发现与安装、开发者契约、Dashboard 交互、V2 Metric Group、分组选择、Pane 内关联 Metric 切换、数据源拥有的值和 Custom Monitor 支持。
+- 在保持 Dataset 自己拥有数据源语义的前提下，继续强化 Dataset 生命周期与交互。进一步的保留行为只在协议、资源和兼容性契约明确后交付。
+- 持续完善 Dashboard 布局、Pane 调度、终端性能和全局摘要，不增加兼容性别名。
+- 评估面向长范围 Dashboard 历史 Pane 的、识别 interval 的已完成结果缓存，以及有界的最近/历史刷新。当前轮询在正确性、失效语义和数据源特定语义验证完成前保持不变。
 
 ## 需求池
 

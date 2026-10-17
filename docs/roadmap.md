@@ -2,35 +2,33 @@
 
 [简体中文](roadmap.zh-CN.md)
 
-`ccusage-viz` is currently at **0.2.2**. This roadmap describes public product
+`ccusage-viz` is currently at **0.3.0**. This roadmap describes public product
 contracts and the prioritized requirement pool, not private implementation
 plans.
 
-## 0.2.x
+## Delivered in 0.2.x
 
-- `0.2.x` makes terminal animation a first-class presentation capability:
+- Terminal animation became a first-class presentation capability through
   provider-free standalone animation, ccuv-owned gallery browsing, explicit
   Dashboard animation panes, clock presets, and opt-in state-aware Monitor
   attachments. Animations remain presentation-only and do not change token or
   Dataset data semantics.
-- Continue refining Dashboard layouts, pane scheduling, and the global summary
-  without adding compatibility aliases.
+
+## Current 0.3.x line
+
+- `0.3.0` makes Custom Dataset a first-class public data-source capability with
+  discovery, installation, developer contracts, Dashboard interaction, V2
+  Metric Groups, grouped selection, in-pane related Metric switching,
+  source-owned values, and Custom Monitor support.
+- Continue hardening Dataset lifecycle and interaction behavior while preserving
+  Dataset ownership of source semantics. Further retention behavior ships only
+  when its protocol, resource, and compatibility contracts are explicit.
+- Continue refining Dashboard layouts, pane scheduling, terminal performance,
+  and global summaries without adding compatibility aliases.
 - Evaluate interval-aware completed-result caches and bounded recent/history
-  refreshes for long-range Watch and Dashboard historical panes. Current
-  polling intentionally remains unchanged until correctness, invalidation, and
-  source-specific semantics are validated.
-
-## 0.3.x
-
-- `0.3.x` continues hardening Custom Dataset as a public data-source capability:
-  evolve discovery, installation, developer contracts, and Dashboard interaction
-  while preserving Dataset ownership of source semantics.
-- Build on the implemented V2 Metric Groups, grouped selection, in-pane related
-  Metric switching, source-owned values, and Custom Monitor support. Further
-  lifecycle or retention behavior ships only when its protocol, resource, and
-  compatibility contracts are explicit.
-- This release line provides room for Custom Dataset contract changes that
-  cannot be introduced compatibly in `0.2.x`.
+  refreshes for long-range Dashboard historical panes. Current polling remains
+  unchanged until correctness, invalidation, and source-specific semantics are
+  validated.
 
 ## Requirement pool
 

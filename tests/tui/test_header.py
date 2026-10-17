@@ -4,6 +4,7 @@ from decimal import Decimal
 import pytest
 
 import ccusage_viz.tui.models as tui_models
+from ccusage_viz import __version__
 from ccusage_viz.bootstrap import build_query_runtime
 from ccusage_viz.cli.configuration import _to_options
 from ccusage_viz.command_parsing.parser import build_parser
@@ -57,13 +58,13 @@ def test_tui_text_footer_is_minimal_and_only_advertises_overflow() -> None:
 def test_dashboard_title_places_version_left_and_freshness_right() -> None:
     line = _dashboard_title_line("Dashboard", "updated 12:34:56", 50, color=False)
     assert display_width(line) == 50
-    assert line.startswith("v0.2.2")
+    assert line.startswith(f"v{__version__}")
     assert line.endswith("updated 12:34:56")
     assert line.index("Dashboard") == (50 - len("Dashboard")) // 2
 
     narrow = _dashboard_title_line("仪表盘", "更新于 12:34:56", 18, color=False)
     assert display_width(narrow) == 18
-    assert narrow.startswith("v0.2.2")
+    assert narrow.startswith(f"v{__version__}")
 
 
 def test_tui_is_not_a_dashboard_compatibility_alias() -> None:
