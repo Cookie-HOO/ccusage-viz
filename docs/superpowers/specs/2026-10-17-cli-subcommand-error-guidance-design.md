@@ -52,3 +52,5 @@ A `main()`-level test will verify that the formatted diagnostic is written to st
 ## Scope
 
 This change covers only registered argparse subcommand levels in the public CLI. It does not add fuzzy execution, automatic typo correction, command aliases, option-name suggestions, dashboard preset suggestions, or changes to help output.
+
+This is a diagnostic-only change. Every argv sequence that currently parses successfully must produce the same namespace, launch configuration, route, side effects, and exit behavior after the change. Default-command injection and command execution are not modified. Preflight inspection may only intercept argv that already fails as an invalid subcommand; ambiguous cases must fall through to the existing parser and execution path.
