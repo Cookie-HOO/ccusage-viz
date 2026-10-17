@@ -6,6 +6,25 @@
 - **Minor (`0.x.0`)**: substantial new user-facing capabilities or source integrations before 1.0.
 - Before `1.0`, public interfaces may still change between releases.
 
+## 0.3.1
+
+`0.3.1` hardens cross-platform startup and small CLI failure paths, and replaces
+the non-working DSH installation guidance:
+
+- local timezone discovery now uses `tzlocal` before the existing Unix-oriented
+  fallbacks, so Windows and other hosts without `/etc/localtime` can resolve an
+  IANA timezone for date boundaries and copied commands;
+- omitting the required `ccuv text` preset now reports the supported preset list
+  through the same localized error path as an invalid preset;
+- the README no longer recommends installing a pnpm monorepo through npm's Git
+  dependency flow. It links to the pinned, unofficial
+  [`Cookie-HOO/ccusage-dsh`](https://github.com/Cookie-HOO/ccusage-dsh)
+  distribution, whose checksum-verifying installers provide native DSH-enabled
+  builds for Windows, macOS, and Linux.
+
+The DSH distribution remains separate from ccuv: this release does not add a
+ccuv-native collector or change built-in Token metric semantics.
+
 ## 0.3.0
 
 `0.3.0` makes Dataset extensions a first-class data-source capability and
