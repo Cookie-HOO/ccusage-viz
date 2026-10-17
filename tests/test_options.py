@@ -11,6 +11,7 @@ from ccusage_viz.configuration import (
     apply_custom_probe_defaults,
     default_custom_pane,
     default_pane,
+    focused_dashboard_from_chart,
     v2_metric_probe_descriptor,
 )
 from ccusage_viz.core.custom_ranking_time import TimestampRange
@@ -35,6 +36,7 @@ from ccusage_viz.i18n import load_translator
 from ccusage_viz.options import (
     DENSITIES,
     CalendarConfig,
+    ChartPaneConfig,
     ChartPresentation,
     CustomChartConfig,
     CustomChartPaneConfig,
@@ -61,6 +63,52 @@ from ccusage_viz.options import (
     resolve_date_range,
     validate_custom_partition_selection,
 )
+
+
+def test_chart_launch_becomes_focused_one_pane_dashboard() -> None:
+    historical = StandaloneLaunch(
+        ProcessConfig(),
+        StandaloneHostConfig(interval=31, ascii=True, timezone="Asia/Shanghai"),
+        TimelineConfig("timeline", DateRange(date(2026, 1, 1), date(2026, 1, 14))),
+        frozenset(("interval", "period")),
+    )
+    monitor = replace(
+        historical,
+        chart=MonitorConfig("monitor", DateRange(date(2026, 1, 1), date(2026, 1, 1))),
+    )
+    custom = replace(
+        historical,
+        chart=CustomChartConfig(
+            "ranking",
+            CustomCommandSource("reading", ("reader", "ccuv")),
+            DateRange(date(2026, 1, 1), date(2026, 1, 14)),
+        ),
+    )
+
+    for launch, pane_type in (
+        (historical, ChartPaneConfig),
+        (monitor, ChartPaneConfig),
+        (custom, CustomChartPaneConfig),
+    ):
+        dashboard = focused_dashboard_from_chart(launch)
+        assert dashboard.process == launch.process
+        assert dashboard.host.grid == "1x1"
+        assert dashboard.host.header_style == "hidden"
+        assert dashboard.host.header_summary == "none"
+        assert dashboard.host.ascii == launch.host.ascii
+        assert dashboard.host.timezone == launch.host.timezone
+        assert len(dashboard.panes) == 1
+        assert isinstance(dashboard.panes[0], pane_type)
+        assert dashboard.panes[0].chart == launch.chart
+
+    historical_dashboard = focused_dashboard_from_chart(historical)
+    monitor_dashboard = focused_dashboard_from_chart(monitor)
+    assert historical_dashboard.host.refresh_interval == 31
+    assert historical_dashboard.host.sampling_interval == 15
+    assert monitor_dashboard.host.refresh_interval == 15
+    assert monitor_dashboard.host.sampling_interval == 31
+    assert historical_dashboard.explicit == frozenset(("refresh_interval", "period"))
+    assert monitor_dashboard.explicit == frozenset(("sampling_interval", "period"))
 
 
 def test_custom_command_sources_use_filesystem_identity_for_absolute_paths(tmp_path) -> None:

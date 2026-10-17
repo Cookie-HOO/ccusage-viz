@@ -19,6 +19,7 @@ from ccusage_viz.options import (
     CustomChartConfig,
     CustomChartPaneConfig,
     CustomCommandSource,
+    DashboardHostConfig,
     DashboardLaunch,
     MonitorConfig,
     RankingConfig,
@@ -301,6 +302,32 @@ def default_custom_pane(
             metric_titles=metric_titles,
         )
     )
+
+
+def focused_dashboard_from_chart(launch: StandaloneLaunch) -> DashboardLaunch:
+    """Adapt a chart CLI launch to a headerless one-Pane Dashboard."""
+
+    chart = launch.chart
+    pane = (
+        CustomChartPaneConfig(chart)
+        if isinstance(chart, CustomChartConfig)
+        else ChartPaneConfig(chart)
+    )
+    interval_field = "sampling_interval" if chart.kind == "monitor" else "refresh_interval"
+    explicit = (launch.explicit - {"interval"}) | {interval_field}
+    host = DashboardHostConfig(
+        provider=launch.host.provider,
+        ascii=launch.host.ascii,
+        demo_size=launch.host.demo_size,
+        demo_seed=launch.host.demo_seed,
+        timezone=launch.host.timezone,
+        grid="1x1",
+        refresh_interval=launch.host.interval if interval_field == "refresh_interval" else 15.0,
+        sampling_interval=launch.host.interval if interval_field == "sampling_interval" else 15.0,
+        header_style="hidden",
+        header_summary="none",
+    )
+    return DashboardLaunch(launch.process, host, (pane,), explicit)
 
 
 def standalone_from_chart_pane(
