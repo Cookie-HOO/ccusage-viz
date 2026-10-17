@@ -51,17 +51,23 @@ def test_monitor_styles_collapse_to_four_view_families() -> None:
 
 
 def test_historical_heading_places_metric_chart_dimension_and_period_in_order() -> None:
-    assert compose_heading(
-        HeadingSpec("Token", "累计排名", dimension="项目", period="30d"),
-        context("zh"),
-    ) == "Token · 累计排名 · by 项目 · 30d"
+    assert (
+        compose_heading(
+            HeadingSpec("Token", "累计排名", dimension="项目", period="30d"),
+            context("zh"),
+        )
+        == "Token · 累计排名 · by 项目 · 30d"
+    )
 
 
 def test_heading_without_metric_starts_with_chart_and_keeps_optional_metadata() -> None:
-    assert compose_heading(
-        HeadingSpec(None, "Timeline", dimension="project", period="30d", status="Unavailable"),
-        context("en"),
-    ) == "Timeline · by Project · 30d(Unavailable)"
+    assert (
+        compose_heading(
+            HeadingSpec(None, "Timeline", dimension="project", period="30d", status="Unavailable"),
+            context("en"),
+        )
+        == "Timeline · by Project · 30d(Unavailable)"
+    )
 
 
 def test_heading_without_metric_remains_width_and_query_safe() -> None:
@@ -84,33 +90,44 @@ def test_heading_without_metric_remains_width_and_query_safe() -> None:
 
 
 def test_partitioned_heading_uses_directional_dimension_relationship() -> None:
-    assert compose_heading(
-        HeadingSpec("Star", "累计排名", dimension="仓库", partition="语言", period="30d"),
-        context("zh"),
-    ) == "Star · 累计排名 · by 语言 → 仓库 · 30d"
+    assert (
+        compose_heading(
+            HeadingSpec("Star", "累计排名", dimension="仓库", partition="语言", period="30d"),
+            context("zh"),
+        )
+        == "Star · 累计排名 · by 语言 → 仓库 · 30d"
+    )
 
 
 def test_heading_localizes_known_dimension_keys() -> None:
-    assert compose_heading(
-        HeadingSpec("Token", "累计排名", dimension="model"), context("zh")
-    ) == "Token · 累计排名 · by 模型"
+    assert (
+        compose_heading(HeadingSpec("Token", "累计排名", dimension="model"), context("zh"))
+        == "Token · 累计排名 · by 模型"
+    )
 
 
 def test_partitioned_heading_localizes_each_known_dimension_key() -> None:
-    assert compose_heading(
-        HeadingSpec("Token", "累计排名", dimension="project", partition="model"),
-        context("zh"),
-    ) == "Token · 累计排名 · by 模型 → 项目"
+    assert (
+        compose_heading(
+            HeadingSpec("Token", "累计排名", dimension="project", partition="model"),
+            context("zh"),
+        )
+        == "Token · 累计排名 · by 模型 → 项目"
+    )
 
 
 def test_monitor_window_is_labeled_but_ungrouped_total_is_omitted() -> None:
-    assert compose_heading(
-        HeadingSpec("TPM", "趋势", period="1h", window=True), context("zh")
-    ) == "TPM · 趋势 · 1h 窗口"
-    assert compose_heading(
-        HeadingSpec("Tokens", "Ranking", dimension="project", period="1h", window=True),
-        context("en"),
-    ) == "Tokens · Ranking · by Project · 1h window"
+    assert (
+        compose_heading(HeadingSpec("TPM", "趋势", period="1h", window=True), context("zh"))
+        == "TPM · 趋势 · 1h 窗口"
+    )
+    assert (
+        compose_heading(
+            HeadingSpec("Tokens", "Ranking", dimension="project", period="1h", window=True),
+            context("en"),
+        )
+        == "Tokens · Ranking · by Project · 1h window"
+    )
 
 
 def test_heading_reduction_removes_dimension_before_period() -> None:

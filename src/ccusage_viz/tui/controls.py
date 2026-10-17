@@ -9,6 +9,7 @@ from ccusage_viz.terminal_ui import AdjustmentAction
 def _cycle(values: tuple[str, ...], current: str, step: int) -> str:
     return values[(values.index(current) + step) % len(values)]
 
+
 _COMMON_PANE_QUICK_ACTIONS = (
     ("d/D", "density"),
     ("t/T", "theme"),
@@ -40,6 +41,7 @@ _PANE_POSITION_ACTIONS = (
     ("J / K", "height"),
 )
 
+
 def _localized_actions(
     actions: tuple[tuple[str, str], ...], translator: Translator
 ) -> tuple[AdjustmentAction, ...]:
@@ -48,16 +50,19 @@ def _localized_actions(
         for priority, (key, label) in enumerate(actions)
     )
 
+
 def _pane_content_actions(body_view: BodyView) -> tuple[tuple[str, str], ...]:
     if body_view_copy_kind(body_view) is None:
         return _PANE_CONTENT_ACTIONS
     return (*_PANE_CONTENT_ACTIONS, ("y", "copy"))
+
 
 def _pane_management_divider(translator: Translator, width: int, *, color: bool) -> str:
     """Render the Dashboard Pane section boundary above scoped actions."""
 
     divider = translator.text("status.tui_pane_management_divider")
     return clip_width(f"\x1b[1m{divider}\x1b[0m" if color else divider, width)
+
 
 def _management_row(
     label: str,

@@ -21,16 +21,23 @@ def allocate_pane_id(session: TuiSession) -> int:
     session.next_pane_id += 1
     return pane_id
 
-def create_pane(session: TuiSession, command: PaneConfig | str, *, pane_id: int | None=None) -> TuiPane:
+
+def create_pane(
+    session: TuiSession, command: PaneConfig | str, *, pane_id: int | None = None
+) -> TuiPane:
     pane_id = allocate_pane_id(session) if pane_id is None else pane_id
     if isinstance(command, CustomChartPaneConfig):
-        pane = _new_pane(session.options, command, f'dashboard:pane:{pane_id}', session.runtime)
-    elif command == 'empty':
+        pane = _new_pane(session.options, command, f"dashboard:pane:{pane_id}", session.runtime)
+    elif command == "empty":
         pane = _new_pane(session.options, EmptyPaneConfig())
-    elif command == 'animate':
-        pane = _new_pane(session.options, AnimationPaneConfig(default_animation_spec('pane')))
+    elif command == "animate":
+        pane = _new_pane(session.options, AnimationPaneConfig(default_animation_spec("pane")))
     else:
         assert isinstance(command, str)
-        pane = _new_pane(_new_pane_options(command, session.options), f'dashboard:pane:{pane_id}', session.runtime)
+        pane = _new_pane(
+            _new_pane_options(command, session.options),
+            f"dashboard:pane:{pane_id}",
+            session.runtime,
+        )
     pane.pane_id = pane_id
     return pane

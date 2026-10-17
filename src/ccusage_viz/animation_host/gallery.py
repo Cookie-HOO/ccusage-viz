@@ -83,6 +83,7 @@ class GalleryState:
     def mark_theme_changed(self, style: str) -> None:
         self.dirty_styles.add(style)
 
+
 def _gallery_geometry(terminal: Terminal) -> tuple[int, int, int, int]:
     """Return a fixed two-column, large-card gallery viewport."""
 
@@ -92,6 +93,7 @@ def _gallery_geometry(terminal: Terminal) -> tuple[int, int, int, int]:
     rows = max(1, available_height // 18)
     card_height = max(1, available_height // rows)
     return columns, rows, card_width, card_height
+
 
 def _gallery_card(
     rows: tuple[str, ...],
@@ -119,6 +121,7 @@ def _gallery_card(
         *(vertical + pad_width(item, interior_width) + vertical for item in body),
         bottom_left + horizontal * interior_width + bottom_right,
     )
+
 
 def _gallery_rows(
     state: GalleryState,
@@ -198,11 +201,13 @@ def _gallery_rows(
     )
     return tuple(output), tuple(sessions)
 
+
 def _gallery_wait_seconds(sessions: tuple[AnimationSessionState, ...], now: float) -> float:
     deadlines = tuple(
         session.next_deadline for session in sessions if session.next_deadline is not None
     )
     return _POLL_SECONDS if not deadlines else min(_POLL_SECONDS, max(0.0, min(deadlines) - now))
+
 
 def _run_gallery(options: AnimationLaunch, translator: Translator) -> int:
     state = GalleryState(animation_style_choices("standalone"), options.animation.style)

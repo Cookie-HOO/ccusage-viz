@@ -1,5 +1,3 @@
-
-
 from datetime import date
 
 from ccusage_viz.custom_models import (
@@ -40,6 +38,7 @@ def _probe_descriptor() -> CustomProbeDescriptor:
         },
         (),
     )
+
 
 def timeline(
     *, rolling: bool = True, by: str | None = None, top: int | None = None

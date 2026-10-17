@@ -78,6 +78,7 @@ def _shutdown_pane(pane: TuiPane) -> None:
         pane.summary.scheduler.shutdown()
         pane.summary.lifecycle.shutdown()
 
+
 def _replace_pane(
     panes: list[TuiPane],
     index: int,
@@ -90,6 +91,7 @@ def _replace_pane(
     start(index)
     _shutdown_pane(displaced)
 
+
 def _insert_pane(
     panes: list[TuiPane],
     index: int,
@@ -99,6 +101,7 @@ def _insert_pane(
 ) -> None:
     panes.insert(index, inserted)
     start(index)
+
 
 def _new_pane(
     options: StandaloneLaunch | DashboardLaunch,
@@ -251,6 +254,7 @@ def _new_pane(
         attachment_renderer=attachment_renderer,
     )
 
+
 def _await_custom_submission(
     handle: QueryHandle[ProviderResult],
     generation: int,
@@ -272,8 +276,10 @@ def _await_custom_submission(
             comparison_request_config=comparison_request_config,
         )
 
+
 def _await_historical(handle: QueryHandle[ProviderResult], started: float) -> UsageSnapshot:
     return snapshot_from_result(handle.result(), time.monotonic() - started)
+
 
 def _await_builtin_summary_submission(
     handle: QueryHandle[ProviderResult],
@@ -285,6 +291,7 @@ def _await_builtin_summary_submission(
         return BuiltinSummaryOutcome(generation, plan, chart, result=handle.result())
     except BaseException as exc:
         return BuiltinSummaryOutcome(generation, plan, chart, error=exc)
+
 
 def _await_historical_submission(submission: HistoricalSubmission) -> HistoricalOutcome:
     try:
@@ -300,11 +307,13 @@ def _await_historical_submission(submission: HistoricalSubmission) -> Historical
             error=exc,
         )
 
+
 def _await_monitor_submission(submission: MonitorSubmission) -> MonitorOutcome:
     try:
         return MonitorOutcome(submission.generation, completion=submission.result())
     except BaseException as exc:
         return MonitorOutcome(submission.generation, error=exc)
+
 
 def _await_monitor_warmup(
     component: MonitorComponent,
@@ -329,6 +338,7 @@ def _await_monitor_warmup(
     except BaseException as exc:
         return MonitorWarmupOutcome(generation, tuple(completions), exc)
 
+
 def _refresh_deltas(pane: TuiChartPane, values: dict[Hashable, float]) -> None:
     tracker = RefreshDeltas(
         pane.previous_values,
@@ -340,11 +350,13 @@ def _refresh_deltas(pane: TuiChartPane, values: dict[Hashable, float]) -> None:
     pane.deltas = tracker.current
     pane.values_initialized = tracker.initialized
 
+
 def _refresh_ranks(pane: TuiChartPane, ordered_keys: tuple[Hashable, ...]) -> None:
     tracker = RefreshRanks(pane.previous_ranks, pane.rank_deltas)
     tracker.accept(ordered_keys)
     pane.previous_ranks = tracker.previous
     pane.rank_deltas = tracker.current
+
 
 def _clear_changes(pane: TuiChartPane) -> None:
     pane.previous_values.clear()
@@ -352,6 +364,7 @@ def _clear_changes(pane: TuiChartPane) -> None:
     pane.values_initialized = False
     pane.previous_ranks.clear()
     pane.rank_deltas.clear()
+
 
 def _new_pane_options(command: str, base: DashboardLaunch) -> StandaloneLaunch:
     from ccusage_viz.configuration import default_pane, standalone_from_chart_pane

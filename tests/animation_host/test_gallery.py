@@ -1,4 +1,3 @@
-
 from dataclasses import replace
 
 import pytest
@@ -24,6 +23,7 @@ def test_default_animation_spec_rejects_empty_catalog(monkeypatch) -> None:
     with pytest.raises(UsageError):
         default_animation_spec()
 
+
 def test_catalog_is_discovered_from_term_animate() -> None:
     styles = animation_style_choices()
 
@@ -32,6 +32,7 @@ def test_catalog_is_discovered_from_term_animate() -> None:
     assert animation_spec(styles[0]).style == styles[0]
     with pytest.raises(UsageError):
         animation_spec("not-an-animation")
+
 
 def test_gallery_catalog_refresh_preserves_valid_selection_and_handles_removal() -> None:
     state = GalleryState(("rain", "snow"), "snow")
@@ -49,6 +50,7 @@ def test_gallery_catalog_refresh_preserves_valid_selection_and_handles_removal()
     assert state.selected_style == ""
     assert state.selected_index() == 0
 
+
 def test_gallery_hides_off_page_sessions_without_idle_catch_up() -> None:
     state = GalleryState(("rain", "snow"), "rain")
     rain = state.session_for("rain", now=1.0)
@@ -59,6 +61,7 @@ def test_gallery_hides_off_page_sessions_without_idle_catch_up() -> None:
 
     assert not rain.visible
     assert rain.clock.elapsed(100.0) == 2.0
+
 
 def test_gallery_projects_all_visible_previews_between_deadlines(monkeypatch, translator) -> None:
     state = GalleryState(("rain", "snow"), "rain")
@@ -75,6 +78,7 @@ def test_gallery_projects_all_visible_previews_between_deadlines(monkeypatch, tr
     _gallery_rows(state, renderer, terminal, translator, now=2.0)
 
     assert calls == ["rain", "snow"]
+
 
 def test_gallery_uses_two_columns_tall_cards_and_paginates_by_selection(translator) -> None:
     state = GalleryState(("rain", "snow", "digital-clock", "mole-cat"), "rain")
@@ -97,6 +101,7 @@ def test_gallery_uses_two_columns_tall_cards_and_paginates_by_selection(translat
     )
     assert any("digital-clock" in row and "mole-cat" in row for row in rendered)
 
+
 def test_gallery_uses_ascii_card_borders(translator) -> None:
     state = GalleryState(("rain",), "rain")
 
@@ -106,6 +111,7 @@ def test_gallery_uses_ascii_card_borders(translator) -> None:
 
     assert rows[0] == "+" + "-" * 18 + "+"
     assert any(row.startswith("|") and row.endswith("|") for row in rows)
+
 
 def test_gallery_cards_keep_ansi_display_width_safe(monkeypatch, translator) -> None:
     state = GalleryState(("rain",), "rain")
@@ -117,6 +123,7 @@ def test_gallery_cards_keep_ansi_display_width_safe(monkeypatch, translator) -> 
     rows, _ = _gallery_rows(state, renderer, terminal, translator, now=1.0)
 
     assert all(display_width(row) <= terminal.width for row in rows)
+
 
 def test_catalog_extension_is_discovered_without_a_ccuv_catalog_change(monkeypatch) -> None:
     catalog = curated_catalog()

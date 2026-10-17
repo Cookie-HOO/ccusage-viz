@@ -1,6 +1,3 @@
-
-
-
 import pytest
 
 from ccusage_viz.providers.ccusage_definition import CCUSAGE_DEFINITION
@@ -17,6 +14,7 @@ def test_ccusage_provider_owns_logical_to_physical_planning() -> None:
     assert query.arguments[:3] == ("daily", "--by-agent", "--json")
     assert query.arguments[-2:] == ("--offline", "--no-cost")
     assert CCUSAGE_DEFINITION.provider.fingerprint(query) == query.fingerprint
+
 
 def test_provider_preserves_source_identity() -> None:
     source_intent = intent("timeline")
@@ -35,6 +33,7 @@ def test_provider_preserves_source_identity() -> None:
     (query,) = CCUSAGE_DEFINITION.provider.compile(source_intent).queries
 
     assert query.provider == ProviderRef("ccusage", "workspace-a")
+
 
 def test_provider_rejects_unsupported_resolution() -> None:
     source = intent("timeline")

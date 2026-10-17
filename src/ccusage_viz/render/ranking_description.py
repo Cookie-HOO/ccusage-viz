@@ -9,15 +9,18 @@ from ccusage_viz.render.palette import get_color_scheme
 
 _DESCRIPTION_LINK = re.compile(r"\[([^\]]+)\]\((https://[A-Za-z0-9][^\s)]*)\)")
 
+
 @dataclass(frozen=True, slots=True)
 class _DescriptionPart:
     text: str
     url: str | None = None
 
+
 @dataclass(frozen=True, slots=True)
 class _DescriptionEmphasis:
     text: str
     style: str | None = None
+
 
 def _description_emphasis(value: str) -> tuple[_DescriptionEmphasis, ...]:
     """Parse the intentionally small, non-nesting star-emphasis subset."""
@@ -51,8 +54,10 @@ def _description_emphasis(value: str) -> tuple[_DescriptionEmphasis, ...]:
         parts.append(_DescriptionEmphasis(value[plain_start:]))
     return tuple(parts)
 
+
 def _description_visible_text_part(value: str) -> str:
     return "".join(part.text for part in _description_emphasis(value))
+
 
 def _description_parts(value: str) -> tuple[_DescriptionPart, ...]:
     """Parse the one safe inline description construct without executing source controls."""
@@ -68,15 +73,18 @@ def _description_parts(value: str) -> tuple[_DescriptionPart, ...]:
         parts.append(_DescriptionPart(sanitized[position:]))
     return tuple(parts)
 
+
 def _terminal_link(value: str, url: str) -> str:
     """Attach a trusted https target with an OSC 8 link that has no visible URL."""
     return f"\x1b]8;;{url}\x1b\\{value}\x1b]8;;\x1b\\"
+
 
 def _link_emphasis(value: str, context: RenderContext, *, color: int) -> str:
     """Keep links muted while making their interaction affordance legible."""
     if not context.color:
         return value
     return f"\x1b[38;5;{color}m\x1b[2;4m{value}\x1b[0m"
+
 
 def _description_search_text(value: str) -> str:
     """Expose both visible labels and hidden link targets to local search."""
@@ -87,6 +95,7 @@ def _description_search_text(value: str) -> str:
         for part in _description_parts(value)
     )
 
+
 def copyable_description_text(value: str) -> str:
     """Flatten a safe description into clipboard text without terminal controls."""
     return "".join(
@@ -96,9 +105,11 @@ def copyable_description_text(value: str) -> str:
         for part in _description_parts(value)
     ).strip()
 
+
 def description_visible_text(value: str) -> str:
     """Return only the text rendered for a description, excluding link targets."""
     return "".join(_description_visible_text_part(part.text) for part in _description_parts(value))
+
 
 def _description_row_markup(row: str, source: str) -> str:
     """Restore intact safe links after plain-text description wrapping."""
@@ -109,6 +120,7 @@ def _description_row_markup(row: str, source: str) -> str:
         markup = f"[{part.text}]({part.url})" if part.url is not None else part.text
         row = row.replace(visible_text, markup)
     return row
+
 
 def _highlight_parts(value: str, query: str) -> tuple[tuple[str, bool], ...]:
     """Split plain text into unmatched/matched literal case-insensitive spans."""
@@ -128,6 +140,7 @@ def _highlight_parts(value: str, query: str) -> tuple[tuple[str, bool], ...]:
         parts.append((value[position:], False))
     return tuple(parts)
 
+
 def highlight_ranking_match(value: str, query: str, *, context: RenderContext) -> str:
     """Highlight every literal case-insensitive match without changing text width."""
     scheme = get_color_scheme(context.color_scheme)
@@ -136,10 +149,12 @@ def highlight_ranking_match(value: str, query: str, *, context: RenderContext) -
         for part, matched in _highlight_parts(value, query)
     )
 
+
 def render_ranking_description(value: str, context: RenderContext) -> str:
     """Render description text with the same muted treatment as Custom Ranking."""
 
     return _render_highlighted_description(value, "", context)
+
 
 def _render_highlighted_description(value: str, query: str, context: RenderContext) -> str:
     """Render safe links, metadata tags, and star emphasis."""

@@ -31,6 +31,7 @@ def test_document_rejects_unknown_fields_nonfinite_values_and_duplicate_names() 
     with pytest.raises(DashboardPresetValidationError, match="unique"):
         DashboardPresetDocument.parse(duplicates)
 
+
 def test_document_save_overwrite_preserves_created_at_and_updates_timestamp() -> None:
     original = preset_from_launch("review", _launch(), now=NOW)
     replacement = preset_from_launch("review", _launch(), now=NOW + timedelta(days=1))

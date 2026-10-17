@@ -29,9 +29,8 @@ def test_standalone_host_exits_for_owned_exit_keys(
     assert animate_module.run_animation(animation_launch, translator) == 0
     assert finished == [True]
 
-def test_standalone_host_ignores_space(
-    monkeypatch, translator, animation_launch
-) -> None:
+
+def test_standalone_host_ignores_space(monkeypatch, translator, animation_launch) -> None:
     session = new_animation_session(animation_spec("rain"), theme="classic")
     events = iter((" ", "q"))
 
@@ -50,6 +49,7 @@ def test_standalone_host_ignores_space(
     assert session.playback_requested
     assert session.traversal_frozen_at is None
     assert not hasattr(session, "host_paused")
+
 
 def test_standalone_host_adjustment_handles_quick_controls(
     monkeypatch, translator, animation_launch
@@ -72,6 +72,7 @@ def test_standalone_host_adjustment_handles_quick_controls(
     assert session.theme == "classic"
     assert session.spec.style == "rain"
 
+
 def test_standalone_host_advanced_adjustment_ignores_animation_controls(
     monkeypatch, translator, animation_launch
 ) -> None:
@@ -93,6 +94,7 @@ def test_standalone_host_advanced_adjustment_ignores_animation_controls(
     assert session.theme == "classic"
     assert session.spec.style == "rain"
 
+
 def test_terminal_keeps_color_when_ascii_is_requested(monkeypatch, animation_launch) -> None:
     options = AnimationLaunch(
         animation_launch.process,
@@ -113,6 +115,7 @@ def test_terminal_keeps_color_when_ascii_is_requested(monkeypatch, animation_lau
     assert terminal.color
     assert terminal.ascii
     assert "no_color" not in calls[0]
+
 
 def test_frame_wait_is_bounded_and_deadline_aware() -> None:
     session = new_animation_session(animation_spec("rain"), theme="classic")

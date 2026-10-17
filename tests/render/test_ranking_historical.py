@@ -1,7 +1,3 @@
-
-
-
-
 from dataclasses import replace
 from datetime import date
 
@@ -80,6 +76,7 @@ def test_pending_exact_project_ranking_uses_accepted_canonical_identity(
     assert translator.text("status.querying") in output
     assert translator.text("message.data_loading") in output
 
+
 def test_historical_ranking_heading_is_centered_once() -> None:
     context = RenderContext(80, 24, load_translator("zh"), color=False, period="14d")
     model = RankingModel((RankingEntry("a", "A", usage(1_200)),), period())
@@ -92,6 +89,7 @@ def test_historical_ranking_heading_is_centered_once() -> None:
         == (context.width - display_width(heading.lstrip())) // 2
     )
 
+
 def test_ranking_heading_shows_hidden_top_coverage() -> None:
     model = RankingModel(
         (RankingEntry("a", "A", usage(60)),),
@@ -103,9 +101,8 @@ def test_ranking_heading_shows_hidden_top_coverage() -> None:
 
     output = render_ranking(model, context(True))
 
-    assert (
-        "Tokens · Ranking · 2026-01-01–2026-01-14 · Top 1 · 60.0% of total" in output
-    )
+    assert "Tokens · Ranking · 2026-01-01–2026-01-14 · Top 1 · 60.0% of total" in output
+
 
 def test_pending_historical_ranking_masks_stale_figures() -> None:
     summary = PeriodSummary(
@@ -143,6 +140,7 @@ def test_pending_historical_ranking_masks_stale_figures() -> None:
     assert " 60 " not in output
     assert "60.0%" not in output
 
+
 def test_ranking_and_custom_calendar_render_without_json_or_table() -> None:
     ranking = render_ranking(
         RankingModel((RankingEntry("a", "项目", usage(1_200)),), period()), context(True)
@@ -153,6 +151,7 @@ def test_ranking_and_custom_calendar_render_without_json_or_table() -> None:
         CalendarModel((CalendarDay(date(2026, 1, 1), usage(4)),)), context(True)
     )
     assert "Calendar" in calendar and "Less" in calendar and "#" in calendar
+
 
 def test_exact_project_ranking_qualifies_safe_labels_and_title() -> None:
     model = RankingModel(
@@ -188,6 +187,7 @@ def test_exact_project_ranking_qualifies_safe_labels_and_title() -> None:
     assert "-private-work-py-ccusage-viz" not in output
     assert "/private/work/py-ccusage-viz" not in output
 
+
 def test_name_project_ranking_keeps_plain_label_for_exact_identity() -> None:
     model = RankingModel(
         (RankingEntry(("project", "exact", "claude", "-private-work-app"), "app", usage(1_200)),),
@@ -199,6 +199,7 @@ def test_name_project_ranking_keeps_plain_label_for_exact_identity() -> None:
     assert "Ranking · 2026-01-01–2026-01-14" in output
     assert "claude app" not in output
     assert "app" in output
+
 
 def test_exact_project_ranking_keeps_agent_visible_in_narrow_context() -> None:
     model = RankingModel(
@@ -227,6 +228,7 @@ def test_exact_project_ranking_keeps_agent_visible_in_narrow_context() -> None:
     assert "codex" in rows[1]
     assert all("claude ·" not in row and "codex ·" not in row for row in rows)
     assert all("very-long-project" not in row for row in rows)
+
 
 def test_historical_ranking_derives_comparison_markers_from_entry_facts() -> None:
     model = RankingModel(
@@ -262,6 +264,7 @@ def test_historical_ranking_derives_comparison_markers_from_entry_facts() -> Non
     assert "-100" in app_line
     assert "v" in app_line
 
+
 def test_historical_ranking_full_uses_labeled_value_delta_without_rank_comparison() -> None:
     entries = (
         RankingPresentationEntry(
@@ -291,6 +294,7 @@ def test_historical_ranking_full_uses_labeled_value_delta_without_rank_compariso
     assert "—" in other
     assert all(display_width(row) <= 100 for row in output.splitlines())
 
+
 def test_historical_ranking_all_period_omits_comparison_columns_and_uses_available_width() -> None:
     context = RenderContext(
         120, 24, load_translator("en"), color=False, style="dot", density="detailed", period="all"
@@ -308,6 +312,7 @@ def test_historical_ranking_all_period_omits_comparison_columns_and_uses_availab
 
     assert all("vs prior" not in row and "Rank Δ" not in row for row in rows)
     assert all(display_width(row) == context.width for row in rows)
+
 
 def test_historical_ranking_rank_comparison_hides_growth_but_retains_rank_delta() -> None:
     output = render_historical_ranking(
@@ -335,6 +340,7 @@ def test_historical_ranking_rank_comparison_hides_growth_but_retains_rank_delta(
     assert "+200" not in api and "-100" not in app
     assert "^" in api and "v" in app
 
+
 def test_historical_ranking_none_comparison_hides_all_comparison_columns() -> None:
     output = render_historical_ranking(
         (RankingPresentationEntry("api", "API", 300, previous=100, comparison_ready=True),),
@@ -346,6 +352,7 @@ def test_historical_ranking_none_comparison_hides_all_comparison_columns() -> No
 
     assert "vs prior" not in output
     assert "Rank Δ" not in output
+
 
 def test_historical_ranking_shows_refresh_activity_and_rank_changes() -> None:
     model = RankingModel(
@@ -379,6 +386,7 @@ def test_historical_ranking_shows_refresh_activity_and_rank_changes() -> None:
     assert "2 v * api" in api_line
     assert "800 v" in api_line
 
+
 def test_historical_ranking_other_ignores_refresh_activity() -> None:
     other = RankingModel(
         (RankingEntry("Other", "Other", usage(500), is_other=True),),
@@ -402,6 +410,7 @@ def test_historical_ranking_other_ignores_refresh_activity() -> None:
     assert "^" not in line
     assert "*" not in line
 
+
 def test_empty_ranking_keeps_localized_effective_range() -> None:
     output = render_ranking(
         RankingModel((), period()),
@@ -411,6 +420,7 @@ def test_empty_ranking_keeps_localized_effective_range() -> None:
     lines = output.splitlines()
     assert lines[0].strip() == "Token · 累计排名 · 2026-01-01–2026-01-14"
     assert lines[1] == "所选范围内没有 Token 用量。"
+
 
 def test_ranking_dots_style_repeats_marks_to_the_scaled_value() -> None:
     model = RankingModel(
@@ -430,6 +440,7 @@ def test_ranking_dots_style_repeats_marks_to_the_scaled_value() -> None:
     assert rows[0].count("●") > 1
     assert rows[1].count("●") > 1
     assert "·" in rows[1]
+
 
 @pytest.mark.parametrize("style", ("dot", "dots", "bars"))
 def test_historical_ranking_aligns_tracks_and_right_value_column(style: str) -> None:
@@ -457,6 +468,7 @@ def test_historical_ranking_aligns_tracks_and_right_value_column(style: str) -> 
     assert "10" in rows[0] and "—" in rows[0] and rows[0].endswith("66.7%")
     assert "five units" in rows[1] and "—" in rows[1] and rows[1].endswith("33.3%")
 
+
 def test_historical_ranking_deemphasizes_fixed_project_buckets_like_other() -> None:
     scheme = get_color_scheme("classic")
     model = RankingModel(
@@ -476,6 +488,7 @@ def test_historical_ranking_deemphasizes_fixed_project_buckets_like_other() -> N
     assert f"\x1b[38;5;{scheme.highlight}m●" in rows[0]
     assert f"\x1b[38;5;{scheme.other}m●" in rows[1]
     assert f"\x1b[38;5;{scheme.other}m●" in rows[2]
+
 
 def test_ranking_compacts_common_opaque_prefixes() -> None:
     model = RankingModel(

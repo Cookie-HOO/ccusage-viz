@@ -9,9 +9,7 @@ from ccusage_viz.pi_sessions import resolve_pi_session_cwds
 def write_session(root: Path, directory: str, session_id: str, cwd: str) -> None:
     path = root / directory / f"2026-10-09_{session_id}.jsonl"
     path.parent.mkdir(parents=True)
-    path.write_text(
-        json.dumps({"type": "session", "id": session_id, "cwd": cwd}), encoding="utf-8"
-    )
+    path.write_text(json.dumps({"type": "session", "id": session_id, "cwd": cwd}), encoding="utf-8")
 
 
 def test_resolve_pi_session_cwds_uses_the_session_header_cwd(tmp_path: Path) -> None:

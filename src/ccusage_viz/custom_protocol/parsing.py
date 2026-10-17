@@ -136,6 +136,7 @@ def parse_custom_response(raw: bytes, request: CustomRequest) -> CustomResponse:
         warnings=warnings,
     )
 
+
 def _validate_envelope(root: dict[str, object], request: CustomRequest) -> None:
     expected_protocol = (
         V2_PROTOCOL_VERSION
@@ -163,11 +164,13 @@ def _validate_envelope(root: dict[str, object], request: CustomRequest) -> None:
                 )
             raise CustomProtocolError(detail)
 
+
 def _response_metric_id(root: dict[str, object], expected: str) -> str:
     metric_id = _string(root.get("metric_id"), "v2 response metric ID")
     if metric_id != expected:
         raise CustomProtocolError("v2 response metric ID does not match request")
     return metric_id
+
 
 def _validate_v2_query_descriptor(
     descriptor: V2ProbeDescriptor, metric_id: str, chart_kind: str
@@ -188,6 +191,7 @@ def _validate_v2_query_descriptor(
     if chart_kind not in supported:
         raise CustomProtocolError("v2 response descriptor does not support requested chart kind")
     return metric, supported[chart_kind]
+
 
 def _is_ranking_request(request: V2ChartRequest, metric: V2MetricDescriptor) -> bool:
     """Identify Ranking from request-only fields and the response descriptor.
@@ -213,6 +217,7 @@ def _is_ranking_request(request: V2ChartRequest, metric: V2MetricDescriptor) -> 
     }
     return historical_kinds == {"ranking"}
 
+
 def _validate_ranking_request_partition(
     request: V2ChartRequest, capability: V2HistoricalChartCapability
 ) -> None:
@@ -229,6 +234,7 @@ def _validate_ranking_request_partition(
     except CustomProtocolError as exc:
         raise CustomProtocolError(f"v2 response ranking capability {exc}") from exc
 
+
 def _parse_v2_runtime(value: object) -> V2Runtime:
     source = _mapping(value, "v2 response runtime")
     if set(source) != {"filters"}:
@@ -238,6 +244,7 @@ def _parse_v2_runtime(value: object) -> V2Runtime:
     )
     _unique_ids(filters, "runtime filters")
     return V2Runtime(filters)
+
 
 def _parse_failure(root: dict[str, object]) -> CustomProtocolError:
     error = _mapping(root.get("error"), "error")
@@ -258,6 +265,7 @@ def _parse_failure(root: dict[str, object]) -> CustomProtocolError:
         unsupported = {key: value for key, value in parsed.items() if isinstance(value, str)}
     failure = CustomProtocolFailure(code, message, unsupported)
     return CustomProtocolError(f"{code}: {message.en}", failure=failure)
+
 
 def _parse_warnings(value: object) -> tuple[CustomProtocolWarning, ...]:
     if value is None:

@@ -16,15 +16,14 @@ from ccusage_viz.terminal import Frame, FramePainter, compose_frame, emphasize, 
 from ccusage_viz.tui_input import InputDecoder, KeyEvent, PasteEvent, read_event, tui_input_mode
 
 
-def _read_manager_event(
-    decoder: InputDecoder, read_input: Callable[[], object] | None
-) -> object:
+def _read_manager_event(decoder: InputDecoder, read_input: Callable[[], object] | None) -> object:
     """Read one nested-manager event and preserve global Ctrl-C semantics."""
 
     event = read_input() if read_input is not None else read_event(decoder, 0.1)
     if isinstance(event, KeyEvent) and event.value == "\x03":
         raise KeyboardInterrupt
     return event
+
 
 def _read_local_command(
     screen: FramePainter,
@@ -70,6 +69,7 @@ def _read_local_command(
         if len(event.value) == 1 and event.value.isprintable():
             command += event.value
 
+
 def _choose_dataset_source(
     screen: FramePainter,
     translator: Translator,
@@ -112,6 +112,7 @@ def _choose_dataset_source(
         elif event.value in {"\r", "\n"}:
             return sources[index]
 
+
 def _confirm(
     screen: FramePainter,
     translator: Translator,
@@ -135,6 +136,7 @@ def _confirm(
         if event.value == "\x1b":
             return False
 
+
 def _register_local(
     service: DatasetService,
     screen: FramePainter,
@@ -155,7 +157,9 @@ def _register_local(
             screen,
             translator,
             decoder,
-            translator.text("status.dataset_registration_conflict", dataset_id=result.registration.dataset_id),
+            translator.text(
+                "status.dataset_registration_conflict", dataset_id=result.registration.dataset_id
+            ),
             title=translator.text("status.dataset_registration_conflict_title"),
             controls=translator.text("status.dataset_registration_conflict_controls"),
             read_input=read_input,
@@ -166,7 +170,10 @@ def _register_local(
             result = service.register_local_command(argv, replace=True)
         except Exception as exc:
             return format_error(exc, translator)
-    return translator.text(f"status.dataset_registration_{result.kind}", dataset_id=result.registration.dataset_id)
+    return translator.text(
+        f"status.dataset_registration_{result.kind}", dataset_id=result.registration.dataset_id
+    )
+
 
 def _manager_help_lines(
     status: DatasetRegistrationStatus | None,
@@ -272,6 +279,7 @@ def _manager_help_lines(
     ]
     return tuple(rows)
 
+
 def _manager_help_frame(
     lines: tuple[str, ...], translator: Translator, *, width: int, height: int, color: bool = False
 ) -> Frame:
@@ -310,6 +318,7 @@ def _manager_help_frame(
             canvas[start_y + index] = " " * start_x + row
     return Frame(tuple(canvas))
 
+
 def _show_manager_help(
     screen: FramePainter,
     translator: Translator,
@@ -322,7 +331,9 @@ def _show_manager_help(
     size = get_terminal_size()
     screen.paint(
         _manager_help_frame(
-            _manager_help_lines(status, translator, details=details, width=max(1, size.columns - 4)),
+            _manager_help_lines(
+                status, translator, details=details, width=max(1, size.columns - 4)
+            ),
             translator,
             width=size.columns,
             height=size.lines,
@@ -334,8 +345,10 @@ def _show_manager_help(
         if isinstance(event, KeyEvent) and event.value in {"h", "\x1b", "\r", "\n"}:
             return
 
+
 def run_dataset_manager(service: DatasetService, translator: Translator) -> int:
     from ccusage_viz.datasets.manager_installation import _register_github, _register_official
+
     screen = FramePainter(sys.stdout)
     selected = 0
     details = False
@@ -410,7 +423,9 @@ def run_dataset_manager(service: DatasetService, translator: Translator) -> int:
                         screen,
                         translator,
                         decoder,
-                        translator.text("status.dataset_remove_confirm", dataset_id=current.dataset_id),
+                        translator.text(
+                            "status.dataset_remove_confirm", dataset_id=current.dataset_id
+                        ),
                         title=translator.text("status.dataset_remove_title"),
                         controls=translator.text("status.dataset_remove_controls"),
                     ):
@@ -418,9 +433,7 @@ def run_dataset_manager(service: DatasetService, translator: Translator) -> int:
                         selected = max(0, selected - 1)
                 elif key == "r":
                     refreshed = service.refresh_all()
-                    unavailable = sum(
-                        item.availability == "unavailable" for item in refreshed
-                    )
+                    unavailable = sum(item.availability == "unavailable" for item in refreshed)
                     notice = translator.text(
                         "status.dataset_refresh_complete", unavailable=unavailable
                     )

@@ -67,6 +67,7 @@ def _add_presentation(parser: argparse.ArgumentParser, tr: Translator, command: 
             help=tr.text("help.legend"),
         )
 
+
 def _add_history_shared(
     parser: argparse.ArgumentParser,
     tr: Translator,
@@ -95,6 +96,7 @@ def _add_history_shared(
         "--interval", type=float, default=10.0, metavar="SECONDS", help=tr.text("help.interval")
     )
     _add_presentation(parser, tr, command)
+
 
 def _add_tui(parser: argparse.ArgumentParser, tr: Translator) -> None:
     parser.add_argument(
@@ -177,6 +179,7 @@ def _add_tui(parser: argparse.ArgumentParser, tr: Translator) -> None:
         help=tr.text("help.theme"),
     )
 
+
 def _add_custom_history(parser: argparse.ArgumentParser, tr: Translator, command: str) -> None:
     parser.add_argument("--dataset", required=True, metavar="ID")
     parser.add_argument("--command", dest="command_text", metavar="TEXT")
@@ -197,6 +200,7 @@ def _add_custom_history(parser: argparse.ArgumentParser, tr: Translator, command
         )
     _add_presentation(parser, tr, command)
 
+
 def _add_monitor(parser: argparse.ArgumentParser, tr: Translator) -> None:
     parser.add_argument("--window", default="1h", metavar="DURATION", help=tr.text("help.window"))
     parser.add_argument(
@@ -213,6 +217,7 @@ def _add_monitor(parser: argparse.ArgumentParser, tr: Translator) -> None:
     # Grouped monitor views need a line-compatible default rather than the
     # ungrouped Total mode's bar default.
     parser.set_defaults(style=None)
+
 
 def build_parser(tr: Translator) -> argparse.ArgumentParser:
     parser = LocalizedParser(description=tr.text("app.description"))

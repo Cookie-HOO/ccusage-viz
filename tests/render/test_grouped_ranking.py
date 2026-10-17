@@ -1,4 +1,3 @@
-
 import re
 from dataclasses import replace
 from decimal import Decimal
@@ -48,6 +47,7 @@ def test_grouped_custom_ranking_renders_dataset_order_arrow_heading_and_independ
     assert "safe docs" in strip_ansi(output)
     assert "https://example.com/coding" not in strip_ansi(output)
 
+
 def test_grouped_custom_ranking_sanitizes_scalar_metadata_and_keeps_trusted_group_link() -> None:
     controls = "\x1b[2J\x1b]52;c;YXR0YWNr\x07"
     groups = (
@@ -87,6 +87,7 @@ def test_grouped_custom_ranking_sanitizes_scalar_metadata_and_keeps_trusted_grou
     assert "Delta display" in strip_ansi(output)
     assert "\x1b]8;;https://example.com/groups/safe\x1b\\" in output
 
+
 def test_grouped_custom_ranking_bounds_adversarial_scalar_columns() -> None:
     huge = "界" * 100
     groups = (
@@ -121,6 +122,7 @@ def test_grouped_custom_ranking_bounds_adversarial_scalar_columns() -> None:
     assert all(display_width(line) <= context.width for line in output.splitlines())
     assert any("…" in line for line in output.splitlines())
 
+
 def test_flat_custom_ranking_bounds_adversarial_scalar_columns() -> None:
     huge = "X" * 200
     projection = _grouped_ranking_projection()
@@ -136,11 +138,10 @@ def test_flat_custom_ranking_bounds_adversarial_scalar_columns() -> None:
     context = RenderContext(
         58, 20, load_translator("en"), color=False, ascii=True, density="detailed"
     )
-    output = render_custom_projection(
-        replace(projection, series=(entry,), groups=None), context
-    )
+    output = render_custom_projection(replace(projection, series=(entry,), groups=None), context)
 
     assert all(display_width(line) <= context.width for line in output.splitlines())
+
 
 def test_grouped_custom_ranking_centers_main_heading_and_aligns_shared_value_columns() -> None:
     groups = (
@@ -200,6 +201,7 @@ def test_grouped_custom_ranking_centers_main_heading_and_aligns_shared_value_col
         "12345 requests"
     ) + len("12345 requests")
 
+
 def test_grouped_custom_ranking_premeasures_extreme_inner_shares_with_each_group_total() -> None:
     groups = (
         CustomProjectedRankingGroup(
@@ -253,6 +255,7 @@ def test_grouped_custom_ranking_premeasures_extreme_inner_shares_with_each_group
     assert len({display_width(line) for line in (ordinary, positive, negative)}) == 1
     assert all(display_width(line) <= context.width for line in lines)
 
+
 def test_grouped_custom_ranking_new_group_uses_localized_full_comparison_only() -> None:
     projection = _grouped_ranking_projection()
     assert projection.config is not None
@@ -295,12 +298,17 @@ def test_grouped_custom_ranking_new_group_uses_localized_full_comparison_only() 
         heading = next(line for line in strip_ansi(output).splitlines() if "General Model" in line)
         assert "New" not in heading
 
+
 def test_grouped_custom_ranking_unchanged_group_ignores_custom_comparison_display() -> None:
     groups = (
         CustomProjectedRankingGroup(
             "unchanged",
             LocalizedText("Unchanged", "未变化"),
-            (CustomProjectedSeries("item", LocalizedText("Item", "项目"), (Decimal("7"),), rank=1),),
+            (
+                CustomProjectedSeries(
+                    "item", LocalizedText("Item", "项目"), (Decimal("7"),), rank=1
+                ),
+            ),
             Decimal("7"),
             Decimal("7"),
             True,
@@ -320,6 +328,7 @@ def test_grouped_custom_ranking_unchanged_group_ignores_custom_comparison_displa
 
     assert "same as before" not in heading
     assert re.search(r"7 requests\s+0\s+100\.0%", heading)
+
 
 def test_pending_grouped_custom_ranking_suppresses_group_and_entry_comparisons() -> None:
     output = strip_ansi(
@@ -343,6 +352,7 @@ def test_pending_grouped_custom_ranking_suppresses_group_and_entry_comparisons()
     assert "New" not in general_heading
     assert "+" not in output and "New" not in output
 
+
 def test_grouped_custom_ranking_rank_mode_suppresses_group_value_delta() -> None:
     projection = _grouped_ranking_projection()
     assert projection.config is not None
@@ -353,6 +363,7 @@ def test_grouped_custom_ranking_rank_mode_suppresses_group_value_delta() -> None
 
     assert "+2 requests" not in output
     assert "Rank Δ" in output
+
 
 def test_grouped_custom_ranking_handles_empty_zero_signed_and_hidden_shares() -> None:
     groups = (
@@ -391,6 +402,7 @@ def test_grouped_custom_ranking_handles_empty_zero_signed_and_hidden_shares() ->
     assert "%" not in output
     assert "%" not in without_shares
 
+
 def test_grouped_custom_ranking_negative_item_with_nonzero_total_stays_within_terminal_width() -> (
     None
 ):
@@ -420,6 +432,7 @@ def test_grouped_custom_ranking_negative_item_with_nonzero_total_stays_within_te
     assert "-33.3%" in negative
     assert display_width(negative) <= context.width
     assert "#" not in negative
+
 
 def test_grouped_custom_ranking_all_period_and_narrow_density_hide_comparison_and_descriptions() -> (
     None

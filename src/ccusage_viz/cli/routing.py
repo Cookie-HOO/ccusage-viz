@@ -12,11 +12,13 @@ class ShortCircuitKind(StrEnum):
     HELP = "help"
     VERSION = "version"
 
+
 @dataclass(frozen=True, slots=True)
 class ShortCircuitRoute:
     kind: ShortCircuitKind
     command: str | None = None
     language: str | None = None
+
 
 def probe_short_circuit(argv: list[str]) -> ShortCircuitRoute | None:
     """Identify side-effect-free routes before configuration or runtime setup."""
@@ -37,6 +39,7 @@ def probe_short_circuit(argv: list[str]) -> ShortCircuitRoute | None:
             break
     return ShortCircuitRoute(ShortCircuitKind.HELP, command, language)
 
+
 def _inject_default_command(argv: list[str]) -> list[str]:
     if not argv:
         return ["chart", "timeline"]
@@ -54,6 +57,7 @@ def _inject_default_command(argv: list[str]) -> list[str]:
     if remaining and remaining[0] in _TUI_COMMANDS:
         return [*leading, *remaining]
     return ["chart", "timeline", *argv]
+
 
 def _top_level_typo(raw_args: list[str], error: UsageError) -> UsageError:
     if error.key != "error.arguments":

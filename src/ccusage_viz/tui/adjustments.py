@@ -76,11 +76,13 @@ _LAYOUT_SHORTCUT_VALUES = {
     "spotlight-wide2": "spotlight-wide2",
 }
 
+
 def _project_grouping_available(chart: object | None) -> bool:
     return (
         isinstance(chart, (TimelineConfig, StackConfig, RankingConfig, MonitorConfig))
         and chart.by == "project"
     )
+
 
 def _pane_adjustment_bindings(
     command: str,
@@ -116,6 +118,7 @@ def _pane_adjustment_bindings(
         visible = (*visible, ("t/T", "animation_theme"), ("s/S", "animation_style"))
     return visible
 
+
 def _pane_adjustment_actions(
     command: str,
     page: str,
@@ -134,12 +137,14 @@ def _pane_adjustment_actions(
         translator,
     )
 
+
 def _adjustment_controls(
     command: str, page: str, translator: Translator, *, chart: object | None = None
 ) -> str:
     return " · ".join(
         action.text for action in _pane_adjustment_actions(command, page, translator, chart=chart)
     )
+
 
 def _adjustment_page_keys(
     command: str,
@@ -161,6 +166,7 @@ def _adjustment_page_keys(
         for character in binding
         if character not in {"/", " "}
     )
+
 
 def _adjustment_target_page(
     command: str,
@@ -189,6 +195,7 @@ def _adjustment_target_page(
         return other_page
     return None
 
+
 def _adjustment_key_supported(
     command: str,
     page: str,
@@ -204,6 +211,7 @@ def _adjustment_key_supported(
         attachment_available=attachment_available,
     )
 
+
 def _query_affecting_adjustment(command: str, key: str) -> bool:
     """Compatibility helper for key-only callers.
 
@@ -215,6 +223,7 @@ def _query_affecting_adjustment(command: str, key: str) -> bool:
         or (key in {"b", "B"} and command in {"timeline", "stack", "ranking", "monitor"})
         or (command == "monitor" and key == "w")
     )
+
 
 def _text_view_footer(
     body_view: BodyView,
@@ -240,6 +249,7 @@ def _text_view_footer(
         ),
     )
 
+
 def _pane_help_settings_actions(
     command: str,
     translator: Translator,
@@ -259,6 +269,7 @@ def _pane_help_settings_actions(
             attachment_available=attachment_available,
         )
     )
+
 
 def _pane_help_action_text(page: str, action: AdjustmentAction, translator: Translator) -> str:
     detail_labels = (
@@ -289,6 +300,7 @@ def _pane_help_action_text(page: str, action: AdjustmentAction, translator: Tran
     )
     return translator.text(f"status.tui_help_parameter_{page}", action=action.text, detail=detail)
 
+
 _ANIMATION_PANE_QUICK_BINDINGS = (
     ("p/P", "overlay_position"),
     ("t/T", "animation_theme"),
@@ -302,6 +314,7 @@ _ANIMATION_PANE_ADVANCED_BINDINGS = (
     ("i", "overlay_interval"),
     ("L", "overlay_history"),
 )
+
 
 def _animation_pane_adjustment_keys(page: str) -> frozenset[str]:
     """Return individual non-global animation Pane adjustment keys."""
@@ -318,6 +331,7 @@ def _animation_pane_adjustment_keys(page: str) -> frozenset[str]:
         if character not in {"/", " "}
     )
 
+
 def _animation_adjustment_target_page(current_page: str, key: str) -> str | None:
     """Resolve an unambiguous Dashboard Animation Pane adjustment shortcut."""
 
@@ -327,6 +341,7 @@ def _animation_adjustment_target_page(current_page: str, key: str) -> str | None
     if key in _animation_pane_adjustment_keys(other_page):
         return other_page
     return None
+
 
 def _animation_pane_adjustment_actions(
     page: str, translator: Translator
@@ -338,6 +353,7 @@ def _animation_pane_adjustment_actions(
         AdjustmentAction(binding, translator.text(f"adjustment.{label}"), priority)
         for priority, (binding, label) in enumerate(bindings)
     )
+
 
 def _empty_pane_adjustment_footer(
     translator: Translator,
@@ -362,6 +378,7 @@ def _empty_pane_adjustment_footer(
             width,
         ),
     )
+
 
 def _animation_adjustment_footer(
     pane: TuiAnimationPane,
@@ -418,6 +435,7 @@ def _animation_adjustment_footer(
         ),
     )
 
+
 def _adjustment_footer(
     state: str,
     command: str,
@@ -463,6 +481,7 @@ def _adjustment_footer(
             width,
         ),
     )
+
 
 def _pane_adjustment_state(pane: TuiChartPane, page: str, translator: Translator) -> str:
     chart = _pane_display_options(pane).chart
@@ -513,6 +532,7 @@ def _pane_adjustment_state(pane: TuiChartPane, page: str, translator: Translator
         settings=settings,
     )
 
+
 def _global_adjustment_footer(
     *,
     state: str,
@@ -527,6 +547,7 @@ def _global_adjustment_footer(
     )
     return clip_width(state, width), clip_width(prefix + action_row, width)
 
+
 def _adjustment_target(focused: int | None, key: str, pane_count: int) -> int | None:
     if key == "\x1b":
         return None
@@ -536,6 +557,7 @@ def _adjustment_target(focused: int | None, key: str, pane_count: int) -> int | 
         return (focused + 1) % pane_count
     return focused
 
+
 def _layout_shortcut_capacity(shortcut: str) -> int | None:
     value = _LAYOUT_SHORTCUT_VALUES[shortcut]
     if "x" not in value:
@@ -543,12 +565,15 @@ def _layout_shortcut_capacity(shortcut: str) -> int | None:
     rows, columns = fixed_shape(value)
     return rows * columns
 
+
 def _layout_shortcut_available(shortcut: str, pane_count: int) -> bool:
     return parse_dashboard_layout(_LAYOUT_SHORTCUT_VALUES[shortcut], pane_count) is not None
+
 
 def _next_available_layout_shortcut(index: int, available: tuple[int, ...], direction: int) -> int:
     position = available.index(index)
     return available[(position + direction) % len(available)]
+
 
 def _choose_layout_shortcut(
     screen: FramePainter,
@@ -605,5 +630,6 @@ def _choose_layout_shortcut(
             return _LAYOUT_SHORTCUTS[index]
         elif key == "\x1b":
             return None
+
 
 _CUSTOM_PANE_KINDS = ("timeline", "stack", "calendar", "ranking")

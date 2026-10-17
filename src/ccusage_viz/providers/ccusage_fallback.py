@@ -49,11 +49,13 @@ _FALLBACK_SCHEDULING_GROUP: Final = "ccusage-project-fallback"
 
 _FALLBACK_SCHEDULING_LIMIT: Final = 4
 
+
 @dataclass(frozen=True, slots=True)
 class _FallbackSourceKey:
     source_id: str | None
     executable: str
     environment_digest: str
+
 
 @dataclass(frozen=True, slots=True)
 class _CcusageQueryMetadata:
@@ -62,6 +64,7 @@ class _CcusageQueryMetadata:
     role: Literal["project-observation", "project-fallback"]
     observation_id: str
     agent: str | None = None
+
 
 class _ProjectFallbackMemory:
     def __init__(self) -> None:
@@ -87,6 +90,7 @@ class _ProjectFallbackMemory:
             else:
                 self._agents.pop(source, None)
 
+
 def _fallback_source(provider: ProviderRef, context: ExecutionContext | None) -> _FallbackSourceKey:
     if context is None:
         executable = ""
@@ -100,6 +104,7 @@ def _fallback_source(provider: ProviderRef, context: ExecutionContext | None) ->
         executable,
         hashlib.sha256(encoded.encode("utf-8")).hexdigest(),
     )
+
 
 def _project_observation_query(
     intent: QueryIntent,
@@ -133,6 +138,7 @@ def _project_observation_query(
         payload=_CcusageQueryMetadata(source, revision, "project-observation", query.fingerprint),
     )
 
+
 def _remembered_fallback_queries(
     observation: PhysicalQuery,
     fallback_state: tuple[_FallbackSourceKey, int, frozenset[str]] | None,
@@ -147,6 +153,7 @@ def _remembered_fallback_queries(
         _project_fallback_query(observation, metadata, agent, speculative=True)
         for agent in sorted(agents, key=str.casefold)
     )
+
 
 def _project_fallback_query(
     observation: PhysicalQuery,
@@ -187,8 +194,10 @@ def _project_fallback_query(
         speculative=speculative,
     )
 
+
 def _query_metadata(query: PhysicalQuery) -> _CcusageQueryMetadata | None:
     return query.payload if isinstance(query.payload, _CcusageQueryMetadata) else None
+
 
 def _normalized_query_metadata(query: PhysicalQuery):
     metadata = _query_metadata(query)
@@ -203,6 +212,7 @@ def _normalized_query_metadata(query: PhysicalQuery):
         ("ccusage_observation_id", metadata.observation_id),
         ("ccusage_agent", metadata.agent),
     )
+
 
 def _fragment_query_metadata(
     fragment: ProviderResultFragment,
@@ -239,6 +249,7 @@ def _fragment_query_metadata(
         agent,
     )
 
+
 def _exception_agents(records: tuple[UsageRecord, ...]) -> frozenset[str]:
     return frozenset(
         record.agent.casefold()
@@ -246,6 +257,7 @@ def _exception_agents(records: tuple[UsageRecord, ...]) -> frozenset[str]:
         if record.source is SourceKind.UNIFIED_DAILY
         and record.attribution in {"unassigned", "unverified"}
     )
+
 
 def _project_fallback_replacement_records(
     fragments: tuple[ProviderResultFragment, ...],
@@ -283,11 +295,13 @@ def _project_fallback_replacement_records(
             reconciled.extend(fallback.records)
     return tuple(reconciled)
 
+
 def _days(interval: DateInterval):
     day = interval.since
     while day <= interval.until:
         yield day
         day += timedelta(days=1)
+
 
 def _fixed_project_observation_records(
     data: object, records: tuple[UsageRecord, ...]
@@ -328,9 +342,11 @@ def _fixed_project_observation_records(
         )
     return tuple(projected)
 
+
 def _fallback_agent(operation: str) -> str | None:
     marker = "project_fallback_sessions:"
     return operation.removeprefix(marker) if operation.startswith(marker) else None
+
 
 def _query_dates(coverage: DateCoverage) -> tuple[str | None, str | None]:
     if len(coverage.intervals) != 1:
@@ -338,12 +354,14 @@ def _query_dates(coverage: DateCoverage) -> tuple[str | None, str | None]:
     interval = coverage.intervals[0]
     return interval.since.isoformat(), interval.until.isoformat()
 
+
 def _fallback_session_cwds(agent: str, records: tuple[UsageRecord, ...]) -> dict[str, str]:
     if agent != "pi":
         return {}
     return resolve_pi_session_cwds(
         record.session_id for record in records if record.session_id is not None
     )
+
 
 def _replace_unverified_records(records: tuple[UsageRecord, ...]) -> tuple[UsageRecord, ...]:
     """Use fully reconciled fallback session totals instead of unverified aggregates."""
@@ -381,6 +399,7 @@ def _replace_unverified_records(records: tuple[UsageRecord, ...]) -> tuple[Usage
         )
     )
 
+
 def _enrich_codex_project_rows(data: object) -> object:
     if not isinstance(data, dict):
         return data
@@ -406,5 +425,3 @@ def _enrich_codex_project_rows(data: object) -> object:
         if cwd is not None:
             row["_ccusage_viz_project_cwd"] = cwd
     return data
-
-

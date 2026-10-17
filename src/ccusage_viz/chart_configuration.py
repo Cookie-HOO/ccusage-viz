@@ -371,7 +371,10 @@ def custom_chart_from_namespace(
                 timezone=timezone,
             )
         else:
-            if getattr(namespace, "since", None) is not None or getattr(namespace, "until", None) is not None:
+            if (
+                getattr(namespace, "since", None) is not None
+                or getattr(namespace, "until", None) is not None
+            ):
                 raise UsageError("error.date_conflict")
             date_range = resolve_custom_ranking_range(
                 requested_period,

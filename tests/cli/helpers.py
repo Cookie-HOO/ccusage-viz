@@ -1,4 +1,3 @@
-
 from argparse import Namespace
 
 from ccusage_viz.options import DEFAULT_STYLES

@@ -1,7 +1,3 @@
-
-
-
-
 import pytest
 
 from ccusage_viz import __version__
@@ -48,6 +44,7 @@ def test_text_and_animate_help_describe_public_interfaces(
     assert "--overlay-time-band" not in animate_help
     assert "Seconds between command-overlay refreshes" in animate_help
 
+
 def test_dataset_list_reads_registered_records_without_running_probes(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -64,11 +61,13 @@ def test_dataset_list_reads_registered_records_without_running_probes(
     assert main(["dataset", "--lang", "en", "list"]) == 0
     assert capsys.readouterr().out == "No registered datasets\n"
 
+
 def test_text_time_state_writes_a_localized_dynamic_status(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     assert main(["text", "time-state", "--lang", "zh"]) == 0
     assert capsys.readouterr().out.startswith(("🛌", "🌅", "💼", "🍜", "🌆"))
+
 
 def test_text_time_state_detects_language_when_omitted(
     monkeypatch: pytest.MonkeyPatch,
@@ -78,6 +77,7 @@ def test_text_time_state_detects_language_when_omitted(
 
     assert main(["text", "time-state"]) == 0
     assert capsys.readouterr().out.startswith(("🛌", "🌅", "💼", "🍜", "🌆"))
+
 
 def test_text_time_state_describe_explains_implementation(
     capsys: pytest.CaptureFixture[str],
@@ -97,6 +97,7 @@ def test_text_time_state_describe_explains_implementation(
         "both print the current status."
     )
 
+
 def test_text_run_is_equivalent_to_default(capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["text", "time-state", "--lang", "en"]) == 0
     default = capsys.readouterr().out
@@ -104,11 +105,13 @@ def test_text_run_is_equivalent_to_default(capsys: pytest.CaptureFixture[str]) -
     assert main(["text", "time-state", "--run", "--lang", "en"]) == 0
     assert capsys.readouterr().out == default
 
+
 def test_text_cannot_be_parsed_as_a_dashboard_pane() -> None:
     parser = build_parser(load_translator("en"))
 
     with pytest.raises(UsageError):
         _to_options(parser.parse_args(["dashboard", "--pane", "text time-state"]))
+
 
 def test_main_top_level_typo_lists_commands_and_suggests_dashboard(
     monkeypatch: pytest.MonkeyPatch,
@@ -126,6 +129,7 @@ def test_main_top_level_typo_lists_commands_and_suggests_dashboard(
     assert "Supported commands: chart, dashboard, animate, dataset, text" in error
     assert "Did you mean 'dashboard'?" in error
 
+
 def test_main_top_level_typo_honors_leading_language_option(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -134,6 +138,7 @@ def test_main_top_level_typo_honors_leading_language_option(
     error = capsys.readouterr().err
     assert "支持的命令：chart, dashboard, animate, dataset, text" in error
     assert "你是不是想输入 'dashboard'？" in error
+
 
 def test_option_led_default_chart_route_is_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: list[object] = []
@@ -146,6 +151,7 @@ def test_option_led_default_chart_route_is_unchanged(monkeypatch: pytest.MonkeyP
     assert len(captured) == 1
     assert isinstance(captured[0], StandaloneLaunch)
 
+
 def test_version_short_circuits_before_translation_or_runtime(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -154,11 +160,13 @@ def test_version_short_circuits_before_translation_or_runtime(
         lambda *_args, **_kwargs: pytest.fail("translator must not load"),
     )
     monkeypatch.setattr(
-        "ccusage_viz.cli.entrypoint.run", lambda *_args, **_kwargs: pytest.fail("runtime must not start")
+        "ccusage_viz.cli.entrypoint.run",
+        lambda *_args, **_kwargs: pytest.fail("runtime must not start"),
     )
 
     assert main(["--version"]) == 0
     assert capsys.readouterr().out.strip() == f"ccusage-viz {__version__}"
+
 
 def test_dashboard_uses_launcher_from_local_wrapper_environment(
     monkeypatch: pytest.MonkeyPatch,
@@ -173,6 +181,7 @@ def test_dashboard_uses_launcher_from_local_wrapper_environment(
     assert captured[0].launcher == "ccuv-local"
     assert isinstance(captured[0].panes[0], AnimationPaneConfig)
     assert captured[0].panes[0].overlay.command == "ccuv-local text time-state --run"
+
 
 def test_ascii_conflicts_only_with_explicit_theme(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("ccusage_viz.cli.entrypoint.run", lambda *_args: 0)

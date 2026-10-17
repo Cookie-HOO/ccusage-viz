@@ -137,7 +137,10 @@ def test_monitor_metric_switch_pending_state_retains_accepted_metric_help() -> N
     )
     assert component.candidate.metric_id == "growth"
     assert component.v2_descriptor is None
-    assert tui_custom_adjustments._accepted_custom_metric_help_node(pane, load_translator("en")) is None
+    assert (
+        tui_custom_adjustments._accepted_custom_metric_help_node(pane, load_translator("en"))
+        is None
+    )
 
 
 def test_monitor_metric_switch_failure_retains_old_sampling_state() -> None:
@@ -548,15 +551,13 @@ def test_custom_monitor_ranking_retains_localized_group_descriptions_and_display
     english = component.ranking_model(language="en").observed_entries
     chinese = component.ranking_model(language="zh").observed_entries
 
-    assert [
-        (entry.key, entry.description, entry.display) for entry in english
-    ] == [
-        ("fast", "fast help", "90%"), ("slow", "slow help", "20%")
+    assert [(entry.key, entry.description, entry.display) for entry in english] == [
+        ("fast", "fast help", "90%"),
+        ("slow", "slow help", "20%"),
     ]
-    assert [
-        (entry.key, entry.description, entry.display) for entry in chinese
-    ] == [
-        ("fast", "快说明", "90%"), ("slow", "慢说明", "20%")
+    assert [(entry.key, entry.description, entry.display) for entry in chinese] == [
+        ("fast", "快说明", "90%"),
+        ("slow", "慢说明", "20%"),
     ]
 
 

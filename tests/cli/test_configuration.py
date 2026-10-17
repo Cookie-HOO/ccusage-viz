@@ -42,6 +42,7 @@ def test_dataset_cli_parses_manager_and_local_list() -> None:
     assert manager.dataset_command is None
     assert listing.dataset_command == "list"
 
+
 def test_empty_dashboard_populates_fixed_and_named_layouts() -> None:
     parser = build_parser(load_translator("en"))
 
@@ -52,6 +53,7 @@ def test_empty_dashboard_populates_fixed_and_named_layouts() -> None:
     assert all(isinstance(pane, EmptyPaneConfig) for pane in fixed.panes)
     assert len(named.panes) == 2
     assert all(isinstance(pane, EmptyPaneConfig) for pane in named.panes)
+
 
 def test_bare_custom_dataset_routes_through_installed_source(
     monkeypatch: pytest.MonkeyPatch,
@@ -67,6 +69,7 @@ def test_bare_custom_dataset_routes_through_installed_source(
 
     assert isinstance(launch.chart, CustomChartConfig)
     assert launch.chart.source == installed
+
 
 @pytest.mark.parametrize("kind", ("timeline", "stack", "ranking", "calendar"))
 def test_installed_dataset_defaults_use_host_timezone_today(
@@ -86,6 +89,7 @@ def test_installed_dataset_defaults_use_host_timezone_today(
     assert isinstance(launch.chart, CustomChartConfig)
     assert launch.chart.date_range.until == date.today()
     assert launch.host.timezone == "Asia/Shanghai"
+
 
 def test_installed_dataset_accepts_explicit_current_day_date(
     monkeypatch: pytest.MonkeyPatch,
@@ -115,6 +119,7 @@ def test_installed_dataset_accepts_explicit_current_day_date(
     assert isinstance(launch.chart, CustomChartConfig)
     assert launch.chart.date_range.until == date(2026, 9, 20)
 
+
 def test_standalone_conversion_preserves_custom_source_and_chart() -> None:
     source = CustomCommandSource("weread", ("reader", "ccuv"))
     chart = CustomChartConfig(
@@ -131,6 +136,7 @@ def test_standalone_conversion_preserves_custom_source_and_chart() -> None:
     assert standalone.chart.source == source
     assert standalone.host.interval == 30
 
+
 def test_animate_gallery_preserves_positional_initial_style() -> None:
     parser = build_parser(load_translator("en"))
 
@@ -143,26 +149,31 @@ def test_animate_gallery_preserves_positional_initial_style() -> None:
     assert clock.gallery
     assert clock.animation.style == "digital-clock"
 
+
 @pytest.mark.parametrize("command", ("timeline", "monitor"))
 @pytest.mark.parametrize("mode", ("below-title", "inside", "hidden"))
 def test_timeline_and_monitor_accept_legend_modes(command: str, mode: str) -> None:
     parser = build_parser(load_translator("en"))
     assert parser.parse_args(["chart", command, "--legend", mode]).legend == mode
 
+
 def test_monitor_accepts_values_legend_mode() -> None:
     parser = build_parser(load_translator("en"))
     assert parser.parse_args(["chart", "monitor", "--legend", "values"]).legend == "values"
+
 
 @pytest.mark.parametrize("mode", ("below-title", "hidden"))
 def test_stack_accepts_supported_legend_modes(mode: str) -> None:
     parser = build_parser(load_translator("en"))
     assert parser.parse_args(["chart", "stack", "--legend", mode]).legend == mode
 
+
 @pytest.mark.parametrize("command", ("timeline", "stack", "ranking", "monitor"))
 def test_project_aggregation_is_not_a_public_chart_option(command: str) -> None:
     parser = build_parser(load_translator("en"))
     with pytest.raises(UsageError):
         parser.parse_args(["chart", command, "--project-aggregation", "exact"])
+
 
 def test_animate_defaults_to_first_discovered_style_and_rejects_chart_options() -> None:
     parser = build_parser(load_translator("en"))
@@ -173,6 +184,7 @@ def test_animate_defaults_to_first_discovered_style_and_rejects_chart_options() 
     with pytest.raises(UsageError) as caught:
         parser.parse_args(["animate", "--density", "compact"])
     assert caught.value.key == "error.arguments"
+
 
 def test_dashboard_accepts_explicit_animation_pane_and_rejects_bare_animate() -> None:
     parser = build_parser(load_translator("en"))
@@ -193,11 +205,13 @@ def test_dashboard_accepts_explicit_animation_pane_and_rejects_bare_animate() ->
             _to_options(parser.parse_args(["dashboard", "--pane", fragment]))
         assert caught.value.key == "error.tui_panel"
 
+
 def test_dashboard_has_no_global_density_option() -> None:
     parser = build_parser(load_translator("en"))
     with pytest.raises(UsageError) as caught:
         parser.parse_args(["dashboard", "--density", "compact"])
     assert caught.value.key == "error.arguments"
+
 
 @pytest.mark.parametrize("style", ("step", "absolute"))
 def test_style_is_rejected_for_the_wrong_command(style: str) -> None:
@@ -206,6 +220,7 @@ def test_style_is_rejected_for_the_wrong_command(style: str) -> None:
         parser.parse_args(["chart", "calendar", "--style", style])
     assert caught.value.key == "error.arguments"
 
+
 def test_historical_charts_reject_monitor_distribution_style() -> None:
     parser = build_parser(load_translator("en"))
     for command in ("timeline", "calendar", "stack", "ranking"):
@@ -213,11 +228,13 @@ def test_historical_charts_reject_monitor_distribution_style() -> None:
             parser.parse_args(["chart", command, "--style", "cumulative-bars"])
         assert caught.value.key == "error.arguments"
 
+
 def test_timeline_rejects_removed_point_style() -> None:
     parser = build_parser(load_translator("en"))
     with pytest.raises(UsageError) as caught:
         parser.parse_args(["chart", "timeline", "--style", "point"])
     assert caught.value.key == "error.arguments"
+
 
 def test_chart_lifecycle_defaults_and_rejects_removed_watch_options() -> None:
     parser = build_parser(load_translator("en"))
@@ -236,6 +253,7 @@ def test_chart_lifecycle_defaults_and_rejects_removed_watch_options() -> None:
         with pytest.raises(UsageError, match="error.arguments"):
             parser.parse_args(arguments)
 
+
 @pytest.mark.parametrize(
     ("field", "value", "key"),
     [
@@ -249,6 +267,7 @@ def test_numeric_intervals_must_be_finite(field: str, value: float, key: str) ->
     with pytest.raises(UsageError) as caught:
         _to_options(namespace(**{field: value}))
     assert caught.value.key == key
+
 
 @pytest.mark.parametrize(
     ("command", "by", "top", "key"),
@@ -264,12 +283,14 @@ def test_top_requires_a_category_dimension(
         _to_options(namespace(command=command, by=by, top=top))
     assert caught.value.key == key
 
+
 @pytest.mark.parametrize("dimension", ("agent", "model", "project"))
 def test_grouped_timeline_defaults_to_top_three(dimension: str) -> None:
     options = _to_options(namespace(command="timeline", by=dimension, top=None))
 
     assert options.chart.top == 3
     assert options.chart.other == "show"
+
 
 @pytest.mark.parametrize("dimension", ("agent", "model", "project"))
 def test_grouped_monitor_defaults_to_top_three(dimension: str) -> None:
@@ -278,10 +299,12 @@ def test_grouped_monitor_defaults_to_top_three(dimension: str) -> None:
 
     assert options.chart.top == 3
 
+
 def test_ranking_has_a_default_category_dimension_for_top() -> None:
     options = _to_options(namespace(command="ranking", by="project", top=5))
     assert options.chart.by == "project"
     assert options.chart.top == 5
+
 
 @pytest.mark.parametrize(
     ("window", "key"),
@@ -291,6 +314,7 @@ def test_monitor_window_is_strictly_validated(window: str, key: str) -> None:
     with pytest.raises(UsageError) as caught:
         _to_options(namespace(command="monitor", by=None, window=window))
     assert caught.value.key == key
+
 
 @pytest.mark.parametrize("dimension", ("agent", "model", "project"))
 def test_monitor_accepts_grouping_and_top(dimension: str) -> None:
@@ -302,16 +326,19 @@ def test_monitor_accepts_grouping_and_top(dimension: str) -> None:
     assert options.chart.window_seconds == 3600
     assert options.host.interval == 15.0
 
+
 @pytest.mark.parametrize("dimension", ("agent", "model", "project"))
 def test_monitor_grouping_rejects_bars(dimension: str) -> None:
     with pytest.raises(UsageError) as caught:
         _to_options(namespace(command="monitor", by=dimension, style="bars"))
     assert caught.value.key == "error.style_incompatible"
 
+
 def test_demo_monitor_defaults_to_one_second_interval() -> None:
     options = _to_options(namespace(command="monitor", demo="small", by=None, style="bars"))
     assert options.host.interval == 1.0
     assert options.host.demo_seed is not None
+
 
 @pytest.mark.parametrize("kind", ("timeline", "calendar", "stack", "ranking", "monitor"))
 @pytest.mark.parametrize("prefix", ([], ["--lang", "zh"]))
@@ -320,6 +347,7 @@ def test_removed_root_chart_commands_are_rejected(kind: str, prefix: list[str]) 
 
     assert _inject_default_command(args) == args
     assert main(args) == 2
+
 
 def test_ranking_defaults_to_dot_for_builtin_and_custom_commands() -> None:
     parser = build_parser(load_translator("en"))
@@ -332,6 +360,7 @@ def test_ranking_defaults_to_dot_for_builtin_and_custom_commands() -> None:
     assert builtin.chart.presentation.style == "dot"
     assert custom.chart.presentation.style == "dot"
 
+
 def test_command_requires_a_dataset_source() -> None:
     parser = build_parser(load_translator("en"))
 
@@ -339,6 +368,7 @@ def test_command_requires_a_dataset_source() -> None:
         _to_options(parser.parse_args(["chart", "timeline", "--command", "reader ccuv"]))
 
     assert caught.value.key == "error.arguments"
+
 
 @pytest.mark.parametrize(
     ("arguments", "error_key"),
@@ -360,6 +390,7 @@ def test_builtin_charts_reject_partition_by_without_dataset(
 
     assert caught.value.key == error_key
 
+
 def test_custom_ranking_rejects_an_explicit_top_without_grouping() -> None:
     parser = build_parser(load_translator("en"))
     namespace = parser.parse_args(
@@ -371,9 +402,11 @@ def test_custom_ranking_rejects_an_explicit_top_without_grouping() -> None:
 
     assert caught.value.key == "error.top_requires_by"
 
+
 def test_large_top_values_are_accepted() -> None:
     parser = build_parser(load_translator("en"))
     assert _to_options(parser.parse_args(["chart", "ranking", "--top", "999"])).chart.top == 999
+
 
 @pytest.mark.parametrize("timeout", ("0", "nan", "inf"))
 def test_dashboard_rejects_non_positive_or_non_finite_timeout(timeout: str) -> None:
@@ -381,6 +414,7 @@ def test_dashboard_rejects_non_positive_or_non_finite_timeout(timeout: str) -> N
     with pytest.raises(UsageError) as caught:
         _to_options(parser.parse_args(["dashboard", "--query-timeout", timeout]))
     assert caught.value.key == "error.arguments"
+
 
 def test_dashboard_rejects_named_grid_for_arbitrary_panes() -> None:
     parser = build_parser(load_translator("en"))
@@ -401,6 +435,7 @@ def test_dashboard_rejects_named_grid_for_arbitrary_panes() -> None:
         )
 
     assert caught.value.key == "error.tui_grid"
+
 
 def test_dashboard_accepts_spotlight_wide2_as_a_layout_only() -> None:
     parser = build_parser(load_translator("en"))
@@ -440,6 +475,7 @@ def test_dashboard_accepts_spotlight_wide2_as_a_layout_only() -> None:
             _to_options(parser.parse_args(["dashboard", "--pane", "timeline", "--grid", layout]))
         assert caught.value.key == "error.tui_grid"
 
+
 def test_dashboard_accepts_layout_weights_and_tracks_explicit_aliases() -> None:
     parser = build_parser(load_translator("en"))
     arguments = [
@@ -464,6 +500,7 @@ def test_dashboard_accepts_layout_weights_and_tracks_explicit_aliases() -> None:
     assert options.was_explicit("column_weights")
     assert options.was_explicit("row_weights")
 
+
 def test_dashboard_narrow_clock_reuses_narrow_panes_with_short_clock_row() -> None:
     parser = build_parser(load_translator("en"))
 
@@ -477,6 +514,7 @@ def test_dashboard_narrow_clock_reuses_narrow_panes_with_short_clock_row() -> No
     assert narrow_clock.host.grid == "4x1"
     assert narrow_clock.host.row_weights == (6, 14, 14, 12)
     assert narrow_clock.host.style == "framed"
+
 
 def test_dashboard_wide_clock_reuses_wide_panes_below_compact_digital_clock_row() -> None:
     parser = build_parser(load_translator("en"))
@@ -492,6 +530,7 @@ def test_dashboard_wide_clock_reuses_wide_panes_below_compact_digital_clock_row(
     assert wide_clock.host.layout == "spotlight-wide"
     assert wide_clock.host.row_weights == (5, 15, 14)
     assert wide_clock.host.style == "framed"
+
 
 def test_dashboard_single_keeps_only_the_wide_clock_analog_pane() -> None:
     parser = build_parser(load_translator("en"))
@@ -510,10 +549,13 @@ def test_dashboard_single_keeps_only_the_wide_clock_analog_pane() -> None:
     assert single.host.style == "minimal"
     assert single.host.header_summary == "none"
 
+
 def test_dashboard_unavailable_store_preserves_existing_error_for_builtin(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("ccusage_viz.cli.configuration.dashboard_preset_state_root", lambda: tmp_path)
+    monkeypatch.setattr(
+        "ccusage_viz.cli.configuration.dashboard_preset_state_root", lambda: tmp_path
+    )
 
     def fail_list(_store: DashboardPresetStore) -> tuple[object, ...]:
         raise DashboardPresetStoreError("unavailable")
@@ -527,6 +569,7 @@ def test_dashboard_unavailable_store_preserves_existing_error_for_builtin(
     assert caught.value.key == "error.arguments"
     assert caught.value.values["detail"] == "user dashboard preset storage is unavailable"
 
+
 def test_dashboard_structural_options_require_content() -> None:
     parser = build_parser(load_translator("en"))
 
@@ -535,6 +578,7 @@ def test_dashboard_structural_options_require_content() -> None:
             parser.parse_args(["dashboard", "--grid", "2x2"]),
             explicit=frozenset({"grid"}),
         )
+
 
 def test_dashboard_owns_distinct_pane_cadences() -> None:
     parser = build_parser(load_translator("en"))
@@ -558,6 +602,7 @@ def test_dashboard_owns_distinct_pane_cadences() -> None:
     assert options.panes[0].chart.kind == "timeline"
     assert options.panes[1].chart.kind == "monitor"
 
+
 @pytest.mark.parametrize("theme_option", ("--theme", "--the"))
 def test_dashboard_ascii_rejects_explicit_or_abbreviated_pane_theme(
     theme_option: str,
@@ -567,6 +612,7 @@ def test_dashboard_ascii_rejects_explicit_or_abbreviated_pane_theme(
         _to_options(
             parser.parse_args(["dashboard", "--ascii", "--pane", f"timeline {theme_option} nord"])
         )
+
 
 @pytest.mark.parametrize(
     "arguments",
@@ -582,6 +628,7 @@ def test_dashboard_rejects_removed_or_ambiguous_options(arguments: list[str]) ->
     parser = build_parser(load_translator("en"))
     with pytest.raises(UsageError):
         parser.parse_args(arguments)
+
 
 @pytest.mark.parametrize(
     "flag", ["--pick", "--pick-theme", "--color-scheme", "--preview-schemes", "--no-color"]

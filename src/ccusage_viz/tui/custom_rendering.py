@@ -123,6 +123,7 @@ def _pane_copy_payload(
         view=view,
     )
 
+
 def _custom_render_context(
     config: CustomChartConfig,
     translator: Translator,
@@ -163,6 +164,7 @@ def _custom_render_context(
         reserved_summary_rows=reserved_summary_rows,
     )
 
+
 def _custom_failure_log_detail(error: BaseException, translator: Translator) -> str:
     if isinstance(error, QueryError):
         failure = error.values.get("custom_failure")
@@ -176,6 +178,7 @@ def _custom_failure_log_detail(error: BaseException, translator: Translator) -> 
                     detail = f"{detail} ({field}={value})"
             return detail
     return translator.text("status.custom_log_error")
+
 
 def _render_custom_failure(
     component: CustomHistoricalComponent,
@@ -205,6 +208,7 @@ def _render_custom_failure(
         error_body=True,
     )
 
+
 def _retain_custom_facts_while_pending(
     lifecycle: LifecycleOperation[object] | None = None,
     *,
@@ -227,6 +231,7 @@ def _retain_custom_facts_while_pending(
             if operation is not None and operation.generation == generation:
                 trigger = operation.trigger
     return trigger in {LifecycleTrigger.PERIODIC, LifecycleTrigger.MANUAL}
+
 
 def _render_custom_monitor(
     component: CustomMonitorComponent,
@@ -275,6 +280,7 @@ def _render_custom_monitor(
         )
     return PaneRender(render_custom_monitor(component, context))
 
+
 def _append_custom_monitor_attachment(
     pane: TuiCustomPane,
     body: str,
@@ -315,6 +321,7 @@ def _append_custom_monitor_attachment(
     )
     return "\n".join((body, *result.rows)) if result.viable else body
 
+
 def _custom_response_warning_notices(
     component: CustomHistoricalComponent, translator: Translator
 ) -> tuple[str, ...]:
@@ -324,6 +331,7 @@ def _custom_response_warning_notices(
         warning.message.zh_cn if translator.language == "zh" else warning.message.en
         for warning in component.accepted_warnings
     )
+
 
 def _render_custom_projection(
     projection: CustomChartProjection,
@@ -477,6 +485,7 @@ def _render_custom_projection(
         rendered = "\n".join((rendered, audit))
     return PaneRender(rendered)
 
+
 def _ranking_fixed_rows(chart: str) -> int:
     """Keep Ranking chrome above the first numbered row while data scrolls."""
     for index, row in enumerate(chart.splitlines()):
@@ -484,6 +493,7 @@ def _ranking_fixed_rows(chart: str) -> int:
         if prefix.isdecimal():
             return index
     return 0
+
 
 def _custom_ranking_copyable_entries(
     pane: TuiCustomPane, translator: Translator
@@ -511,6 +521,7 @@ def _custom_ranking_copyable_entries(
         entries.append((rank, series.id, label, description, series.link))
     return tuple(entries)
 
+
 def _apply_custom_ranking_spacing(chart: str, *, mode: str, width: int, ascii: bool) -> str:
     """Insert presentation-only separators before numbered Custom Ranking rows."""
 
@@ -531,6 +542,7 @@ def _apply_custom_ranking_spacing(chart: str, *, mode: str, width: int, ascii: b
         rows.append(row)
     return "\n".join(rows)
 
+
 def _custom_ranking_clipboard_text(
     label: str, description: str | None, project_link: str | None
 ) -> str:
@@ -538,6 +550,7 @@ def _custom_ranking_clipboard_text(
     return "\n".join(
         part for part in (label, copyable_description_text(description or ""), project_link) if part
     )
+
 
 def _custom_ranking_clipboard_all_text(
     entries: Iterable[tuple[str, str | None, str | None]],
@@ -547,6 +560,7 @@ def _custom_ranking_clipboard_all_text(
         _custom_ranking_clipboard_text(label, description, project_link)
         for label, description, project_link in entries
     )
+
 
 def _custom_standalone_actions(
     component: CustomHistoricalComponent,
@@ -577,6 +591,7 @@ def _custom_standalone_actions(
         )
     )
     return _localized_actions(tuple(actions), translator)
+
 
 def _custom_standalone_render(
     component: CustomHistoricalComponent,

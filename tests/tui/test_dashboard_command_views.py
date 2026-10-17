@@ -50,6 +50,7 @@ def test_full_dashboard_command_copies_and_round_trips_custom_partition() -> Non
     assert isinstance(pane, tui_models.CustomChartPaneConfig)
     assert (pane.chart.partition_by, pane.chart.group_by) == ("logical_model", "real_model")
 
+
 def test_dashboard_command_copy_preserves_custom_legend() -> None:
     parser = build_parser(load_translator("en"))
     dashboard = _to_options(
@@ -70,6 +71,7 @@ def test_dashboard_command_copy_preserves_custom_legend() -> None:
     assert isinstance(pane, tui_models.CustomChartPaneConfig)
     assert pane.chart.presentation.legend == "inside"
 
+
 def test_dashboard_commands_preserve_local_date_context_and_timezone() -> None:
     parser = build_parser(load_translator("en"))
     dashboard = _to_options(parser.parse_args(["dashboard"]))
@@ -86,6 +88,7 @@ def test_dashboard_commands_preserve_local_date_context_and_timezone() -> None:
     explicit = _to_options(parser.parse_args(["dashboard", "--timezone", "UTC"]))
     assert explicit.host.timezone == "UTC"
 
+
 def test_full_dashboard_command_preserves_local_launcher_for_clock_overlay() -> None:
     parser = build_parser(load_translator("en"))
     dashboard = _to_options(parser.parse_args(["dashboard"]), launcher="ccuv-local")
@@ -100,6 +103,7 @@ def test_full_dashboard_command_preserves_local_launcher_for_clock_overlay() -> 
     assert isinstance(reparsed.panes[0], AnimationPaneConfig)
     assert reparsed.panes[0].overlay.command == "ccuv-local text time-state --run"
 
+
 def test_full_dashboard_command_preserves_animation_pane_style() -> None:
     parser = build_parser(load_translator("en"))
     dashboard = _to_options(
@@ -111,6 +115,7 @@ def test_full_dashboard_command_preserves_animation_pane_style() -> None:
 
     assert "animate rain" in command
     assert reparsed.panes[1] == dashboard.panes[1]
+
 
 def test_dashboard_layout_weights_round_trip_through_full_command() -> None:
     parser = build_parser(load_translator("en"))
@@ -143,6 +148,7 @@ def test_dashboard_layout_weights_round_trip_through_full_command() -> None:
     assert reparsed.host.column_weights == (16, 8)
     assert reparsed.host.row_weights == (24,)
 
+
 def test_full_dashboard_command_explicit_grid_overrides_source_named_layout() -> None:
     parser = build_parser(load_translator("en"))
     dashboard = _to_options(parser.parse_args(["dashboard", "spotlight-wide"]))
@@ -154,6 +160,7 @@ def test_full_dashboard_command_explicit_grid_overrides_source_named_layout() ->
     assert "--layout" not in full
     assert reparsed.host.grid == "2x2"
     assert reparsed.host.layout is None
+
 
 def test_full_dashboard_command_serializes_runtime_layout_weight_overrides() -> None:
     parser = build_parser(load_translator("en"))
@@ -168,6 +175,7 @@ def test_full_dashboard_command_serializes_runtime_layout_weight_overrides() -> 
 
     assert reparsed.host.column_weights == (16, 8)
     assert reparsed.host.row_weights == (15, 5, 5)
+
 
 def test_full_dashboard_command_includes_private_and_runtime_configuration() -> None:
     parser = build_parser(load_translator("en"))
@@ -204,6 +212,7 @@ def test_full_dashboard_command_includes_private_and_runtime_configuration() -> 
     assert reparsed.panes[0].chart.presentation.density == "minimal"
     assert "--density minimal" in tokens[tokens.index("--pane") + 1]
 
+
 def test_dashboard_pane_copy_materializes_canonical_standalone_interval() -> None:
     parser = build_parser(load_translator("en"))
     base = _to_options(parser.parse_args(["dashboard"]))
@@ -222,6 +231,7 @@ def test_dashboard_pane_copy_materializes_canonical_standalone_interval() -> Non
     assert format_dashboard_pane_command(
         standalone_from_chart_pane(base, monitor), refresh_interval=30, sampling_interval=15
     ) == ("ccuv chart monitor --by model --timezone Asia/Shanghai --density compact")
+
 
 def test_dashboard_pane_command_views_wrap_without_affecting_copy_payload() -> None:
     parser = build_parser(load_translator("en"))
@@ -253,6 +263,7 @@ def test_dashboard_pane_command_views_wrap_without_affecting_copy_payload() -> N
     assert "--ccusage-bin" in full
     assert format_full_command(active).count("\n") == 0
     assert _pane_copy_payload(pane, load_translator("en"), terminal) == format_full_command(active)
+
 
 def test_dashboard_pane_copy_actions_follow_body_view() -> None:
     assert (

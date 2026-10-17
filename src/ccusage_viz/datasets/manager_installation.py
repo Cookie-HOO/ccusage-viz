@@ -30,7 +30,9 @@ def _register_result(
             screen,
             translator,
             decoder,
-            translator.text("status.dataset_registration_conflict", dataset_id=result.registration.dataset_id),
+            translator.text(
+                "status.dataset_registration_conflict", dataset_id=result.registration.dataset_id
+            ),
             title=translator.text("status.dataset_registration_conflict_title"),
             controls=translator.text("status.dataset_registration_conflict_controls"),
             read_input=read_input,
@@ -38,10 +40,14 @@ def _register_result(
         if not confirmed:
             return translator.text("status.dataset_registration_cancelled")
         result = service.register_installed_dataset(result.registration.dataset_id, replace=True)
-    return translator.text(f"status.dataset_registration_{result.kind}", dataset_id=result.registration.dataset_id)
+    return translator.text(
+        f"status.dataset_registration_{result.kind}", dataset_id=result.registration.dataset_id
+    )
+
 
 def _official_preview(service: DatasetService, dataset_id: str):
     return service.prepare_official_install(dataset_id)
+
 
 def _load_official_preview(
     service: DatasetService,
@@ -72,6 +78,7 @@ def _load_official_preview(
     finally:
         executor.shutdown(wait=False, cancel_futures=True)
 
+
 def _official_catalog_rows(
     entries: tuple[object, ...],
     translator: Translator,
@@ -99,6 +106,7 @@ def _official_catalog_rows(
                 row = clip_width(row, max(0, available - 1)) + "…"
             rows.append("  " + render_ranking_description(row, context))
     return tuple(rows)
+
 
 def _register_official(
     service: DatasetService,
@@ -180,6 +188,7 @@ def _register_official(
         except Exception as exc:
             return format_error(exc, translator)
 
+
 def _read_github_repository(
     screen: FramePainter,
     translator: Translator,
@@ -220,6 +229,7 @@ def _read_github_repository(
             return repository.strip() or None
         elif len(event.value) == 1 and event.value.isprintable():
             repository += event.value
+
 
 def _register_github(
     service: DatasetService,

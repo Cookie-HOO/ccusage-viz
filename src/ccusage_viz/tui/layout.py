@@ -21,8 +21,10 @@ def _grid_shape(grid: str, count: int) -> tuple[int, int]:
     )
     return layout.topology.rows, layout.topology.columns
 
+
 def _grid_for_pane_count(grid: str, pane_count: int) -> str:
     return layout_for_pane_count(grid, pane_count)
+
 
 def _practical_grid(pane_count: int) -> str:
     """Return the smallest two-column grid suitable for numeric layout editing."""
@@ -32,9 +34,11 @@ def _practical_grid(pane_count: int) -> str:
     rows = (pane_count + columns - 1) // columns
     return f"{rows}x{columns}"
 
+
 def parse_grid(value: str, pane_count: int) -> str | None:
     """Normalize a runtime numeric grid only when it can display every pane."""
     return parse_numeric_grid(value, pane_count)
+
 
 def _dashboard_structure(style: str) -> tuple[str, str]:
     return {
@@ -43,6 +47,7 @@ def _dashboard_structure(style: str) -> tuple[str, str]:
         "framed": ("none", "subtle"),
         "accent": ("none", "accent"),
     }[style]
+
 
 def resolve_panel_layout(
     *, width: int, height: int, rows: int, columns: int, divider_style: str
@@ -58,6 +63,7 @@ def resolve_panel_layout(
         tuple(height_base + int(index < height_remainder) for index in range(rows)),
         gutter,
     )
+
 
 def pane_rects(
     *,
@@ -88,14 +94,17 @@ def pane_rects(
         top += cell_height + layout.gutter
     return tuple(rects)
 
+
 def pane_at(rects: tuple[PaneRect, ...], x: int, y: int) -> int | None:
     for rect in rects:
         if rect.left <= x < rect.left + rect.width and rect.top <= y < rect.top + rect.height:
             return rect.index
     return None
 
+
 def _fit_line(line: str, width: int) -> str:
     return pad_width(clip_width(line, width), width)
+
 
 def _frame(
     lines: list[str],
@@ -147,6 +156,7 @@ def _frame(
         *(vertical + item + vertical for item in body),
         bottom_left + horizontal * (width - 2) + bottom_right,
     ]
+
 
 def compose_panes(
     charts: list[str],
@@ -204,6 +214,7 @@ def compose_panes(
             output.append(horizontal * layout.width)
     return "\n".join(output)
 
+
 def _compose_dashboard_overlays(
     grid: str,
     layout: ResolvedPaneLayout,
@@ -225,6 +236,7 @@ def _compose_dashboard_overlays(
                 rows[placement.row], placement, width=layout.width
             )
     return "\n".join(rows)
+
 
 def _compose_resolved_panes(
     charts: list[str],

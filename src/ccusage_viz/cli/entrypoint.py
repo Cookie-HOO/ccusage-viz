@@ -30,11 +30,13 @@ def _render_short_circuit(route: ShortCircuitRoute) -> int:
     parser.parse_args(route.command.split() + ["--help"] if route.command else ["--help"])
     raise AssertionError("argparse help did not exit")
 
+
 def _preparse_language(argv: list[str]) -> str:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--lang", choices=("en", "zh"))
     namespace, _ = parser.parse_known_args(argv)
     return namespace.lang or detect_language()
+
 
 def main(argv: list[str] | None = None) -> int:
     raw_args = list(sys.argv[1:] if argv is None else argv)

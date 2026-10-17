@@ -33,11 +33,7 @@ def render_text_viewport(
 ) -> TextViewport:
     """Return the visible rows of text and its valid scrolling position."""
     lines = (
-        list(text)
-        if isinstance(text, tuple)
-        else text.rstrip("\r\n").splitlines()
-        if text
-        else []
+        list(text) if isinstance(text, tuple) else text.rstrip("\r\n").splitlines() if text else []
     )
     visible_rows = max(0, visible_rows)
     maximum = max(0, len(lines) - visible_rows)

@@ -12,6 +12,7 @@ from ccusage_viz.trends import trend_glyph
 
 RankingNumber = int | Decimal
 
+
 @dataclass(frozen=True, slots=True)
 class RankingPresentationEntry:
     """Raw, presentation-neutral facts for one historical ranking row."""
@@ -36,6 +37,7 @@ class RankingPresentationEntry:
     # Absolute position in the complete current ranking. Search and viewport
     # windows may hide rows but must not renumber the survivors.
     rank: int | None = None
+
 
 def _refresh_markers(
     entry: RankingPresentationEntry,
@@ -80,6 +82,7 @@ def _refresh_markers(
             )
     return rank_marker, activity, value_marker
 
+
 def _compact_labels(labels: Sequence[str], width: int) -> list[str]:
     """Compact a shared prefix when doing so leaves unique display labels."""
     if len(labels) < 2:
@@ -121,6 +124,7 @@ def _compact_labels(labels: Sequence[str], width: int) -> list[str]:
         result[index] = truncate_middle_width(f"…{labels[index][len(prefix) :]}", width)
     return result
 
+
 def _matches_search(entry: RankingPresentationEntry, query: str) -> bool:
     """Return whether a literal case-insensitive query occurs in a searchable field."""
     needle = query.casefold()
@@ -133,6 +137,7 @@ def _matches_search(entry: RankingPresentationEntry, query: str) -> bool:
         )
         or (entry.project_link is not None and needle in entry.project_link.casefold())
     )
+
 
 def filter_ranking_entries(
     entries: Sequence[RankingPresentationEntry], query: str

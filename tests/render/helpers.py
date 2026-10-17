@@ -1,8 +1,3 @@
-
-
-
-
-
 from datetime import date, datetime
 from decimal import Decimal
 
@@ -110,14 +105,18 @@ def _grouped_ranking_projection(
         groups,
     )
 
+
 def usage(total: int) -> TokenUsage:
     return TokenUsage(total, total, 0, 0, 0)
+
 
 def context(ascii: bool = False) -> RenderContext:
     return RenderContext(80, 24, load_translator("en"), color=False, ascii=ascii)
 
+
 def period() -> DateRange:
     return DateRange(date(2026, 1, 1), date(2026, 1, 14))
+
 
 def _distribution_model() -> TimeOfDayDistributionModel:
     started = datetime(2026, 9, 22, 9, 0).astimezone()

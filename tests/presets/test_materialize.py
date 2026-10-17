@@ -66,6 +66,7 @@ def test_custom_ranking_timestamp_preset_refreshes_relative_and_preserves_fixed(
     assert relative_chart.chart.date_range.end_at == fresh  # type: ignore[union-attr]
     assert fixed_chart.chart.date_range == fixed
 
+
 def test_loaded_custom_preset_preserves_its_configuration_over_probe_defaults() -> None:
     saved_chart = CustomChartConfig(
         "ranking",
@@ -107,6 +108,7 @@ def test_loaded_custom_preset_preserves_its_configuration_over_probe_defaults() 
 
     assert apply_custom_probe_defaults(pane.chart, descriptor, timezone="UTC") == pane.chart
 
+
 def test_installed_custom_sources_are_resolved_only_when_materialized() -> None:
     record = preset_from_launch(
         "dataset",
@@ -128,6 +130,7 @@ def test_installed_custom_sources_are_resolved_only_when_materialized() -> None:
     original = record.panes[0]
     assert isinstance(original, CustomChartPaneConfig)
     assert replace(restored.chart, initial_explicit=frozenset()) == original.chart
+
 
 def test_named_empty_preserves_launch_configuration_and_replaces_only_panes() -> None:
     launch = _launch(panes=(EmptyPaneConfig(), ChartPaneConfig(CalendarConfig("calendar", RANGE))))

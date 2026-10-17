@@ -80,6 +80,7 @@ def _communicate_bounded(
     stderr_thread.join()
     return bytes(stdout), bytes(stderr)
 
+
 def _stop(process: subprocess.Popen[bytes]) -> None:
     if os.name == "nt":
         subprocess.run(
@@ -106,6 +107,7 @@ def _stop(process: subprocess.Popen[bytes]) -> None:
     with suppress(ChildProcessError):
         process.wait()
 
+
 def _signal_process_group(process: subprocess.Popen[bytes], sig: signal.Signals) -> None:
     try:
         os.killpg(process.pid, sig)
@@ -117,6 +119,7 @@ def _signal_process_group(process: subprocess.Popen[bytes], sig: signal.Signals)
                 process.terminate()
             else:
                 process.kill()
+
 
 def _decode_stderr(value: bytes) -> str:
     return value[-_STDERR_LIMIT:].decode("utf-8", errors="replace")

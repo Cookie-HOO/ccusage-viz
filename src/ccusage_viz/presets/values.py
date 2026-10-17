@@ -24,10 +24,13 @@ from ccusage_viz.options import (
 
 PRESET_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9-]*$")
 
+
 class DashboardPresetValidationError(ValueError):
     """A wire preset is malformed, unsupported, or unsafe to materialize."""
 
+
 Choice = TypeVar("Choice", bound=str)
+
 
 def validate_preset_name(name: str) -> str:
     """Return a safe Dashboard preset identifier or raise a precise validation error."""
@@ -39,10 +42,12 @@ def validate_preset_name(name: str) -> str:
         )
     return name
 
+
 def _expect_mapping(value: object, label: str) -> Mapping[str, object]:
     if not isinstance(value, Mapping) or any(not isinstance(key, str) for key in value):
         raise DashboardPresetValidationError(f"{label} must be an object")
     return value
+
 
 def _exact(value: object, fields: frozenset[str], label: str) -> Mapping[str, object]:
     mapping = _expect_mapping(value, label)
@@ -61,20 +66,24 @@ def _exact(value: object, fields: frozenset[str], label: str) -> Mapping[str, ob
         raise DashboardPresetValidationError(f"{label} has invalid fields ({detail})")
     return mapping
 
+
 def _string(value: object, label: str, *, allow_empty: bool = False) -> str:
     if not isinstance(value, str) or (not allow_empty and not value):
         raise DashboardPresetValidationError(f"{label} must be a non-empty string")
     return value
+
 
 def _optional_string(value: object, label: str) -> str | None:
     if value is None:
         return None
     return _string(value, label)
 
+
 def _boolean(value: object, label: str) -> bool:
     if not isinstance(value, bool):
         raise DashboardPresetValidationError(f"{label} must be a boolean")
     return value
+
 
 def _integer(value: object, label: str, *, minimum: int | None = None) -> int:
     if not isinstance(value, int) or isinstance(value, bool):
@@ -82,6 +91,7 @@ def _integer(value: object, label: str, *, minimum: int | None = None) -> int:
     if minimum is not None and value < minimum:
         raise DashboardPresetValidationError(f"{label} must be at least {minimum}")
     return value
+
 
 def _number(value: object, label: str, *, minimum: float | None = None) -> float:
     if not isinstance(value, (int, float)) or isinstance(value, bool) or not isfinite(float(value)):
@@ -91,6 +101,7 @@ def _number(value: object, label: str, *, minimum: float | None = None) -> float
         raise DashboardPresetValidationError(f"{label} must be at least {minimum}")
     return result
 
+
 def _choice(
     value: object, choices: Sequence[Choice] | set[Choice] | frozenset[Choice], label: str
 ) -> Choice:
@@ -99,12 +110,14 @@ def _choice(
         raise DashboardPresetValidationError(f"unsupported {label}: {text}")
     return cast(Choice, text)
 
+
 def _optional_choice(
     value: object, choices: Sequence[Choice] | set[Choice] | frozenset[Choice], label: str
 ) -> Choice | None:
     if value is None:
         return None
     return _choice(value, choices, label)
+
 
 def _timestamp(value: object, label: str) -> datetime:
     text = _string(value, label)
@@ -118,10 +131,12 @@ def _timestamp(value: object, label: str) -> datetime:
         raise DashboardPresetValidationError(f"{label} must be UTC")
     return result.astimezone(UTC)
 
+
 def _timestamp_wire(value: datetime) -> str:
     if value.tzinfo is None:
         raise DashboardPresetValidationError("preset timestamps must be timezone-aware")
     return value.astimezone(UTC).isoformat(timespec="microseconds").replace("+00:00", "Z")
+
 
 def _date(value: object, label: str) -> date:
     text = _string(value, label)
@@ -130,8 +145,10 @@ def _date(value: object, label: str) -> date:
     except ValueError as exc:
         raise DashboardPresetValidationError(f"invalid {label}") from exc
 
+
 def _date_wire(value: date) -> str:
     return value.isoformat()
+
 
 def _weights(value: object, label: str) -> tuple[int, ...] | None:
     if value is None:
@@ -143,13 +160,16 @@ def _weights(value: object, label: str) -> tuple[int, ...] | None:
         raise DashboardPresetValidationError(f"{label} must not be empty")
     return result
 
+
 def _weights_wire(value: tuple[int, ...] | None) -> list[int] | None:
     return list(value) if value is not None else None
+
 
 def _string_list(value: object, label: str) -> tuple[str, ...]:
     if not isinstance(value, list):
         raise DashboardPresetValidationError(f"{label} must be an array")
     return tuple(_string(item, f"{label} item") for item in value)
+
 
 def _filters_wire(value: Filters) -> dict[str, list[str]]:
     return {
@@ -157,6 +177,7 @@ def _filters_wire(value: Filters) -> dict[str, list[str]]:
         "models": list(value.models),
         "projects": list(value.projects),
     }
+
 
 def _filters_parse(value: object) -> Filters:
     wire = _exact(value, frozenset(("agents", "models", "projects")), "filters")
@@ -166,6 +187,7 @@ def _filters_parse(value: object) -> Filters:
         projects=_string_list(wire["projects"], "filters.projects"),
     )
 
+
 def _presentation_wire(value: ChartPresentation) -> dict[str, str]:
     return {
         "theme": value.theme,
@@ -173,6 +195,7 @@ def _presentation_wire(value: ChartPresentation) -> dict[str, str]:
         "legend": value.legend,
         "density": value.density,
     }
+
 
 def _presentation_parse(value: object, kind: str) -> ChartPresentation:
     wire = _exact(value, frozenset(("theme", "style", "legend", "density")), "presentation")
@@ -183,6 +206,7 @@ def _presentation_parse(value: object, kind: str) -> ChartPresentation:
         legend=_string(wire["legend"], "presentation.legend"),
         density=_choice(wire["density"], DENSITIES, "presentation.density"),  # type: ignore[arg-type]
     )
+
 
 def _date_range_wire(value: DateRange | TimestampRange) -> dict[str, object]:
     if isinstance(value, TimestampRange):
@@ -201,6 +225,7 @@ def _date_range_wire(value: DateRange | TimestampRange) -> dict[str, object]:
         "fixed_bounds": value.fixed_bounds,
         "implicit_until": value.implicit_until,
     }
+
 
 def _date_range_parse(value: object) -> DateRange | TimestampRange:
     source = _expect_mapping(value, "date_range")
@@ -260,8 +285,10 @@ def _date_range_parse(value: object) -> DateRange | TimestampRange:
         implicit_until=_boolean(wire["implicit_until"], "date_range.implicit_until"),
     )
 
+
 def _custom_filters_wire(value: CustomFilters) -> list[dict[str, object]]:
     return [{"id": identifier, "values": list(values)} for identifier, values in value]
+
 
 def _custom_filters_parse(value: object) -> CustomFilters:
     if not isinstance(value, list):
@@ -277,6 +304,7 @@ def _custom_filters_parse(value: object) -> CustomFilters:
         result.append((identifier, _string_list(wire["values"], f"custom filters[{index}].values")))
     return tuple(result)
 
+
 def _overlay_wire(value: OverlayConfig) -> dict[str, object]:
     return {
         "text": value.text,
@@ -289,6 +317,7 @@ def _overlay_wire(value: OverlayConfig) -> dict[str, object]:
         "offset_x": value.offset_x,
         "offset_y": value.offset_y,
     }
+
 
 def _overlay_parse(value: object) -> OverlayConfig:
     wire = _exact(
@@ -323,12 +352,14 @@ def _overlay_parse(value: object) -> OverlayConfig:
     except ValueError as exc:
         raise DashboardPresetValidationError("invalid overlay") from exc
 
+
 def _process_wire(value: ProcessConfig) -> dict[str, object]:
     return {
         "ccusage_bin": value.ccusage_bin,
         "query_timeout": value.query_timeout,
         "output_limit": value.output_limit,
     }
+
 
 def _process_parse(value: object) -> ProcessConfig:
     wire = _exact(value, frozenset(("ccusage_bin", "query_timeout", "output_limit")), "process")
@@ -337,6 +368,7 @@ def _process_parse(value: object) -> ProcessConfig:
         query_timeout=_number(wire["query_timeout"], "process.query_timeout", minimum=0.001),
         output_limit=_integer(wire["output_limit"], "process.output_limit", minimum=1),
     )
+
 
 def _host_wire(value: DashboardHostConfig) -> dict[str, object]:
     return {
@@ -357,6 +389,7 @@ def _host_wire(value: DashboardHostConfig) -> dict[str, object]:
         "theme": value.theme,
         "style": value.style,
     }
+
 
 def _host_parse(value: object, pane_count: int) -> DashboardHostConfig:
     fields = frozenset(
@@ -424,6 +457,7 @@ def _host_parse(value: object, pane_count: int) -> DashboardHostConfig:
         theme=_string(wire["theme"], "host.theme"),
         style=_choice(wire["style"], DASHBOARD_STYLES, "host.style"),
     )
+
 
 def _optional_int(value: object, label: str, *, minimum: int | None = None) -> int | None:
     return None if value is None else _integer(value, label, minimum=minimum)

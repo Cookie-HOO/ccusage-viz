@@ -101,6 +101,7 @@ def probe_descriptor_to_wire(descriptor: CustomProbeDescriptor) -> dict[str, obj
         ],
     }
 
+
 def v2_probe_descriptor_to_wire(descriptor: V2ProbeDescriptor) -> dict[str, object]:
     """Serialize safe V2 descriptor metadata for a local registration snapshot."""
 
@@ -233,6 +234,7 @@ def v2_probe_descriptor_to_wire(descriptor: V2ProbeDescriptor) -> dict[str, obje
         ],
     }
 
+
 def _defaults_to_wire(value: CustomChartDefaults, *, ranking: bool = False) -> dict[str, object]:
     declared = value.declared or frozenset({"period", "group_by", "top"})
     fields: dict[str, object] = {}
@@ -253,7 +255,5 @@ def _defaults_to_wire(value: CustomChartDefaults, *, ranking: bool = False) -> d
         divisor = 3600 if suffix == "h" else 60
         fields["window"] = f"{value.window_seconds // divisor}{suffix}"
     if "filters" in declared and value.filters:
-        fields["filters"] = {
-            filter_id: list(options) for filter_id, options in value.filters
-        }
+        fields["filters"] = {filter_id: list(options) for filter_id, options in value.filters}
     return fields

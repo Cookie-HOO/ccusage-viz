@@ -21,6 +21,7 @@ from ccusage_viz.presets.values import (
 
 PRESET_SCHEMA = "ccuv.dashboard-presets/v1"
 
+
 @dataclass(frozen=True, slots=True)
 class DashboardPresetRecord:
     """One validated, version-independent user preset declaration."""
@@ -81,6 +82,7 @@ class DashboardPresetRecord:
     def materialize(self) -> DashboardLaunch:
         return DashboardLaunch(self.process, self.host, self.panes)  # type: ignore[arg-type]
 
+
 @dataclass(frozen=True, slots=True)
 class DashboardPresetDocument:
     """The complete strict, versioned collection stored in one private file."""
@@ -128,6 +130,7 @@ class DashboardPresetDocument:
         return DashboardPresetDocument(
             tuple(record for record in self.presets if record.name != name)
         )
+
 
 def preset_from_launch(
     name: str, launch: DashboardLaunch, *, now: datetime | None = None

@@ -119,7 +119,9 @@ def render_historical_ranking(
     list_style = context.style == "list"
 
     def formatted_label(entry: RankingPresentationEntry, label: str, width: int) -> str:
-        marker = "" if list_style else f" | {entry.copy_marker}" if entry.copy_marker is not None else ""
+        marker = (
+            "" if list_style else f" | {entry.copy_marker}" if entry.copy_marker is not None else ""
+        )
         if entry.project_link is not None and not list_style:
             link_marker = f" · {_terminal_link('→', entry.project_link)}"
             marker += link_marker

@@ -1,7 +1,3 @@
-
-
-
-
 import pytest
 
 from ccusage_viz.cli.configuration import _to_options
@@ -31,6 +27,7 @@ def test_custom_pane_fragment_preserves_normalized_filters_and_compact_density()
     assert pane.chart.filters == (("category", ("fiction", "literature")),)
     assert pane.chart.presentation.density == "compact"
 
+
 def test_demo_seed_is_shared_by_dashboard_panes_and_varies_between_invocations() -> None:
     parser = build_parser(load_translator("en"))
 
@@ -46,6 +43,7 @@ def test_demo_seed_is_shared_by_dashboard_panes_and_varies_between_invocations()
         for pane in fixed.panes
         if isinstance(pane, ChartPaneConfig)
     )
+
 
 @pytest.mark.parametrize(
     "fragment",

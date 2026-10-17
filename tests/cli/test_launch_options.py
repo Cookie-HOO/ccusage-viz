@@ -1,4 +1,3 @@
-
 from dataclasses import replace
 from datetime import UTC, date, datetime
 from typing import cast
@@ -101,6 +100,7 @@ def test_chart_launch_becomes_focused_one_pane_dashboard() -> None:
     assert historical_dashboard.explicit == frozenset(("refresh_interval", "period"))
     assert monitor_dashboard.explicit == frozenset(("sampling_interval", "period"))
 
+
 def test_v2_ranking_all_default_period_survives_compatibility_projection() -> None:
     text = LocalizedText("Stars", "Star 数")
     descriptor = V2ProbeDescriptor(
@@ -136,6 +136,7 @@ def test_v2_ranking_all_default_period_survives_compatibility_projection() -> No
     assert projected.capabilities.charts["ranking"].periods == ("all",)
     assert resolved.date_range.period == "all"
 
+
 @pytest.mark.parametrize("kind", ("timeline", "calendar", "stack", "ranking"))
 def test_custom_declared_periods_limit_every_historical_chart_cycle(kind: str) -> None:
     chart = CustomChartConfig(
@@ -147,6 +148,7 @@ def test_custom_declared_periods_limit_every_historical_chart_cycle(kind: str) -
 
     assert adjust_custom_chart(chart, "p").date_range.period == "30d"
     assert adjust_custom_chart(chart, "P").date_range.period == "30d"
+
 
 def test_v2_custom_ranking_cycles_dataset_subday_periods_in_declaration_order() -> None:
     chart = CustomChartConfig(
@@ -167,6 +169,7 @@ def test_v2_custom_ranking_cycles_dataset_subday_periods_in_declaration_order() 
     assert wrapped.date_range.period == "15s"
     assert wrapped.date_range.end_at == now  # type: ignore[union-attr]
 
+
 def test_custom_pane_and_empty_pane_are_discriminated() -> None:
     dashboard = DashboardLaunch(ProcessConfig(), DashboardHostConfig(), ())
     custom = default_custom_pane(
@@ -180,6 +183,7 @@ def test_custom_pane_and_empty_pane_are_discriminated() -> None:
     assert pane_kind(custom) == "custom"
     assert not hasattr(EmptyPaneConfig(), "source")
     assert not hasattr(EmptyPaneConfig(), "provider")
+
 
 def test_custom_display_adjustments_stay_local() -> None:
     chart = CustomChartConfig(
@@ -196,6 +200,7 @@ def test_custom_display_adjustments_stay_local() -> None:
     assert adjust_custom_chart(chart, "l").presentation.legend == "inside"
     assert adjust_custom_chart(chart, "d").presentation.density == DENSITIES[0]
 
+
 def test_custom_ranking_top_adjusts_without_an_explicit_grouping() -> None:
     chart = CustomChartConfig(
         "ranking",
@@ -209,6 +214,7 @@ def test_custom_ranking_top_adjusts_without_an_explicit_grouping() -> None:
     assert adjust_custom_chart(replace(chart, top=1), "-").top is None
     assert adjust_custom_chart(replace(chart, top=2), "-").top == 1
 
+
 def test_stack_defaults_to_composition_and_cycles_native_groupings() -> None:
     date_range = resolve_date_range("stack", period="14d", since=None, until=None)
     source = StandaloneLaunch(
@@ -217,6 +223,7 @@ def test_stack_defaults_to_composition_and_cycles_native_groupings() -> None:
 
     assert source.chart.by == "composition"
     assert adjust_standalone(source, "b").chart.by == "agent"
+
 
 def test_ranking_period_cycle_includes_today_only() -> None:
     source = StandaloneLaunch(
@@ -231,6 +238,7 @@ def test_ranking_period_cycle_includes_today_only() -> None:
 
     assert adjusted.chart.date_range.period == "1d"
     assert adjusted.chart.date_range.days == 1
+
 
 def test_ranking_period_cycle_includes_all_with_unix_epoch_anchor() -> None:
     chart = RankingConfig(
@@ -248,9 +256,11 @@ def test_ranking_period_cycle_includes_all_with_unix_epoch_anchor() -> None:
     assert all_time.date_range.since == date(1971, 1, 1)
     assert back_to_year.date_range.period == "1y"
 
+
 def test_all_period_is_ranking_only() -> None:
     with pytest.raises(UsageError):
         resolve_date_range("timeline", period="all", since=None, until=None)
+
 
 def test_installed_custom_pane_uses_dashboard_timezone_today() -> None:
     dashboard = DashboardLaunch(ProcessConfig(), DashboardHostConfig(timezone="Asia/Shanghai"), ())
@@ -260,6 +270,7 @@ def test_installed_custom_pane_uses_dashboard_timezone_today() -> None:
 
     assert pane.chart.date_range.until == local_today(timezone="Asia/Shanghai")
     assert pane.chart.date_range.period == "14d"
+
 
 def test_ranking_defaults_to_dot_across_programmatic_and_dashboard_entry_points() -> None:
     dashboard = DashboardLaunch(ProcessConfig(), DashboardHostConfig(), ())
@@ -275,6 +286,7 @@ def test_ranking_defaults_to_dot_across_programmatic_and_dashboard_entry_points(
     assert native.chart.presentation == ChartPresentation(style="dot", density="full")
     assert custom.chart.presentation == native.chart.presentation
 
+
 def test_custom_timeline_defaults_to_existing_historical_period_and_presentation() -> None:
     dashboard = DashboardLaunch(ProcessConfig(), DashboardHostConfig(), ())
     pane = default_custom_pane(
@@ -288,6 +300,7 @@ def test_custom_timeline_defaults_to_existing_historical_period_and_presentation
     assert pane.chart.presentation == native.chart.presentation
     assert pane.chart.presentation == ChartPresentation(style="linear", density="compact")
 
+
 def test_default_timeline_range_is_fourteen_inclusive_days() -> None:
     result = resolve_date_range(
         "timeline", period=None, since=None, until=None, today=date(2026, 9, 12)
@@ -300,11 +313,13 @@ def test_default_timeline_range_is_fourteen_inclusive_days() -> None:
     )
     assert result.relative_until
 
+
 def test_relative_range_advances_but_historical_range_stays_fixed() -> None:
     relative = timeline().chart.date_range
     assert refresh_date_range(relative, today=date(2026, 9, 13)).until == date(2026, 9, 13)
     fixed = timeline(rolling=False).chart.date_range
     assert refresh_date_range(fixed, today=date(2026, 9, 13)) == fixed
+
 
 @pytest.mark.parametrize(
     ("period", "since", "until"),
@@ -325,6 +340,7 @@ def test_invalid_ranges_fail(period: str | None, since: str | None, until: str |
             today=date(2026, 9, 12),
         )
 
+
 @pytest.mark.parametrize(
     ("density", "expected"),
     (("minimal", False), ("compact", False), ("full", True), ("detailed", True)),
@@ -332,9 +348,11 @@ def test_invalid_ranges_fail(period: str | None, since: str | None, until: str |
 def test_complete_content_density_contract(density: str, expected: bool) -> None:
     assert has_complete_content(cast(Density, density)) is expected
 
+
 def test_chart_density_has_exactly_four_values_and_defaults_to_detailed() -> None:
     assert DENSITIES == ("minimal", "compact", "full", "detailed")
     assert ChartPresentation().density == "detailed"
+
 
 def test_runtime_adjustments_replace_owned_nested_configs() -> None:
     source = timeline(by="model", top=10)
@@ -368,6 +386,7 @@ def test_runtime_adjustments_replace_owned_nested_configs() -> None:
     assert adjust_standalone(source, "+").chart.top == 11
     assert adjust_standalone(source, "k").chart.weekdays == "hide"
     assert adjust_standalone(timeline(rolling=False), "p") == timeline(rolling=False)
+
 
 @pytest.mark.parametrize(
     ("chart", "key", "expected_by"),
@@ -406,6 +425,7 @@ def test_builtin_grouping_cycles_preserve_unbounded_top(chart, key, expected_by)
     assert updated.chart.by == expected_by
     assert updated.chart.top is None
 
+
 def test_builtin_grouping_cycles_preserve_explicit_top_in_both_directions() -> None:
     chart = TimelineConfig(
         "timeline",
@@ -435,6 +455,7 @@ def test_builtin_grouping_cycles_preserve_explicit_top_in_both_directions() -> N
     assert (reverse.chart.by, reverse.chart.top) == ("agent", 7)
     assert to_total.chart.top == 7
 
+
 def test_calendar_style_key_cycles_between_relative_and_grid() -> None:
     source = StandaloneLaunch(
         ProcessConfig(),
@@ -454,6 +475,7 @@ def test_calendar_style_key_cycles_between_relative_and_grid() -> None:
     grid = adjust_standalone(source, "s")
     assert grid.chart.presentation.style == "grid"
     assert adjust_standalone(grid, "s").chart.presentation.style == "relative"
+
 
 def test_period_keys_adjust_through_the_shared_historical_cycle() -> None:
     source = timeline()
@@ -496,6 +518,7 @@ def test_period_keys_adjust_through_the_shared_historical_cycle() -> None:
     )
     assert adjust_standalone(timeline(rolling=False), "P") == timeline(rolling=False)
 
+
 def test_replace_chart_filters_preserves_every_other_setting() -> None:
     source = timeline(by="model", top=10)
     filters = Filters(agents=("Claude Code",), models=("sonnet",))
@@ -506,6 +529,7 @@ def test_replace_chart_filters_preserves_every_other_setting() -> None:
     assert replace(updated.chart, filters=source.chart.filters) == source.chart
     assert updated.host == source.host
     assert updated.process == source.process
+
 
 def test_monitor_list_is_available_for_total_and_grouped_views() -> None:
     assert "list" in compatible_styles("ranking", "model")
@@ -520,6 +544,7 @@ def test_monitor_list_is_available_for_total_and_grouped_views() -> None:
     )
     assert adjust_standalone(monitor, "s").chart.presentation.style == "ranking-dot"
     assert adjust_standalone(monitor, "b").chart.presentation.style == "ranking"
+
 
 def test_monitor_distribution_adjustments_change_only_display_projection() -> None:
     monitor = StandaloneLaunch(
@@ -538,6 +563,7 @@ def test_monitor_distribution_adjustments_change_only_display_projection() -> No
     assert half_hour.chart.distribution_granularity == "half-hour"
     assert half_hour.chart.window_seconds == monitor.chart.window_seconds
     assert adjust_standalone(monitor, "i").host.interval == 30
+
 
 def test_monitor_ranking_styles_do_not_adjust_the_rolling_window() -> None:
     for style in ("ranking", "ranking-dot", "list"):

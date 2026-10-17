@@ -32,6 +32,7 @@ def _editor_line_start(draft: str, cursor: int) -> int:
     cursor = max(0, min(cursor, len(draft)))
     return draft.rfind("\n", 0, cursor) + 1
 
+
 def _editor_line_end(draft: str, cursor: int) -> int:
     """Return the final insertion point on the current physical line."""
 
@@ -39,12 +40,14 @@ def _editor_line_end(draft: str, cursor: int) -> int:
     newline = draft.find("\n", cursor)
     return len(draft) if newline < 0 else newline
 
+
 def _editor_word_kind(character: str) -> int:
     """Classify whitespace, keyword characters, and punctuation like Vim motions."""
 
     if character.isspace():
         return 0
     return 1 if character.isalnum() or character == "_" else 2
+
 
 def _editor_previous_word(draft: str, cursor: int) -> int:
     """Return the Vim-style ``b`` destination before ``cursor``."""
@@ -59,6 +62,7 @@ def _editor_previous_word(draft: str, cursor: int) -> int:
         cursor -= 1
     return cursor
 
+
 def _editor_next_word(draft: str, cursor: int) -> int:
     """Return the Vim-style ``w`` destination after ``cursor``."""
 
@@ -71,6 +75,7 @@ def _editor_next_word(draft: str, cursor: int) -> int:
     while cursor < len(draft) and _editor_word_kind(draft[cursor]) == 0:
         cursor += 1
     return cursor
+
 
 def _overlay_editor_controls(
     translator: Translator, *, width: int, color: bool, dashboard: bool = False
@@ -85,6 +90,7 @@ def _overlay_editor_controls(
         else "status.overlay_editor_controls_complete",
     )
     return tuple(controls_line(translator.text(key), width=width, color=color) for key in keys)
+
 
 def _editor_help_lines(translator: Translator, *, ascii: bool) -> tuple[str, ...]:
     """Render shared editor Help groups for the standalone frame."""
@@ -102,6 +108,7 @@ def _editor_help_lines(translator: Translator, *, ascii: bool) -> tuple[str, ...
         if group_index != len(editor_help_groups()) - 1:
             lines.append("")
     return tuple(lines)
+
 
 def _editor_viewport(
     draft: str, cursor: int, width: int, *, cursor_visible: bool
@@ -126,6 +133,7 @@ def _editor_viewport(
     if cursor_column < width:
         return visible + "\x1b[7m \x1b[0m", start
     return visible, start
+
 
 def _run_overlay_editor(
     screen: FramePainter,
@@ -243,6 +251,7 @@ def _run_overlay_editor(
                 text_draft = updated
             else:
                 command_draft = updated
+
 
 def _run_overlay_history(
     screen: FramePainter,

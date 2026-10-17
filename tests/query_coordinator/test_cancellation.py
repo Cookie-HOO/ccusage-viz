@@ -40,6 +40,7 @@ def test_handle_cancellation_detaches_only_its_plan_on_shared_coordinator() -> N
     assert active.result(1).records
     assert calls == ["shared"]
 
+
 def test_last_subscriber_cancellation_reaches_physical_execution() -> None:
     cancellation_observed = Event()
 
@@ -65,6 +66,7 @@ def test_last_subscriber_cancellation_reaches_physical_execution() -> None:
         handle.result(0.1)
     assert caught.value.key == "error.ccusage_cancelled"
     assert cancellation_observed.wait(1)
+
 
 def test_subscriber_launches_when_original_registrant_detaches_before_launch() -> None:
     original_registered = Event()
@@ -104,6 +106,7 @@ def test_subscriber_launches_when_original_registrant_detaches_before_launch() -
     allow_original_launch.set()
     assert calls == ["shared"]
 
+
 def test_plan_failure_does_not_cancel_an_unrelated_plan() -> None:
     calls: list[str] = []
     provider = RecordingProvider(calls, Lock(), Event(), Event())
@@ -124,6 +127,7 @@ def test_plan_failure_does_not_cancel_an_unrelated_plan() -> None:
 
     assert active.result(1).records
     assert calls == ["shared"]
+
 
 def test_cancelled_handle_settles_while_provider_assembly_is_blocked() -> None:
     assembly_started = Event()
@@ -148,6 +152,7 @@ def test_cancelled_handle_settles_while_provider_assembly_is_blocked() -> None:
         handle.result(0.1)
     assert caught.value.key == "error.ccusage_cancelled"
     release_assembly.set()
+
 
 def test_required_failure_settles_before_cancellation_resistant_sibling() -> None:
     sibling_started = Event()
@@ -179,6 +184,7 @@ def test_required_failure_settles_before_cancellation_resistant_sibling() -> Non
         handle.result(0.2)
     assert caught.value.key == "error.ccusage_failed"
     release_sibling.set()
+
 
 def test_cancelled_coordinator_rejects_new_work() -> None:
     calls: list[str] = []

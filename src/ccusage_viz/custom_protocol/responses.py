@@ -24,10 +24,12 @@ class CustomChartResponse:
     data: CustomData
     warnings: tuple[CustomProtocolWarning, ...] = field(default=(), kw_only=True)
 
+
 @dataclass(frozen=True, slots=True)
 class CustomSummaryResponse:
     summary: CustomSummary
     warnings: tuple[CustomProtocolWarning, ...] = field(default=(), kw_only=True)
+
 
 @dataclass(frozen=True, slots=True)
 class CustomProbeResponse:
@@ -35,11 +37,13 @@ class CustomProbeResponse:
     descriptor: CustomProbeDescriptor
     warnings: tuple[CustomProtocolWarning, ...] = field(default=(), kw_only=True)
 
+
 @dataclass(frozen=True, slots=True)
 class V2ProbeResponse:
     dataset_id: str
     descriptor: V2ProbeDescriptor
     warnings: tuple[CustomProtocolWarning, ...] = field(default=(), kw_only=True)
+
 
 @dataclass(frozen=True, slots=True)
 class V2ChartResponse:
@@ -49,6 +53,7 @@ class V2ChartResponse:
     runtime: V2Runtime
     warnings: tuple[CustomProtocolWarning, ...] = field(default=(), kw_only=True)
 
+
 @dataclass(frozen=True, slots=True)
 class V2MonitorResponse:
     metric_id: str
@@ -57,11 +62,13 @@ class V2MonitorResponse:
     runtime: V2Runtime = field(default_factory=lambda: V2Runtime(()))
     warnings: tuple[CustomProtocolWarning, ...] = field(default=(), kw_only=True)
 
+
 @dataclass(frozen=True, slots=True)
 class V2SummaryResponse:
     metric_id: str
     summary: CustomSummary
     warnings: tuple[CustomProtocolWarning, ...] = field(default=(), kw_only=True)
+
 
 CustomResponse: TypeAlias = (
     CustomChartResponse
@@ -73,10 +80,12 @@ CustomResponse: TypeAlias = (
     | V2ProbeResponse
 )
 
+
 @dataclass(frozen=True, slots=True)
 class CustomPaneResponse(CustomChartResponse):
     """Legacy in-process chart fixture shape retained during the UI migration."""
 
     summary: object
+
 
 CustomDashboardSummaryResponse = CustomSummaryResponse

@@ -49,9 +49,7 @@ class DemoProvider:
         ):
             raise ValueError("demo report time must be numeric")
         arguments = (
-            (size, str(seed))
-            if report_time is None
-            else (size, str(seed), str(float(report_time)))
+            (size, str(seed)) if report_time is None else (size, str(seed), str(float(report_time)))
         )
         queries = tuple(
             PhysicalQuery(

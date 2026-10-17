@@ -48,10 +48,7 @@ def test_catalogs_have_the_same_keys_and_placeholders() -> None:
         EN_MESSAGES["status.tui_preset_operations"]
         == "Ctrl-S save as new preset · Ctrl-P manage presets"
     )
-    assert (
-        ZH_MESSAGES["status.tui_preset_operations"]
-        == "Ctrl-S 保存为新预设 · Ctrl-P 管理预设"
-    )
+    assert ZH_MESSAGES["status.tui_preset_operations"] == "Ctrl-S 保存为新预设 · Ctrl-P 管理预设"
     assert " d adjust dashboard " in EN_MESSAGES["status.tui_chart_controls"]
     assert "c {action}" not in EN_MESSAGES["status.tui_chart_controls"]
     assert " d 调整仪表盘 " in ZH_MESSAGES["status.tui_chart_controls"]

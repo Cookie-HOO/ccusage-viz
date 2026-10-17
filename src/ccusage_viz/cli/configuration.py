@@ -53,11 +53,13 @@ from ccusage_viz.presets.values import DashboardPresetValidationError
 def _dashboard_preset_choices(user_names: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(dict.fromkeys((*DASHBOARD_PRESETS, *user_names)))
 
+
 def _demo_seed(namespace: argparse.Namespace) -> int | None:
     if namespace.demo is None:
         return None
     seed = getattr(namespace, "demo_seed", None)
     return seed if seed is not None else secrets.randbits(63)
+
 
 def _to_options(
     namespace: argparse.Namespace,
@@ -367,12 +369,14 @@ def _to_options(
     )
     return StandaloneLaunch(process, host, chart, explicit)
 
+
 def _route(options: LaunchConfig) -> LaunchRoute:
     if isinstance(options, DashboardLaunch):
         return DashboardRoute(options)
     if isinstance(options, AnimationLaunch):
         return AnimationRoute(options)
     return StandaloneRoute(options)
+
 
 def _validate_configuration(options: LaunchConfig) -> None:
     if options.host.ascii and options.was_explicit("color_scheme"):

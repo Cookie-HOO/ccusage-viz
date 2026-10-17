@@ -70,7 +70,9 @@ def test_animation_ticks_reuse_static_pane(
         def finish(self) -> None:
             pass
 
-    def render(pane: tui_rendering.TuiPane, *_args: object, **_kwargs: object) -> tui_models.PaneRender:
+    def render(
+        pane: tui_rendering.TuiPane, *_args: object, **_kwargs: object
+    ) -> tui_models.PaneRender:
         index = pane.pane_id
         calls[index].append(now[0])
         if isinstance(pane, tui_models.TuiAnimationPane):
@@ -89,39 +91,159 @@ def test_animation_ticks_reuse_static_pane(
             return KeyEvent("\x03")
         return None
 
-    monkeypatch.setattr(tui_session, 'build_query_runtime', Runtime)
-    monkeypatch.setattr(tui_session, 'FramePainter', Screen)
-    monkeypatch.setattr(tui_adjustments, 'FramePainter', Screen)
-    monkeypatch.setattr(tui_datasets_catalog, 'FramePainter', Screen)
-    monkeypatch.setattr(tui_datasets_chooser, 'FramePainter', Screen)
-    monkeypatch.setattr(tui_runtime, 'tui_input_mode', nullcontext)
-    monkeypatch.setattr(tui_adjustments, 'read_event', read)
-    monkeypatch.setattr(tui_input, 'read_event', read)
-    monkeypatch.setattr(tui_datasets_catalog, 'read_event', read)
-    monkeypatch.setattr(tui_datasets_chooser, 'read_event', read)
-    monkeypatch.setattr(tui_events, 'get_terminal_size', lambda: os.terminal_size((180 if ordinary_paint == 'resize' and reads[0] >= 3 else 160, 40)))
-    monkeypatch.setattr(tui_runtime, 'get_terminal_size', lambda: os.terminal_size((180 if ordinary_paint == 'resize' and reads[0] >= 3 else 160, 40)))
-    monkeypatch.setattr(tui_painting, 'get_terminal_size', lambda: os.terminal_size((180 if ordinary_paint == 'resize' and reads[0] >= 3 else 160, 40)))
-    monkeypatch.setattr(tui_dashboard_events, 'get_terminal_size', lambda: os.terminal_size((180 if ordinary_paint == 'resize' and reads[0] >= 3 else 160, 40)))
-    monkeypatch.setattr(tui_pointer, 'get_terminal_size', lambda: os.terminal_size((180 if ordinary_paint == 'resize' and reads[0] >= 3 else 160, 40)))
-    monkeypatch.setattr(tui_pane_events, 'get_terminal_size', lambda: os.terminal_size((180 if ordinary_paint == 'resize' and reads[0] >= 3 else 160, 40)))
-    monkeypatch.setattr(tui_help, 'get_terminal_size', lambda: os.terminal_size((180 if ordinary_paint == 'resize' and reads[0] >= 3 else 160, 40)))
-    monkeypatch.setattr(tui_history, 'get_terminal_size', lambda: os.terminal_size((180 if ordinary_paint == 'resize' and reads[0] >= 3 else 160, 40)))
-    monkeypatch.setattr(tui_datasets_catalog, 'get_terminal_size', lambda: os.terminal_size((180 if ordinary_paint == 'resize' and reads[0] >= 3 else 160, 40)))
-    monkeypatch.setattr(tui_datasets_chooser, 'get_terminal_size', lambda: os.terminal_size((180 if ordinary_paint == 'resize' and reads[0] >= 3 else 160, 40)))
-    monkeypatch.setattr(tui_datasets_blocking, 'get_terminal_size', lambda: os.terminal_size((180 if ordinary_paint == 'resize' and reads[0] >= 3 else 160, 40)))
-    monkeypatch.setattr(tui_datasets_modal, 'get_terminal_size', lambda: os.terminal_size((180 if ordinary_paint == 'resize' and reads[0] >= 3 else 160, 40)))
-    monkeypatch.setattr(tui_painting, 'get_terminal_size', lambda: os.terminal_size((180 if ordinary_paint == 'resize' and reads[0] >= 3 else 160, 40)))
-    monkeypatch.setattr(tui_pointer, 'get_terminal_size', lambda: os.terminal_size((180 if ordinary_paint == 'resize' and reads[0] >= 3 else 160, 40)))
-    monkeypatch.setattr(tui_help, 'get_terminal_size', lambda: os.terminal_size((180 if ordinary_paint == 'resize' and reads[0] >= 3 else 160, 40)))
-    monkeypatch.setattr(tui_history, 'get_terminal_size', lambda: os.terminal_size((180 if ordinary_paint == 'resize' and reads[0] >= 3 else 160, 40)))
-    monkeypatch.setattr(tui_datasets_catalog, 'get_terminal_size', lambda: os.terminal_size((180 if ordinary_paint == 'resize' and reads[0] >= 3 else 160, 40)))
-    monkeypatch.setattr(tui_datasets_chooser, 'get_terminal_size', lambda: os.terminal_size((180 if ordinary_paint == 'resize' and reads[0] >= 3 else 160, 40)))
-    monkeypatch.setattr(tui_datasets_blocking, 'get_terminal_size', lambda: os.terminal_size((180 if ordinary_paint == 'resize' and reads[0] >= 3 else 160, 40)))
-    monkeypatch.setattr(tui_datasets_modal, 'get_terminal_size', lambda: os.terminal_size((180 if ordinary_paint == 'resize' and reads[0] >= 3 else 160, 40)))
+    monkeypatch.setattr(tui_session, "build_query_runtime", Runtime)
+    monkeypatch.setattr(tui_session, "FramePainter", Screen)
+    monkeypatch.setattr(tui_adjustments, "FramePainter", Screen)
+    monkeypatch.setattr(tui_datasets_catalog, "FramePainter", Screen)
+    monkeypatch.setattr(tui_datasets_chooser, "FramePainter", Screen)
+    monkeypatch.setattr(tui_runtime, "tui_input_mode", nullcontext)
+    monkeypatch.setattr(tui_adjustments, "read_event", read)
+    monkeypatch.setattr(tui_input, "read_event", read)
+    monkeypatch.setattr(tui_datasets_catalog, "read_event", read)
+    monkeypatch.setattr(tui_datasets_chooser, "read_event", read)
+    monkeypatch.setattr(
+        tui_events,
+        "get_terminal_size",
+        lambda: os.terminal_size(
+            (180 if ordinary_paint == "resize" and reads[0] >= 3 else 160, 40)
+        ),
+    )
+    monkeypatch.setattr(
+        tui_runtime,
+        "get_terminal_size",
+        lambda: os.terminal_size(
+            (180 if ordinary_paint == "resize" and reads[0] >= 3 else 160, 40)
+        ),
+    )
+    monkeypatch.setattr(
+        tui_painting,
+        "get_terminal_size",
+        lambda: os.terminal_size(
+            (180 if ordinary_paint == "resize" and reads[0] >= 3 else 160, 40)
+        ),
+    )
+    monkeypatch.setattr(
+        tui_dashboard_events,
+        "get_terminal_size",
+        lambda: os.terminal_size(
+            (180 if ordinary_paint == "resize" and reads[0] >= 3 else 160, 40)
+        ),
+    )
+    monkeypatch.setattr(
+        tui_pointer,
+        "get_terminal_size",
+        lambda: os.terminal_size(
+            (180 if ordinary_paint == "resize" and reads[0] >= 3 else 160, 40)
+        ),
+    )
+    monkeypatch.setattr(
+        tui_pane_events,
+        "get_terminal_size",
+        lambda: os.terminal_size(
+            (180 if ordinary_paint == "resize" and reads[0] >= 3 else 160, 40)
+        ),
+    )
+    monkeypatch.setattr(
+        tui_help,
+        "get_terminal_size",
+        lambda: os.terminal_size(
+            (180 if ordinary_paint == "resize" and reads[0] >= 3 else 160, 40)
+        ),
+    )
+    monkeypatch.setattr(
+        tui_history,
+        "get_terminal_size",
+        lambda: os.terminal_size(
+            (180 if ordinary_paint == "resize" and reads[0] >= 3 else 160, 40)
+        ),
+    )
+    monkeypatch.setattr(
+        tui_datasets_catalog,
+        "get_terminal_size",
+        lambda: os.terminal_size(
+            (180 if ordinary_paint == "resize" and reads[0] >= 3 else 160, 40)
+        ),
+    )
+    monkeypatch.setattr(
+        tui_datasets_chooser,
+        "get_terminal_size",
+        lambda: os.terminal_size(
+            (180 if ordinary_paint == "resize" and reads[0] >= 3 else 160, 40)
+        ),
+    )
+    monkeypatch.setattr(
+        tui_datasets_blocking,
+        "get_terminal_size",
+        lambda: os.terminal_size(
+            (180 if ordinary_paint == "resize" and reads[0] >= 3 else 160, 40)
+        ),
+    )
+    monkeypatch.setattr(
+        tui_datasets_modal,
+        "get_terminal_size",
+        lambda: os.terminal_size(
+            (180 if ordinary_paint == "resize" and reads[0] >= 3 else 160, 40)
+        ),
+    )
+    monkeypatch.setattr(
+        tui_painting,
+        "get_terminal_size",
+        lambda: os.terminal_size(
+            (180 if ordinary_paint == "resize" and reads[0] >= 3 else 160, 40)
+        ),
+    )
+    monkeypatch.setattr(
+        tui_pointer,
+        "get_terminal_size",
+        lambda: os.terminal_size(
+            (180 if ordinary_paint == "resize" and reads[0] >= 3 else 160, 40)
+        ),
+    )
+    monkeypatch.setattr(
+        tui_help,
+        "get_terminal_size",
+        lambda: os.terminal_size(
+            (180 if ordinary_paint == "resize" and reads[0] >= 3 else 160, 40)
+        ),
+    )
+    monkeypatch.setattr(
+        tui_history,
+        "get_terminal_size",
+        lambda: os.terminal_size(
+            (180 if ordinary_paint == "resize" and reads[0] >= 3 else 160, 40)
+        ),
+    )
+    monkeypatch.setattr(
+        tui_datasets_catalog,
+        "get_terminal_size",
+        lambda: os.terminal_size(
+            (180 if ordinary_paint == "resize" and reads[0] >= 3 else 160, 40)
+        ),
+    )
+    monkeypatch.setattr(
+        tui_datasets_chooser,
+        "get_terminal_size",
+        lambda: os.terminal_size(
+            (180 if ordinary_paint == "resize" and reads[0] >= 3 else 160, 40)
+        ),
+    )
+    monkeypatch.setattr(
+        tui_datasets_blocking,
+        "get_terminal_size",
+        lambda: os.terminal_size(
+            (180 if ordinary_paint == "resize" and reads[0] >= 3 else 160, 40)
+        ),
+    )
+    monkeypatch.setattr(
+        tui_datasets_modal,
+        "get_terminal_size",
+        lambda: os.terminal_size(
+            (180 if ordinary_paint == "resize" and reads[0] >= 3 else 160, 40)
+        ),
+    )
     monkeypatch.setattr(tui_rendering.time, "monotonic", lambda: now[0])
-    monkeypatch.setattr(tui_rendering, '_pane_render', render)
-    monkeypatch.setattr(tui_painting, '_pane_render', render)
+    monkeypatch.setattr(tui_rendering, "_pane_render", render)
+    monkeypatch.setattr(tui_painting, "_pane_render", render)
 
     assert tui_runtime.run_tui(launch, translator) == 0
     assert len(calls[0]) >= 4

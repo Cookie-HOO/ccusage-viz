@@ -79,6 +79,7 @@ def custom_summary_response(
         )
     )
 
+
 def _accepted_metric_help_pane() -> tui_models.TuiCustomPane:
     text = LocalizedText("Dataset", "数据集")
     unit = CustomUnit("count", text, "suffix", 0)
@@ -137,6 +138,7 @@ def _accepted_metric_help_pane() -> tui_models.TuiCustomPane:
         ).process,
     )
 
+
 def _dashboard_help_frames(
     monkeypatch: pytest.MonkeyPatch, pane: tui_models.TuiCustomPane, *, language: str, width: int
 ) -> str:
@@ -175,40 +177,94 @@ def _dashboard_help_frames(
         )
     )
     events = iter((KeyEvent("m"), KeyEvent("h"), KeyEvent("\x03")))
-    monkeypatch.setattr(tui_session, 'build_query_runtime', Runtime)
-    monkeypatch.setattr(tui_pane_lifecycle, '_new_pane', lambda *_args: pane)
-    monkeypatch.setattr(tui_session, '_new_pane', lambda *_args: pane)
-    monkeypatch.setattr(tui_structure, '_new_pane', lambda *_args: pane)
-    monkeypatch.setattr(tui_history, '_new_pane', lambda *_args: pane)
-    monkeypatch.setattr(tui_session, 'FramePainter', Screen)
-    monkeypatch.setattr(tui_adjustments, 'FramePainter', Screen)
-    monkeypatch.setattr(tui_datasets_catalog, 'FramePainter', Screen)
-    monkeypatch.setattr(tui_datasets_chooser, 'FramePainter', Screen)
-    monkeypatch.setattr(tui_runtime, 'tui_input_mode', nullcontext)
-    monkeypatch.setattr(tui_adjustments, 'read_event', lambda _decoder, _timeout: next(events))
-    monkeypatch.setattr(tui_input, 'read_event', lambda _decoder, _timeout: next(events))
-    monkeypatch.setattr(tui_datasets_catalog, 'read_event', lambda _decoder, _timeout: next(events))
-    monkeypatch.setattr(tui_datasets_chooser, 'read_event', lambda _decoder, _timeout: next(events))
-    monkeypatch.setattr(tui_events, 'get_terminal_size', lambda: __import__('os').terminal_size((width, 40)))
-    monkeypatch.setattr(tui_runtime, 'get_terminal_size', lambda: __import__('os').terminal_size((width, 40)))
-    monkeypatch.setattr(tui_painting, 'get_terminal_size', lambda: __import__('os').terminal_size((width, 40)))
-    monkeypatch.setattr(tui_dashboard_events, 'get_terminal_size', lambda: __import__('os').terminal_size((width, 40)))
-    monkeypatch.setattr(tui_pointer, 'get_terminal_size', lambda: __import__('os').terminal_size((width, 40)))
-    monkeypatch.setattr(tui_pane_events, 'get_terminal_size', lambda: __import__('os').terminal_size((width, 40)))
-    monkeypatch.setattr(tui_help, 'get_terminal_size', lambda: __import__('os').terminal_size((width, 40)))
-    monkeypatch.setattr(tui_history, 'get_terminal_size', lambda: __import__('os').terminal_size((width, 40)))
-    monkeypatch.setattr(tui_datasets_catalog, 'get_terminal_size', lambda: __import__('os').terminal_size((width, 40)))
-    monkeypatch.setattr(tui_datasets_chooser, 'get_terminal_size', lambda: __import__('os').terminal_size((width, 40)))
-    monkeypatch.setattr(tui_datasets_blocking, 'get_terminal_size', lambda: __import__('os').terminal_size((width, 40)))
-    monkeypatch.setattr(tui_datasets_modal, 'get_terminal_size', lambda: __import__('os').terminal_size((width, 40)))
-    monkeypatch.setattr(tui_painting, 'get_terminal_size', lambda: __import__('os').terminal_size((width, 40)))
-    monkeypatch.setattr(tui_pointer, 'get_terminal_size', lambda: __import__('os').terminal_size((width, 40)))
-    monkeypatch.setattr(tui_help, 'get_terminal_size', lambda: __import__('os').terminal_size((width, 40)))
-    monkeypatch.setattr(tui_history, 'get_terminal_size', lambda: __import__('os').terminal_size((width, 40)))
-    monkeypatch.setattr(tui_datasets_catalog, 'get_terminal_size', lambda: __import__('os').terminal_size((width, 40)))
-    monkeypatch.setattr(tui_datasets_chooser, 'get_terminal_size', lambda: __import__('os').terminal_size((width, 40)))
-    monkeypatch.setattr(tui_datasets_blocking, 'get_terminal_size', lambda: __import__('os').terminal_size((width, 40)))
-    monkeypatch.setattr(tui_datasets_modal, 'get_terminal_size', lambda: __import__('os').terminal_size((width, 40)))
+    monkeypatch.setattr(tui_session, "build_query_runtime", Runtime)
+    monkeypatch.setattr(tui_pane_lifecycle, "_new_pane", lambda *_args: pane)
+    monkeypatch.setattr(tui_session, "_new_pane", lambda *_args: pane)
+    monkeypatch.setattr(tui_structure, "_new_pane", lambda *_args: pane)
+    monkeypatch.setattr(tui_history, "_new_pane", lambda *_args: pane)
+    monkeypatch.setattr(tui_session, "FramePainter", Screen)
+    monkeypatch.setattr(tui_adjustments, "FramePainter", Screen)
+    monkeypatch.setattr(tui_datasets_catalog, "FramePainter", Screen)
+    monkeypatch.setattr(tui_datasets_chooser, "FramePainter", Screen)
+    monkeypatch.setattr(tui_runtime, "tui_input_mode", nullcontext)
+    monkeypatch.setattr(tui_adjustments, "read_event", lambda _decoder, _timeout: next(events))
+    monkeypatch.setattr(tui_input, "read_event", lambda _decoder, _timeout: next(events))
+    monkeypatch.setattr(tui_datasets_catalog, "read_event", lambda _decoder, _timeout: next(events))
+    monkeypatch.setattr(tui_datasets_chooser, "read_event", lambda _decoder, _timeout: next(events))
+    monkeypatch.setattr(
+        tui_events, "get_terminal_size", lambda: __import__("os").terminal_size((width, 40))
+    )
+    monkeypatch.setattr(
+        tui_runtime, "get_terminal_size", lambda: __import__("os").terminal_size((width, 40))
+    )
+    monkeypatch.setattr(
+        tui_painting, "get_terminal_size", lambda: __import__("os").terminal_size((width, 40))
+    )
+    monkeypatch.setattr(
+        tui_dashboard_events,
+        "get_terminal_size",
+        lambda: __import__("os").terminal_size((width, 40)),
+    )
+    monkeypatch.setattr(
+        tui_pointer, "get_terminal_size", lambda: __import__("os").terminal_size((width, 40))
+    )
+    monkeypatch.setattr(
+        tui_pane_events, "get_terminal_size", lambda: __import__("os").terminal_size((width, 40))
+    )
+    monkeypatch.setattr(
+        tui_help, "get_terminal_size", lambda: __import__("os").terminal_size((width, 40))
+    )
+    monkeypatch.setattr(
+        tui_history, "get_terminal_size", lambda: __import__("os").terminal_size((width, 40))
+    )
+    monkeypatch.setattr(
+        tui_datasets_catalog,
+        "get_terminal_size",
+        lambda: __import__("os").terminal_size((width, 40)),
+    )
+    monkeypatch.setattr(
+        tui_datasets_chooser,
+        "get_terminal_size",
+        lambda: __import__("os").terminal_size((width, 40)),
+    )
+    monkeypatch.setattr(
+        tui_datasets_blocking,
+        "get_terminal_size",
+        lambda: __import__("os").terminal_size((width, 40)),
+    )
+    monkeypatch.setattr(
+        tui_datasets_modal, "get_terminal_size", lambda: __import__("os").terminal_size((width, 40))
+    )
+    monkeypatch.setattr(
+        tui_painting, "get_terminal_size", lambda: __import__("os").terminal_size((width, 40))
+    )
+    monkeypatch.setattr(
+        tui_pointer, "get_terminal_size", lambda: __import__("os").terminal_size((width, 40))
+    )
+    monkeypatch.setattr(
+        tui_help, "get_terminal_size", lambda: __import__("os").terminal_size((width, 40))
+    )
+    monkeypatch.setattr(
+        tui_history, "get_terminal_size", lambda: __import__("os").terminal_size((width, 40))
+    )
+    monkeypatch.setattr(
+        tui_datasets_catalog,
+        "get_terminal_size",
+        lambda: __import__("os").terminal_size((width, 40)),
+    )
+    monkeypatch.setattr(
+        tui_datasets_chooser,
+        "get_terminal_size",
+        lambda: __import__("os").terminal_size((width, 40)),
+    )
+    monkeypatch.setattr(
+        tui_datasets_blocking,
+        "get_terminal_size",
+        lambda: __import__("os").terminal_size((width, 40)),
+    )
+    monkeypatch.setattr(
+        tui_datasets_modal, "get_terminal_size", lambda: __import__("os").terminal_size((width, 40))
+    )
 
     translator = load_translator(language)
     assert tui_runtime.run_tui(options, translator) == 0
@@ -219,6 +275,7 @@ def _dashboard_help_frames(
     ]
     assert overlays
     return overlays[-1]
+
 
 def _custom_monitor_component(*, grouped: bool = True, total: str = "90") -> CustomMonitorComponent:
     chart = CustomChartConfig(

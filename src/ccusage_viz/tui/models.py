@@ -54,11 +54,13 @@ class HistoricalOutcome:
     completion: HistoricalCompletion | None = None
     error: BaseException | None = None
 
+
 @dataclass(frozen=True, slots=True)
 class MonitorOutcome:
     generation: int
     completion: MonitorCompletion | None = None
     error: BaseException | None = None
+
 
 @dataclass(frozen=True, slots=True)
 class MonitorWarmupOutcome:
@@ -66,7 +68,9 @@ class MonitorWarmupOutcome:
     completions: tuple[MonitorCompletion, ...] = ()
     error: BaseException | None = None
 
+
 PaneFuture = Future[HistoricalOutcome] | Future[MonitorOutcome] | Future[MonitorWarmupOutcome]
+
 
 @dataclass(frozen=True, slots=True)
 class BuiltinSummaryOutcome:
@@ -76,9 +80,11 @@ class BuiltinSummaryOutcome:
     result: ProviderResult | None = None
     error: BaseException | None = None
 
+
 @dataclass(slots=True)
 class TuiEmptyPane:
     pane_id: int = -1
+
 
 @dataclass(frozen=True, slots=True)
 class CustomOutcome:
@@ -88,11 +94,13 @@ class CustomOutcome:
     purpose: Literal["probe", "primary", "comparison"] = "primary"
     comparison_request_config: CustomChartConfig | None = None
 
+
 @dataclass(frozen=True, slots=True)
 class CustomLogRecord:
     timestamp: datetime
     status: str
     detail: str
+
 
 @dataclass(slots=True)
 class RankingSearchState:
@@ -101,6 +109,7 @@ class RankingSearchState:
     query: str = ""
     editing: bool = False
     density_notice: str | None = None
+
 
 @dataclass(slots=True)
 class TuiCustomPane:
@@ -143,6 +152,7 @@ class TuiCustomPane:
     def interval(self) -> float:
         return self.scheduler.interval
 
+
 @dataclass(slots=True)
 class TuiChartPane:
     component: HistoricalChartComponent | MonitorComponent
@@ -175,6 +185,7 @@ class TuiChartPane:
     def interval(self) -> float:
         return _pane_options(self).host.interval
 
+
 @dataclass(slots=True)
 class TuiAnimationPane:
     """A render-only dashboard pane; it owns no provider or lifecycle runtime."""
@@ -188,7 +199,9 @@ class TuiAnimationPane:
     text_line_counts: dict[BodyView, int] = field(default_factory=dict)
     text_visible_rows: dict[BodyView, int] = field(default_factory=dict)
 
+
 TuiPane = TuiChartPane | TuiAnimationPane | TuiCustomPane | TuiEmptyPane
+
 
 @dataclass(slots=True)
 class HelpOverlayState:
@@ -202,6 +215,7 @@ class HelpOverlayState:
     dataset_id: str | None = None
     chart_kind: str | None = None
     scroll_offset: int = 0
+
 
 @dataclass(slots=True)
 class OverlayEditorState:
@@ -243,12 +257,14 @@ class OverlayEditorState:
         else:
             self.text_draft = value
 
+
 @dataclass(slots=True)
 class OverlayHistoryState:
     """Command-history table displayed within one Dashboard animation pane."""
 
     pane_index: int
     table: OverlayHistoryTableState = field(default_factory=OverlayHistoryTableState)
+
 
 @dataclass(slots=True)
 class DashboardDatasetModalState:
@@ -277,11 +293,13 @@ class DashboardDatasetModalState:
     metric_periods: tuple[str, ...] = ()
     metric_titles: tuple[str, str] | None = None
 
+
 def _custom_metric_periods(metric: V2MetricDescriptor, kind: str) -> tuple[str, ...]:
     """Return the periods declared for one Metric's selected historical chart."""
 
     capability = metric.capabilities.charts.get(kind)
     return capability.periods if isinstance(capability, V2HistoricalChartCapability) else ()
+
 
 @dataclass(frozen=True, slots=True)
 class MetricChooserRow:
@@ -291,11 +309,14 @@ class MetricChooserRow:
     text: str
     metric_index: int | None = None
 
+
 _DOUBLE_CLICK_SECONDS = 0.35
+
 
 def _pane_options(pane: TuiChartPane) -> StandaloneLaunch:
     component = pane.component
     return component.accepted_options or component.candidate
+
 
 def _pane_display_options(pane: TuiChartPane) -> StandaloneLaunch:
     component = pane.component
@@ -308,16 +329,19 @@ def _pane_display_options(pane: TuiChartPane) -> StandaloneLaunch:
         return component.candidate
     return _pane_options(pane)
 
+
 def _chart_pane_config(pane: TuiChartPane) -> ChartPaneConfig:
     chart = _pane_options(pane).chart
     assert not isinstance(chart, CustomChartConfig)
     return ChartPaneConfig(chart)
+
 
 def _custom_pane_options(dashboard: DashboardLaunch, pane: TuiCustomPane) -> StandaloneLaunch:
     from ccusage_viz.configuration import standalone_from_chart_pane
 
     chart = pane.component.accepted_config or pane.component.candidate
     return standalone_from_chart_pane(dashboard, CustomChartPaneConfig(chart))
+
 
 @dataclass(slots=True)
 class CustomDashboardSummary:
@@ -357,6 +381,7 @@ class CustomDashboardSummary:
         self.requested_period = None
         self.requested_as_of_date = None
 
+
 @dataclass(frozen=True, slots=True)
 class CustomDashboardSource:
     """A Dataset source selected once per Header summary."""
@@ -364,6 +389,7 @@ class CustomDashboardSource:
     source: CustomCommandSource
     config: CustomChartConfig | None = field(default=None, compare=False)
     summary_mode: str = "comparisons"
+
 
 @dataclass(slots=True)
 class DashboardHeader:
@@ -381,6 +407,7 @@ class DashboardHeader:
     token_enabled: bool = True
     custom_summaries: dict[str, CustomDashboardSummary] = field(default_factory=dict)
 
+
 @dataclass(frozen=True, slots=True)
 class PaneLayout:
     """The exact cell geometry shared by rendering and pointer hit testing."""
@@ -397,6 +424,7 @@ class PaneLayout:
     def height(self) -> int:
         return sum(self.heights) + self.gutter * (len(self.heights) - 1)
 
+
 @dataclass(frozen=True, slots=True)
 class PaneRender:
     chart: str
@@ -404,10 +432,12 @@ class PaneRender:
     overlay_placements: tuple[OverlayPlacement, ...] = ()
     error_body: bool = False
 
+
 @dataclass(frozen=True, slots=True)
 class DashboardOverlayPlacement:
     source_index: int
     placement: OverlayPlacement
+
 
 @dataclass(slots=True)
 class CustomPaneDraft:

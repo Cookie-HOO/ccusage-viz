@@ -18,6 +18,7 @@ from ccusage_viz.presets.values import DashboardPresetValidationError
 
 DatasetSourceResolver: TypeAlias = Callable[[str], CustomCommandSource]
 
+
 def materialize_preset(
     record: DashboardPresetRecord,
     source_resolver: DatasetSourceResolver,
@@ -55,6 +56,7 @@ def materialize_preset(
         else:
             panes.append(pane)
     return DashboardLaunch(record.process, record.host, tuple(panes))  # type: ignore[arg-type]
+
 
 def empty_preset_launch(launch: DashboardLaunch) -> DashboardLaunch:
     """Keep a resolved preset's topology/settings while replacing all pane content."""

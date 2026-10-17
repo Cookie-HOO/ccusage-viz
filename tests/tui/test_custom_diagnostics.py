@@ -32,6 +32,7 @@ def test_custom_failure_log_detail_uses_only_validated_protocol_fields() -> None
         == "source_unavailable: 安全的数据源分类 (range.period=1w)"
     )
 
+
 def test_custom_failure_log_detail_hides_unstructured_exception_text() -> None:
     assert (
         tui_custom_rendering._custom_failure_log_detail(
@@ -39,6 +40,7 @@ def test_custom_failure_log_detail_hides_unstructured_exception_text() -> None:
         )
         == "error"
     )
+
 
 def test_custom_log_records_render_localized_statuses() -> None:
     dashboard = _to_options(

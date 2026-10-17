@@ -1,8 +1,3 @@
-
-
-
-
-
 from datetime import date, timedelta
 
 import plotext as plt
@@ -62,6 +57,7 @@ def test_timeline_surfaces_have_independent_axis_and_control_budgets() -> None:
     assert standalone.height == 15
     assert dashboard.height == 18
 
+
 def test_timeline_area_requires_one_visible_series() -> None:
     model = TimelineModel(
         (date(2026, 1, 1),),
@@ -74,12 +70,14 @@ def test_timeline_area_requires_one_visible_series() -> None:
         render_timeline(model, RenderContext(80, 24, load_translator("en"), style="area"))
     assert caught.value.key == "error.timeline_area_series"
 
+
 def test_timeline_no_color_has_no_ansi_sequences() -> None:
     model = TimelineModel(
         (date(2026, 1, 1),),
         (Series("total", "Total", (usage(1_000),)),),
     )
     assert "\x1b[" not in render_timeline(model, context(True))
+
 
 def test_timeline_hides_only_the_sole_canonical_total_legend() -> None:
     day = (date(2026, 1, 1),)
@@ -95,6 +93,7 @@ def test_timeline_hides_only_the_sole_canonical_total_legend() -> None:
     assert "Total" not in total.splitlines()[0]
     assert "claude" in named
 
+
 def test_timeline_displays_an_explicit_legend_for_multiple_series() -> None:
     model = TimelineModel(
         (date(2026, 1, 1),),
@@ -109,6 +108,7 @@ def test_timeline_displays_an_explicit_legend_for_multiple_series() -> None:
 
     assert ". terra · o sol · # Other" in output
 
+
 def test_timeline_project_legend_uses_recognizable_safe_labels() -> None:
     model = TimelineModel(
         (date(2026, 1, 1),),
@@ -122,6 +122,7 @@ def test_timeline_project_legend_uses_recognizable_safe_labels() -> None:
 
     assert ". my-app · o api" in output
     assert "Project-" not in output
+
 
 @pytest.mark.parametrize("position", ("inside", "hidden"))
 def test_timeline_nondefault_legend_position_hides_external_legend(position: str) -> None:
@@ -139,6 +140,7 @@ def test_timeline_nondefault_legend_position_hides_external_legend(position: str
 
     assert ". terra · o sol" not in output
 
+
 def test_colored_plot_inherits_terminal_background() -> None:
     model = TimelineModel(
         (date(2026, 1, 1), date(2026, 1, 2)),
@@ -148,6 +150,7 @@ def test_colored_plot_inherits_terminal_background() -> None:
     assert "\x1b[" in output
     assert "\x1b[48;" not in output
 
+
 def test_wide_timeline_ticks_include_localized_weekdays() -> None:
     model = TimelineModel(
         (date(2026, 1, 1), date(2026, 1, 2)),
@@ -156,6 +159,7 @@ def test_wide_timeline_ticks_include_localized_weekdays() -> None:
     output = render_timeline(model, RenderContext(100, 24, load_translator("en"), color=False))
     assert "Th 01-01" in output
     assert "Fr 01-02" in output
+
 
 def test_timeline_budgets_each_wrapped_summary_row(monkeypatch: pytest.MonkeyPatch) -> None:
     summary = PeriodSummary(
@@ -188,6 +192,7 @@ def test_timeline_budgets_each_wrapped_summary_row(monkeypatch: pytest.MonkeyPat
     assert len(output.splitlines()) == context.height
     assert "01-01" in output.splitlines()[-1]
     assert "01-02" in output.splitlines()[-1]
+
 
 def test_timeline_ignores_plotext_ambient_terminal_height_limit() -> None:
     days = tuple(date(2026, 9, 20) + timedelta(days=index) for index in range(14))
@@ -227,6 +232,7 @@ def test_timeline_ignores_plotext_ambient_terminal_height_limit() -> None:
     assert len(output.splitlines()) == context.height
     assert days[0].strftime("%m-%d") in output.splitlines()[-1]
     assert days[-2].strftime("%m-%d") in output.splitlines()[-1]
+
 
 def test_plotext_state_is_cleared_after_render_scope() -> None:
     original_limits = tuple(plt.terminal._limit)

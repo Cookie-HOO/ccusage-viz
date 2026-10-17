@@ -27,9 +27,7 @@ def _replace_heading(rendered: str, heading: str) -> str:
     return "\n".join((heading, *rest))
 
 
-def render_custom_monitor_heading(
-    component: CustomMonitorComponent, context: RenderContext
-) -> str:
+def render_custom_monitor_heading(component: CustomMonitorComponent, context: RenderContext) -> str:
     """Render the canonical, width-safe heading for any Custom Monitor state."""
 
     config = component.accepted_config or component.candidate

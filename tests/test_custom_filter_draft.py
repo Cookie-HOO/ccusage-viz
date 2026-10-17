@@ -109,7 +109,9 @@ def test_custom_filter_tabs_wrap_without_splitting_and_share_mouse_geometry() ->
 
 
 def test_custom_filter_tab_layout_uses_localized_display_width() -> None:
-    layout = _tab_layout(WRAPPED_CHOICES, load_translator("zh"), active_index=0, accepted=(), width=12)
+    layout = _tab_layout(
+        WRAPPED_CHOICES, load_translator("zh"), active_index=0, accepted=(), width=12
+    )
 
     assert [(tab.x_start, tab.x_end, tab.y) for tab in layout] == [
         (1, 11, 1),
@@ -122,8 +124,13 @@ def test_custom_filter_option_click_accounts_for_wrapped_tab_rows() -> None:
     events = iter((MouseEvent(0, 2, 5, True, 0), KeyEvent("\r")))
 
     result = run_custom_filter_editor(
-        (), WRAPPED_CHOICES, load_translator("en"), width=18, height=10,
-        paint=lambda _body, _controls: None, read_key=lambda: next(events),
+        (),
+        WRAPPED_CHOICES,
+        load_translator("en"),
+        width=18,
+        height=10,
+        paint=lambda _body, _controls: None,
+        read_key=lambda: next(events),
     )
 
     assert result == (("category", ("fiction",)),)
@@ -211,12 +218,20 @@ def test_custom_filter_editor_switches_tabs_with_horizontal_arrows() -> None:
     non_arrow_events = iter(("l", " ", "\r"))
 
     arrow_result = run_custom_filter_editor(
-        (), CHOICES, load_translator("en"), width=80,
-        paint=lambda _body, _controls: None, read_key=lambda: next(arrow_events),
+        (),
+        CHOICES,
+        load_translator("en"),
+        width=80,
+        paint=lambda _body, _controls: None,
+        read_key=lambda: next(arrow_events),
     )
     non_arrow_result = run_custom_filter_editor(
-        (), CHOICES, load_translator("en"), width=80,
-        paint=lambda _body, _controls: None, read_key=lambda: next(non_arrow_events),
+        (),
+        CHOICES,
+        load_translator("en"),
+        width=80,
+        paint=lambda _body, _controls: None,
+        read_key=lambda: next(non_arrow_events),
     )
 
     assert arrow_result == (("source", ("app",)),)
@@ -227,8 +242,13 @@ def test_custom_filter_editor_tab_switches_to_next_filter_dimension() -> None:
     events = iter((KeyEvent("\t"), KeyEvent(" "), KeyEvent("\r")))
 
     result = run_custom_filter_editor(
-        (), CHOICES, load_translator("en"), width=80, height=12,
-        paint=lambda _body, _controls: None, read_key=lambda: next(events),
+        (),
+        CHOICES,
+        load_translator("en"),
+        width=80,
+        height=12,
+        paint=lambda _body, _controls: None,
+        read_key=lambda: next(events),
     )
 
     assert result == (("source", ("app",)),)
@@ -246,14 +266,31 @@ def test_custom_filter_help_ignores_inputs_and_preserves_the_complete_draft() ->
     frames: list[tuple[str, str]] = []
     events = iter(
         (
-            "\x1b[C", "C", "j", "j", "j", " ", "/", PasteEvent("option"), "\r", "h",
-            KeyEvent(" "), MouseEvent(0, 2, 3, True, 0), PasteEvent("c"), PasteEvent("\x03"),
-            "h", "\r",
+            "\x1b[C",
+            "C",
+            "j",
+            "j",
+            "j",
+            " ",
+            "/",
+            PasteEvent("option"),
+            "\r",
+            "h",
+            KeyEvent(" "),
+            MouseEvent(0, 2, 3, True, 0),
+            PasteEvent("c"),
+            PasteEvent("\x03"),
+            "h",
+            "\r",
         )
     )
 
     result = run_custom_filter_editor(
-        (), (CHOICES[0], choice), load_translator("en"), width=48, height=6,
+        (),
+        (CHOICES[0], choice),
+        load_translator("en"),
+        width=48,
+        height=6,
         paint=lambda body, controls: frames.append((body, controls)),
         read_key=lambda: next(events),
     )
@@ -278,8 +315,12 @@ def test_custom_filter_help_ignores_inputs_and_preserves_the_complete_draft() ->
 def test_custom_filter_editor_pasted_ctrl_c_raises_keyboard_interrupt() -> None:
     with pytest.raises(KeyboardInterrupt):
         run_custom_filter_editor(
-            (), CHOICES, load_translator("en"), width=80,
-            paint=lambda _body, _controls: None, read_key=lambda: PasteEvent("\x03"),
+            (),
+            CHOICES,
+            load_translator("en"),
+            width=80,
+            paint=lambda _body, _controls: None,
+            read_key=lambda: PasteEvent("\x03"),
         )
 
 
@@ -287,8 +328,12 @@ def test_custom_filter_help_ignores_pasted_ctrl_c() -> None:
     events = iter(("h", PasteEvent("\x03"), "h", "\r"))
 
     result = run_custom_filter_editor(
-        (), CHOICES, load_translator("en"), width=80,
-        paint=lambda _body, _controls: None, read_key=lambda: next(events),
+        (),
+        CHOICES,
+        load_translator("en"),
+        width=80,
+        paint=lambda _body, _controls: None,
+        read_key=lambda: next(events),
     )
 
     assert result == ()
@@ -299,8 +344,12 @@ def test_custom_filter_editor_search_h_does_not_open_help() -> None:
     events = iter(("/", "h", "\r", "\r"))
 
     result = run_custom_filter_editor(
-        (), CHOICES, load_translator("en"), width=80,
-        paint=lambda body, _controls: frames.append(body), read_key=lambda: next(events),
+        (),
+        CHOICES,
+        load_translator("en"),
+        width=80,
+        paint=lambda body, _controls: frames.append(body),
+        read_key=lambda: next(events),
     )
 
     assert result == ()
@@ -313,8 +362,12 @@ def test_custom_filter_help_escape_returns_before_editor_escape_cancels() -> Non
     events = iter(("h", "\x1b", "\x1b"))
 
     result = run_custom_filter_editor(
-        (), CHOICES, load_translator("en"), width=80,
-        paint=lambda body, _controls: frames.append(body), read_key=lambda: next(events),
+        (),
+        CHOICES,
+        load_translator("en"),
+        width=80,
+        paint=lambda body, _controls: frames.append(body),
+        read_key=lambda: next(events),
     )
 
     assert result is None

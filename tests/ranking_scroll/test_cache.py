@@ -69,6 +69,7 @@ def test_viewport_search_preserves_full_facts_and_anchor_after_refresh() -> None
     assert viewport.full_maximum == Decimal(60)
     assert viewport.offset == viewport.starts[0]
 
+
 def test_refresh_restores_top_visible_entry_by_stable_id() -> None:
     model = projection(30)
     viewport = RankingViewport()
@@ -85,6 +86,7 @@ def test_refresh_restores_top_visible_entry_by_stable_id() -> None:
         index for index, entry in enumerate(viewport.entries) if str(entry.key) == anchor_id
     )
     assert viewport.offset == viewport.starts[refreshed_index]
+
 
 def test_refresh_missing_anchor_falls_back_to_nearest_surviving_row_start() -> None:
     model = projection(30)
@@ -107,6 +109,7 @@ def test_refresh_missing_anchor_falls_back_to_nearest_surviving_row_start() -> N
     )
     assert viewport.offset == viewport.starts[nearest_index]
 
+
 def test_geometry_change_restores_stable_anchor_at_new_row_start() -> None:
     model = projection(30, descriptions=True)
     viewport = RankingViewport()
@@ -123,6 +126,7 @@ def test_geometry_change_restores_stable_anchor_at_new_row_start() -> None:
     )
     assert viewport.offset == viewport.starts[new_index]
 
+
 def test_refresh_shrink_resize_top_and_source_reset():
     model = projection(100)
     viewport = RankingViewport()
@@ -137,6 +141,7 @@ def test_refresh_shrink_resize_top_and_source_reset():
     )
     render(changed, viewport)
     assert viewport.offset == 0
+
 
 def test_geometry_cache_restores_copied_columns_and_evicts_lru() -> None:
     viewport = RankingViewport()
@@ -172,6 +177,7 @@ def test_geometry_cache_restores_copied_columns_and_evicts_lru() -> None:
     assert not viewport.restore_geometry("c")
     assert viewport.restore_geometry("d")
 
+
 def test_two_warm_widths_skip_all_geometry_work(monkeypatch: pytest.MonkeyPatch) -> None:
     import ccusage_viz.render.custom_ranking_viewport as module
 
@@ -195,6 +201,7 @@ def test_two_warm_widths_skip_all_geometry_work(monkeypatch: pytest.MonkeyPatch)
     # With scrollbar gutters these exercise effective geometry widths 99 and 97.
     render(model, viewport, wide, spacing="line", scrollbar=True)
     render(model, viewport, narrow, spacing="line", scrollbar=True)
+
 
 def test_cached_geometry_clamps_with_new_visible_rows(
     monkeypatch: pytest.MonkeyPatch,
@@ -230,6 +237,7 @@ def test_cached_geometry_clamps_with_new_visible_rows(
     assert viewport.visible_rows < tall.height - 2
     assert viewport.offset == min(original, viewport.total_rows - viewport.visible_rows)
 
+
 def test_cached_geometry_matches_first_render_at_each_width() -> None:
     viewport = RankingViewport()
     model = projection(100, descriptions=True, comparison=True)
@@ -257,6 +265,7 @@ def test_cached_geometry_matches_first_render_at_each_width() -> None:
     assert expected_wide[-1] > 0
     assert capture(wide) == expected_wide
     assert capture(narrow) == expected_narrow
+
 
 @pytest.mark.parametrize("change", ("series", "search", "language", "unit"))
 def test_stable_data_changes_invalidate_all_geometry_snapshots(
@@ -317,6 +326,7 @@ def test_stable_data_changes_invalidate_all_geometry_snapshots(
     )
     assert calls == 2
 
+
 def test_warm_large_ranking_only_formats_visible_entries(monkeypatch):
     import ccusage_viz.render.custom_ranking_preparation as preparation
     import ccusage_viz.render.ranking_historical as presentation
@@ -348,6 +358,7 @@ def test_warm_large_ranking_only_formats_visible_entries(monkeypatch):
     assert len(output.splitlines()) == ctx.height
     assert len(viewport.hits) <= viewport.visible_rows
 
+
 def test_density_rebuild_preserves_window_body_scrollbar_and_hits():
     model = projection(30, descriptions=True, comparison=True)
     viewport = RankingViewport()
@@ -373,6 +384,7 @@ def test_density_rebuild_preserves_window_body_scrollbar_and_hits():
         assert strip_ansi(actual[row])[copy_column] == "⊞"
         assert link_column is not None and strip_ansi(actual[row])[link_column] == "→"
 
+
 def test_style_and_theme_changes_reuse_data_and_rebuild_style_geometry() -> None:
     model = projection(100)
     viewport = RankingViewport()
@@ -395,6 +407,7 @@ def test_style_and_theme_changes_reuse_data_and_rebuild_style_geometry() -> None
     render(model, viewport, replace(styled, color=True, color_scheme="dracula"))
     assert viewport.entries is entries
     assert viewport.starts is list_starts
+
 
 def test_scrollbar_gutter_reuses_warm_layout_and_does_not_overlap_hits(monkeypatch):
     viewport = RankingViewport()

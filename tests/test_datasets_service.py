@@ -83,7 +83,16 @@ def v2_probe(dataset_id: str = "router") -> V2ProbeResponse:
                 CustomUnit("token", text, "suffix", 0),
                 "sum",
                 V2MetricCapabilities((), (), {"monitor": V2MonitorCapability(60, 10, (), ())}),
-                {"monitor": CustomChartDefaults(None, None, None, style="ranking", window_seconds=21600, declared=frozenset({"style", "window"}))},
+                {
+                    "monitor": CustomChartDefaults(
+                        None,
+                        None,
+                        None,
+                        style="ranking",
+                        window_seconds=21600,
+                        declared=frozenset({"style", "window"}),
+                    )
+                },
             ),
             V2MetricDescriptor(
                 "completed_requests",
@@ -92,7 +101,16 @@ def v2_probe(dataset_id: str = "router") -> V2ProbeResponse:
                 CustomUnit("request", text, "suffix", 0),
                 "sum",
                 V2MetricCapabilities((), (), {"monitor": V2MonitorCapability(60, 10, (), ())}),
-                {"monitor": CustomChartDefaults(None, None, None, style="ranking", window_seconds=21600, declared=frozenset({"style", "window"}))},
+                {
+                    "monitor": CustomChartDefaults(
+                        None,
+                        None,
+                        None,
+                        style="ranking",
+                        window_seconds=21600,
+                        declared=frozenset({"style", "window"}),
+                    )
+                },
             ),
         ),
         (),
@@ -174,7 +192,9 @@ def test_local_registration_can_be_disabled_reenabled_and_removed_without_target
 ) -> None:
     target = tmp_path / "reader"
     target.write_text("#!/bin/sh\n")
-    service = DatasetService(root=tmp_path / "state", environ={}, probe_runner=lambda _argv: probe())
+    service = DatasetService(
+        root=tmp_path / "state", environ={}, probe_runner=lambda _argv: probe()
+    )
     service.register_local_command((str(target), "ccuv"))
 
     service.set_enabled("weread", False)
@@ -265,7 +285,9 @@ def _archive() -> bytes:
                 "capabilities": {
                     "group_by": [],
                     "filters": [],
-                    "charts": {"timeline": {"granularities": ["day"], "group_by": [], "filters": []}},
+                    "charts": {
+                        "timeline": {"granularities": ["day"], "group_by": [], "filters": []}
+                    },
                 },
                 "defaults": {"timeline": {"period": "14d", "group_by": None, "top": None}},
                 "environment": [],
@@ -312,7 +334,13 @@ def test_inspect_artifact_validates_full_descriptor_without_installing(tmp_path:
                         "capabilities": {
                             "group_by": [],
                             "filters": [],
-                            "charts": {"timeline": {"granularities": ["day"], "group_by": [], "filters": []}},
+                            "charts": {
+                                "timeline": {
+                                    "granularities": ["day"],
+                                    "group_by": [],
+                                    "filters": [],
+                                }
+                            },
                         },
                         "defaults": {"timeline": {"period": "14d", "group_by": None, "top": None}},
                         "environment": [],

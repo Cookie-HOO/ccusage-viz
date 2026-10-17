@@ -37,6 +37,7 @@ RANGE = DateRange(date(2026, 9, 1), date(2026, 9, 2))
 
 UNIT = CustomUnit("page", LocalizedText("pages", "页"), "suffix", 2)
 
+
 def config(**changes: object) -> CustomChartConfig:
     values: dict[str, object] = {
         "kind": "timeline",
@@ -48,6 +49,7 @@ def config(**changes: object) -> CustomChartConfig:
     }
     values.update(changes)
     return CustomChartConfig(**values)  # type: ignore[arg-type]
+
 
 def response(
     values: tuple[tuple[str, str], ...] = (("a", "10"), ("b", "5"), ("c", "2")),
@@ -91,6 +93,7 @@ def response(
         CustomPaneSummary(metric),
     )
 
+
 def _grouped_response(
     groups: tuple[tuple[str, tuple[tuple[str, str], ...]], ...],
     *,
@@ -129,6 +132,7 @@ def _grouped_response(
             )
         ),
     )
+
 
 def v2_chart_response(metric_id: str, *, periods: tuple[str, ...] = ()) -> V2ChartResponse:
     text = LocalizedText("Reading", "阅读")

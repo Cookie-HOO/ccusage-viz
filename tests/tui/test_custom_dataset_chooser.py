@@ -60,7 +60,9 @@ def test_dataset_metric_chooser_groups_declared_metrics_and_keeps_ungrouped_flat
         ("description", "  └─ Dataset", None),
     ]
 
-    chinese_rows = tui_datasets_chooser._dataset_metric_chooser_rows(descriptor, load_translator("zh"))
+    chinese_rows = tui_datasets_chooser._dataset_metric_chooser_rows(
+        descriptor, load_translator("zh")
+    )
     assert [(row.text, row.metric_index) for row in chinese_rows] == [
         ("GitHub 工具", None),
         ("├─ stars-zh", 0),
@@ -70,6 +72,7 @@ def test_dataset_metric_chooser_groups_declared_metrics_and_keeps_ungrouped_flat
         ("legacy-zh", 2),
         ("  └─ 数据集", None),
     ]
+
 
 def test_dataset_metric_chooser_keeps_legacy_descriptor_flat() -> None:
     text = LocalizedText("Dataset", "数据集")
@@ -94,6 +97,7 @@ def test_dataset_metric_chooser_keeps_legacy_descriptor_flat() -> None:
         ("description", "  └─ Dataset", None),
     ]
 
+
 def test_dataset_metric_chooser_titles_the_selected_dataset() -> None:
     text = LocalizedText("Large Model Routing", "大模型路由")
     metric = V2MetricDescriptor(
@@ -111,8 +115,10 @@ def test_dataset_metric_chooser_titles_the_selected_dataset() -> None:
 
     assert chrome == ("数据集：大模型路由 · 0.1.0", "选择一个指标")
 
+
 def test_dataset_source_chooser_uses_the_non_parameterized_title() -> None:
     assert load_translator("zh").text("status.dataset_chooser_title") == "数据集"
+
 
 def test_custom_pane_chooser_builds_a_source_config_and_rejects_invalid_drafts() -> None:
     class Screen:

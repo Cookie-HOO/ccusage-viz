@@ -50,6 +50,7 @@ def test_custom_partition_selection_validation_rejects_invalid_combinations() ->
     with pytest.raises(ValueError, match="supported"):
         validate_custom_partition_selection("missing", "real_model", capability)
 
+
 def test_custom_chart_config_appends_partition_without_breaking_positional_fields() -> None:
     source = CustomCommandSource("weread", ("reader", "ccuv"))
     chart = CustomChartConfig(
@@ -75,6 +76,7 @@ def test_custom_chart_config_appends_partition_without_breaking_positional_field
     assert chart.group_by == "real_model"
     assert chart.partition_by == "logical_model"
 
+
 def test_custom_source_requires_dataset_and_nonempty_argv() -> None:
     source = CustomCommandSource("weread", ("reader", "ccuv"))
     assert source.dataset_id == "weread"
@@ -85,6 +87,7 @@ def test_custom_source_requires_dataset_and_nonempty_argv() -> None:
         CustomCommandSource("weread", ())
     with pytest.raises(ValueError, match="source_kind"):
         CustomCommandSource("weread", ("reader",), source_kind="other")  # type: ignore[arg-type]
+
 
 def test_custom_probe_defaults_apply_to_an_unconfigured_ranking_chart() -> None:
     source = CustomCommandSource("weread", ("reader", "ccuv"))
@@ -101,6 +104,7 @@ def test_custom_probe_defaults_apply_to_an_unconfigured_ranking_chart() -> None:
     assert resolved.date_range.until == local_today(timezone="UTC")
     assert resolved.group_by == "book"
     assert resolved.top == 10
+
 
 def test_custom_probe_partition_default_does_not_overwrite_explicit_grouping() -> None:
     text = LocalizedText("Router", "路由")
@@ -136,6 +140,7 @@ def test_custom_probe_partition_default_does_not_overwrite_explicit_grouping() -
     assert resolved.group_by == "logical_model"
     assert resolved.partition_by == "provider"
 
+
 def test_probe_capability_replaces_stale_explicit_partition_and_grouping() -> None:
     text = LocalizedText("Router", "路由")
     descriptor = CustomProbeDescriptor(
@@ -163,6 +168,7 @@ def test_probe_capability_replaces_stale_explicit_partition_and_grouping() -> No
 
     assert resolved.partition_by is None
     assert resolved.group_by == "adapter,real_model"
+
 
 def test_absent_probe_defaults_preserve_valid_current_partition_and_grouping() -> None:
     text = LocalizedText("Router", "路由")
@@ -195,6 +201,7 @@ def test_absent_probe_defaults_preserve_valid_current_partition_and_grouping() -
 
     assert apply_custom_probe_defaults(initial, descriptor, timezone="UTC") == initial
 
+
 def test_required_partition_capability_without_defaults_chooses_legal_pair() -> None:
     text = LocalizedText("Router", "路由")
     descriptor = CustomProbeDescriptor(
@@ -226,6 +233,7 @@ def test_required_partition_capability_without_defaults_chooses_legal_pair() -> 
 
     assert (resolved.partition_by, resolved.group_by) == ("logical_model", "real_model")
 
+
 def test_custom_probe_defaults_preserve_explicit_range_grouping_and_top() -> None:
     source = CustomCommandSource("weread", ("reader", "ccuv"))
     initial = CustomChartConfig(
@@ -240,6 +248,7 @@ def test_custom_probe_defaults_preserve_explicit_range_grouping_and_top() -> Non
     resolved = apply_custom_probe_defaults(initial, _probe_descriptor(), timezone="UTC")
 
     assert resolved == initial
+
 
 def test_invalid_custom_probe_defaults_leave_host_values_intact() -> None:
     source = CustomCommandSource("weread", ("reader", "ccuv"))
@@ -272,6 +281,7 @@ def test_invalid_custom_probe_defaults_leave_host_values_intact() -> None:
 
     assert resolved == initial
 
+
 def test_custom_ranking_partition_cli_and_command_round_trip() -> None:
     parser = build_parser(load_translator("en"))
     argv = [
@@ -299,6 +309,7 @@ def test_custom_ranking_partition_cli_and_command_round_trip() -> None:
     assert "--partition-by logical_model --group-by real_model --top 3" in format_command(launch)
     reparsed = _to_options(parser.parse_args(shlex.split(format_full_command(launch))[1:]))
     assert reparsed.chart.partition_by == "logical_model"
+
 
 def test_standalone_command_copy_outputs_and_round_trips_custom_partition() -> None:
     parser = build_parser(load_translator("en"))
@@ -329,6 +340,7 @@ def test_standalone_command_copy_outputs_and_round_trips_custom_partition() -> N
     assert "--partition-by logical_model --group-by real_model" in full
     assert isinstance(copied.chart, CustomChartConfig)
     assert (copied.chart.partition_by, copied.chart.group_by) == ("logical_model", "real_model")
+
 
 def test_custom_partition_cli_rejects_invalid_combinations() -> None:
     parser = build_parser(load_translator("en"))

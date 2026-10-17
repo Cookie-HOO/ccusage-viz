@@ -25,8 +25,10 @@ RANGE = DateRange(
     implicit_until=True,
 )
 
+
 def _installed_source(dataset_id: str = "reading") -> CustomCommandSource:
     return CustomCommandSource(dataset_id, ("ccuv-dataset", dataset_id), "installed")
+
 
 def _launch(*, panes: tuple[object, ...] | None = None) -> DashboardLaunch:
     resolved_panes = panes or (

@@ -338,9 +338,7 @@ def _presentation_descriptor(response: CustomChartResponse) -> CustomPresentatio
         },
         {
             dimension.id: dimension.label
-            for dimension in (
-                response.capabilities.partition_by or response.capabilities.group_by
-            )
+            for dimension in (response.capabilities.partition_by or response.capabilities.group_by)
         },
     )
 

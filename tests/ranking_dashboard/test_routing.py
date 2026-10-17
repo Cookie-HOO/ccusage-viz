@@ -1,4 +1,3 @@
-
 from dataclasses import replace
 from time import monotonic
 
@@ -59,6 +58,7 @@ def test_grouped_dashboard_dispatch_wheel_and_hit_translation(dashboard):
 
     run([WheelEvent(1, 2, 3), click_visible, verify])
 
+
 def test_grouped_dashboard_incremental_numeric_search_survives_zero_matches(dashboard):
     run, panes, frames, focuses, layouts, decoder, copied, opened, size = dashboard
     del frames, layouts, decoder, copied, opened
@@ -86,6 +86,7 @@ def test_grouped_dashboard_incremental_numeric_search_survives_zero_matches(dash
         ]
     )
 
+
 def test_pointed_unfocused_pane_batches_wheel_without_queries_or_focus_change(dashboard):
     run, panes, frames, focuses, layouts, decoder, *_ = dashboard
 
@@ -106,6 +107,7 @@ def test_pointed_unfocused_pane_batches_wheel_without_queries_or_focus_change(da
         return KeyEvent("\x03")
 
     run([MouseEvent(0, 100, 1, True, 0), MouseEvent(0, 100, 1, True, 0), burst, check])
+
 
 def test_two_panes_edges_outside_coordinates_and_no_idle_motion(dashboard):
     run, panes, frames, focuses, layouts, decoder, *_ = dashboard
@@ -135,6 +137,7 @@ def test_two_panes_edges_outside_coordinates_and_no_idle_motion(dashboard):
     # Startup and exactly two visible wheel moves.
     assert len(frames) == 3
 
+
 def test_help_owns_wheel_and_reverse_leaves_bottom_immediately(dashboard):
     run, panes, frames, focuses, layouts, decoder, *_ = dashboard
 
@@ -154,6 +157,7 @@ def test_help_owns_wheel_and_reverse_leaves_bottom_immediately(dashboard):
 
     before = [0]
     run([bottom, check_bottom, WheelEvent(-1, 2, 3), check_help, KeyEvent("\x03")])
+
 
 def test_presentation_adjustments_retain_scrolled_ranking_interactions_without_work(dashboard):
     run, panes, frames, focuses, layouts, decoder, copied, opened, _ = dashboard
@@ -284,6 +288,7 @@ def test_presentation_adjustments_retain_scrolled_ranking_interactions_without_w
             check_link,
         ]
     )
+
 
 def test_frameless_focus_reuses_two_committed_ranking_geometries(dashboard):
     run, panes, frames, focuses, layouts, decoder, copied, opened, _ = dashboard
@@ -424,6 +429,7 @@ def test_frameless_focus_reuses_two_committed_ranking_geometries(dashboard):
         ]
     )
 
+
 def test_text_view_and_nonranking_panes_do_not_scroll_while_pending_ranking_clears_viewport(
     dashboard,
 ):
@@ -452,14 +458,25 @@ def test_text_view_and_nonranking_panes_do_not_scroll_while_pending_ranking_clea
 
     run([WheelEvent(1, 2, 3), hide_chart, pending, WheelEvent(1, 2, 3), check])
 
+
 def test_scrolling_uses_displayed_header_and_resized_geometry(dashboard):
     run, panes, frames, focuses, layouts, decoder, copied, opened, size = dashboard
     run.options = replace(run.options, host=replace(run.options.host, header_style="full"))
-    run.monkeypatch.setattr(tui_header, '_header_lines', lambda *args: ['header', 'summary', 'divider'])
-    run.monkeypatch.setattr(tui_painting, '_header_lines', lambda *args: ['header', 'summary', 'divider'])
-    run.monkeypatch.setattr(tui_pointer, '_header_lines', lambda *args: ['header', 'summary', 'divider'])
-    run.monkeypatch.setattr(tui_datasets_blocking, '_header_lines', lambda *args: ['header', 'summary', 'divider'])
-    run.monkeypatch.setattr(tui_datasets_modal, '_header_lines', lambda *args: ['header', 'summary', 'divider'])
+    run.monkeypatch.setattr(
+        tui_header, "_header_lines", lambda *args: ["header", "summary", "divider"]
+    )
+    run.monkeypatch.setattr(
+        tui_painting, "_header_lines", lambda *args: ["header", "summary", "divider"]
+    )
+    run.monkeypatch.setattr(
+        tui_pointer, "_header_lines", lambda *args: ["header", "summary", "divider"]
+    )
+    run.monkeypatch.setattr(
+        tui_datasets_blocking, "_header_lines", lambda *args: ["header", "summary", "divider"]
+    )
+    run.monkeypatch.setattr(
+        tui_datasets_modal, "_header_lines", lambda *args: ["header", "summary", "divider"]
+    )
 
     def resize():
         assert panes[0].ranking_viewport.offset == 1
@@ -483,6 +500,7 @@ def test_scrolling_uses_displayed_header_and_resized_geometry(dashboard):
         ]
     )
 
+
 def test_wheel_search_editing_resets_scroll_without_data_work(dashboard):
     run, panes, frames, focuses, layouts, decoder, *_ = dashboard
 
@@ -503,6 +521,7 @@ def test_wheel_search_editing_resets_scroll_without_data_work(dashboard):
             check_search,
         ]
     )
+
 
 def test_notices_audit_and_summary_stay_fixed(dashboard):
     from ccusage_viz.errors import QueryError
@@ -531,8 +550,8 @@ def test_notices_audit_and_summary_stay_fixed(dashboard):
         snapshots.append(contents[0].splitlines())
         return original(contents, layout, **kwargs)
 
-    run.monkeypatch.setattr(tui_layout, '_compose_resolved_panes', compose)
-    run.monkeypatch.setattr(tui_painting, '_compose_resolved_panes', compose)
+    run.monkeypatch.setattr(tui_layout, "_compose_resolved_panes", compose)
+    run.monkeypatch.setattr(tui_painting, "_compose_resolved_panes", compose)
     run([WheelEvent(1, 1, 1), KeyEvent("\x03")])
     before, after = snapshots[:2]
     assert before != after
@@ -541,6 +560,7 @@ def test_notices_audit_and_summary_stay_fixed(dashboard):
     assert before[-1] == after[-1]
     assert pane.ranking_viewport.reserved_rows > 0
     assert len(before) == len(after)
+
 
 def test_nonranking_custom_chart_does_not_gain_a_viewport(dashboard):
     run, panes, frames, focuses, layouts, decoder, *_ = dashboard
@@ -553,6 +573,7 @@ def test_nonranking_custom_chart_does_not_gain_a_viewport(dashboard):
     run([WheelEvent(1, 1, 1), KeyEvent("\x03")])
     assert pane.ranking_viewport.offset == 0
     assert not pane.ranking_viewport.active
+
 
 @pytest.mark.parametrize("kind", ("ranking", "monitor"))
 def test_native_ranking_and_monitor_ignore_wheels(dashboard, kind):
@@ -576,6 +597,7 @@ def test_native_ranking_and_monitor_ignore_wheels(dashboard, kind):
     assert len(frames) == 1
     assert not hasattr(panes[0], "ranking_viewport")
 
+
 def test_custom_monitor_ranking_ignores_wheels(dashboard):
     from ccusage_viz.custom_monitor_component import CustomMonitorComponent
 
@@ -589,6 +611,7 @@ def test_custom_monitor_ranking_ignores_wheels(dashboard):
     run([WheelEvent(1, 1, 1), KeyEvent("\x03")])
     assert len(frames) == 1
     assert not panes[0].ranking_viewport.active
+
 
 def test_opposite_wheels_with_unchanged_final_offset_do_not_paint(dashboard):
     run, panes, frames, focuses, layouts, decoder, *_ = dashboard

@@ -152,14 +152,10 @@ def test_component_attaches_scalar_comparison_using_issued_request_config() -> N
 
 def test_component_attaches_grouped_scalar_comparison_using_issued_request_config() -> None:
     current = V2RankingData(
-        groups=(
-            V2RankingGroup("api", LocalizedText("API", "接口"), (entry("read", "42"),)),
-        )
+        groups=(V2RankingGroup("api", LocalizedText("API", "接口"), (entry("read", "42"),)),)
     )
     previous = V2RankingData(
-        groups=(
-            V2RankingGroup("api", LocalizedText("API", "接口"), (entry("read", "30"),)),
-        )
+        groups=(V2RankingGroup("api", LocalizedText("API", "接口"), (entry("read", "30"),)),)
     )
     component = CustomHistoricalComponent(config(top=None, other="hide"))
     assert component.apply_provider_result(SimpleNamespace(custom_response=response(current)))
@@ -184,9 +180,7 @@ def test_scalar_flat_data_views_have_no_fabricated_time_axis() -> None:
     )
 
     payload = custom_data_payload(projection, language="en")
-    table = render_custom_data(
-        projection, language="en", translator=load_translator("en")
-    )
+    table = render_custom_data(projection, language="en", translator=load_translator("en"))
 
     assert "range" not in payload
     assert "granularity" not in payload
@@ -202,12 +196,8 @@ def test_scalar_partition_data_views_render_partition_rows_without_time() -> Non
         response(
             V2RankingData(
                 groups=(
-                    V2RankingGroup(
-                        "api", LocalizedText("API", "接口"), (entry("read", "7"),)
-                    ),
-                    V2RankingGroup(
-                        "web", LocalizedText("Web", "网页"), (entry("write", "3"),)
-                    ),
+                    V2RankingGroup("api", LocalizedText("API", "接口"), (entry("read", "7"),)),
+                    V2RankingGroup("web", LocalizedText("Web", "网页"), (entry("write", "3"),)),
                 )
             )
         ),

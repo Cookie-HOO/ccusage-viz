@@ -97,9 +97,7 @@ def custom_heading(
     partition = None
     if config.kind == "ranking" and config.partition_by is not None:
         label = (
-            descriptor.partition_labels.get(config.partition_by)
-            if descriptor is not None
-            else None
+            descriptor.partition_labels.get(config.partition_by) if descriptor is not None else None
         )
         partition = _localized(label, context) if label is not None else config.partition_by
 

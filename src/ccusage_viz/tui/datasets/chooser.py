@@ -36,6 +36,7 @@ _PANE_GROUPS = (
 
 _PANE_COMMANDS = tuple(command for _, commands in _PANE_GROUPS for command in commands)
 
+
 def _pane_chooser_rows(translator: Translator, selected: int) -> tuple[list[str], dict[str, int]]:
     current = _PANE_COMMANDS[selected]
     rows: list[str] = []
@@ -51,8 +52,10 @@ def _pane_chooser_rows(translator: Translator, selected: int) -> tuple[list[str]
             )
     return rows, positions
 
+
 def _dataset_title(value, translator: Translator) -> str:
     return value.zh_cn if translator.language == "zh" else value.en
+
 
 def _dataset_metric_chooser_rows(
     descriptor: V2ProbeDescriptor, translator: Translator
@@ -97,12 +100,14 @@ def _dataset_metric_chooser_rows(
     )
     return tuple(rows)
 
+
 def _metric_chooser_row_text(row: MetricChooserRow, *, ascii: bool) -> str:
     """Adapt tree connectors for an ASCII terminal without changing row identity."""
 
     if not ascii:
         return row.text
     return row.text.translate(str.maketrans({"├": "|", "└": "\\", "│": "|", "─": "-"}))
+
 
 def _metric_chooser_display_rows(
     rows: tuple[MetricChooserRow, ...], *, width: int, ascii: bool
@@ -129,6 +134,7 @@ def _metric_chooser_display_rows(
         )
     return tuple(display_rows)
 
+
 def _metric_chooser_previous_offset(
     rows: tuple[MetricChooserRow, ...], *, selected_metric_index: int, offset: int
 ) -> int | None:
@@ -145,6 +151,7 @@ def _metric_chooser_previous_offset(
     first_position = selectable_positions[0]
     return first_position - 1 if offset == first_position and first_position > 0 else None
 
+
 def _dataset_metric_chooser_chrome(
     descriptor: V2ProbeDescriptor, translator: Translator
 ) -> tuple[str, str]:
@@ -158,6 +165,7 @@ def _dataset_metric_chooser_chrome(
         ),
         translator.text("status.dataset_metric_choose"),
     )
+
 
 def _choose_custom_pane_config(
     screen: FramePainter,
@@ -273,6 +281,7 @@ def _choose_custom_pane_config(
             else:
                 draft.command = value
 
+
 def _choose_installed_pane_config(
     screen: FramePainter,
     translator: Translator,
@@ -365,7 +374,9 @@ def _choose_installed_pane_config(
         elif len(key) == 1 and key.isprintable():
             dataset_id += key
 
+
 _DATASET_VIEW_KINDS = ("timeline", "calendar", "stack", "ranking")
+
 
 def _chooser_viewport(
     rows: list[str], *, index: int, offset: int, height: int, reserved_rows: int = 2
@@ -380,6 +391,7 @@ def _chooser_viewport(
     elif index >= offset + visible_rows:
         offset = index - visible_rows + 1
     return "\n".join(rows[offset : offset + visible_rows]), offset
+
 
 def _choose_dataset_view(
     screen: FramePainter,
@@ -416,6 +428,7 @@ def _choose_dataset_view(
             index = (index - 1) % len(kinds)
         elif event.value in {"\r", "\n"}:
             return kinds[index]
+
 
 def _choose_dataset_pane_config(
     screen: FramePainter,
@@ -617,6 +630,7 @@ def _choose_dataset_pane_config(
             metric_periods=metric_periods,
             metric_titles=metric_titles,
         )
+
 
 def _choose_pane_type(
     screen: FramePainter,

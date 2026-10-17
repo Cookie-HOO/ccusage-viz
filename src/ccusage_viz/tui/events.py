@@ -65,7 +65,11 @@ from ccusage_viz.tui_preset_manager import reconcile_preset_manager, reduce_pres
 
 def dispatch_event(session: TuiSession, event: object, *, now: float) -> None:
     if isinstance(event, WheelEvent):
-        scrolling = tuple(pane.active_ranking_viewport for pane in session.panes if isinstance(pane, TuiCustomPane))
+        scrolling = tuple(
+            pane.active_ranking_viewport
+            for pane in session.panes
+            if isinstance(pane, TuiCustomPane)
+        )
         before = tuple(viewport.offset for viewport in scrolling)
         handle_ranking_wheel(session, event)
         if isinstance(session.decoder, InputDecoder):
@@ -84,7 +88,11 @@ def dispatch_event(session: TuiSession, event: object, *, now: float) -> None:
             if update.command is not None:
                 execute_preset_command(session, update.command)
             if session.preset_manager is not None:
-                session.preset_manager = reconcile_preset_manager(session.preset_manager, preset_catalog(session), visible_rows=max(1, get_terminal_size().lines - 4))
+                session.preset_manager = reconcile_preset_manager(
+                    session.preset_manager,
+                    preset_catalog(session),
+                    visible_rows=max(1, get_terminal_size().lines - 4),
+                )
         paint(session)
         return
     if session.dataset_modal is not None:
@@ -110,58 +118,99 @@ def dispatch_event(session: TuiSession, event: object, *, now: float) -> None:
         animation_pane = pane
         if isinstance(event, PasteEvent):
             cursor = session.overlay_editor.cursor
-            session.overlay_editor.replace_draft(session.overlay_editor.draft[:cursor] + event.value + session.overlay_editor.draft[cursor:])
+            session.overlay_editor.replace_draft(
+                session.overlay_editor.draft[:cursor]
+                + event.value
+                + session.overlay_editor.draft[cursor:]
+            )
             session.overlay_editor.cursor = cursor + len(event.value)
             paint(session)
             return
         key = event.value
-        if key == '\x03':
+        if key == "\x03":
             raise KeyboardInterrupt
-        if key == '\x1b':
+        if key == "\x1b":
             session.overlay_editor = None
-        elif key == '\t':
-            session.overlay_editor.mode = 'command' if session.overlay_editor.mode == 'text' else 'text'
-        elif key == '\r':
+        elif key == "\t":
+            session.overlay_editor.mode = (
+                "command" if session.overlay_editor.mode == "text" else "text"
+            )
+        elif key == "\r":
             mode = session.overlay_editor.mode
             draft = session.overlay_editor.draft
             pane_index = session.overlay_editor.pane_index
-            record_mutation(session, ('pane', pane_index, 'overlay-source'), lambda pane=animation_pane: pane.overlay.apply_draft(mode, draft))
+            record_mutation(
+                session,
+                ("pane", pane_index, "overlay-source"),
+                lambda pane=animation_pane: pane.overlay.apply_draft(mode, draft),
+            )
             session.overlay_editor = None
-        elif key in {'\n', '\x0b'}:
-            adjust_pane_weight(session, session.overlay_editor.pane_index, axis='row', delta=1 if key == '\x0b' else -1)
-        elif key == '\x08':
-            open_help(session, context='editor')
-        elif key == '\x15':
-            session.overlay_editor.replace_draft('')
+        elif key in {"\n", "\x0b"}:
+            adjust_pane_weight(
+                session,
+                session.overlay_editor.pane_index,
+                axis="row",
+                delta=1 if key == "\x0b" else -1,
+            )
+        elif key == "\x08":
+            open_help(session, context="editor")
+        elif key == "\x15":
+            session.overlay_editor.replace_draft("")
             session.overlay_editor.cursor = 0
-            session.copy_feedback.show(session.translator.text('status.overlay_editor_cleared'))
-        elif key == '\x19':
-            session.copy_feedback.show(session.translator.text('status.command_copied' if copy_command(session.overlay_editor.draft) else 'status.command_copy_failed'))
-        elif key == '\x12':
-            session.overlay_editor.replace_draft(pane.overlay.config.text or '' if session.overlay_editor.mode == 'text' else pane.overlay.config.command or '')
+            session.copy_feedback.show(session.translator.text("status.overlay_editor_cleared"))
+        elif key == "\x19":
+            session.copy_feedback.show(
+                session.translator.text(
+                    "status.command_copied"
+                    if copy_command(session.overlay_editor.draft)
+                    else "status.command_copy_failed"
+                )
+            )
+        elif key == "\x12":
+            session.overlay_editor.replace_draft(
+                pane.overlay.config.text or ""
+                if session.overlay_editor.mode == "text"
+                else pane.overlay.config.command or ""
+            )
             session.overlay_editor.cursor = len(session.overlay_editor.draft)
-        elif key == '\x7f' and session.overlay_editor.cursor:
+        elif key == "\x7f" and session.overlay_editor.cursor:
             cursor = session.overlay_editor.cursor
-            session.overlay_editor.replace_draft(session.overlay_editor.draft[:cursor - 1] + session.overlay_editor.draft[cursor:])
+            session.overlay_editor.replace_draft(
+                session.overlay_editor.draft[: cursor - 1] + session.overlay_editor.draft[cursor:]
+            )
             session.overlay_editor.cursor = cursor - 1
-        elif key in {'\x1b[3~', '\x04'}:
+        elif key in {"\x1b[3~", "\x04"}:
             cursor = session.overlay_editor.cursor
-            session.overlay_editor.replace_draft(session.overlay_editor.draft[:cursor] + session.overlay_editor.draft[cursor + 1:])
-        elif key == '\x1b[D':
+            session.overlay_editor.replace_draft(
+                session.overlay_editor.draft[:cursor] + session.overlay_editor.draft[cursor + 1 :]
+            )
+        elif key == "\x1b[D":
             session.overlay_editor.cursor = max(0, session.overlay_editor.cursor - 1)
-        elif key == '\x1b[C':
-            session.overlay_editor.cursor = min(len(session.overlay_editor.draft), session.overlay_editor.cursor + 1)
-        elif key in {'\x1b[H', '\x01'}:
-            session.overlay_editor.cursor = _editor_line_start(session.overlay_editor.draft, session.overlay_editor.cursor)
-        elif key == '\x02':
-            session.overlay_editor.cursor = _editor_previous_word(session.overlay_editor.draft, session.overlay_editor.cursor)
-        elif key == '\x17':
-            session.overlay_editor.cursor = _editor_next_word(session.overlay_editor.draft, session.overlay_editor.cursor)
-        elif key in {'\x1b[F', '\x05'}:
-            session.overlay_editor.cursor = _editor_line_end(session.overlay_editor.draft, session.overlay_editor.cursor)
+        elif key == "\x1b[C":
+            session.overlay_editor.cursor = min(
+                len(session.overlay_editor.draft), session.overlay_editor.cursor + 1
+            )
+        elif key in {"\x1b[H", "\x01"}:
+            session.overlay_editor.cursor = _editor_line_start(
+                session.overlay_editor.draft, session.overlay_editor.cursor
+            )
+        elif key == "\x02":
+            session.overlay_editor.cursor = _editor_previous_word(
+                session.overlay_editor.draft, session.overlay_editor.cursor
+            )
+        elif key == "\x17":
+            session.overlay_editor.cursor = _editor_next_word(
+                session.overlay_editor.draft, session.overlay_editor.cursor
+            )
+        elif key in {"\x1b[F", "\x05"}:
+            session.overlay_editor.cursor = _editor_line_end(
+                session.overlay_editor.draft, session.overlay_editor.cursor
+            )
         elif len(key) == 1 and key.isprintable():
             cursor = session.overlay_editor.cursor
-            session.overlay_editor.replace_draft(session.overlay_editor.draft[:cursor] + key + session.overlay_editor.draft[cursor:])
+            session.overlay_editor.replace_draft(
+                session.overlay_editor.draft[:cursor] + key + session.overlay_editor.draft[cursor:]
+            )
             session.overlay_editor.cursor = cursor + 1
         paint(session)
         return
@@ -171,12 +220,23 @@ def dispatch_event(session: TuiSession, event: object, *, now: float) -> None:
         key = event.value
         pane = session.panes[session.custom_logs_pane]
         assert isinstance(pane, TuiCustomPane)
-        if key == '\x03':
+        if key == "\x03":
             raise KeyboardInterrupt
-        if key == '\x1b':
+        if key == "\x1b":
             session.custom_logs_pane = None
-        elif key in {'y', 'Y'}:
-            session.copy_feedback.show(session.translator.text('status.data_copied' if copy_command('\n'.join(f'{record.timestamp.isoformat()} {record.status}: {record.detail}' for record in pane.logs)) else 'status.command_copy_failed'))
+        elif key in {"y", "Y"}:
+            session.copy_feedback.show(
+                session.translator.text(
+                    "status.data_copied"
+                    if copy_command(
+                        "\n".join(
+                            f"{record.timestamp.isoformat()} {record.status}: {record.detail}"
+                            for record in pane.logs
+                        )
+                    )
+                    else "status.command_copy_failed"
+                )
+            )
         paint(session)
         return
     if session.overlay_history is not None:
@@ -185,23 +245,36 @@ def dispatch_event(session: TuiSession, event: object, *, now: float) -> None:
         key = event.value
         pane = session.panes[session.overlay_history.pane_index]
         assert isinstance(pane, TuiAnimationPane)
-        if key == '\x03':
+        if key == "\x03":
             raise KeyboardInterrupt
-        if key == 'h':
-            open_help(session, context='history')
+        if key == "h":
+            open_help(session, context="history")
             return
-        if key == '\x1b':
+        if key == "\x1b":
             session.overlay_history = None
         else:
             records = tuple(pane.overlay.history)
-            if key in {'y', '\r', '\n'} and session.overlay_history.table.selected is not None:
-                session.copy_feedback.show(session.translator.text('status.command_copied' if copy_command(format_execution_record(session.overlay_history.table.selected)) else 'status.command_copy_failed'))
-            elif key == '\x1b[A':
+            if key in {"y", "\r", "\n"} and session.overlay_history.table.selected is not None:
+                session.copy_feedback.show(
+                    session.translator.text(
+                        "status.command_copied"
+                        if copy_command(
+                            format_execution_record(session.overlay_history.table.selected)
+                        )
+                        else "status.command_copy_failed"
+                    )
+                )
+            elif key == "\x1b[A":
                 move_history_selection(session.overlay_history.table, records, -1)
-            elif key == '\x1b[B':
+            elif key == "\x1b[B":
                 move_history_selection(session.overlay_history.table, records, 1)
-            elif key in {'{', '}', 'J', 'K'}:
-                adjust_pane_weight(session, session.overlay_history.pane_index, axis='column' if key in {'{', '}'} else 'row', delta=1 if key in {'}', 'K'} else -1)
+            elif key in {"{", "}", "J", "K"}:
+                adjust_pane_weight(
+                    session,
+                    session.overlay_history.pane_index,
+                    axis="column" if key in {"{", "}"} else "row",
+                    delta=1 if key in {"}", "K"} else -1,
+                )
         paint(session)
         return
     if isinstance(event, MouseEvent):
@@ -213,34 +286,36 @@ def dispatch_event(session: TuiSession, event: object, *, now: float) -> None:
                 search.query += event.value
             elif isinstance(event, KeyEvent):
                 key = event.value
-                if key == '\x1b':
-                    search.query = ''
+                if key == "\x1b":
+                    search.query = ""
                     search.editing = False
                     search.density_notice = None
-                elif key in {'\r', '\n'}:
+                elif key in {"\r", "\n"}:
                     search.editing = False
-                elif key in {'\x7f', '\x08'}:
+                elif key in {"\x7f", "\x08"}:
                     search.query = search.query[:-1]
                 elif len(key) == 1 and key.isprintable():
                     search.query += key
             paint(session)
             return
-        if isinstance(event, KeyEvent) and event.value == '/':
+        if isinstance(event, KeyEvent) and event.value == "/":
             search.editing = True
             search.density_notice = None
             paint(session)
             return
     key = event.value if isinstance(event, KeyEvent) else None
-    if key == '\x03':
+    if key == "\x03":
         raise KeyboardInterrupt
     if session.grid_draft is not None:
-        if key == '\x1b':
+        if key == "\x1b":
             session.grid_draft = None
             session.grid_error = None
-        elif key in {'\r', '\n'}:
+        elif key in {"\r", "\n"}:
             parsed = parse_grid(session.grid_draft, len(session.panes))
             if parsed is None:
-                session.grid_error = session.translator.text('error.tui_grid_runtime', value=session.grid_draft, count=len(session.panes))
+                session.grid_error = session.translator.text(
+                    "error.tui_grid_runtime", value=session.grid_draft, count=len(session.panes)
+                )
             else:
                 changed_grid = parsed != session.active_grid or session.active_layout is not None
                 if changed_grid:
@@ -250,82 +325,108 @@ def dispatch_event(session: TuiSession, event: object, *, now: float) -> None:
                         session.active_layout = None
                         session.column_weights = None
                         session.row_weights = None
-                    record_mutation(session, ('layout', 'topology'), apply_grid)
+
+                    record_mutation(session, ("layout", "topology"), apply_grid)
                 session.grid_draft = None
                 session.grid_error = None
-        elif key in {'\x7f', '\x08'}:
+        elif key in {"\x7f", "\x08"}:
             session.grid_draft = session.grid_draft[:-1]
-        elif key and (key.isalnum() or key in {'x', 'X', '-'}):
+        elif key and (key.isalnum() or key in {"x", "X", "-"}):
             session.grid_draft += key
         paint(session)
         return
-    if key in {'u', 'U'}:
-        restored = session.history.undo() if key == 'u' else session.history.redo()
+    if key in {"u", "U"}:
+        restored = session.history.undo() if key == "u" else session.history.redo()
         if restored is session.history:
-            session.copy_feedback.show(session.translator.text('status.tui_history_empty_undo' if key == 'u' else 'status.tui_history_empty_redo'))
+            session.copy_feedback.show(
+                session.translator.text(
+                    "status.tui_history_empty_undo"
+                    if key == "u"
+                    else "status.tui_history_empty_redo"
+                )
+            )
         else:
             session.history = restored
             apply_dashboard_state(session, session.history.current)
         paint(session)
         return
-    if key == 'h':
+    if key == "h":
         open_help(session)
         return
-    if key == 'c':
+    if key == "c":
         session.controls_hidden = not session.controls_hidden
         paint(session, force=True)
         return
-    if session.adjustment_mode == 'pane':
+    if session.adjustment_mode == "pane":
         handle_pane_adjustment(session, event, key, now=now)
         return
-    if session.adjustment_mode == 'global':
+    if session.adjustment_mode == "global":
         handle_dashboard_adjustment(session, event, key)
         return
-    if session.body_view != 'chart' and key in {'\x1b[A', '\x1b[B', '\x1b[H', 'e'}:
-        offset = next_text_offset(key, offset=session.dashboard_text_offset, line_count=session.dashboard_text_line_count, visible_rows=session.dashboard_text_visible_rows)
+    if session.body_view != "chart" and key in {"\x1b[A", "\x1b[B", "\x1b[H", "e"}:
+        offset = next_text_offset(
+            key,
+            offset=session.dashboard_text_offset,
+            line_count=session.dashboard_text_line_count,
+            visible_rows=session.dashboard_text_visible_rows,
+        )
         assert offset is not None
         session.dashboard_text_offset = offset
         paint(session, force=True)
         return
-    if session.body_view == 'chart' and key == 'r':
+    if session.body_view == "chart" and key == "r":
         session.manual_refresh_operations.clear()
         for index in range(len(session.panes)):
             if refresh(session, index, trigger=LifecycleTrigger.MANUAL, replace_active=True):
                 pane = session.panes[index]
-                if isinstance(pane, (TuiChartPane, TuiCustomPane)) and pane.lifecycle.active is not None:
+                if (
+                    isinstance(pane, (TuiChartPane, TuiCustomPane))
+                    and pane.lifecycle.active is not None
+                ):
                     session.manual_refresh_operations.add(pane.lifecycle.active)
         if refresh_header(session, trigger=LifecycleTrigger.MANUAL, replace_active=True):
             operation = session.header.lifecycle.active
             if operation is not None:
                 session.manual_refresh_operations.add(operation)
-        session.manual_refresh_operations.update(refresh_custom_summaries(session, trigger=LifecycleTrigger.MANUAL, replace_active=True))
+        session.manual_refresh_operations.update(
+            refresh_custom_summaries(session, trigger=LifecycleTrigger.MANUAL, replace_active=True)
+        )
         paint(session, force=True)
-    elif key == '\x10' and session.body_view == 'chart':
+    elif key == "\x10" and session.body_view == "chart":
         open_preset_manager(session)
         paint(session)
         return
-    elif key == '\x13' and session.body_view == 'chart':
+    elif key == "\x13" and session.body_view == "chart":
         open_preset_manager(session, save=True)
         paint(session)
         return
-    elif key in {'v', 'V'}:
+    elif key in {"v", "V"}:
 
         def cycle_dashboard_view() -> None:
-            session.body_view = cycle_dashboard_body_view(session.body_view, step=1 if key == 'v' else -1)
-        record_mutation(session, ('dashboard', 'view'), cycle_dashboard_view)
-    elif key in {'y', 'Y'} and session.body_view != 'chart':
-        session.copy_feedback.show(session.translator.text('status.command_copied' if copy_command(full_dashboard_command(session)) else 'status.command_copy_failed'))
-    elif key == '\t':
+            session.body_view = cycle_dashboard_body_view(
+                session.body_view, step=1 if key == "v" else -1
+            )
+
+        record_mutation(session, ("dashboard", "view"), cycle_dashboard_view)
+    elif key in {"y", "Y"} and session.body_view != "chart":
+        session.copy_feedback.show(
+            session.translator.text(
+                "status.command_copied"
+                if copy_command(full_dashboard_command(session))
+                else "status.command_copy_failed"
+            )
+        )
+    elif key == "\t":
         return
-    elif key == 'd' and session.body_view == 'chart':
+    elif key == "d" and session.body_view == "chart":
         session.focused = None
-        session.adjustment_mode = 'global'
-        session.adjustment_page = 'quick'
+        session.adjustment_mode = "global"
+        session.adjustment_page = "quick"
         session.adjustment_timer = AdjustmentIdleTimer()
-    elif key == 'm' and session.body_view == 'chart':
+    elif key == "m" and session.body_view == "chart":
         session.focused = _adjustment_target(session.focused, key, len(session.panes))
-        session.adjustment_mode = 'pane' if session.focused is not None else None
-        session.adjustment_page = 'quick'
+        session.adjustment_mode = "pane" if session.focused is not None else None
+        session.adjustment_page = "quick"
         session.adjustment_timer = AdjustmentIdleTimer() if session.focused is not None else None
     else:
         return

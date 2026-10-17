@@ -71,9 +71,7 @@ def test_monitor_component_submits_provider_backed_demo_samples(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr("ccusage_viz.acquisition.time.monotonic", lambda: 4.9)
-    launch = replace(
-        options(), host=replace(options().host, demo_size="small", demo_seed=17)
-    )
+    launch = replace(options(), host=replace(options().host, demo_size="small", demo_seed=17))
     runtime = build_query_runtime()
     component = MonitorComponent(
         launch,

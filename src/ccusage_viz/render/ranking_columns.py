@@ -33,6 +33,7 @@ def _comparison_heading(context: RenderContext) -> str:
         else context.translator.text("label.ranking_previous")
     )
 
+
 def measure_ranking_columns(
     entries: Sequence[RankingPresentationEntry],
     *,
@@ -181,6 +182,7 @@ def measure_ranking_columns(
     )
     columns.description_width = max(1, context.width - min(context.width, rank_column_width + 1))
 
+
 def _fit_comparison_widths(
     *,
     context: RenderContext,
@@ -215,6 +217,7 @@ def _fit_comparison_widths(
         widths[index] -= reduction
         overflow -= reduction
     return widths[0], widths[1], widths[2], widths[3]
+
 
 def render_ranking_heading_row(
     *,
@@ -307,15 +310,11 @@ def render_ranking_heading_row(
             pad_width(truncate_width(value, current_width), current_width, align="right"),
         ]
         if growth_visible:
-            fields.append(
-                pad_width(truncate_width(delta, delta_width), delta_width, align="right")
-            )
+            fields.append(pad_width(truncate_width(delta, delta_width), delta_width, align="right"))
         if rank_comparison_visible:
             fields.append(" " * rank_change_width)
         if show_percentage:
-            fields.append(
-                pad_width(truncate_width(share, share_width), share_width, align="right")
-            )
+            fields.append(pad_width(truncate_width(share, share_width), share_width, align="right"))
         row = clip_width(" ".join(fields), context.width)
     else:
         right_fields = [value]

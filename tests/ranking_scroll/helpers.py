@@ -51,6 +51,7 @@ def projection(count=100, *, descriptions=False, comparison=False):
         comparison_available=comparison,
     )
 
+
 def grouped_projection() -> CustomChartProjection:
     model = projection(0)
 
@@ -86,6 +87,7 @@ def grouped_projection() -> CustomChartProjection:
     )
     return replace(model, groups=groups, series=())
 
+
 def grouped_projection_with_visible_comparisons() -> CustomChartProjection:
     model = grouped_projection()
     groups = tuple(
@@ -105,6 +107,7 @@ def grouped_projection_with_visible_comparisons() -> CustomChartProjection:
         for group in model.groups or ()
     )
     return replace(model, groups=groups, comparison_available=True)
+
 
 def render_grouped(
     model: CustomChartProjection,
@@ -135,6 +138,7 @@ def render_grouped(
         copied_all=False,
     )
 
+
 def context(*, height=12, width=100, density="normal", color=False, period=None, pending=False):
     return RenderContext(
         width,
@@ -146,6 +150,7 @@ def context(*, height=12, width=100, density="normal", color=False, period=None,
         period=period,
         pending=pending,
     )
+
 
 def render(
     model,
@@ -179,6 +184,7 @@ def render(
         copied_all=copied_all,
     )
 
+
 def _search_fact_projection() -> CustomChartProjection:
     def item(
         key: str,
@@ -206,6 +212,7 @@ def _search_fact_projection() -> CustomChartProjection:
         ),
         show_percentage=True,
     )
+
 
 def _track(line: str, mark: str, empty: str) -> str:
     return next(part for part in line.split() if mark in part and set(part) <= {mark, empty})

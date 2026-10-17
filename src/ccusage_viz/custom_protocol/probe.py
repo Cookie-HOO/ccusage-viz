@@ -45,6 +45,7 @@ def _parse_dataset(value: object) -> CustomDataset:
         _parse_unit(source.get("unit")),
     )
 
+
 def _parse_capabilities(value: object) -> CustomCapabilities:
     source = _mapping(value, "capabilities")
     dimensions = tuple(
@@ -110,6 +111,7 @@ def _parse_capabilities(value: object) -> CustomCapabilities:
     _unique_ids(filters, "filters")
     return CustomCapabilities(dimensions, filters, parsed)
 
+
 def _parse_probe_descriptor(value: object) -> CustomProbeDescriptor:
     source = _mapping(value, "probe descriptor")
     revision = _string(source.get("revision"), "probe descriptor revision")
@@ -158,10 +160,12 @@ def _parse_probe_descriptor(value: object) -> CustomProbeDescriptor:
         source_timezone,
     )
 
+
 def parse_probe_descriptor(value: object) -> CustomProbeDescriptor:
     """Parse a persisted static Dataset descriptor without a response envelope."""
 
     return _parse_probe_descriptor(value)
+
 
 def parse_v2_probe_descriptor(value: object) -> V2ProbeDescriptor:
     """Parse a V2 Dataset descriptor with Metric-owned capabilities."""
@@ -216,6 +220,7 @@ def parse_v2_probe_descriptor(value: object) -> V2ProbeDescriptor:
         metric_groups,
     )
 
+
 def _parse_v2_metric_group(value: object) -> V2MetricGroup:
     source = _mapping(value, "v2 metric group")
     identifier = _string(source.get("id"), "v2 metric group ID")
@@ -224,6 +229,7 @@ def _parse_v2_metric_group(value: object) -> V2MetricGroup:
     except ValueError as error:
         raise CustomProtocolError(str(error)) from error
     return V2MetricGroup(identifier, _parse_localized(source.get("title"), "v2 metric group title"))
+
 
 def _parse_v2_metric(value: object) -> V2MetricDescriptor:
     source = _mapping(value, "v2 metric")
@@ -251,6 +257,7 @@ def _parse_v2_metric(value: object) -> V2MetricDescriptor:
         summary,  # type: ignore[arg-type]
         group_id,
     )
+
 
 def _parse_v2_capabilities(value: object) -> V2MetricCapabilities:
     source = _mapping(value, "v2 metric capabilities")
@@ -405,6 +412,7 @@ def _parse_v2_capabilities(value: object) -> V2MetricCapabilities:
                     )
     return V2MetricCapabilities(dimensions, (), charts, partition_dimensions)
 
+
 def validate_partition_selection(
     partition_by: str | None,
     group_by: str | None,
@@ -425,6 +433,7 @@ def validate_partition_selection(
         raise CustomProtocolError("active partition_by requires a non-null group_by")
     if partition_by is not None and partition_by == group_by:
         raise CustomProtocolError("partition_by and group_by must differ")
+
 
 def _parse_v2_defaults(
     value: object, capabilities: V2MetricCapabilities
@@ -487,6 +496,7 @@ def _parse_v2_defaults(
         )
     return defaults
 
+
 def _valid_period(value: str, *, subday: bool = False) -> bool:
     try:
         parse_period(value)
@@ -498,6 +508,7 @@ def _valid_period(value: str, *, subday: bool = False) -> bool:
         except ValueError:
             return False
     return True
+
 
 def _default_filters(value: object) -> tuple[tuple[str, tuple[str, ...]], ...]:
     if not isinstance(value, dict):
@@ -511,6 +522,7 @@ def _default_filters(value: object) -> tuple[tuple[str, tuple[str, ...]], ...]:
             parsed.append((filter_id, options))
     return tuple(sorted(parsed))
 
+
 def _default_window_seconds(value: object) -> int | None:
     if not isinstance(value, str):
         return None
@@ -519,6 +531,7 @@ def _default_window_seconds(value: object) -> int | None:
         return None
     seconds = int(match.group(1)) * (60 if match.group(2) == "m" else 3600)
     return seconds if 5 * 60 <= seconds <= 24 * 3600 else None
+
 
 def _parse_environment_declaration(value: object) -> CustomEnvironmentDeclaration:
     source = _mapping(value, "environment declaration")
@@ -541,12 +554,14 @@ def _parse_environment_declaration(value: object) -> CustomEnvironmentDeclaratio
         help_url,
     )
 
+
 def _parse_dimension(value: object, name: str) -> CustomDimension:
     source = _mapping(value, name)
     return CustomDimension(
         _string(source.get("id"), f"{name} ID"),
         _parse_localized(source.get("label"), f"{name} label"),
     )
+
 
 def _parse_filter(value: object) -> CustomFilter:
     source = _mapping(value, "filter")

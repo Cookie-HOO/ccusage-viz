@@ -9,6 +9,7 @@ from ccusage_viz.presets.values import DashboardPresetValidationError, validate_
 def test_validate_preset_name_accepts_safe_identifiers(name: str) -> None:
     assert validate_preset_name(name) == name
 
+
 @pytest.mark.parametrize(
     "name", ("", "1start", "Upper", "with_space", "with.dot", "with/slash", "中文")
 )

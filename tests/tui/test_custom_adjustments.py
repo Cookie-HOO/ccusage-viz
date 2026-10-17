@@ -85,6 +85,7 @@ def test_custom_capabilities_are_unavailable_after_source_replacement() -> None:
 
     assert _custom_capability_for_component(component) is None
 
+
 def test_probe_capability_keeps_period_and_group_controls_after_rejected_query() -> None:
     chart = CustomChartConfig(
         "ranking",
@@ -110,12 +111,17 @@ def test_probe_capability_keeps_period_and_group_controls_after_rejected_query()
     assert _custom_capability_for_component(component) == capability
     assert "p/P" in {
         action.key
-        for action in tui_custom_rendering._custom_standalone_actions(component, load_translator("en"))
+        for action in tui_custom_rendering._custom_standalone_actions(
+            component, load_translator("en")
+        )
     }
     assert (
-        tui_custom_adjustments._cycle_custom_grouping(component.candidate, capability.group_by).group_by
+        tui_custom_adjustments._cycle_custom_grouping(
+            component.candidate, capability.group_by
+        ).group_by
         == "book"
     )
+
 
 def test_custom_metric_periods_follow_the_selected_chart_kind() -> None:
     metric = V2MetricDescriptor(
@@ -141,6 +147,7 @@ def test_custom_metric_periods_follow_the_selected_chart_kind() -> None:
     assert tui_models._custom_metric_periods(metric, "calendar") == ()
     assert tui_models._custom_metric_periods(metric, "missing") == ()
 
+
 def test_live_capability_periods_replace_stale_pane_periods_for_adjustment() -> None:
     chart = CustomChartConfig(
         "ranking",
@@ -160,6 +167,7 @@ def test_live_capability_periods_replace_stale_pane_periods_for_adjustment() -> 
     assert effective.metric_periods == ("1d", "7d")
     assert adjust_custom_chart(effective, "p").date_range.period == "7d"
     assert adjust_custom_chart(effective, "P").date_range.period == "7d"
+
 
 def test_pending_metric_switch_uses_target_metric_periods() -> None:
     text = LocalizedText("GitHub", "GitHub")
@@ -228,6 +236,7 @@ def test_pending_metric_switch_uses_target_metric_periods() -> None:
     assert updated.metric_id == "growth"
     assert updated.date_range.period == "7d"
 
+
 def test_undeclared_live_periods_restore_generic_period_cycling() -> None:
     chart = CustomChartConfig(
         "timeline",
@@ -248,6 +257,7 @@ def test_undeclared_live_periods_restore_generic_period_cycling() -> None:
     assert effective.metric_periods == ()
     assert adjust_custom_chart(effective, "p").date_range.period == "14d"
 
+
 def test_probe_capability_remains_available_before_the_first_chart_response() -> None:
     chart = CustomChartConfig(
         "timeline",
@@ -260,6 +270,7 @@ def test_probe_capability_remains_available_before_the_first_chart_response() ->
 
     assert _custom_capability_for_component(component) is not None
     assert adjust_custom_chart(component.candidate, "p").date_range.period == "30d"
+
 
 def test_custom_dashboard_adjustment_uses_native_footer() -> None:
     chart = CustomChartConfig(
@@ -287,14 +298,19 @@ def test_custom_dashboard_adjustment_uses_native_footer() -> None:
     assert ("e", "custom_source") not in tui_custom_adjustments._custom_pane_adjustment_bindings(
         pane, "advanced"
     )
-    assert ("L", "custom_logs") in tui_custom_adjustments._custom_pane_adjustment_bindings(pane, "advanced")
+    assert ("L", "custom_logs") in tui_custom_adjustments._custom_pane_adjustment_bindings(
+        pane, "advanced"
+    )
+
 
 def test_custom_metric_switch_binding_requires_declared_group() -> None:
     pane = _accepted_metric_help_pane()
     descriptor = pane.component.v2_descriptor
     assert isinstance(descriptor, V2ProbeDescriptor)
 
-    assert ("m/M", "metric") not in tui_custom_adjustments._custom_pane_adjustment_bindings(pane, "quick")
+    assert ("m/M", "metric") not in tui_custom_adjustments._custom_pane_adjustment_bindings(
+        pane, "quick"
+    )
 
     pane.component.v2_descriptor = replace(
         descriptor,
@@ -302,7 +318,10 @@ def test_custom_metric_switch_binding_requires_declared_group() -> None:
         metric_groups=(V2MetricGroup("github", LocalizedText("GitHub", "GitHub")),),
     )
 
-    assert ("m/M", "metric") in tui_custom_adjustments._custom_pane_adjustment_bindings(pane, "quick")
+    assert ("m/M", "metric") in tui_custom_adjustments._custom_pane_adjustment_bindings(
+        pane, "quick"
+    )
+
 
 def test_custom_metric_switch_binding_omits_undeclared_group() -> None:
     pane = _accepted_metric_help_pane()
@@ -312,7 +331,10 @@ def test_custom_metric_switch_binding_omits_undeclared_group() -> None:
         descriptor, metrics=(replace(descriptor.metrics[0], group_id="missing"),)
     )
 
-    assert ("m/M", "metric") not in tui_custom_adjustments._custom_pane_adjustment_bindings(pane, "quick")
+    assert ("m/M", "metric") not in tui_custom_adjustments._custom_pane_adjustment_bindings(
+        pane, "quick"
+    )
+
 
 def test_custom_ranking_adjustment_state_exposes_top_and_other_projection() -> None:
     component = CustomHistoricalComponent(
@@ -333,8 +355,12 @@ def test_custom_ranking_adjustment_state_exposes_top_and_other_projection() -> N
         ).process,
     )
 
-    quick = tui_custom_adjustments._custom_pane_adjustment_state(pane, "quick", load_translator("en"))
-    advanced = tui_custom_adjustments._custom_pane_adjustment_state(pane, "advanced", load_translator("en"))
+    quick = tui_custom_adjustments._custom_pane_adjustment_state(
+        pane, "quick", load_translator("en")
+    )
+    advanced = tui_custom_adjustments._custom_pane_adjustment_state(
+        pane, "advanced", load_translator("en")
+    )
 
     assert "Group book" in quick
     assert "Top 10" in quick
@@ -345,6 +371,7 @@ def test_custom_ranking_adjustment_state_exposes_top_and_other_projection() -> N
         )[1]
     )
     assert "Other show" in advanced
+
 
 def test_v2_ranking_top_refreshes_only_when_it_outgrows_retrieved_coverage() -> None:
     component = CustomHistoricalComponent(
@@ -360,10 +387,13 @@ def test_v2_ranking_top_refreshes_only_when_it_outgrows_retrieved_coverage() -> 
     component.set_capability(CustomChartCapability(("day",), ("project",), (), max_items=50))
     component.retrieval_top = 10
 
-    assert tui_custom_adjustments._custom_top_refresh_required(component, replace(component.candidate, top=11))
+    assert tui_custom_adjustments._custom_top_refresh_required(
+        component, replace(component.candidate, top=11)
+    )
     assert not tui_custom_adjustments._custom_top_refresh_required(
         component, replace(component.candidate, top=10)
     )
+
 
 def test_v2_ranking_top_above_dataset_maximum_does_not_request_more_coverage() -> None:
     component = CustomHistoricalComponent(
@@ -382,6 +412,7 @@ def test_v2_ranking_top_above_dataset_maximum_does_not_request_more_coverage() -
     assert not tui_custom_adjustments._custom_top_refresh_required(
         component, replace(component.candidate, top=11)
     )
+
 
 def test_v2_ranking_response_keeps_the_source_limit_for_later_top_adjustments() -> None:
     component = CustomHistoricalComponent(
@@ -424,6 +455,7 @@ def test_v2_ranking_response_keeps_the_source_limit_for_later_top_adjustments() 
         component, replace(component.candidate, top=11)
     )
 
+
 @pytest.mark.parametrize("group_by", (None, "book"))
 @pytest.mark.parametrize("step", (1, -1))
 @pytest.mark.parametrize("top", (None, 6))
@@ -442,6 +474,7 @@ def test_custom_historical_grouping_cycles_preserve_top_at_group_boundaries(
 
     assert updated.group_by == ("book" if group_by is None else None)
     assert updated.top is top
+
 
 def test_custom_capabilities_are_hidden_when_the_source_changes() -> None:
     dashboard = _to_options(

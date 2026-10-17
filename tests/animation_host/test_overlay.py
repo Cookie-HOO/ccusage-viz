@@ -41,12 +41,14 @@ def test_overlay_editor_viewport_keeps_cursor_visible_without_shifting_text() ->
     assert hidden == "b界c"
     assert "▏" not in visible
 
+
 def test_overlay_editor_viewport_marks_end_of_line_without_overflow() -> None:
     visible, start = _editor_viewport("abcd", 4, 4, cursor_visible=True)
 
     assert visible == "bcd\x1b[7m \x1b[0m"
     assert start == 1
     assert display_width(visible) == 4
+
 
 @pytest.mark.parametrize(
     ("draft", "cursor", "previous", "next_word"),
@@ -65,9 +67,11 @@ def test_overlay_editor_word_motions(
     assert _editor_previous_word(draft, cursor) == previous
     assert _editor_next_word(draft, cursor) == next_word
 
+
 def test_overlay_editor_line_motions_stay_on_current_physical_line() -> None:
     assert _editor_line_start("alpha\nbeta", 9) == 6
     assert _editor_line_end("alpha\nbeta", 7) == 10
+
 
 def test_standalone_overlay_editor_ctrl_u_clears_active_draft(monkeypatch, translator) -> None:
     class RecordingPainter:
@@ -86,8 +90,12 @@ def test_standalone_overlay_editor_ctrl_u_clears_active_draft(monkeypatch, trans
             animate_module.KeyEvent("\r"),
         )
     )
-    monkeypatch.setattr(overlay_editor_module, "_terminal", lambda _options: Terminal(100, 5, False, True))
-    monkeypatch.setattr(overlay_editor_module, "read_event", lambda _decoder, _timeout: next(events))
+    monkeypatch.setattr(
+        overlay_editor_module, "_terminal", lambda _options: Terminal(100, 5, False, True)
+    )
+    monkeypatch.setattr(
+        overlay_editor_module, "read_event", lambda _decoder, _timeout: next(events)
+    )
 
     try:
         overlay_editor_module._run_overlay_editor(
@@ -110,6 +118,7 @@ def test_standalone_overlay_editor_ctrl_u_clears_active_draft(monkeypatch, trans
     finally:
         overlay.close()
 
+
 def test_standalone_overlay_editor_ctrl_h_opens_help_and_del_deletes(
     monkeypatch, translator
 ) -> None:
@@ -131,9 +140,13 @@ def test_standalone_overlay_editor_ctrl_h_opens_help_and_del_deletes(
             animate_module.KeyEvent("\r"),
         )
     )
-    monkeypatch.setattr(overlay_editor_module, "_terminal", lambda _options: Terminal(120, 8, False, True))
+    monkeypatch.setattr(
+        overlay_editor_module, "_terminal", lambda _options: Terminal(120, 8, False, True)
+    )
     monkeypatch.setattr(animate_module, "_terminal", lambda _options: Terminal(120, 8, False, True))
-    monkeypatch.setattr(overlay_editor_module, "read_event", lambda _decoder, _timeout: next(events))
+    monkeypatch.setattr(
+        overlay_editor_module, "read_event", lambda _decoder, _timeout: next(events)
+    )
     monkeypatch.setattr(animate_module, "read_event", lambda _decoder, _timeout: next(events))
 
     try:
@@ -157,6 +170,7 @@ def test_standalone_overlay_editor_ctrl_h_opens_help_and_del_deletes(
     finally:
         overlay.close()
 
+
 def test_standalone_overlay_editor_word_motions_position_insertions(
     monkeypatch, translator
 ) -> None:
@@ -172,8 +186,12 @@ def test_standalone_overlay_editor_word_motions_position_insertions(
             animate_module.KeyEvent("\r"),
         )
     )
-    monkeypatch.setattr(overlay_editor_module, "_terminal", lambda _options: Terminal(120, 6, False, True))
-    monkeypatch.setattr(overlay_editor_module, "read_event", lambda _decoder, _timeout: next(events))
+    monkeypatch.setattr(
+        overlay_editor_module, "_terminal", lambda _options: Terminal(120, 6, False, True)
+    )
+    monkeypatch.setattr(
+        overlay_editor_module, "read_event", lambda _decoder, _timeout: next(events)
+    )
 
     try:
         overlay_editor_module._run_overlay_editor(
@@ -186,6 +204,7 @@ def test_standalone_overlay_editor_word_motions_position_insertions(
         assert overlay.config.text == "Yfoo Xbar"
     finally:
         overlay.close()
+
 
 def test_overlay_editor_controls_distinguish_standalone_and_dashboard() -> None:
     translator = load_translator("en")
@@ -202,6 +221,7 @@ def test_overlay_editor_controls_distinguish_standalone_and_dashboard() -> None:
     assert dashboard[:2] == standalone[:2]
     assert dashboard[2].startswith("OVERALL ·")
     assert "Ctrl-J / Ctrl-K pane height" in dashboard[2]
+
 
 def test_standalone_help_shows_overlay_timeout_hint(
     monkeypatch, translator, animation_launch
@@ -230,6 +250,7 @@ def test_standalone_help_shows_overlay_timeout_hint(
         "\n".join(frame.rows) for frame in frames if "Animation help" in "\n".join(frame.rows)
     )
     assert "└─ Overlay commands time out after 30 seconds." in help_text
+
 
 def test_standalone_animation_paints_text_overlay_in_final_frame(translator) -> None:
     stream = StringIO()

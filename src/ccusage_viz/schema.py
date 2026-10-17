@@ -114,7 +114,8 @@ def _record(
     return UsageRecord(
         day=(
             _day(row, path)
-            if day is None and source not in {SourceKind.CODEX_SESSIONS, SourceKind.PROJECT_SESSIONS}
+            if day is None
+            and source not in {SourceKind.CODEX_SESSIONS, SourceKind.PROJECT_SESSIONS}
             else day
         ),
         agent=agent,

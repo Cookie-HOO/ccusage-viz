@@ -64,6 +64,7 @@ def resolve_metric(config: CustomChartConfig, descriptor: V2ProbeDescriptor) -> 
         ranking_comparison=comparison,
     )
 
+
 def apply_custom_monitor_defaults(
     config: CustomChartConfig, metric: V2MetricDescriptor
 ) -> tuple[CustomChartConfig, int | None]:

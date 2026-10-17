@@ -63,6 +63,7 @@ def _parse_data(
         raise CustomProtocolError(f"data must not contain more than {max_items} series")
     return CustomData(series)
 
+
 def _parse_ranking_group(value: object, *, index: int) -> CustomRankingGroup:
     name = f"data.groups[{index}]"
     source = _mapping(value, name)
@@ -89,6 +90,7 @@ def _parse_ranking_group(value: object, *, index: int) -> CustomRankingGroup:
         _parse_https_url(source["link"], f"{name}.link") if "link" in source else None,
     )
 
+
 def _parse_v2_ranking_data(
     value: object, *, partitioned: bool, max_items: int | None
 ) -> V2RankingData:
@@ -114,6 +116,7 @@ def _parse_v2_ranking_data(
         raise CustomProtocolError(f"data must not contain more than {max_items} series")
     return V2RankingData(series=series)
 
+
 def _parse_v2_ranking_group(value: object, *, index: int) -> V2RankingGroup:
     name = f"data.groups[{index}]"
     source = _mapping(value, name)
@@ -136,6 +139,7 @@ def _parse_v2_ranking_group(value: object, *, index: int) -> V2RankingGroup:
         _parse_https_url(source["link"], f"{name}.link") if "link" in source else None,
     )
 
+
 def _parse_v2_ranking_entry(value: object, *, name: str) -> CustomRankingEntry:
     source = _mapping(value, name)
     if "points" in source:
@@ -154,6 +158,7 @@ def _parse_v2_ranking_entry(value: object, *, name: str) -> CustomRankingEntry:
         _parse_https_url(source["link"], f"{name}.link") if "link" in source else None,
     )
 
+
 def _normalized_localized(source: object, key: str) -> LocalizedText | None:
     """Parse an optional localized field, normalising whitespace-only values to None."""
     value = source.get(key, None) if isinstance(source, dict) else None
@@ -163,6 +168,7 @@ def _normalized_localized(source: object, key: str) -> LocalizedText | None:
     if not (result.en.strip() or result.zh_cn.strip()):
         return None
     return result
+
 
 def _parse_v2_monitor_observation(value: object) -> V2MonitorObservation:
     source = _mapping(value, "v2 monitor observation")
@@ -185,6 +191,7 @@ def _parse_v2_monitor_observation(value: object) -> V2MonitorObservation:
         _parse_decimal(source.get("total"), "v2 monitor observation total"),
         groups,
     )
+
 
 def _parse_series(
     value: object, *, descriptions_allowed: bool, name: str = "series"
@@ -226,6 +233,7 @@ def _parse_series(
         _parse_https_url(source["link"], field("link")) if "link" in source else None,
     )
 
+
 def _parse_point(value: object, *, name: str = "point") -> CustomPoint:
     source = _mapping(value, name)
     separator = "." if name != "point" else " "
@@ -233,6 +241,7 @@ def _parse_point(value: object, *, name: str = "point") -> CustomPoint:
         _parse_date(source.get("date"), f"{name}{separator}date"),
         _parse_decimal(source.get("value"), f"{name}{separator}value"),
     )
+
 
 def _parse_summary(value: object) -> CustomSummary:
     source = _mapping(value, "summary")
@@ -250,6 +259,7 @@ def _parse_summary(value: object) -> CustomSummary:
             _parse_comparison(metric.get("year_over_year"), "year-over-year comparison"),
         )
     )
+
 
 def _parse_comparison(value: object, name: str) -> CustomComparison:
     source = _mapping(value, name)

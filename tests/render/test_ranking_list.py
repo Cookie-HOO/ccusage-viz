@@ -1,20 +1,3 @@
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 from ccusage_viz.formatting import display_width
 from ccusage_viz.i18n import load_translator
 from ccusage_viz.render.base import RenderContext
@@ -49,6 +32,7 @@ def test_historical_ranking_list_keeps_label_and_value_columns_aligned() -> None
     assert rows[0].endswith("10")
     assert rows[1].endswith("five units")
     assert display_width(rows[0]) == display_width(rows[1])
+
 
 def test_historical_ranking_list_prioritizes_labels_and_omits_auxiliary_indicators() -> None:
     context = RenderContext(
@@ -90,11 +74,14 @@ def test_historical_ranking_list_prioritizes_labels_and_omits_auxiliary_indicato
     assert "vs prior" not in output and "Rank Δ" not in output and "%" not in output
     assert "Current" in header and "Scale" not in header
 
+
 def test_historical_ranking_list_keeps_native_compactable_labels_and_fits_wide_value() -> None:
     entries = (
         RankingPresentationEntry("a", "prefix/shared-project-a | native", 10),
         RankingPresentationEntry("b", "prefix/shared-project-b | native", 5),
-        RankingPresentationEntry("c", "prefix/shared-project-c | native", 1, display="value-too-wide"),
+        RankingPresentationEntry(
+            "c", "prefix/shared-project-c | native", 1, display="value-too-wide"
+        ),
     )
     wide_output = render_historical_ranking(
         entries,

@@ -45,10 +45,14 @@ def test_ccuv_state_roots_keep_dataset_and_preset_domains_as_siblings(
     root = ccuv_state_root(environ=environ, home=Path("/home/test"), platform=platform)
 
     assert root == Path(expected)
-    assert dataset_state_root(environ=environ, home=Path("/home/test"), platform=platform) == root / "datasets"
-    assert dashboard_preset_state_root(
-        environ=environ, home=Path("/home/test"), platform=platform
-    ) == root / "dashboard-presets"
+    assert (
+        dataset_state_root(environ=environ, home=Path("/home/test"), platform=platform)
+        == root / "datasets"
+    )
+    assert (
+        dashboard_preset_state_root(environ=environ, home=Path("/home/test"), platform=platform)
+        == root / "dashboard-presets"
+    )
 
 
 def test_dataset_directory_rejects_unsafe_ids(tmp_path: Path) -> None:

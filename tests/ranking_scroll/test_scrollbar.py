@@ -42,6 +42,7 @@ def test_direct_wheel_steps_and_bounds(visible_rows: int) -> None:
     assert viewport.offset == maximum - 1
     assert not viewport.scroll(0)
 
+
 def test_small_and_zero_height_viewports() -> None:
     viewport = RankingViewport(total_rows=100, visible_rows=2)
     assert viewport.scroll(1)
@@ -49,6 +50,7 @@ def test_small_and_zero_height_viewports() -> None:
     viewport.visible_rows = 0
     assert not viewport.scroll(1)
     assert viewport.offset == 1
+
 
 @pytest.mark.parametrize("spacing", ("compact", "space", "line", "dashed"))
 @pytest.mark.parametrize("descriptions", (False, True))
@@ -73,6 +75,7 @@ def test_isolated_wheel_moves_tracked_entry_one_screen_row(spacing, descriptions
     assert viewport.scroll(-1)
     render(model, viewport, ctx, spacing=spacing)
     assert tracked_row() == before - 2
+
 
 def test_dashboard_partition_mode_switch_clears_incompatible_viewport_state() -> None:
     from ccusage_viz.terminal import Terminal
@@ -105,6 +108,7 @@ def test_dashboard_partition_mode_switch_clears_incompatible_viewport_state() ->
     assert flat.active
     assert grouped.offset == 0 and not grouped.hits and not grouped.rows
 
+
 def test_list_viewport_has_no_copy_actions_and_expands_labels() -> None:
     viewport = RankingViewport()
 
@@ -122,6 +126,7 @@ def test_list_viewport_has_no_copy_actions_and_expands_labels() -> None:
     assert "⊞" not in output and "→" not in output
     assert "Project 19" in output
 
+
 def test_direct_and_viewport_search_render_the_same_row_facts() -> None:
     model = _search_fact_projection()
     ctx = replace(context(height=20, width=100), style="bar")
@@ -135,6 +140,7 @@ def test_direct_and_viewport_search_render_the_same_row_facts() -> None:
     viewport_row = next(line for line in windowed.splitlines() if "Claude" in line)
     assert direct_row == viewport_row
 
+
 @pytest.mark.parametrize("height", (0, 1, 2, 3))
 def test_tiny_viewports_and_empty_comparison(height):
     model = projection(0, comparison=True)
@@ -142,6 +148,7 @@ def test_tiny_viewports_and_empty_comparison(height):
     render(model, viewport, context(height=height, density="detailed"))
     assert viewport.total_rows == 0
     assert not viewport.scroll(1)
+
 
 def test_standalone_custom_ranking_does_not_use_dashboard_viewport(monkeypatch):
     from ccusage_viz.custom_component import CustomHistoricalComponent
@@ -153,12 +160,15 @@ def test_standalone_custom_ranking_does_not_use_dashboard_viewport(monkeypatch):
     component.accepted_config = model.config
     component.pending_generation = None
     monkeypatch.setattr(
-        tui_custom_rendering, "render_custom_ranking_viewport", lambda *a, **kw: pytest.fail("standalone viewport")
+        tui_custom_rendering,
+        "render_custom_ranking_viewport",
+        lambda *a, **kw: pytest.fail("standalone viewport"),
     )
     output = tui_custom_rendering._custom_standalone_render(
         component, load_translator("en"), Terminal(100, 12, False, False), pending=False
     )
     assert "Project 99" in output.chart
+
 
 @pytest.mark.parametrize("ascii", (False, True))
 def test_scrollbar_persists_on_overflow_and_tracks_wheel_offset(ascii):
@@ -185,6 +195,7 @@ def test_scrollbar_persists_on_overflow_and_tracks_wheel_offset(ascii):
     bar = viewport.scrollbar
     assert bar.thumb_top + bar.thumb_size == bar.top + bar.height
 
+
 @pytest.mark.parametrize("grouped", (False, True))
 @pytest.mark.parametrize("ascii", (False, True))
 def test_scrollbar_expands_thumb_only_while_hovered(grouped, ascii):
@@ -205,6 +216,7 @@ def test_scrollbar_expands_thumb_only_while_hovered(grouped, ascii):
     track = next(row for row in range(bar.top, bar.top + bar.height) if not bar.on_thumb(row))
     assert compact_rows[track][-1] == hovered_rows[track][-1] == line
 
+
 @pytest.mark.parametrize("spacing", ("compact", "space", "line", "dashed"))
 def test_scrollbar_visibility_counts_descriptions_and_spacing(spacing):
     model = projection(5, descriptions=True)
@@ -221,6 +233,7 @@ def test_scrollbar_visibility_counts_descriptions_and_spacing(spacing):
     assert viewport.scrollbar is None
     render(projection(0), viewport, ctx, scrollbar=True)
     assert viewport.scrollbar is None
+
 
 @pytest.mark.parametrize("height,width", ((0, 80), (1, 80), (24, 1)))
 def test_scrollbar_not_drawn_when_no_room(height, width):

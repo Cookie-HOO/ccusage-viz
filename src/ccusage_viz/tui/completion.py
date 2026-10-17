@@ -55,6 +55,7 @@ def collect(session: TuiSession) -> bool:
         start_header,
         start_pane,
     )
+
     changed = False
 
     def retire_manual_refresh(operation: OperationToken) -> None:
@@ -64,7 +65,28 @@ def collect(session: TuiSession) -> bool:
         session.manual_refresh_operations.remove(operation)
         if not session.manual_refresh_operations:
             changed = True
-    active_operations = {lifecycle.active for lifecycle in (session.header.lifecycle, *(summary.lifecycle for summary in session.header.custom_summaries.values()), *(lifecycle for pane in session.panes for lifecycle in ((pane.lifecycle, pane.summary.lifecycle) if isinstance(pane, TuiCustomPane) and pane.summary is not None else (pane.lifecycle,) if isinstance(pane, TuiChartPane) and pane.summary_lifecycle is not None else (pane.lifecycle,) if isinstance(pane, TuiChartPane) else ()))) if lifecycle.active is not None}
+
+    active_operations = {
+        lifecycle.active
+        for lifecycle in (
+            session.header.lifecycle,
+            *(summary.lifecycle for summary in session.header.custom_summaries.values()),
+            *(
+                lifecycle
+                for pane in session.panes
+                for lifecycle in (
+                    (pane.lifecycle, pane.summary.lifecycle)
+                    if isinstance(pane, TuiCustomPane) and pane.summary is not None
+                    else (pane.lifecycle,)
+                    if isinstance(pane, TuiChartPane) and pane.summary_lifecycle is not None
+                    else (pane.lifecycle,)
+                    if isinstance(pane, TuiChartPane)
+                    else ()
+                )
+            ),
+        )
+        if lifecycle.active is not None
+    }
     if session.manual_refresh_operations - active_operations:
         session.manual_refresh_operations.intersection_update(active_operations)
         changed = True
@@ -109,7 +131,7 @@ def collect(session: TuiSession) -> bool:
             else:
                 response = outcome.result.custom_response
                 if not isinstance(response, (CustomSummaryResponse, V2SummaryResponse)):
-                    raise TypeError('custom provider result does not contain a summary response')
+                    raise TypeError("custom provider result does not contain a summary response")
                 summary.response = response
                 record_custom_warnings(session, summary.source, response)
                 summary.error = None
@@ -148,7 +170,7 @@ def collect(session: TuiSession) -> bool:
             else:
                 response = outcome.result.custom_response
                 if not isinstance(response, (CustomSummaryResponse, V2SummaryResponse)):
-                    raise TypeError('custom provider result does not contain a Pane summary')
+                    raise TypeError("custom provider result does not contain a Pane summary")
                 summary.response = response
                 record_custom_warnings(session, summary.source, response)
                 summary.error = None
@@ -165,7 +187,12 @@ def collect(session: TuiSession) -> bool:
                 changed = True
         retire_manual_refresh(operation)
         if summary.lifecycle.active is None:
-            summary.lifecycle.start_ready(now=observed_at, start=lambda operation, pane=pane: start_custom_pane_summary_submission(session, pane, operation))
+            summary.lifecycle.start_ready(
+                now=observed_at,
+                start=lambda operation, pane=pane: start_custom_pane_summary_submission(
+                    session, pane, operation
+                ),
+            )
     for pane in (item for item in session.panes if isinstance(item, TuiChartPane)):
         lifecycle = pane.summary_lifecycle
         if lifecycle is None or not isinstance(pane.component, HistoricalChartComponent):
@@ -186,7 +213,13 @@ def collect(session: TuiSession) -> bool:
             elif outcome.result is None:
                 lifecycle.abandon(operation)
             else:
-                pane.summary = build_builtin_pane_summary(outcome.chart, outcome.plan, outcome.result.records, outcome.result.coverage, accepted_at=datetime.now().astimezone())
+                pane.summary = build_builtin_pane_summary(
+                    outcome.chart,
+                    outcome.plan,
+                    outcome.result.records,
+                    outcome.result.coverage,
+                    accepted_at=datetime.now().astimezone(),
+                )
                 pane.component.set_summary(pane.summary.summary)
                 pane.summary_error = None
                 lifecycle.complete(operation, generation=outcome.generation)
@@ -211,47 +244,123 @@ def collect(session: TuiSession) -> bool:
                 if not pane.lifecycle.accepts(operation, generation=outcome.generation):
                     pane.lifecycle.abandon(operation)
                 elif outcome.error is not None:
-                    failure = outcome.error.values.get('custom_failure') if isinstance(outcome.error, QueryError) else None
+                    failure = (
+                        outcome.error.values.get("custom_failure")
+                        if isinstance(outcome.error, QueryError)
+                        else None
+                    )
                     retry = False
-                    if isinstance(failure, CustomProtocolFailure) and failure.code == 'unsupported_query' and (failure.unsupported is not None) and isinstance(pane.component, (CustomHistoricalComponent, CustomMonitorComponent)) and (pane.component.switch_target_config is not None) and (pane.component.v2_descriptor is not None):
-                        target = next((metric for metric in pane.component.v2_descriptor.metrics if metric.id == pane.component.request_config.metric_id), None)
-                        field = failure.unsupported.get('field')
-                        retry = target is not None and field is not None and pane.component.retry_metric_switch(field, target)
+                    if (
+                        isinstance(failure, CustomProtocolFailure)
+                        and failure.code == "unsupported_query"
+                        and (failure.unsupported is not None)
+                        and isinstance(
+                            pane.component, (CustomHistoricalComponent, CustomMonitorComponent)
+                        )
+                        and (pane.component.switch_target_config is not None)
+                        and (pane.component.v2_descriptor is not None)
+                    ):
+                        target = next(
+                            (
+                                metric
+                                for metric in pane.component.v2_descriptor.metrics
+                                if metric.id == pane.component.request_config.metric_id
+                            ),
+                            None,
+                        )
+                        field = failure.unsupported.get("field")
+                        retry = (
+                            target is not None
+                            and field is not None
+                            and pane.component.retry_metric_switch(field, target)
+                        )
                     if retry:
                         pane.lifecycle.complete(operation, generation=outcome.generation)
-                        refresh(session, index, trigger=LifecycleTrigger.CONFIGURATION, data_affecting=False)
+                        refresh(
+                            session,
+                            index,
+                            trigger=LifecycleTrigger.CONFIGURATION,
+                            data_affecting=False,
+                        )
                         changed = True
                         continue
-                    if isinstance(failure, CustomProtocolFailure) and failure.code == 'unsupported_query' and (failure.unsupported is not None) and isinstance(pane.component, (CustomHistoricalComponent, CustomMonitorComponent)) and (pane.component.switch_target_config is not None) and (pane.component.v2_descriptor is not None):
-                        target = next((metric for metric in pane.component.v2_descriptor.metrics if metric.id == pane.component.request_config.metric_id), None)
-                        field = failure.unsupported.get('field')
+                    if (
+                        isinstance(failure, CustomProtocolFailure)
+                        and failure.code == "unsupported_query"
+                        and (failure.unsupported is not None)
+                        and isinstance(
+                            pane.component, (CustomHistoricalComponent, CustomMonitorComponent)
+                        )
+                        and (pane.component.switch_target_config is not None)
+                        and (pane.component.v2_descriptor is not None)
+                    ):
+                        target = next(
+                            (
+                                metric
+                                for metric in pane.component.v2_descriptor.metrics
+                                if metric.id == pane.component.request_config.metric_id
+                            ),
+                            None,
+                        )
+                        field = failure.unsupported.get("field")
                         if target is not None and field is not None:
                             pane.component.cancel_metric_switch()
-                            session.copy_feedback.show(session.translator.text('status.custom_metric_switch_no_default', metric=_dataset_title(target.title, session.translator), field=field))
+                            session.copy_feedback.show(
+                                session.translator.text(
+                                    "status.custom_metric_switch_no_default",
+                                    metric=_dataset_title(target.title, session.translator),
+                                    field=field,
+                                )
+                            )
                             pane.lifecycle.complete(operation, generation=outcome.generation)
                             changed = True
                             continue
-                    failed = pane.component.fail(outcome.error, generation=outcome.generation) if isinstance(pane.component, CustomMonitorComponent) else pane.component.fail(outcome.error, generation=outcome.generation, purpose='primary' if outcome.purpose == 'probe' else outcome.purpose)
+                    failed = (
+                        pane.component.fail(outcome.error, generation=outcome.generation)
+                        if isinstance(pane.component, CustomMonitorComponent)
+                        else pane.component.fail(
+                            outcome.error,
+                            generation=outcome.generation,
+                            purpose="primary" if outcome.purpose == "probe" else outcome.purpose,
+                        )
+                    )
                     if failed:
-                        record_custom_log(session, pane, 'error', _custom_failure_log_detail(outcome.error, session.translator))
+                        record_custom_log(
+                            session,
+                            pane,
+                            "error",
+                            _custom_failure_log_detail(outcome.error, session.translator),
+                        )
                         pane.lifecycle.complete(operation, generation=outcome.generation)
                         changed = True
                     else:
                         pane.lifecycle.abandon(operation)
                 elif outcome.result is None:
                     pane.lifecycle.abandon(operation)
-                elif outcome.purpose == 'probe':
+                elif outcome.purpose == "probe":
                     response = outcome.result.custom_response
                     if isinstance(pane.component, CustomMonitorComponent):
                         if not isinstance(response, V2ProbeResponse):
-                            raise TypeError('custom monitor probe did not return a V2 response')
+                            raise TypeError("custom monitor probe did not return a V2 response")
                         resolved = resolve_metric(pane.component.candidate, response.descriptor)
-                        metric = next((item for item in response.descriptor.metrics if item.id == resolved.metric_id), None)
-                        if metric is None or not isinstance(metric.capabilities.charts.get('monitor'), V2MonitorCapability):
-                            raise TypeError('custom monitor metric is not supported by runtime probe')
+                        metric = next(
+                            (
+                                item
+                                for item in response.descriptor.metrics
+                                if item.id == resolved.metric_id
+                            ),
+                            None,
+                        )
+                        if metric is None or not isinstance(
+                            metric.capabilities.charts.get("monitor"), V2MonitorCapability
+                        ):
+                            raise TypeError(
+                                "custom monitor metric is not supported by runtime probe"
+                            )
                         from ccusage_viz.custom_monitor_defaults import (
                             apply_custom_monitor_defaults,
                         )
+
                         resolved, display_window = apply_custom_monitor_defaults(resolved, metric)
                         pane.component.configure(resolved, data_affecting=False)
                         pane.component.set_metric(metric)
@@ -259,24 +368,54 @@ def collect(session: TuiSession) -> bool:
                             pane.component.configure_display_window(display_window)
                     elif isinstance(response, V2ProbeResponse):
                         resolved = resolve_metric(pane.component.candidate, response.descriptor)
-                        descriptor = v2_metric_probe_descriptor(response.descriptor, resolved.metric_id)
-                        pane.component.configure(apply_custom_probe_defaults(resolved, descriptor, timezone=session.options.host.timezone or 'UTC'), data_affecting=False)
-                        pane.component.set_capability(descriptor.capabilities.charts[pane.component.candidate.kind])
+                        descriptor = v2_metric_probe_descriptor(
+                            response.descriptor, resolved.metric_id
+                        )
+                        pane.component.configure(
+                            apply_custom_probe_defaults(
+                                resolved,
+                                descriptor,
+                                timezone=session.options.host.timezone or "UTC",
+                            ),
+                            data_affecting=False,
+                        )
+                        pane.component.set_capability(
+                            descriptor.capabilities.charts[pane.component.candidate.kind]
+                        )
                     elif not isinstance(response, CustomProbeResponse):
-                        raise TypeError('custom provider result does not contain a probe response')
+                        raise TypeError("custom provider result does not contain a probe response")
                     if session.options.host.timezone is None:
-                        raise RuntimeError('custom Dataset requests require a timezone')
-                    if isinstance(pane.component, CustomHistoricalComponent) and isinstance(response, CustomProbeResponse):
-                        pane.component.configure(apply_custom_probe_defaults(pane.component.candidate, response.descriptor, timezone=session.options.host.timezone), data_affecting=False)
-                        pane.component.set_capability(response.descriptor.capabilities.charts[pane.component.candidate.kind])
+                        raise RuntimeError("custom Dataset requests require a timezone")
+                    if isinstance(pane.component, CustomHistoricalComponent) and isinstance(
+                        response, CustomProbeResponse
+                    ):
+                        pane.component.configure(
+                            apply_custom_probe_defaults(
+                                pane.component.candidate,
+                                response.descriptor,
+                                timezone=session.options.host.timezone,
+                            ),
+                            data_affecting=False,
+                        )
+                        pane.component.set_capability(
+                            response.descriptor.capabilities.charts[pane.component.candidate.kind]
+                        )
                     if isinstance(pane.component, CustomHistoricalComponent):
                         capability = pane.component.capability
-                        if capability is not None and capability.refresh_interval_seconds is not None:
-                            pane.scheduler.rebuild(capability.refresh_interval_seconds, now=observed_at)
+                        if (
+                            capability is not None
+                            and capability.refresh_interval_seconds is not None
+                        ):
+                            pane.scheduler.rebuild(
+                                capability.refresh_interval_seconds, now=observed_at
+                            )
                     pane.probe_complete = True
                     try:
                         from ccusage_viz.datasets.service import DatasetService
-                        DatasetService().update_runtime_probe(pane.component.candidate.source, response)
+
+                        DatasetService().update_runtime_probe(
+                            pane.component.candidate.source, response
+                        )
                     except OSError:
                         pass
                     record_custom_warnings(session, pane.component.candidate.source, response)
@@ -286,32 +425,72 @@ def collect(session: TuiSession) -> bool:
                 elif isinstance(pane.component, CustomMonitorComponent):
                     response = outcome.result.custom_response
                     if not isinstance(response, V2MonitorResponse):
-                        raise TypeError('custom monitor query did not return a V2 observation')
-                    if pane.component.accept(CustomMonitorCompletion(outcome.generation, pane.component.request_config, response), accepted_at=datetime.now().astimezone()):
+                        raise TypeError("custom monitor query did not return a V2 observation")
+                    if pane.component.accept(
+                        CustomMonitorCompletion(
+                            outcome.generation, pane.component.request_config, response
+                        ),
+                        accepted_at=datetime.now().astimezone(),
+                    ):
                         record_custom_warnings(session, pane.component.candidate.source, response)
-                        record_custom_log(session, pane, 'ok', session.translator.text('status.custom_query_succeeded'))
+                        record_custom_log(
+                            session,
+                            pane,
+                            "ok",
+                            session.translator.text("status.custom_query_succeeded"),
+                        )
                         pane.lifecycle.complete(operation, generation=outcome.generation)
                         session.last_successful_update = pane.component.accepted_at
                         if pane.attachment is not None:
-                            _update_custom_monitor_attachment_activity(pane.component, pane.attachment, now=time.monotonic(), wall=pane.component.accepted_at, translator=session.translator)
+                            _update_custom_monitor_attachment_activity(
+                                pane.component,
+                                pane.attachment,
+                                now=time.monotonic(),
+                                wall=pane.component.accepted_at,
+                                translator=session.translator,
+                            )
                         changed = True
                     else:
                         pane.lifecycle.abandon(operation)
-                elif pane.component.apply_provider_result(outcome.result, purpose=outcome.purpose, comparison_request_config=outcome.comparison_request_config):
-                    record_custom_warnings(session, pane.component.candidate.source, outcome.result.custom_response)
-                    record_custom_log(session, pane, 'ok', session.translator.text('status.custom_query_succeeded'))
+                elif pane.component.apply_provider_result(
+                    outcome.result,
+                    purpose=outcome.purpose,
+                    comparison_request_config=outcome.comparison_request_config,
+                ):
+                    record_custom_warnings(
+                        session, pane.component.candidate.source, outcome.result.custom_response
+                    )
+                    record_custom_log(
+                        session,
+                        pane,
+                        "ok",
+                        session.translator.text("status.custom_query_succeeded"),
+                    )
                     pane.lifecycle.complete(operation, generation=outcome.generation)
                     session.last_successful_update = pane.component.accepted_at
                     changed = True
-                    if outcome.purpose == 'primary' and pane.component.start_comparison() is not None:
-                        refresh(session, index, trigger=LifecycleTrigger.CONFIGURATION, data_affecting=False)
+                    if (
+                        outcome.purpose == "primary"
+                        and pane.component.start_comparison() is not None
+                    ):
+                        refresh(
+                            session,
+                            index,
+                            trigger=LifecycleTrigger.CONFIGURATION,
+                            data_affecting=False,
+                        )
                 else:
                     pane.lifecycle.abandon(operation)
             except Exception as exc:
                 if pane.lifecycle.accepts(operation, generation=operation.generation):
                     pane.lifecycle.abandon(operation)
-                    if pane.component.fail(exc, generation=operation.generation, purpose='primary'):
-                        record_custom_log(session, pane, 'error', _custom_failure_log_detail(exc, session.translator))
+                    if pane.component.fail(exc, generation=operation.generation, purpose="primary"):
+                        record_custom_log(
+                            session,
+                            pane,
+                            "error",
+                            _custom_failure_log_detail(exc, session.translator),
+                        )
                         changed = True
             retire_manual_refresh(operation)
             start_pane(session, index, now=observed_at)
@@ -335,7 +514,14 @@ def collect(session: TuiSession) -> bool:
                 retire_manual_refresh(operation)
                 continue
             if loaded.error is not None:
-                failed = component.fail(loaded.error, generation=loaded.generation, purpose=loaded.purpose) if isinstance(component, HistoricalChartComponent) and isinstance(loaded, HistoricalOutcome) else component.fail(loaded.error, generation=loaded.generation)
+                failed = (
+                    component.fail(
+                        loaded.error, generation=loaded.generation, purpose=loaded.purpose
+                    )
+                    if isinstance(component, HistoricalChartComponent)
+                    and isinstance(loaded, HistoricalOutcome)
+                    else component.fail(loaded.error, generation=loaded.generation)
+                )
                 if failed:
                     pane.lifecycle.complete(operation, generation=loaded.generation)
                     changed = True
@@ -350,43 +536,78 @@ def collect(session: TuiSession) -> bool:
                             continue
                         chart = component.candidate.chart
                         if not isinstance(chart, MonitorConfig):
-                            raise TypeError('monitor pane component has historical configuration')
+                            raise TypeError("monitor pane component has historical configuration")
                         steps = len(loaded.completions)
                         demo_now = observed_at
                         demo_wall = datetime.now().astimezone()
                         demo_seconds = chart.window_seconds / max(1, steps - 1)
-                        accepted = all((component.accept(completion, now=demo_now - (steps - ordinal) * demo_seconds, wall=demo_wall - timedelta(seconds=(steps - ordinal) * demo_seconds), detect_gap=False) for ordinal, completion in enumerate(loaded.completions, start=1)))
+                        accepted = all(
+                            (
+                                component.accept(
+                                    completion,
+                                    now=demo_now - (steps - ordinal) * demo_seconds,
+                                    wall=demo_wall
+                                    - timedelta(seconds=(steps - ordinal) * demo_seconds),
+                                    detect_gap=False,
+                                )
+                                for ordinal, completion in enumerate(loaded.completions, start=1)
+                            )
+                        )
                         if accepted:
                             pane.demo_ordinal = steps
                             pane.demo_warmed_generation = loaded.generation
-                            pane.scheduler.rebuild(component.candidate.host.interval, now=observed_at)
+                            pane.scheduler.rebuild(
+                                component.candidate.host.interval, now=observed_at
+                            )
                     else:
                         assert isinstance(loaded, MonitorOutcome)
                         assert loaded.completion is not None
-                        accepted = component.accept(loaded.completion, now=observed_at, wall=datetime.now().astimezone())
+                        accepted = component.accept(
+                            loaded.completion, now=observed_at, wall=datetime.now().astimezone()
+                        )
                         if accepted:
                             pane.demo_ordinal += 1
                 else:
                     assert isinstance(loaded, HistoricalOutcome)
                     assert loaded.completion is not None
                     accepted = component.accept(loaded.completion)
-                    if accepted and component.candidate.chart.kind == 'ranking':
+                    if accepted and component.candidate.chart.kind == "ranking":
                         _refresh_deltas(pane, component.ranking_values())
                         _refresh_ranks(pane, component.ranking_keys())
                 if accepted:
                     if pane.attachment is not None and isinstance(component, MonitorComponent):
-                        _update_monitor_attachment_activity(component, pane.attachment, now=observed_at, wall=datetime.now().astimezone(), translator=session.translator)
+                        _update_monitor_attachment_activity(
+                            component,
+                            pane.attachment,
+                            now=observed_at,
+                            wall=datetime.now().astimezone(),
+                            translator=session.translator,
+                        )
                     pane.lifecycle.complete(operation, generation=loaded.generation)
                     session.last_successful_update = component.accepted_at
                     changed = True
-                    if isinstance(component, HistoricalChartComponent) and isinstance(loaded, HistoricalOutcome) and (loaded.purpose is HistoricalPurpose.PRIMARY) and component.missing_comparison_coverage().intervals:
-                        refresh(session, index, trigger=LifecycleTrigger.CONFIGURATION, data_affecting=False)
+                    if (
+                        isinstance(component, HistoricalChartComponent)
+                        and isinstance(loaded, HistoricalOutcome)
+                        and (loaded.purpose is HistoricalPurpose.PRIMARY)
+                        and component.missing_comparison_coverage().intervals
+                    ):
+                        refresh(
+                            session,
+                            index,
+                            trigger=LifecycleTrigger.CONFIGURATION,
+                            data_affecting=False,
+                        )
                 else:
                     pane.lifecycle.abandon(operation)
         except Exception as exc:
             if pane.lifecycle.accepts(operation, generation=operation.generation):
                 pane.lifecycle.abandon(operation)
-                failed = component.fail(exc, generation=operation.generation, purpose=purpose) if isinstance(component, HistoricalChartComponent) else component.fail(exc, generation=operation.generation)
+                failed = (
+                    component.fail(exc, generation=operation.generation, purpose=purpose)
+                    if isinstance(component, HistoricalChartComponent)
+                    else component.fail(exc, generation=operation.generation)
+                )
                 if failed:
                     changed = True
         retire_manual_refresh(operation)

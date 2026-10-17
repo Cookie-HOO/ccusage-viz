@@ -34,6 +34,7 @@ def test_dashed_separator_uses_scheme_muted_across_widths(width: int, ascii_mode
         == expected
     )
 
+
 def test_flat_ranking_clipboard_includes_visible_values_and_shares() -> None:
     viewport = RankingViewport()
     model = projection(2)
@@ -47,6 +48,7 @@ def test_flat_ranking_clipboard_includes_visible_values_and_shares() -> None:
 
     render(model, viewport, replace(context(width=80, density="detailed"), style="list"))
     assert "%" not in viewport.clipboard_all_text()
+
 
 def test_copy_all_marker_follows_count_row_and_hides_without_it():
     model = projection(100)
@@ -78,6 +80,7 @@ def test_copy_all_marker_follows_count_row_and_hides_without_it():
     render(projection(0), viewport, copy_all_action=True)
     assert viewport.copy_all_hit is None
 
+
 @pytest.mark.parametrize("spacing", ("compact", "space", "line", "dashed"))
 @pytest.mark.parametrize("comparison", (False, True))
 def test_line_window_matches_full_output_with_partial_descriptions(spacing, comparison):
@@ -101,6 +104,7 @@ def test_line_window_matches_full_output_with_partial_descriptions(spacing, comp
             assert strip_ansi(window[row])[copy_column] == "⊞"
             assert strip_ansi(window[row])[link_column] == "→"
 
+
 @pytest.mark.parametrize("density", ("minimal", "normal", "full", "detailed"))
 def test_first_window_preserves_unwindowed_custom_body(density):
     model = projection(20, descriptions=True, comparison=True)
@@ -112,6 +116,7 @@ def test_first_window_preserves_unwindowed_custom_body(density):
     )
     # The caller owns the title. Body and table geometry remain identical.
     assert actual.splitlines()[1:] == expected.splitlines()[1:]
+
 
 def test_direct_search_preserves_rank_share_bar_count_and_link_matching() -> None:
     model = _search_fact_projection()
@@ -135,6 +140,7 @@ def test_direct_search_preserves_rank_share_bar_count_and_link_matching() -> Non
     alpha = next(line for line in full.splitlines() if "Alpha" in line)
     assert _track(alpha, "█", "░").count("█") == 41
 
+
 def test_search_reset_and_hit_identity_and_feedback():
     model = projection(100)
     viewport = RankingViewport()
@@ -155,6 +161,7 @@ def test_search_reset_and_hit_identity_and_feedback():
     assert "No ranking entries" in output
     assert viewport.offset == viewport.total_rows == 0
     assert viewport.hits == {}
+
 
 @pytest.mark.parametrize("changed", ("style", "density"))
 def test_presentation_change_renders_only_current_window(
@@ -197,10 +204,12 @@ def test_presentation_change_renders_only_current_window(
     assert not formatted
     assert viewport.offset > 0
 
+
 def test_zero_values_do_not_divide_by_zero():
     model = projection(1)
     model = replace(model, series=(replace(model.series[0], values=(Decimal(0),)),))
     assert "Project 0" in render(model, RankingViewport())
+
 
 def test_zero_growth_values_do_not_divide_by_zero():
     model = projection(1, comparison=True)
@@ -210,6 +219,7 @@ def test_zero_growth_values_do_not_divide_by_zero():
     output = render(model, RankingViewport(), context(density="detailed"))
 
     assert "Project 0" in output
+
 
 def test_density_change_reuses_data_and_preserves_stable_anchor():
     model = projection(100, descriptions=True)
@@ -227,6 +237,7 @@ def test_density_change_reuses_data_and_preserves_stable_anchor():
     new_index = next(index for index, entry in enumerate(entries) if str(entry.key) == anchor_id)
     assert viewport.offset == viewport.starts[new_index]
 
+
 def test_visible_copy_marker_wins_over_checkmark_in_label():
     model = projection(1)
     model = replace(
@@ -236,6 +247,7 @@ def test_visible_copy_marker_wins_over_checkmark_in_label():
     output = render(model, viewport).splitlines()
     row, (_, column, _) = next(iter(viewport.hits.items()))
     assert strip_ansi(output[row])[column] == "⊞"
+
 
 @pytest.mark.parametrize("width", (1, 3, 8, 20, 60))
 def test_clipped_icons_do_not_create_invisible_hit_targets(width):

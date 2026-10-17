@@ -222,8 +222,11 @@ def render_ranking(
 
     total = None if model.is_observed or pending else model.percentage_total.total
     formatted_values = [
-        "??" if pending else (
-            entry.display if isinstance(entry, ScalarRankingEntry) and entry.display is not None
+        "??"
+        if pending
+        else (
+            entry.display
+            if isinstance(entry, ScalarRankingEntry) and entry.display is not None
             else format_tokens(round(_entry_value(entry)))
         )
         for entry in entries

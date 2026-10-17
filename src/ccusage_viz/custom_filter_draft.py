@@ -174,7 +174,9 @@ def run_custom_filter_editor(
             continue
         if draft.search_editing:
             if key == "\x1b":
-                draft = replace(draft, query="", search_editing=False, option_index=0, viewport_row=0)
+                draft = replace(
+                    draft, query="", search_editing=False, option_index=0, viewport_row=0
+                )
             elif key in {"\r", "\n"}:
                 draft = replace(draft, search_editing=False)
             elif key in {"\x7f", "\b"}:
@@ -209,7 +211,9 @@ def run_custom_filter_editor(
             draft = draft.cycle_columns()
         elif key == " ":
             current = draft.current_filter(choices)
-            options = _matching_options(current, draft.query, translator) if current is not None else ()
+            options = (
+                _matching_options(current, draft.query, translator) if current is not None else ()
+            )
             if current is not None and options:
                 option = options[draft.option_index % len(options)]
                 draft = draft.toggle(current, option.id)
@@ -360,7 +364,11 @@ def _tab_layout(
         zip(choices, filter_tab_counts(accepted, choices), strict=True)
     ):
         label = _localized(choice.label, translator)
-        text = f"[{label} {selected}/{total}]" if index == active_index else f"{label} {selected}/{total}"
+        text = (
+            f"[{label} {selected}/{total}]"
+            if index == active_index
+            else f"{label} {selected}/{total}"
+        )
         tab_width = min(display_width(text), width)
         separator_width = display_width(" · ") if tabs and x != 1 else 0
         if x + separator_width + tab_width - 1 > width:
@@ -453,12 +461,20 @@ def _render_custom_filter_draft(
     options = _matching_options(current, draft.query, translator)
     selected = set(draft.selected(current.id))
     selected_count = sum(option.id in selected for option in all_options)
-    selected_status = translator.text("status.custom_filter_count", selected=selected_count, total=len(all_options))
-    selected_prefix, selected_value, selected_suffix = selected_status.partition(str(selected_count))
+    selected_status = translator.text(
+        "status.custom_filter_count", selected=selected_count, total=len(all_options)
+    )
+    selected_prefix, selected_value, selected_suffix = selected_status.partition(
+        str(selected_count)
+    )
     rows = tab_rows
     if draft.query or draft.search_editing:
         cursor = "_" if draft.search_editing else ""
-        rows.append(clip_width(translator.text("label.custom_filter_search", query=draft.query + cursor), width))
+        rows.append(
+            clip_width(
+                translator.text("label.custom_filter_search", query=draft.query + cursor), width
+            )
+        )
     if draft.query:
         rows.append(
             clip_width(

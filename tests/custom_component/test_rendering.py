@@ -58,6 +58,7 @@ def test_calendar_rejects_grouped_or_non_daily_results() -> None:
     with pytest.raises(CustomProjectionError, match="calendar"):
         process_custom_historical(response(), calendar)
 
+
 def test_relative_timestamp_heading_uses_configured_period() -> None:
     interval = TimestampRange(
         datetime.fromisoformat("2026-10-15T11:50:00+08:00"),
@@ -81,6 +82,7 @@ def test_relative_timestamp_heading_uses_configured_period() -> None:
     assert "pages" not in heading
     assert "2026-10-15T" not in heading
 
+
 def test_fixed_timestamp_heading_uses_exact_aware_half_open_bounds() -> None:
     interval = TimestampRange(
         datetime.fromisoformat("2026-10-15T11:50:00+08:00"),
@@ -100,6 +102,7 @@ def test_fixed_timestamp_heading_uses_exact_aware_half_open_bounds() -> None:
 
     assert "Reading time · Ranking · by book" in heading
     assert "[2026-10-15T11:50:00+08:00, 2026-10-15T12:00:00+08:00)" in heading
+
 
 def test_v2_partitioned_ranking_heading_prefers_accepted_descriptor_metric_title() -> None:
     dataset_title = LocalizedText("Routing Dataset", "路由数据集")
@@ -186,6 +189,7 @@ def test_v2_partitioned_ranking_heading_prefers_accepted_descriptor_metric_title
     ):
         assert forbidden not in heading
 
+
 @pytest.mark.parametrize(
     "updated",
     (
@@ -201,6 +205,7 @@ def test_renderer_only_changes_do_not_require_custom_reprojection(updated: objec
 
     assert callable(updated)
     assert not custom_projection_replacement_required(current, updated(current))
+
 
 @pytest.mark.parametrize(
     "updated",
@@ -259,6 +264,7 @@ def test_renderer_only_config_reuses_accepted_projection(
         component.comparison_error,
     ) == lifecycle
 
+
 def test_primary_completion_accepts_renderer_change_while_pending() -> None:
     component = CustomHistoricalComponent(config())
     assert component.accept_response(response())
@@ -278,6 +284,7 @@ def test_primary_completion_accepts_renderer_change_while_pending() -> None:
     assert component.model is not None
     assert component.model.config == updated
     assert not component.is_pending
+
 
 def test_comparison_completion_accepts_and_normalizes_renderer_change() -> None:
     component = CustomHistoricalComponent(config(kind="ranking"))
@@ -302,6 +309,7 @@ def test_comparison_completion_accepts_and_normalizes_renderer_change() -> None:
     assert component.model.comparison_available
     assert not component.comparison_is_pending
 
+
 def test_comparison_renderer_disable_cancels_pending_and_rejects_old_completion() -> None:
     component = CustomHistoricalComponent(config(kind="ranking"))
     assert component.accept_response(response())
@@ -323,6 +331,7 @@ def test_comparison_renderer_disable_cancels_pending_and_rejects_old_completion(
     )
     assert component.comparison_response is None
 
+
 def test_renderer_only_config_while_pending_preserves_accepted_facts() -> None:
     component = CustomHistoricalComponent(config())
     assert component.accept_response(response())
@@ -343,6 +352,7 @@ def test_renderer_only_config_while_pending_preserves_accepted_facts() -> None:
     assert component.accepted_config is accepted_config
     assert component.model is accepted_model
     assert component.render_revision == revision + 1
+
 
 def test_renderer_only_config_reprojects_when_accepted_model_is_missing(
     monkeypatch: pytest.MonkeyPatch,
@@ -371,6 +381,7 @@ def test_renderer_only_config_reprojects_when_accepted_model_is_missing(
     assert component.model is not None
     assert component.model.config == updated
 
+
 @pytest.mark.parametrize(
     ("kind", "style", "expected"),
     (
@@ -392,6 +403,7 @@ def test_custom_charts_use_native_layout_primitives(kind: str, style: str, expec
     assert "Today’s Read 3.50 pages" not in output
     assert expected in output
 
+
 def test_custom_ranking_heading_is_centered_once() -> None:
     projection = process_custom_historical(
         response(),
@@ -406,6 +418,7 @@ def test_custom_ranking_heading_is_centered_once() -> None:
         len(heading) - len(heading.lstrip())
         == (context.width - display_width(heading.lstrip())) // 2
     )
+
 
 def test_custom_ranking_renders_localized_descriptions_only_when_visible() -> None:
     source = response((("api", "10"),))
@@ -438,6 +451,7 @@ def test_custom_ranking_renders_localized_descriptions_only_when_visible() -> No
     assert description_rows
     assert all(display_width(line) <= context.width for line in description_rows)
 
+
 def test_custom_descriptions_are_rejected_outside_ranking() -> None:
     source = response((("api", "10"),))
     described = replace(
@@ -457,6 +471,7 @@ def test_custom_descriptions_are_rejected_outside_ranking() -> None:
 
     with pytest.raises(CustomProjectionError, match="only by ranking"):
         process_custom_historical(described, config(kind="timeline"))
+
 
 def test_custom_calendar_preserves_decimal_values_for_shared_grid(
     monkeypatch: pytest.MonkeyPatch,
@@ -478,6 +493,7 @@ def test_custom_calendar_preserves_decimal_values_for_shared_grid(
     values = captured["values"]
     assert isinstance(values, dict)
     assert values[date(2026, 9, 1)] == Decimal("1.234567890123456789")
+
 
 @pytest.mark.parametrize(
     ("density", "has_footer", "has_streaks", "has_legend"),
@@ -506,6 +522,7 @@ def test_custom_calendar_uses_shared_density_footer(
     assert ("Current streak 0" in output) is has_streaks
     assert ("Longest streak 1" in output) is has_streaks
     assert ("Less . o O # More" in output) is has_legend
+
 
 def test_custom_timeline_preserves_decimal_values_until_plot_adapter(
     monkeypatch: pytest.MonkeyPatch,
@@ -538,6 +555,7 @@ def test_custom_timeline_preserves_decimal_values_until_plot_adapter(
         ["0.00", "0.31", "0.62", "0.93", "1.23"],
     )
 
+
 def test_custom_stack_preserves_decimal_values_until_grouped_plot_dispatch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -562,6 +580,7 @@ def test_custom_stack_preserves_decimal_values_until_grouped_plot_dispatch(
     assert values[0][0] == Decimal("1.234567890123456789")
     assert captured["tick_positions"][-1] == Decimal("1.234567890123456789")
 
+
 def test_custom_timeline_matches_native_total_palette_identity() -> None:
     projection = process_custom_historical(
         response((("total", "10"),)), config(group_by=None, top=None)
@@ -572,6 +591,7 @@ def test_custom_timeline_matches_native_total_palette_identity() -> None:
 
     assert f"\x1b[38;5;{categorical_color('total')}m" in output
     assert "pages" not in strip_ansi(output).splitlines()[0]
+
 
 def test_custom_timeline_labels_unit_once_and_keeps_numeric_ticks_unit_free() -> None:
     projection = process_custom_historical(
@@ -585,6 +605,7 @@ def test_custom_timeline_labels_unit_once_and_keeps_numeric_ticks_unit_free() ->
     assert "pages" not in output.splitlines()[0]
     assert "0.00 pages" not in output
     assert "2.50 pages" not in output
+
 
 def test_custom_timeline_places_prefix_unit_before_heading() -> None:
     prefix_unit = CustomUnit("credit", LocalizedText("$", "元"), "prefix", 2)
@@ -601,6 +622,7 @@ def test_custom_timeline_places_prefix_unit_before_heading() -> None:
     assert "Reading · Timeline · 2026-09-01–2026-09-02" in output
     assert "$" not in output.splitlines()[0]
     assert "$0.00" not in output
+
 
 def test_custom_ranking_shows_copy_marker_and_clipboard_description_text() -> None:
     source = response((("book", "10"),))
@@ -642,6 +664,7 @@ def test_custom_ranking_shows_copy_marker_and_clipboard_description_text() -> No
         == "Read GitHub https://github.com/example/book"
     )
 
+
 def test_custom_ranking_renders_project_link_after_copy_marker() -> None:
     source = response((("book", "10"),))
     source = replace(
@@ -666,6 +689,7 @@ def test_custom_ranking_renders_project_link_after_copy_marker() -> None:
     assert output.count("\x1b]8;;https://example.com/books/book\x1b\\") == 1
     assert projection.series[0].link == "https://example.com/books/book"
 
+
 def test_custom_ranking_title_omits_selected_dataset_filters() -> None:
     source = response((("book", "10"),))
     projection = process_custom_historical(
@@ -684,6 +708,7 @@ def test_custom_ranking_title_omits_selected_dataset_filters() -> None:
 
     assert "Filters: Genre Fiction" not in output.splitlines()[0]
 
+
 def test_custom_timeline_title_omits_selected_dataset_filters() -> None:
     source = response((("book", "10"),))
     projection = process_custom_historical(
@@ -696,6 +721,7 @@ def test_custom_timeline_title_omits_selected_dataset_filters() -> None:
     )
 
     assert "Filters: Genre Fiction" not in output.splitlines()[0]
+
 
 def test_custom_timeline_uses_native_area_validation() -> None:
     projection = process_custom_historical(response(), config(top=None))

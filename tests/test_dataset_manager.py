@@ -42,7 +42,11 @@ def status(*, availability: str = "ready") -> DatasetRegistrationStatus:
     descriptor = CustomProbeDescriptor(
         "weread-1",
         "0.1.0",
-        CustomDataset(text, LocalizedText("Daily reading time", "每日阅读时长"), CustomUnit("minute", text, "suffix", 2)),
+        CustomDataset(
+            text,
+            LocalizedText("Daily reading time", "每日阅读时长"),
+            CustomUnit("minute", text, "suffix", 2),
+        ),
         CustomCapabilities((), (), {"timeline": CustomChartCapability(("day",), (), ())}),
         {"timeline": CustomChartDefaults("14d", None, None)},
         (
@@ -86,7 +90,9 @@ def test_manager_uses_side_by_side_details_on_wide_terminals() -> None:
     translator = load_translator("en")
     statuses = (status(), status(availability="disabled"))
 
-    rendered = render_dataset_manager(statuses, translator, selected=1, details=True, width=120, height=24)
+    rendered = render_dataset_manager(
+        statuses, translator, selected=1, details=True, width=120, height=24
+    )
     body = "\n".join(rendered.frame.rows)
 
     assert "│" in body
@@ -95,7 +101,9 @@ def test_manager_uses_side_by_side_details_on_wide_terminals() -> None:
 
 
 def test_manager_uses_a_separate_detail_page_on_narrow_terminals() -> None:
-    rendered = render_dataset_manager((status(),), load_translator("en"), details=True, width=80, height=24)
+    rendered = render_dataset_manager(
+        (status(),), load_translator("en"), details=True, width=80, height=24
+    )
     body = "\n".join(rendered.frame.rows)
 
     assert "Daily reading time" in body
@@ -181,9 +189,7 @@ def test_official_catalog_description_reuses_custom_ranking_muted_style() -> Non
         ),
     )
 
-    rows = _official_catalog_rows(
-        (entry,), load_translator("zh"), selected=0, width=80, color=True
-    )
+    rows = _official_catalog_rows((entry,), load_translator("zh"), selected=0, width=80, color=True)
 
     assert rows[0] == "› 微信读书 · weread"
     assert "\x1b[" not in rows[0]

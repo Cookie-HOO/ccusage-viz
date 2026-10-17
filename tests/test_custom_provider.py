@@ -229,12 +229,22 @@ def test_coalesced_v2_probes_validate_against_the_executed_request_id(tmp_path: 
     )
     source = CustomCommandSource("router", (sys.executable, str(script)))
     runtime = build_query_runtime()
-    first = runtime.submit(custom_v2_probe_query_intent(
-        source, owner_id="dashboard:pane:2:0", generation=1, trigger=QueryTrigger.STARTUP,
-    ))
-    second = runtime.submit(custom_v2_probe_query_intent(
-        source, owner_id="dashboard:pane:3:1", generation=1, trigger=QueryTrigger.STARTUP,
-    ))
+    first = runtime.submit(
+        custom_v2_probe_query_intent(
+            source,
+            owner_id="dashboard:pane:2:0",
+            generation=1,
+            trigger=QueryTrigger.STARTUP,
+        )
+    )
+    second = runtime.submit(
+        custom_v2_probe_query_intent(
+            source,
+            owner_id="dashboard:pane:3:1",
+            generation=1,
+            trigger=QueryTrigger.STARTUP,
+        )
+    )
 
     assert isinstance(first.result().custom_response, V2ProbeResponse)
     assert isinstance(second.result().custom_response, V2ProbeResponse)
@@ -270,7 +280,9 @@ def test_custom_provider_executes_a_v2_probe(tmp_path: Path) -> None:
     )
     intent = custom_v2_probe_query_intent(
         CustomCommandSource("router", (sys.executable, str(script))),
-        owner_id="probe", generation=1, trigger=QueryTrigger.STARTUP,
+        owner_id="probe",
+        generation=1,
+        trigger=QueryTrigger.STARTUP,
     )
 
     response = build_query_runtime().acquire(intent).custom_response
@@ -335,11 +347,15 @@ def test_custom_provider_executes_probe_declared_subday_ranking_end_to_end(
         )
     )
     source = CustomCommandSource("router", (sys.executable, str(script)))
-    probe = build_query_runtime().acquire(
-        custom_v2_probe_query_intent(
-            source, owner_id="probe", generation=1, trigger=QueryTrigger.STARTUP
+    probe = (
+        build_query_runtime()
+        .acquire(
+            custom_v2_probe_query_intent(
+                source, owner_id="probe", generation=1, trigger=QueryTrigger.STARTUP
+            )
         )
-    ).custom_response
+        .custom_response
+    )
     assert isinstance(probe, V2ProbeResponse)
 
     initial = CustomChartConfig(
@@ -405,11 +421,21 @@ def test_custom_provider_executes_a_v2_chart_metric(tmp_path: Path) -> None:
         )
     )
     config = CustomChartConfig(
-        "timeline", CustomCommandSource("weread", (sys.executable, str(script))),
-        resolve_date_range("timeline", period="14d", since=None, until=None, today=date(2026, 9, 30)), metric_id="reading_time",
+        "timeline",
+        CustomCommandSource("weread", (sys.executable, str(script))),
+        resolve_date_range(
+            "timeline", period="14d", since=None, until=None, today=date(2026, 9, 30)
+        ),
+        metric_id="reading_time",
     )
     result = build_query_runtime().acquire(
-        custom_historical_query_intent(config, timezone="Asia/Shanghai", owner_id="pane", generation=1, trigger=QueryTrigger.STARTUP)
+        custom_historical_query_intent(
+            config,
+            timezone="Asia/Shanghai",
+            owner_id="pane",
+            generation=1,
+            trigger=QueryTrigger.STARTUP,
+        )
     )
 
     assert isinstance(result.custom_response, V2ChartResponse)

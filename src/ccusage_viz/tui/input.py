@@ -20,9 +20,10 @@ from ccusage_viz.tui_input import (
 
 
 def set_screen_cursor_visible(session: TuiSession, visible: bool) -> None:
-    stream = getattr(session.screen, 'stream', None)
+    stream = getattr(session.screen, "stream", None)
     if stream is not None:
         set_cursor_visible(stream, visible)
+
 
 def end_adjustment(session: TuiSession) -> None:
     session.adjustment_mode = None
@@ -30,6 +31,7 @@ def end_adjustment(session: TuiSession) -> None:
     session.focused = None
     session.grid_draft = None
     session.grid_error = None
+
 
 def read_adjustment_event(session: TuiSession, decoder: InputDecoder) -> object:
     timeout = 0.1
@@ -43,7 +45,9 @@ def read_adjustment_event(session: TuiSession, decoder: InputDecoder) -> object:
         timeout = min(timeout, remaining)
     if session.help_overlay is not None:
         event = read_event(decoder, timeout)
-        if isinstance(event, (KeyEvent, MouseEvent, PasteEvent, WheelEvent)) and (not (isinstance(event, KeyEvent) and event.value == '\x03')):
+        if isinstance(event, (KeyEvent, MouseEvent, PasteEvent, WheelEvent)) and (
+            not (isinstance(event, KeyEvent) and event.value == "\x03")
+        ):
             session.help_overlay.timer.record_input()
         elif event is None:
             session.help_overlay.timer.check()
@@ -57,11 +61,20 @@ def read_adjustment_event(session: TuiSession, decoder: InputDecoder) -> object:
         session.adjustment_timer.check()
     return event
 
+
 def raise_if_interrupt(session: TuiSession, event: object) -> object:
     """Route decoded Ctrl-C through the TUI's controlled cleanup path."""
-    if isinstance(event, KeyEvent) and event.value == '\x03':
+    if isinstance(event, KeyEvent) and event.value == "\x03":
         raise KeyboardInterrupt
     return event
 
+
 def animation_deadline(session: TuiSession) -> float | None:
-    return min((deadline for pane in session.panes if (deadline := _pane_animation_deadline(pane)) is not None), default=None)
+    return min(
+        (
+            deadline
+            for pane in session.panes
+            if (deadline := _pane_animation_deadline(pane)) is not None
+        ),
+        default=None,
+    )

@@ -346,7 +346,10 @@ def build_stack(
             Series(
                 key,
                 label,
-                tuple(_aggregate_daily(values, aggregation).get(day, TokenUsage.zero()) for day in days),
+                tuple(
+                    _aggregate_daily(values, aggregation).get(day, TokenUsage.zero())
+                    for day in days
+                ),
                 is_other,
             )
             for key, label, values, is_other in groups

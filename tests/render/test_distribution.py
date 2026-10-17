@@ -1,7 +1,3 @@
-
-
-
-
 from dataclasses import replace
 
 import pytest
@@ -26,6 +22,7 @@ def test_distribution_renderer_keeps_observation_metadata_outside_the_chart() ->
     assert "09" in output and "11" in output
     assert "09:00" not in output and "11:00" not in output
 
+
 def test_distribution_renderer_centers_hour_labels_on_bar_columns() -> None:
     model = _distribution_model()
     output = render_monitor_distribution(
@@ -38,11 +35,13 @@ def test_distribution_renderer_centers_hour_labels_on_bar_columns() -> None:
 
     assert second_tick + 1 == second_bar + 1
 
+
 def test_distribution_renderer_keeps_half_hour_tick_precision() -> None:
     model = replace(_distribution_model(), granularity="half-hour")
     output = render_monitor_distribution(model, context(True))
 
     assert "09:00" in output and "11:00" in output
+
 
 def test_distribution_renderer_uses_available_panel_height() -> None:
     output = render_monitor_distribution(
@@ -51,6 +50,7 @@ def test_distribution_renderer_uses_available_panel_height() -> None:
     )
 
     assert len(output.splitlines()) == 20
+
 
 @pytest.mark.parametrize(
     ("legend", "expected", "missing"),
@@ -74,6 +74,7 @@ def test_distribution_renderer_honors_every_monitor_legend_mode(
     assert expected in output
     if missing:
         assert missing not in output
+
 
 def test_distribution_renderer_ascii_no_color_is_safe_and_width_bounded() -> None:
     output = render_monitor_distribution(

@@ -243,7 +243,10 @@ class DatasetManifest:
 
     @classmethod
     def _parse_static_probe(cls, value: Mapping[str, object]) -> DatasetManifest:
-        if value.get("schema") != DATASET_MANIFEST_SCHEMA or value.get("protocol") not in {CUSTOM_PROTOCOL, CUSTOM_V2_PROTOCOL}:
+        if value.get("schema") != DATASET_MANIFEST_SCHEMA or value.get("protocol") not in {
+            CUSTOM_PROTOCOL,
+            CUSTOM_V2_PROTOCOL,
+        }:
             raise ValueError("manifest schema or protocol is unsupported")
         entrypoint = value.get("entrypoint")
         platform = value.get("platform")
@@ -379,9 +382,7 @@ class ReleaseArtifact:
                 raise ValueError("official release artifact is invalid")
 
     @classmethod
-    def parse_official(
-        cls, value: object, *, dataset_id: str, repository: str
-    ) -> ReleaseArtifact:
+    def parse_official(cls, value: object, *, dataset_id: str, repository: str) -> ReleaseArtifact:
         if not isinstance(value, Mapping) or set(value) != {
             "release_tag",
             "asset_name",
@@ -471,9 +472,7 @@ class CatalogEntry:
             LocalizedText.parse(value.get("summary"), field="catalog.summary"),
             repository,
             tuple(
-                ReleaseArtifact.parse_official(
-                    item, dataset_id=identifier, repository=repository
-                )
+                ReleaseArtifact.parse_official(item, dataset_id=identifier, repository=repository)
                 for item in artifacts
             ),
         )
@@ -748,7 +747,13 @@ class DatasetRegistration:
             "last_probe_error",
         }
         if not set(value).issubset(allowed) or {
-            "schema", "dataset_id", "source", "enabled", "created_at", "updated_at", "probe"
+            "schema",
+            "dataset_id",
+            "source",
+            "enabled",
+            "created_at",
+            "updated_at",
+            "probe",
         } - set(value):
             raise ValueError("Dataset registration has unsupported or missing fields")
         dataset_id = value.get("dataset_id")
@@ -778,13 +783,34 @@ class DatasetRegistration:
             raise ValueError("Dataset registration update candidate is invalid")
         source_kind = source.get("kind")
         if source_kind == "local":
-            if set(source) != {"kind", "command_argv"} or not isinstance(source.get("command_argv"), list) or not all(isinstance(item, str) for item in source["command_argv"]):
+            if (
+                set(source) != {"kind", "command_argv"}
+                or not isinstance(source.get("command_argv"), list)
+                or not all(isinstance(item, str) for item in source["command_argv"])
+            ):
                 raise ValueError("Dataset registration source is invalid")
-            parsed_source: DatasetSource = LocalDatasetSource(tuple(cast(list[str], source["command_argv"])))
+            parsed_source: DatasetSource = LocalDatasetSource(
+                tuple(cast(list[str], source["command_argv"]))
+            )
         elif source_kind in {"official", "github"}:
-            if set(source) != {"kind", "repository", "release_tag", "asset_name", "sha256"} or not all(isinstance(source.get(key), str) for key in ("repository", "release_tag", "asset_name", "sha256")):
+            if set(source) != {
+                "kind",
+                "repository",
+                "release_tag",
+                "asset_name",
+                "sha256",
+            } or not all(
+                isinstance(source.get(key), str)
+                for key in ("repository", "release_tag", "asset_name", "sha256")
+            ):
                 raise ValueError("Dataset registration source is invalid")
-            parsed_source = ManagedDatasetSource(cast(Literal["official", "github"], source_kind), cast(str, source["repository"]), cast(str, source["release_tag"]), cast(str, source["asset_name"]), cast(str, source["sha256"]))
+            parsed_source = ManagedDatasetSource(
+                cast(Literal["official", "github"], source_kind),
+                cast(str, source["repository"]),
+                cast(str, source["release_tag"]),
+                cast(str, source["asset_name"]),
+                cast(str, source["sha256"]),
+            )
         else:
             raise ValueError("Dataset registration source is invalid")
         probe_id = probe.get("dataset_id")

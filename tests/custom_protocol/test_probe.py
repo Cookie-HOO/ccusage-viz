@@ -51,6 +51,7 @@ def test_v2_probe_descriptor_parses_multiple_metrics_and_monitor_capabilities() 
     assert descriptor.metrics[2].aggregation == "value"
     assert descriptor.metrics[2].capabilities.charts["monitor"].refresh_interval_seconds is None
 
+
 def test_runtime_filter_defaults_to_multi_select_and_accepts_single_select() -> None:
     defaulted = _parse_filter(
         {"id": "seed_book", "label": text("Based on book", "基于图书"), "options": []}
@@ -67,6 +68,7 @@ def test_runtime_filter_defaults_to_multi_select_and_accepts_single_select() -> 
     assert defaulted.mode == "multi_select"
     assert single.mode == "single_select"
 
+
 def test_runtime_filter_rejects_unknown_selection_mode() -> None:
     with pytest.raises(CustomProtocolError, match="filter mode"):
         _parse_filter(
@@ -78,12 +80,11 @@ def test_runtime_filter_rejects_unknown_selection_mode() -> None:
             }
         )
 
+
 def test_v2_default_filters_round_trip_in_registration_snapshot() -> None:
     value = v2_probe_descriptor()
     metric = value["metrics"][0]
-    metric["capabilities"]["charts"] = {
-        "ranking": {"group_by": [None], "periods": ["1h"]}
-    }
+    metric["capabilities"]["charts"] = {"ranking": {"group_by": [None], "periods": ["1h"]}}
     metric["defaults"] = {
         "ranking": {
             "period": "1h",
@@ -98,6 +99,7 @@ def test_v2_default_filters_round_trip_in_registration_snapshot() -> None:
         "request_activity": ["has_requests"]
     }
 
+
 def test_custom_data_manual_construction_enforces_flat_or_grouped_union() -> None:
     series = CustomSeries("model", LocalizedText("Model", "模型"), ())
 
@@ -106,6 +108,7 @@ def test_custom_data_manual_construction_enforces_flat_or_grouped_union() -> Non
 
     assert CustomData(series=(series,)).groups is None
     assert CustomData(groups=()).series == ()
+
 
 def test_v2_metric_groups_and_references_round_trip() -> None:
     value = v2_probe_descriptor()
@@ -119,12 +122,14 @@ def test_v2_metric_groups_and_references_round_trip() -> None:
     assert v2_probe_descriptor_to_wire(descriptor)["metric_groups"] == value["metric_groups"]
     assert v2_probe_descriptor_to_wire(descriptor)["metrics"][0]["group_id"] == "router-throughput"
 
+
 def test_v2_metric_rejects_unknown_group_id() -> None:
     value = v2_probe_descriptor()
     value["metrics"][0]["group_id"] = "missing"
 
     with pytest.raises(CustomProtocolError, match="group_id"):
         parse_v2_probe_descriptor(value)
+
 
 def test_v2_probe_and_monitor_wire_round_trip() -> None:
     probe = V2ProbeRequest("probe-v2", command_argv=("router", "ccuv"))
@@ -172,6 +177,7 @@ def test_v2_probe_and_monitor_wire_round_trip() -> None:
     assert parsed.observation.groups[0].description is None
     assert parsed.observation.groups[0].display is None
 
+
 def test_v2_total_summary_wire_round_trip() -> None:
     request = V2SummaryRequest(
         "summary-v2",
@@ -204,6 +210,7 @@ def test_v2_total_summary_wire_round_trip() -> None:
     assert isinstance(parsed, V2SummaryResponse)
     assert parsed.summary.metric.current.value == Decimal("9")
 
+
 @pytest.mark.parametrize(
     ("mutate", "message"),
     [
@@ -228,6 +235,7 @@ def test_v2_probe_descriptor_rejects_invalid_metric_contract(mutate: object, mes
 
     with pytest.raises(CustomProtocolError, match=message):
         parse_v2_probe_descriptor(descriptor)
+
 
 def test_v2_historical_capabilities_accept_declared_periods_for_every_chart_kind() -> None:
     descriptor = v2_probe_descriptor()

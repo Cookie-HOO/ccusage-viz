@@ -1,5 +1,3 @@
-
-
 from datetime import date
 
 from ccusage_viz.providers.ccusage import CcusageProvider
@@ -30,6 +28,7 @@ def test_fallback_memory_learns_and_prefetches_with_preserved_source() -> None:
     assert all(not query.required and query.speculative for query in speculative)
     assert [query.fingerprint for query in speculative] == [query.fingerprint for query in required]
 
+
 def test_fallback_memory_isolates_source_executable_and_environment_digest() -> None:
     provider = CcusageProvider()
     seeded = provider.compile(
@@ -59,6 +58,7 @@ def test_fallback_memory_isolates_source_executable_and_environment_digest() -> 
         ).provider_metadata
     )
     assert metadata["ccusage_environment_digest"] != "secret"
+
 
 def test_fallback_memory_reuses_period_then_adds_removes_and_clears() -> None:
     provider = CcusageProvider()
@@ -99,6 +99,7 @@ def test_fallback_memory_reuses_period_then_adds_removes_and_clears() -> None:
         query.operation.startswith("project_fallback")
         for query in provider.compile(project_intent()).queries
     )
+
 
 def test_out_of_order_fallback_revision_cannot_overwrite_newer_memory() -> None:
     provider = CcusageProvider()

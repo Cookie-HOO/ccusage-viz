@@ -83,6 +83,7 @@ def test_metric_switch_request_wire_uses_target_partition_declaration() -> None:
     assert switch_wire("undeclared", "declared")["partition_by"] is None
     assert "partition_by" not in switch_wire("declared", "undeclared")
 
+
 def test_metric_switch_first_request_clears_supported_partition_without_target_default() -> None:
     capability = V2HistoricalChartCapability(
         ("day",), ("logical_model", "real_model"), (), partition_by=(None, "logical_model")
@@ -128,6 +129,7 @@ def test_metric_switch_first_request_clears_supported_partition_without_target_d
     assert component.request_config.group_by == "real_model"
     assert intent.payload.to_wire()["query"]["partition_by"] is None  # type: ignore[union-attr]
 
+
 def test_historical_metric_switch_commits_only_after_target_response() -> None:
     component = CustomHistoricalComponent(config(metric_id="stars"))
     assert component.accept_response(response())
@@ -142,6 +144,7 @@ def test_historical_metric_switch_commits_only_after_target_response() -> None:
     assert component.candidate.metric_id == "updated_days"
     assert component.request_config.metric_id == "updated_days"
 
+
 def test_historical_metric_switch_rejects_completion_for_previous_metric() -> None:
     component = CustomHistoricalComponent(config(metric_id="stars"))
     issued = component.request_config
@@ -151,6 +154,7 @@ def test_historical_metric_switch_rejects_completion_for_previous_metric() -> No
     assert component.is_pending
     assert component.switch_target_config is not None
     assert component.switch_target_config.metric_id == "updated_days"
+
 
 def test_historical_metric_switch_failure_retains_old_facts_and_metric() -> None:
     component = CustomHistoricalComponent(config(metric_id="stars"))
@@ -163,6 +167,7 @@ def test_historical_metric_switch_failure_retains_old_facts_and_metric() -> None
     assert component.candidate.metric_id == "stars"
     assert component.request_config.metric_id == "stars"
     assert component.model is old_model
+
 
 def test_historical_metric_switch_retries_unsupported_period_with_target_default() -> None:
     component = CustomHistoricalComponent(config(metric_id="stars"))
@@ -190,6 +195,7 @@ def test_historical_metric_switch_retries_unsupported_period_with_target_default
     assert component.request_config.date_range.period == "30d"
     assert not component.retry_metric_switch("range.period", target)
 
+
 def test_historical_metric_switch_retry_rejects_mismatched_target_without_mutation() -> None:
     component = CustomHistoricalComponent(config(metric_id="stars"))
     component.begin_metric_switch(config(metric_id="updated_days"))
@@ -213,6 +219,7 @@ def test_historical_metric_switch_retry_rejects_mismatched_target_without_mutati
     assert component.generation == generation
     assert component.pending_generation == pending_generation
     assert component.switch_normalizations == frozenset()
+
 
 @pytest.mark.parametrize("purpose", ("primary", "comparison"))
 def test_metric_switch_rejects_v2_response_for_previous_metric_without_mutation(
@@ -260,6 +267,7 @@ def test_metric_switch_rejects_v2_response_for_previous_metric_without_mutation(
         component.render_revision,
     ) == state
 
+
 def test_metric_switch_accepts_v2_response_for_requested_metric() -> None:
     component = CustomHistoricalComponent(config(metric_id="stars"))
     assert component.accept_response(response())
@@ -272,6 +280,7 @@ def test_metric_switch_accepts_v2_response_for_requested_metric() -> None:
     assert component.accepted_config is not None
     assert component.accepted_config.metric_id == "updated_days"
     assert not component.is_pending
+
 
 def test_metric_switch_accepts_target_chart_periods() -> None:
     component = CustomHistoricalComponent(config(metric_id="stars", metric_periods=("all",)))
@@ -286,6 +295,7 @@ def test_metric_switch_accepts_target_chart_periods() -> None:
     assert component.accepted_config.metric_periods == ("1d", "7d")
     assert component.capability is not None
     assert component.capability.periods == ("1d", "7d")
+
 
 @pytest.mark.parametrize(
     "changed",

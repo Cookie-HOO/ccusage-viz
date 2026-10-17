@@ -34,13 +34,10 @@ def _official_catalog_item_rows(
     wrapped = list(wrap_width(summary, content_width))
     if len(wrapped) > 2:
         wrapped = [wrapped[0], truncate_width(wrapped[1], max(0, content_width - 1)) + "…"]
-    context = RenderContext(
-        width, 1, translator, color=color, color_scheme=color_scheme
-    )
-    descriptions = tuple(
-        "  " + render_ranking_description(row, context) for row in wrapped[:2]
-    )
+    context = RenderContext(width, 1, translator, color=color, color_scheme=color_scheme)
+    descriptions = tuple("  " + render_ranking_description(row, context) for row in wrapped[:2])
     return (primary, *descriptions)
+
 
 def _official_catalog_rows(
     entries: tuple[object, ...],
@@ -65,6 +62,7 @@ def _official_catalog_rows(
             color_scheme=color_scheme,
         )
     ]
+
 
 def _official_catalog_viewport(
     entries: tuple[object, ...],
@@ -98,12 +96,11 @@ def _official_catalog_viewport(
         offset = selected_start
     elif selected_end > offset + visible_rows:
         offset = (
-            selected_start
-            if len(blocks[index]) > visible_rows
-            else selected_end - visible_rows
+            selected_start if len(blocks[index]) > visible_rows else selected_end - visible_rows
         )
     offset = min(max(0, offset), maximum_offset)
     return "\n".join(rows[offset : offset + visible_rows]), offset
+
 
 def _official_preview_rows(
     preview: tuple[object, bytes, object], translator: Translator
@@ -148,6 +145,7 @@ def _official_preview_rows(
             else (),
         ),
     )
+
 
 def _browse_dataset_catalog(
     screen: FramePainter,
@@ -323,6 +321,7 @@ def _browse_dataset_catalog(
         finally:
             executor.shutdown(wait=False, cancel_futures=True)
         return selected.id
+
 
 def _install_github_dataset(
     screen: FramePainter,

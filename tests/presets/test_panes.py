@@ -44,6 +44,7 @@ def test_round_trip_persists_safe_configuration_not_runtime_or_environment() -> 
     assert restored.launcher == "ccuv"
     assert restored.panes == record.panes
 
+
 def test_round_trip_all_pane_kinds_and_trusted_command_configuration() -> None:
     animation_style = animation_style_choices("pane")[0]
     panes = (
@@ -86,6 +87,7 @@ def test_round_trip_all_pane_kinds_and_trusted_command_configuration() -> None:
     assert animation.overlay.offset_y == 9000
     assert animation.overlay.command == "date +%H:%M"
 
+
 def test_round_trip_preserves_monitor_attachment_configuration() -> None:
     panes = (
         ChartPaneConfig(
@@ -115,6 +117,7 @@ def test_round_trip_preserves_monitor_attachment_configuration() -> None:
     assert custom.attachment_style == original_custom.attachment_style
     assert custom.attachment_theme == original_custom.attachment_theme
 
+
 def test_custom_ranking_item_spacing_round_trips_and_old_preset_defaults_compact() -> None:
     chart = CustomChartConfig(
         "ranking",
@@ -143,10 +146,12 @@ def test_custom_ranking_item_spacing_round_trips_and_old_preset_defaults_compact
     assert isinstance(old, CustomChartPaneConfig)
     assert old.ranking_item_spacing == "compact"
 
+
 def test_custom_ranking_item_spacing_rejects_nonranking_chart() -> None:
     chart = CustomChartConfig("timeline", _installed_source(), RANGE)
     with pytest.raises(ValueError, match="requires a ranking"):
         CustomChartPaneConfig(chart, ranking_item_spacing="line")
+
 
 def test_custom_partition_round_trips_and_old_preset_remains_flat() -> None:
     chart = CustomChartConfig(
@@ -176,6 +181,7 @@ def test_custom_partition_round_trips_and_old_preset_remains_flat() -> None:
     assert isinstance(old, CustomChartPaneConfig)
     assert old.chart.partition_by is None
 
+
 @pytest.mark.parametrize("chart_kind", ("timeline", "calendar", "stack", "monitor"))
 def test_custom_partition_preset_rejects_non_ranking_chart_kinds(chart_kind: str) -> None:
     chart = CustomChartConfig(
@@ -196,6 +202,7 @@ def test_custom_partition_preset_rejects_non_ranking_chart_kinds(chart_kind: str
 
     with pytest.raises(DashboardPresetValidationError, match="only by ranking"):
         DashboardPresetDocument.parse(wire)
+
 
 def test_custom_partition_preset_rejects_missing_or_equal_grouping() -> None:
     chart = CustomChartConfig(

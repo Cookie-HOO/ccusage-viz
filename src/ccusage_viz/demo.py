@@ -91,8 +91,7 @@ def _live_increment(seed: int, *, is_current_day: bool, report_time: float | Non
         return 0
     epoch = int(report_time // 5)
     return sum(
-        1 + _stable_int(seed, "report-epoch", str(index)) % 4
-        for index in range(1, epoch + 1)
+        1 + _stable_int(seed, "report-epoch", str(index)) % 4 for index in range(1, epoch + 1)
     )
 
 

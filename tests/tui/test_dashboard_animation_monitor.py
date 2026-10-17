@@ -39,6 +39,7 @@ def test_dashboard_monitor_default_does_not_change_explicit_or_standalone_total(
     assert panel.chart.by is None
     assert standalone.chart.by is None
 
+
 def test_dashboard_animation_panes_keep_independent_session_state() -> None:
     parser = build_parser(load_translator("en"))
     options = _to_options(
@@ -56,6 +57,7 @@ def test_dashboard_animation_panes_keep_independent_session_state() -> None:
     assert second.session.theme == "classic"
     assert second.session.playback_requested
 
+
 def test_dashboard_monitor_attachment_starts_disabled() -> None:
     parser = build_parser(load_translator("en"))
     options = _to_options(parser.parse_args(["dashboard", "--pane", "monitor --by model"]))
@@ -66,6 +68,7 @@ def test_dashboard_monitor_attachment_starts_disabled() -> None:
     assert pane.attachment.theme == "classic"
     assert not pane.attachment_enabled
     assert not pane.attachment.visible
+
 
 def test_dashboard_monitor_attachment_tracks_only_accepted_activity() -> None:
     class Component:
@@ -103,6 +106,7 @@ def test_dashboard_monitor_attachment_tracks_only_accepted_activity() -> None:
         translator=load_translator("en"),
     )
     assert attachment.activity_label == "last activity detected: 00:00:00"
+
 
 def test_dashboard_monitor_attachment_hides_outside_ranking_and_list() -> None:
     parser = build_parser(load_translator("en"))
@@ -166,6 +170,7 @@ def test_dashboard_monitor_attachment_hides_outside_ranking_and_list() -> None:
     )
     assert not pane.attachment.visible
 
+
 @pytest.mark.parametrize(
     ("change", "expected_querying"),
     (("by", True), ("window", False)),
@@ -211,6 +216,7 @@ def test_dashboard_monitor_marks_only_data_candidate_panes(
     assert rendered.chart == "monitor"
     assert captured == {"pending": expected_querying, "querying": expected_querying}
 
+
 def test_dashboard_monitor_page_resolution_keeps_attachment_shortcuts_current() -> None:
     chart = replace(
         MonitorConfig("monitor", DateRange(date(2026, 1, 1), date(2026, 1, 14))),
@@ -233,12 +239,14 @@ def test_dashboard_monitor_page_resolution_keeps_attachment_shortcuts_current() 
         )
     assert _adjustment_target_page("monitor", "advanced", "t", chart=chart) == "quick"
 
+
 def test_dashboard_animation_pane_resolves_unambiguous_shortcuts() -> None:
     assert _animation_adjustment_target_page("quick", "e") == "advanced"
     assert _animation_adjustment_target_page("advanced", "t") == "quick"
     assert _animation_adjustment_target_page("quick", "p") == "quick"
     assert _animation_adjustment_target_page("advanced", "\x1b[A") == "advanced"
     assert _animation_adjustment_target_page("quick", "?") is None
+
 
 def test_dashboard_monitor_advanced_state_shows_attachment_settings() -> None:
     parser = build_parser(load_translator("en"))

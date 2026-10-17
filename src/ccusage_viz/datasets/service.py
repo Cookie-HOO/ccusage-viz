@@ -56,7 +56,8 @@ class DatasetService:
         root: Path | None = None,
         environ: Mapping[str, str] | None = None,
         platform: tuple[str, str] | None = None,
-        probe_runner: Callable[[tuple[str, ...]], CustomProbeResponse | V2ProbeResponse] | None = None,
+        probe_runner: Callable[[tuple[str, ...]], CustomProbeResponse | V2ProbeResponse]
+        | None = None,
     ) -> None:
         self.environ = environ
         self.store = DatasetStore(dataset_state_root(environ=environ) if root is None else root)
@@ -123,11 +124,17 @@ class DatasetService:
     def registered_command_source(self, dataset_id: str) -> CustomCommandSource:
         registration = self.store.load_registration(parse_dataset_id(dataset_id))
         status = next(
-            (item for item in self.registrations() if item.registration.dataset_id == registration.dataset_id),
+            (
+                item
+                for item in self.registrations()
+                if item.registration.dataset_id == registration.dataset_id
+            ),
             None,
         )
         if status is None or not status.ready:
-            raise UsageError("error.dataset_environment_missing", dataset_id=registration.dataset_id)
+            raise UsageError(
+                "error.dataset_environment_missing", dataset_id=registration.dataset_id
+            )
         if isinstance(registration.source, LocalDatasetSource):
             return CustomCommandSource(registration.dataset_id, registration.source.command_argv)
         return self.installed_command_source(registration.dataset_id)
@@ -309,7 +316,9 @@ class DatasetService:
     def upgrade(self, dataset_id: str) -> DatasetRegistration:
         identifier = parse_dataset_id(dataset_id)
         registration = self.store.load_registration(identifier)
-        if registration.available_update is None or not isinstance(registration.source, ManagedDatasetSource):
+        if registration.available_update is None or not isinstance(
+            registration.source, ManagedDatasetSource
+        ):
             raise UsageError("error.dataset_no_update", dataset_id=identifier)
         artifact = self._resolved_managed_artifact(registration.source)
         if (
@@ -318,7 +327,9 @@ class DatasetService:
             or artifact.sha256 != registration.available_update.sha256
         ):
             raise UsageError("error.dataset_update_changed", dataset_id=identifier)
-        installed = self.install_artifact(artifact, download_release_artifact(artifact), replace=True)
+        installed = self.install_artifact(
+            artifact, download_release_artifact(artifact), replace=True
+        )
         assert installed.dataset_id == identifier
         self.register_installed_dataset(identifier, replace=True)
         return self.store.load_registration(identifier)
@@ -352,7 +363,9 @@ class DatasetService:
         if isinstance(registration.source, ManagedDatasetSource):
             self.store.remove(identifier)
 
-    def register_installed_dataset(self, dataset_id: str, *, replace: bool = False) -> RegisterResult:
+    def register_installed_dataset(
+        self, dataset_id: str, *, replace: bool = False
+    ) -> RegisterResult:
         identifier = parse_dataset_id(dataset_id)
         installed, manifest, executable = self.store.load(identifier)
         response = self.probe_runner((str(executable), "ccuv"))
@@ -596,7 +609,9 @@ class DatasetService:
         self.store.remove(dataset_id)
 
 
-def replace_registration(current: DatasetRegistration, candidate: DatasetRegistration) -> DatasetRegistration:
+def replace_registration(
+    current: DatasetRegistration, candidate: DatasetRegistration
+) -> DatasetRegistration:
     return replace(
         candidate,
         enabled=True,

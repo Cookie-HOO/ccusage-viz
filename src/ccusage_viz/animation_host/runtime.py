@@ -32,6 +32,7 @@ from ccusage_viz.tui_input import InputDecoder, KeyEvent, read_event, tui_input_
 
 _POLL_SECONDS = 0.05
 
+
 def _format_overlay_interval(seconds: float) -> str:
     if seconds >= 3600 and seconds % 3600 == 0:
         return f"{int(seconds // 3600)}h"
@@ -39,11 +40,13 @@ def _format_overlay_interval(seconds: float) -> str:
         return f"{int(seconds // 60)}m"
     return f"{int(seconds)}s"
 
+
 def read_adjustment_event(decoder: InputDecoder, timeout: float) -> str | None:
     """Read one decoded keyboard event for the standalone animation host."""
 
     event = read_event(decoder, timeout)
     return event.value if isinstance(event, KeyEvent) else None
+
 
 def cycle_animation_style(
     session: AnimationSessionState, *, target: AnimationTarget = "standalone", step: int, now: float
@@ -54,9 +57,11 @@ def cycle_animation_style(
     index = styles.index(session.spec.style)
     session.set_style(animation_spec(styles[(index + step) % len(styles)], target=target), now)
 
+
 def _cycle_theme(session: AnimationSessionState, *, step: int, now: float) -> None:
     index = COLOR_SCHEMES.index(session.theme)
     session.set_theme(COLOR_SCHEMES[(index + step) % len(COLOR_SCHEMES)], now)
+
 
 def _terminal(options: AnimationLaunch) -> Terminal:
     return inspect_terminal(
@@ -64,6 +69,7 @@ def _terminal(options: AnimationLaunch) -> Terminal:
         ascii=options.host.ascii,
         size=get_terminal_size(),
     )
+
 
 def _frame_rows(
     session: AnimationSessionState,
@@ -87,6 +93,7 @@ def _frame_rows(
     )
     return result.rows
 
+
 def _status(session: AnimationSessionState, translator: Translator) -> str:
     return translator.text(
         "status.animation",
@@ -94,6 +101,7 @@ def _status(session: AnimationSessionState, translator: Translator) -> str:
         theme=session.theme,
         state=translator.text("status.animation_running"),
     )
+
 
 def _paint_animation(
     screen: FramePainter,
@@ -141,6 +149,7 @@ def _paint_animation(
         atomic=True,
     )
 
+
 def _run_animation_help(
     screen: FramePainter,
     decoder: InputDecoder,
@@ -186,6 +195,7 @@ def _run_animation_help(
             idle_timer.record_input()
         if isinstance(event, KeyEvent) and event.value in close_events:
             return
+
 
 def _run_adjustment(
     screen: FramePainter,
@@ -332,6 +342,7 @@ def _run_adjustment(
             continue
         paint()
 
+
 def _wait_seconds(
     session: AnimationSessionState,
     now: float,
@@ -346,8 +357,10 @@ def _wait_seconds(
         deadlines.append(overlay.next_due)
     return upper_bound if not deadlines else min(upper_bound, max(0.0, min(deadlines) - now))
 
+
 def run_animation(options: AnimationLaunch, translator: Translator) -> int:
     from ccusage_viz.animation_host.gallery import _run_gallery
+
     """Run an interactive animation without creating any provider-facing work."""
 
     if options.gallery:

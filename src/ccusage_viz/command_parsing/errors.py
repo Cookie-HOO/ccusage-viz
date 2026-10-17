@@ -27,6 +27,7 @@ def _invalid_choice_error(
         return UsageError(f"{key}_suggestion", **values)
     return UsageError(key, **values)
 
+
 def _rejected_subcommand(
     message: str,
     metavar: str | None,
@@ -51,6 +52,7 @@ def _rejected_subcommand(
     except (SyntaxError, ValueError):
         return None
     return rejected if isinstance(rejected, str) else None
+
 
 class LocalizedParser(argparse.ArgumentParser):
     def __init__(self, *args: Any, **kwargs: Any) -> None:

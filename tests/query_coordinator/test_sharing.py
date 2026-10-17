@@ -46,6 +46,7 @@ def test_demo_provider_executes_deterministically_in_process() -> None:
     assert result.coverage == DateCoverage((interval,))
     assert result.provenance == (ProviderProvenance(query.provider, query.fingerprint),)
 
+
 @pytest.mark.skipif(os.name != "posix", reason="requires POSIX process groups")
 def test_ccusage_timeout_does_not_wait_for_escaped_pipe_descendant(tmp_path) -> None:
     pid_path = tmp_path / "escaped-child.pid"
@@ -88,6 +89,7 @@ def test_ccusage_timeout_does_not_wait_for_escaped_pipe_descendant(tmp_path) -> 
             os.kill(int(pid_path.read_text()), signal.SIGKILL)
         thread.join(1)
 
+
 def test_coordinator_shares_only_inflight_work_and_preserves_subscribers() -> None:
     calls: list[str] = []
     provider = RecordingProvider(calls, Lock(), Event(), Event())
@@ -124,6 +126,7 @@ def test_coordinator_shares_only_inflight_work_and_preserves_subscribers() -> No
     provider.release.set()
     active.run(plan, provider)
     assert len(calls) == 2
+
 
 @pytest.mark.parametrize(
     ("first", "second"),
@@ -168,6 +171,7 @@ def test_non_equivalent_physical_queries_do_not_share(
 
     assert first_handle.result(1).records
     assert second_handle.result(1).records
+
 
 def test_shared_result_is_rebound_to_each_subscriber_query() -> None:
     first_interval = DateInterval(date(2026, 1, 1), date(2026, 1, 2))
@@ -222,6 +226,7 @@ def test_shared_result_is_rebound_to_each_subscriber_query() -> None:
     assert first_result.provider_metadata == (("payload", "first"),)
     assert second_result.provider_metadata == (("payload", "second"),)
 
+
 def test_immediate_duplicate_fingerprint_in_one_plan_executes_once() -> None:
     provider = RecordingProvider([], Lock(), Event(), Event())
     first = PhysicalQuery(provider.provider, "shared", payload="first")
@@ -235,6 +240,7 @@ def test_immediate_duplicate_fingerprint_in_one_plan_executes_once() -> None:
     result = handle.result(1)
     assert provider.calls == ["shared"]
     assert len(result.records) == 2
+
 
 def test_shared_physical_work_is_assembled_into_independent_owner_results() -> None:
     @dataclass(frozen=True, slots=True)
@@ -271,6 +277,7 @@ def test_shared_physical_work_is_assembled_into_independent_owner_results() -> N
     with pytest.raises(FrozenInstanceError):
         first_result.provider_metadata = ()  # type: ignore[misc]
 
+
 def test_optional_query_failure_preserves_required_fragments() -> None:
     @dataclass(frozen=True, slots=True)
     class OptionalFailureProvider(RecordingProvider):
@@ -293,6 +300,7 @@ def test_optional_query_failure_preserves_required_fragments() -> None:
 
     assert len(result.records) == 1
     assert result.provenance[0].physical_fingerprint == plan.queries[0].fingerprint
+
 
 def test_irrelevant_speculative_failure_is_ignored() -> None:
     assembled: list[tuple[str, ...]] = []
@@ -325,6 +333,7 @@ def test_irrelevant_speculative_failure_is_ignored() -> None:
     assert QueryCoordinator(max_parallel=2).run(plan, provider).records
     assert assembled == [("a",)]
 
+
 def test_required_speculative_failure_is_fatal_and_skips_assemble() -> None:
     assembled = Event()
     required_b = PhysicalQuery(
@@ -356,6 +365,7 @@ def test_required_speculative_failure_is_fatal_and_skips_assemble() -> None:
     assert caught.value.key == "error.ccusage_failed"
     assert not assembled.is_set()
 
+
 def test_resolver_rejects_optional_output() -> None:
     optional = PhysicalQuery(ProviderRef("recording"), "optional", required=False)
 
@@ -373,6 +383,7 @@ def test_resolver_rejects_optional_output() -> None:
             PhysicalPlan("optional-resolver", (PhysicalQuery(provider.provider, "primary"),)),
             provider,
         )
+
 
 def test_dynamically_discovered_identical_query_shares_speculative_work() -> None:
     calls: list[str] = []
@@ -403,6 +414,7 @@ def test_dynamically_discovered_identical_query_shares_speculative_work() -> Non
 
     assert calls.count("b") == 1
     assert len(result.records) == 2
+
 
 def test_duplicate_dynamic_queries_share_one_physical_execution() -> None:
     dynamic = PhysicalQuery(ProviderRef("recording"), "dynamic")

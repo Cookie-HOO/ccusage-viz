@@ -93,20 +93,29 @@ def test_dashboard_help_overlay_omits_monitor_metric_after_descriptorless_accept
     assert "CURRENT METRIC" not in help_overlay
     assert "Tokens" not in help_overlay
 
+
 def test_custom_monitor_renders_source_owned_monitor_presentations_without_shares() -> None:
     component = _custom_monitor_component()
     terminal = Terminal(80, 16, color=False, ascii=True)
     translated = load_translator("en")
 
-    bars = tui_custom_rendering._render_custom_monitor(component, translated, terminal, interval=10).chart
+    bars = tui_custom_rendering._render_custom_monitor(
+        component, translated, terminal, interval=10
+    ).chart
     component.configure(
-        tui_custom_adjustments._adjust_custom_monitor_chart(component.candidate, "s"), data_affecting=False
+        tui_custom_adjustments._adjust_custom_monitor_chart(component.candidate, "s"),
+        data_affecting=False,
     )
-    line = tui_custom_rendering._render_custom_monitor(component, translated, terminal, interval=10).chart
+    line = tui_custom_rendering._render_custom_monitor(
+        component, translated, terminal, interval=10
+    ).chart
     component.configure(
-        tui_custom_adjustments._adjust_custom_monitor_chart(component.candidate, "s"), data_affecting=False
+        tui_custom_adjustments._adjust_custom_monitor_chart(component.candidate, "s"),
+        data_affecting=False,
     )
-    step = tui_custom_rendering._render_custom_monitor(component, translated, terminal, interval=10).chart
+    step = tui_custom_rendering._render_custom_monitor(
+        component, translated, terminal, interval=10
+    ).chart
 
     assert "Alpha" in bars and "Beta" in bars
     assert "Other" not in bars
@@ -114,6 +123,7 @@ def test_custom_monitor_renders_source_owned_monitor_presentations_without_share
     assert "Requests · Trend · by real_model · 1m window" in bars
     assert "view 1h" not in bars
     assert "data window" not in bars
+
 
 def test_custom_monitor_retains_accepted_values_only_for_refreshes() -> None:
     component = _custom_monitor_component()
@@ -138,6 +148,7 @@ def test_custom_monitor_retains_accepted_values_only_for_refreshes() -> None:
     ).chart
     assert "Loading…" in switched
     assert "Alpha" not in switched
+
 
 @pytest.mark.parametrize(
     ("style", "view"),
@@ -179,6 +190,7 @@ def test_custom_monitor_transient_states_use_canonical_heading(
         assert excluded not in heading.lower()
     assert all(display_width(line) <= 80 for line in rendered.chart.splitlines())
 
+
 @pytest.mark.parametrize("failed", (False, True), ids=("pending", "error"))
 def test_custom_monitor_unresolved_transient_state_omits_unfactual_heading(
     failed: bool,
@@ -204,6 +216,7 @@ def test_custom_monitor_unresolved_transient_state_omits_unfactual_heading(
     assert "private-metric-id" not in rendered.chart
     assert rendered.error_body is failed
 
+
 def test_custom_monitor_pane_preserves_probe_error_body() -> None:
     chart = CustomChartConfig(
         "monitor",
@@ -225,6 +238,7 @@ def test_custom_monitor_pane_preserves_probe_error_body() -> None:
     assert rendered.error_body
     assert rendered.chart == "probe failed"
 
+
 def test_custom_monitor_ranking_and_list_keep_native_row_geometry() -> None:
     component = _custom_monitor_component()
     translator = load_translator("en")
@@ -245,6 +259,7 @@ def test_custom_monitor_ranking_and_list_keep_native_row_geometry() -> None:
         assert all(display_width(row) <= context.width for row in custom_rows)
         assert "%" not in "\n".join(custom_rows)
 
+
 def test_custom_monitor_cycles_only_native_compatible_presentations() -> None:
     chart = _custom_monitor_component().candidate
     styles = []
@@ -253,6 +268,7 @@ def test_custom_monitor_cycles_only_native_compatible_presentations() -> None:
         styles.append(chart.presentation.style)
 
     assert styles == ["step", "points", "line-points", "ranking"]
+
 
 def test_custom_monitor_dashboard_context_hides_upper_right_axes_and_stabilizes_zero_values() -> (
     None
@@ -270,6 +286,7 @@ def test_custom_monitor_dashboard_context_hides_upper_right_axes_and_stabilizes_
     assert component.timeline_model(language="en").y_axis_max == 1.0
     assert custom_monitor_y_axis_max([4.2, 4.2]) == 4.2
 
+
 def test_custom_value_monitor_excludes_cumulative_bars() -> None:
     chart = _custom_monitor_component().candidate
     styles = []
@@ -278,6 +295,7 @@ def test_custom_value_monitor_excludes_cumulative_bars() -> None:
         styles.append(chart.presentation.style)
 
     assert styles == ["step", "points", "line-points", "ranking"]
+
 
 def test_custom_monitor_window_control_reprojects_without_query_configuration() -> None:
     component = _custom_monitor_component()
@@ -296,6 +314,7 @@ def test_custom_monitor_window_control_reprojects_without_query_configuration() 
     component.configure_display_window(tui_custom_adjustments._cycle_custom_monitor_window(3600))
 
     assert component.candidate == candidate
+
 
 @pytest.mark.parametrize("group_by", (None, "model"))
 @pytest.mark.parametrize("step", (1, -1))
@@ -318,18 +337,24 @@ def test_custom_monitor_grouping_cycles_preserve_top_at_group_boundaries(
         top,
     )
 
+
 def test_custom_monitor_grouping_cycles_from_total_in_declared_order() -> None:
     component = _custom_monitor_component(grouped=False)
     capability = tui_custom_adjustments._custom_capability_for_component(component)
     assert isinstance(capability, V2MonitorCapability)
 
-    forward = tui_custom_adjustments._cycle_custom_grouping(component.candidate, capability.group_by)
+    forward = tui_custom_adjustments._cycle_custom_grouping(
+        component.candidate, capability.group_by
+    )
     second = tui_custom_adjustments._cycle_custom_grouping(forward, capability.group_by)
-    reverse = tui_custom_adjustments._cycle_custom_grouping(component.candidate, capability.group_by, step=-1)
+    reverse = tui_custom_adjustments._cycle_custom_grouping(
+        component.candidate, capability.group_by, step=-1
+    )
 
     assert forward.group_by == "public_model"
     assert second.group_by == "real_model"
     assert reverse.group_by == "real_model"
+
 
 def test_custom_monitor_attachment_activity_uses_dataset_observation_total() -> None:
     component = _custom_monitor_component(total="90")

@@ -75,6 +75,7 @@ def _pane_animation_deadline(pane: TuiPane) -> float | None:
         deadlines = ()
     return min((deadline for deadline in deadlines if deadline is not None), default=None)
 
+
 def _pane_render(
     pane: TuiPane,
     translator: Translator,
@@ -481,6 +482,7 @@ def _pane_render(
     pane.render_warning = None
     return candidate
 
+
 def _update_monitor_attachment_activity(
     component: MonitorComponent,
     attachment: AnimationSessionState,
@@ -496,6 +498,7 @@ def _update_monitor_attachment_activity(
     attachment.set_playback_requested(active, now)
     if active:
         attachment.activity_label = last_activity_label(translator, wall)
+
 
 def _append_monitor_attachment(
     pane: TuiChartPane,
@@ -545,6 +548,7 @@ def _append_monitor_attachment(
         return body
     return "\n".join((*((body,) if body else ()), *result.rows))
 
+
 def _update_custom_monitor_attachment_activity(
     component: CustomMonitorComponent,
     attachment: AnimationSessionState,
@@ -560,6 +564,7 @@ def _update_custom_monitor_attachment_activity(
     attachment.set_playback_requested(active, now)
     if active:
         attachment.activity_label = last_activity_label(translator, wall)
+
 
 def _local_pane_content(
     chart: str,

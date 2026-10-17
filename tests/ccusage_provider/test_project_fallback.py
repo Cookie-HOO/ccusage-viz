@@ -44,6 +44,7 @@ def test_project_ranking_compiles_primary_queries_without_speculative_fallbacks(
     )
     assert plan.summary_notices == ()
 
+
 def test_newer_unresolved_compile_does_not_block_older_fallback_learning() -> None:
     provider = CcusageProvider()
     older = provider.compile(project_intent())
@@ -60,6 +61,7 @@ def test_newer_unresolved_compile_does_not_block_older_fallback_learning() -> No
         for query in latest.queries
         if query.operation.startswith("project_fallback")
     ] == ["old"]
+
 
 @pytest.mark.parametrize(
     ("fallback_total", "attributed"),
@@ -83,6 +85,7 @@ def test_successful_fallback_directly_replaces_observation(
         assert record.project.display_name == "Unverified"
         assert record.attribution == "unverified"
 
+
 def test_empty_successful_fallback_directly_replaces_observation() -> None:
     provider, plan, observation, fallback = _fallback_replacement_case()
     empty_fallback = replace(fallback, records=())
@@ -90,6 +93,7 @@ def test_empty_successful_fallback_directly_replaces_observation() -> None:
     result = provider.assemble(plan, (observation, empty_fallback))
 
     assert result.records == ()
+
 
 def test_missing_required_fallback_fragment_is_incomplete() -> None:
     provider, plan, observation, _ = _fallback_replacement_case()
@@ -99,6 +103,7 @@ def test_missing_required_fallback_fragment_is_incomplete() -> None:
 
     assert caught.value.key == "error.ccusage_project_fallback_incomplete"
     assert caught.value.values["agent"] == "pi"
+
 
 def test_fallback_replacement_associates_crossed_totals_with_each_interval() -> None:
     provider = CcusageProvider()
@@ -143,6 +148,7 @@ def test_fallback_replacement_associates_crossed_totals_with_each_interval() -> 
         (date(2026, 1, 1), 20),
         (date(2026, 1, 2), 10),
     ]
+
 
 def test_fallback_normalization_accepts_pi_local_and_generic_absolute_paths(
     monkeypatch: pytest.MonkeyPatch,
@@ -194,6 +200,7 @@ def test_fallback_normalization_accepts_pi_local_and_generic_absolute_paths(
     }
     assert all(record.attribution is None for record in result.records)
 
+
 def test_generic_fallback_encoded_project_path_remains_unverified() -> None:
     query = PhysicalQuery(
         ProviderRef("ccusage"),
@@ -220,6 +227,7 @@ def test_generic_fallback_encoded_project_path_remains_unverified() -> None:
     assert record.project.display_name == "Unverified"
     assert record.attribution == "unverified"
     assert record.source_project == "--workspace-future-project--"
+
 
 def test_project_fallback_normalization_resolves_pi_session_cwd(
     monkeypatch: pytest.MonkeyPatch,
@@ -255,6 +263,7 @@ def test_project_fallback_normalization_resolves_pi_session_cwd(
     assert record.project is not None
     assert record.project.key == ("pi", "/workspace/github-projects")
     assert record.attribution is None
+
 
 def test_project_fallback_replaces_matching_unverified_observation(
     monkeypatch: pytest.MonkeyPatch,
@@ -328,6 +337,7 @@ def test_project_fallback_replaces_matching_unverified_observation(
         (record.agent, record.project.raw_id) for record in result.records if record.project
     ] == [("pi", "/workspace/github-projects")]
 
+
 def test_pending_unverified_agents_generate_optional_session_fallbacks() -> None:
     observation = PhysicalQuery(
         ProviderRef("ccusage"),
@@ -379,6 +389,7 @@ def test_pending_unverified_agents_generate_optional_session_fallbacks() -> None
     ]
     assert all(query.required is False for query in queries)
 
+
 def test_pending_unassigned_agent_generates_optional_session_fallback() -> None:
     observation = PhysicalQuery(
         ProviderRef("ccusage"),
@@ -416,6 +427,7 @@ def test_pending_unassigned_agent_generates_optional_session_fallback() -> None:
 
     assert query.arguments[:3] == ("pi", "session", "--json")
     assert query.required is False
+
 
 def test_project_agent_observation_maps_unreliable_agents_to_fixed_projects() -> None:
     query = PhysicalQuery(
@@ -491,6 +503,7 @@ def test_project_agent_observation_maps_unreliable_agents_to_fixed_projects() ->
     ]
     assert not result.notices
     assert result.includes_project_attribution
+
 
 def test_project_agent_observation_maps_relative_dsh_project_to_unverified() -> None:
     query = PhysicalQuery(ProviderRef("ccusage"), "unified_daily_agent_observation")

@@ -156,7 +156,6 @@ def test_header_date_rollover_requests_new_current_day() -> None:
     )
 
 
-
 def custom_summary_response(
     *,
     display: str = "68 pages",

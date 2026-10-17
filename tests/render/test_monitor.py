@@ -1,7 +1,3 @@
-
-
-
-
 from dataclasses import replace
 from datetime import datetime
 
@@ -65,6 +61,7 @@ def test_detailed_surfaces_do_not_reserve_empty_audit_rows() -> None:
     assert standalone.height == 19
     assert dashboard.height == 20
 
+
 def test_observed_monitor_heading_marks_only_query_pending_candidates() -> None:
     model = TimelineModel(
         (),
@@ -83,6 +80,7 @@ def test_observed_monitor_heading_marks_only_query_pending_candidates() -> None:
     assert "querying" in querying
     assert "refreshing" not in refreshing
 
+
 def test_observed_timeline_uses_wall_clock_axis_and_metric_heading() -> None:
     model = TimelineModel(
         (),
@@ -98,6 +96,7 @@ def test_observed_timeline_uses_wall_clock_axis_and_metric_heading() -> None:
     assert "TPM · Trend · 15m window" in output
     assert "10:00" in output and "10:05" in output
     assert "2026-01-01" not in output
+
 
 def test_observed_start_marker_is_density_aware_and_time_anchored() -> None:
     points = (
@@ -128,6 +127,7 @@ def test_observed_start_marker_is_density_aware_and_time_anchored() -> None:
         is None
     )
 
+
 def test_observed_timeline_labels_visible_monitor_start_by_density() -> None:
     model = TimelineModel(
         (),
@@ -154,6 +154,7 @@ def test_observed_timeline_labels_visible_monitor_start_by_density() -> None:
     assert "Monitor started 10:02" not in minimal
     assert "Started 10:02" not in minimal
 
+
 def test_observed_timeline_overlays_a_thin_start_marker_without_plotext_line(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -179,6 +180,7 @@ def test_observed_timeline_overlays_a_thin_start_marker_without_plotext_line(
     assert "┆" not in ascii
     assert ascii.count(":") > 4
 
+
 def test_observed_timeline_renders_sampling_state_inline_and_muted() -> None:
     model = TimelineModel(
         (),
@@ -202,6 +204,7 @@ def test_observed_timeline_renders_sampling_state_inline_and_muted() -> None:
     assert strip_ansi(heading).strip().endswith("(sampling)")
     assert "\x1b[2m" in heading
     assert "(ready)" not in ready.splitlines()[0]
+
 
 @pytest.mark.parametrize(
     ("density", "current"),
@@ -238,6 +241,7 @@ def test_monitor_density_controls_current_observation(
     assert ("observed · Total 1.2K TPM" in output) is current
     assert "vs " not in output
 
+
 def test_detailed_audit_uses_host_supplied_sample_cadence() -> None:
     output = render_audit(
         RenderContext(
@@ -257,6 +261,7 @@ def test_detailed_audit_uses_host_supplied_sample_cadence() -> None:
 
     assert output == "updated 10:05:00 · ccusage 0.25s · sample every 15s"
 
+
 def test_detailed_audit_appends_localized_muted_refreshing_suffix() -> None:
     audit = RenderAudit(datetime(2026, 1, 1, 10, 5), 0.25, 15, "sample", refreshing=True)
     plain = render_audit(
@@ -274,6 +279,7 @@ def test_detailed_audit_appends_localized_muted_refreshing_suffix() -> None:
     assert "\x1b[2m" in colored
     assert "\n" not in colored
     assert chinese.endswith(" · 刷新中")
+
 
 @pytest.mark.parametrize(
     ("density", "audit", "visible"),
@@ -299,6 +305,7 @@ def test_audit_row_visibility_matches_rendered_footer(
     assert audit_row_visible(density, audit) is visible
     assert bool(render_audit(context)) is visible
 
+
 @pytest.mark.parametrize("density", ("minimal", "compact", "full"))
 def test_non_detailed_audit_hides_refreshing_suffix(density: str) -> None:
     output = render_audit(
@@ -313,6 +320,7 @@ def test_non_detailed_audit_hides_refreshing_suffix(density: str) -> None:
     )
 
     assert output == ""
+
 
 def test_monitor_titles_use_metric_view_dimension_and_factual_window() -> None:
     model_ranking = RankingModel(
@@ -331,12 +339,11 @@ def test_monitor_titles_use_metric_view_dimension_and_factual_window() -> None:
         observed_scope=ObservedScope(3600, "project"),
     )
 
-    assert "TPM · Ranking · by Model · 1h window" in render_ranking(
-        model_ranking, context(True)
-    )
+    assert "TPM · Ranking · by Model · 1h window" in render_ranking(model_ranking, context(True))
     assert "Tokens · Trend · by Project · 1h window" in render_timeline(
         project_timeline, context(True)
     )
+
 
 def test_monitor_list_is_centered_and_omits_bar_tracks() -> None:
     model = RankingModel(

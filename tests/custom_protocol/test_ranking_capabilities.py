@@ -47,6 +47,7 @@ def test_v2_subday_periods_are_ranking_only_and_preserve_declaration_order() -> 
     with pytest.raises(CustomProtocolError, match="period"):
         parse_v2_probe_descriptor(value)
 
+
 def test_v2_ranking_sort_direction_parses_and_round_trips() -> None:
     value = v2_probe_descriptor()
     value["metrics"][0]["capabilities"]["charts"] = {
@@ -63,6 +64,7 @@ def test_v2_ranking_sort_direction_parses_and_round_trips() -> None:
         ]
         == "ascending"
     )  # type: ignore[index]
+
 
 def test_v2_ranking_parses_partition_catalog_capability_and_default() -> None:
     value = v2_probe_descriptor()
@@ -93,6 +95,7 @@ def test_v2_ranking_parses_partition_catalog_capability_and_default() -> None:
     assert parsed.capabilities.charts["ranking"].partition_by == (None, "logical_model")
     assert parsed.defaults["ranking"].partition_by == "logical_model"
 
+
 def test_v2_ranking_partition_catalog_falls_back_to_grouping_catalog() -> None:
     value = v2_probe_descriptor()
     metric = value["metrics"][0]
@@ -111,6 +114,7 @@ def test_v2_ranking_partition_catalog_falls_back_to_grouping_catalog() -> None:
 
     assert parsed.capabilities.partition_by is None
     assert parsed.capabilities.charts["ranking"].partition_by == (None, "logical_model")
+
 
 def test_v2_ranking_explicit_partition_catalog_takes_precedence() -> None:
     value = v2_probe_descriptor()
@@ -131,6 +135,7 @@ def test_v2_ranking_explicit_partition_catalog_takes_precedence() -> None:
 
     with pytest.raises(CustomProtocolError, match="partition_by.*declared"):
         parse_v2_probe_descriptor(value)
+
 
 def test_v2_partition_rejects_unknown_ids_and_nonranking_declarations() -> None:
     value = v2_probe_descriptor()
@@ -154,6 +159,7 @@ def test_v2_partition_rejects_unknown_ids_and_nonranking_declarations() -> None:
     }
     with pytest.raises(CustomProtocolError, match="partition_by.*ranking"):
         parse_v2_probe_descriptor(value)
+
 
 def test_v2_ranking_rejects_invalid_partition_defaults() -> None:
     value = v2_probe_descriptor()
@@ -181,6 +187,7 @@ def test_v2_ranking_rejects_invalid_partition_defaults() -> None:
     with pytest.raises(CustomProtocolError, match="partition_by.*supported"):
         parse_v2_probe_descriptor(value)
 
+
 def test_v2_required_partition_rejects_null_default_and_nonranking_default() -> None:
     value = v2_probe_descriptor()
     metric = value["metrics"][0]
@@ -207,6 +214,7 @@ def test_v2_required_partition_rejects_null_default_and_nonranking_default() -> 
     }
     with pytest.raises(CustomProtocolError, match="partition_by.*ranking"):
         parse_v2_probe_descriptor(value)
+
 
 def test_flat_v2_ranking_parses_scalar_metadata_and_rejects_points() -> None:
     request = partitioned_ranking_request(
@@ -240,6 +248,7 @@ def test_flat_v2_ranking_parses_scalar_metadata_and_rejects_points() -> None:
         with pytest.raises(CustomProtocolError, match="must use scalar value"):
             parse_custom_response(json.dumps(root).encode(), request)
 
+
 def test_partitioned_v2_ranking_parses_ordered_groups_and_repeated_inner_ids() -> None:
     request = partitioned_ranking_request()
     root = v2_ranking_response_root(request)
@@ -258,6 +267,7 @@ def test_partitioned_v2_ranking_parses_ordered_groups_and_repeated_inner_ids() -
     assert response.data.groups[0].series[0].value == Decimal("7")  # type: ignore[union-attr]
     assert not hasattr(response.data.groups[0].series[0], "points")  # type: ignore[union-attr]
     assert response.data.series == ()  # type: ignore[union-attr]
+
 
 def test_partitioned_v2_ranking_parses_group_metadata_and_empty_groups() -> None:
     request = partitioned_ranking_request()
@@ -279,6 +289,7 @@ def test_partitioned_v2_ranking_parses_group_metadata_and_empty_groups() -> None
     assert parsed.comparison_display == LocalizedText("+2 requests", "+2 次请求")
     assert parsed.link == "https://example.com/router/coding"
     assert parsed.series == ()
+
 
 def test_grouped_v2_ranking_rejects_duplicate_ids_and_unsafe_metadata() -> None:
     request = partitioned_ranking_request()
@@ -302,6 +313,7 @@ def test_grouped_v2_ranking_rejects_duplicate_ids_and_unsafe_metadata() -> None:
     with pytest.raises(CustomProtocolError, match=r"data\.groups\[0\]\.link.*https"):
         parse_custom_response(json.dumps(root).encode(), request)
 
+
 def test_grouped_v2_ranking_errors_include_the_complete_failing_path() -> None:
     request = partitioned_ranking_request()
     root = v2_ranking_response_root(request)
@@ -319,6 +331,7 @@ def test_grouped_v2_ranking_errors_include_the_complete_failing_path() -> None:
     root["data"] = {"groups": [group]}
     with pytest.raises(CustomProtocolError, match=r"data\.groups\[0\]\.description zh-CN"):
         parse_custom_response(json.dumps(root).encode(), request)
+
 
 def test_flat_v2_ranking_applies_max_items_with_multiple_historical_capabilities() -> None:
     request = partitioned_ranking_request(
@@ -347,6 +360,7 @@ def test_flat_v2_ranking_applies_max_items_with_multiple_historical_capabilities
     with pytest.raises(CustomProtocolError, match="data must not contain more than 2 series"):
         parse_custom_response(json.dumps(root).encode(), request)
 
+
 def test_grouped_v2_ranking_applies_max_items_globally() -> None:
     request = partitioned_ranking_request()
     root = v2_ranking_response_root(request, max_items=2)
@@ -360,6 +374,7 @@ def test_grouped_v2_ranking_applies_max_items_globally() -> None:
     with pytest.raises(CustomProtocolError, match="data must not contain more than 2 series"):
         parse_custom_response(json.dumps(root).encode(), request)
 
+
 def test_v2_ranking_rejects_invalid_sort_direction() -> None:
     value = v2_probe_descriptor()
     value["metrics"][0]["capabilities"]["charts"] = {
@@ -368,6 +383,7 @@ def test_v2_ranking_rejects_invalid_sort_direction() -> None:
 
     with pytest.raises(CustomProtocolError, match="sort_direction"):
         parse_v2_probe_descriptor(value)
+
 
 def test_v2_ranking_capability_accepts_a_positive_source_limit() -> None:
     descriptor = v2_probe_descriptor()
@@ -380,6 +396,7 @@ def test_v2_ranking_capability_accepts_a_positive_source_limit() -> None:
     capability = parse_v2_probe_descriptor(descriptor).metrics[0].capabilities.charts["ranking"]
 
     assert capability.max_items == 10  # type: ignore[union-attr]
+
 
 def test_ranking_capabilities_accept_description_defaults_and_reject_them_elsewhere() -> None:
     descriptor = probe_response()
@@ -397,6 +414,7 @@ def test_ranking_capabilities_accept_description_defaults_and_reject_them_elsewh
     with pytest.raises(CustomProtocolError, match="descriptions_default"):
         parse_custom_response(json.dumps(descriptor).encode(), probe_request())
 
+
 def test_v2_ranking_capability_accepts_a_description_default() -> None:
     descriptor = v2_probe_descriptor()
     descriptor["metrics"][0]["capabilities"]["charts"] = {  # type: ignore[index]
@@ -409,6 +427,7 @@ def test_v2_ranking_capability_accepts_a_description_default() -> None:
     capability = parse_v2_probe_descriptor(descriptor).metrics[0].capabilities.charts["ranking"]
 
     assert capability.descriptions_default == "expanded"  # type: ignore[union-attr]
+
 
 def test_v2_ranking_default_all_is_allowed_and_invalid_defaults_are_ignored() -> None:
     descriptor = v2_probe_descriptor()
@@ -427,6 +446,7 @@ def test_v2_ranking_default_all_is_allowed_and_invalid_defaults_are_ignored() ->
     parsed = parse_v2_probe_descriptor(descriptor)
     assert parsed.metrics[0].defaults["timeline"].period is None
 
+
 @pytest.mark.parametrize("comparison", ("full", "rank", "none"))
 def test_v2_ranking_capability_accepts_comparison_presentation(comparison: str) -> None:
     descriptor = v2_probe_descriptor()
@@ -440,6 +460,7 @@ def test_v2_ranking_capability_accepts_comparison_presentation(comparison: str) 
     capability = parse_v2_probe_descriptor(descriptor).metrics[0].capabilities.charts["ranking"]
 
     assert capability.comparison == comparison  # type: ignore[union-attr]
+
 
 def test_v2_ranking_comparison_rejects_invalid_or_nonranking_values() -> None:
     descriptor = v2_probe_descriptor()

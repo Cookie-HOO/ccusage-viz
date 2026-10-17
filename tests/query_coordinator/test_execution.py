@@ -48,6 +48,7 @@ def test_ccusage_execution_honors_environment_and_output_limit() -> None:
         provider.execute(oversized, Event())
     assert caught.value.key == "error.ccusage_output_limit"
 
+
 def test_scheduling_group_registry_is_process_wide() -> None:
     provider = RecordingProvider([], Lock(), Event(), Event())
     first = PhysicalQuery(
@@ -63,6 +64,7 @@ def test_scheduling_group_registry_is_process_wide() -> None:
         second_handle.result(1)
     provider.release.set()
     assert first_handle.result(1).records
+
 
 def test_ccusage_execution_bounds_stderr_and_times_out_pipe_holding_descendants() -> None:
     provider = CCUSAGE_DEFINITION.provider
@@ -90,6 +92,7 @@ def test_ccusage_execution_bounds_stderr_and_times_out_pipe_holding_descendants(
             provider.execute(descendant, Event())
         assert caught.value.key == "error.ccusage_timeout"
         assert time.monotonic() - started < 2
+
 
 def test_registry_definitions_are_fully_executable() -> None:
     for definition in (CCUSAGE_DEFINITION, DEMO_DEFINITION):

@@ -16,6 +16,7 @@ from ccusage_viz.options import CustomChartConfig
 
 _MAX_DISPLAY_WINDOW_SECONDS = 86_400
 
+
 def custom_monitor_y_axis_max(values: list[float]) -> float:
     """Return a non-degenerate upper bound for source-owned Monitor timelines."""
 
@@ -23,6 +24,7 @@ def custom_monitor_y_axis_max(values: list[float]) -> float:
     if not isfinite(maximum) or maximum <= 0:
         return 1.0
     return maximum
+
 
 def custom_monitor_styles(aggregation: str, group_by: str | None = None) -> tuple[str, ...]:
     """Return the complete source-safe Monitor style cycle for an aggregation."""
@@ -40,6 +42,7 @@ def custom_monitor_styles(aggregation: str, group_by: str | None = None) -> tupl
         styles = tuple(style for style in styles if style != "bars")
     return (*styles, "cumulative-bars") if aggregation == "sum" else styles
 
+
 def normalize_custom_monitor_style(
     config: CustomChartConfig, aggregation: str
 ) -> CustomChartConfig:
@@ -53,11 +56,13 @@ def normalize_custom_monitor_style(
     fallback = "ranking" if style == "cumulative-bars" else styles[0]
     return replace(config, presentation=replace(config.presentation, style=fallback))
 
+
 @dataclass(frozen=True, slots=True)
 class CustomMonitorCompletion:
     generation: int
     config: CustomChartConfig
     response: V2MonitorResponse
+
 
 @dataclass(frozen=True, slots=True)
 class CustomMonitorPresentation:
@@ -69,6 +74,7 @@ class CustomMonitorPresentation:
     aggregation: str
     capability: V2MonitorCapability
 
+
 @dataclass(frozen=True, slots=True)
 class CustomMonitorHeadingMetadata:
     metric: str
@@ -76,11 +82,13 @@ class CustomMonitorHeadingMetadata:
     window_seconds: int
     status: str | None = None
 
+
 @dataclass(frozen=True, slots=True)
 class CustomMonitorSeries:
     key: str
     label: LocalizedText | None
     values: tuple[Decimal | None, ...]
+
 
 @dataclass(frozen=True, slots=True)
 class CustomMonitorPoint:
@@ -89,10 +97,12 @@ class CustomMonitorPoint:
     ended_at: datetime
     observation: V2MonitorObservation | None
 
+
 @dataclass(frozen=True, slots=True)
 class CustomMonitorTimeline:
     points: tuple[CustomMonitorPoint, ...]
     series: tuple[CustomMonitorSeries, ...]
+
 
 @dataclass(frozen=True, slots=True)
 class CustomMonitorRankingEntry:
@@ -101,6 +111,7 @@ class CustomMonitorRankingEntry:
     value: Decimal
     description: LocalizedText | None = None
     display: LocalizedText | None = None
+
 
 @dataclass(frozen=True, slots=True)
 class CustomMonitorRanking:

@@ -33,19 +33,31 @@ from ccusage_viz.tui_preset_manager import PresetManagerState
 
 
 class TuiSession:
-
     def __init__(self, options: DashboardLaunch, translator: Translator) -> None:
         from ccusage_viz.tui.history import capture_dashboard_state
+
         self.options = options
         self.translator = translator
         self.runtime = build_query_runtime()
-        self.panes = [_new_pane(self.options, pane_config, f'dashboard:pane:{index}' if isinstance(pane_config, (ChartPaneConfig, CustomChartPaneConfig)) else None, self.runtime) for index, pane_config in enumerate(self.options.panes)]
+        self.panes = [
+            _new_pane(
+                self.options,
+                pane_config,
+                f"dashboard:pane:{index}"
+                if isinstance(pane_config, (ChartPaneConfig, CustomChartPaneConfig))
+                else None,
+                self.runtime,
+            )
+            for index, pane_config in enumerate(self.options.panes)
+        ]
         for index, pane in enumerate(self.panes):
             pane.pane_id = index
         self.next_pane_id = len(self.panes)
         self.header = _new_header(self.options, self.runtime)
-        _reconcile_custom_dashboard_summaries(self.header, _custom_dashboard_sources(self.panes), now=time.monotonic())
-        self.executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix='ccusage-viz-tui')
+        _reconcile_custom_dashboard_summaries(
+            self.header, _custom_dashboard_sources(self.panes), now=time.monotonic()
+        )
+        self.executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix="ccusage-viz-tui")
         self.focused: int | None = None
         self.active_grid = self.options.host.grid
         self.active_layout = self.options.host.layout
@@ -58,10 +70,10 @@ class TuiSession:
         self.grid_draft: str | None = None
         self.grid_error: str | None = None
         self.adjustment_mode: str | None = None
-        self.adjustment_page = 'quick'
+        self.adjustment_page = "quick"
         self.adjustment_timer: AdjustmentIdleTimer | None = None
         self.controls_hidden = False
-        self.body_view: DashboardBodyView = 'chart'
+        self.body_view: DashboardBodyView = "chart"
         self.dashboard_text_offset = 0
         self.dashboard_text_line_count = 0
         self.dashboard_text_visible_rows = 0
@@ -82,7 +94,9 @@ class TuiSession:
         self.displayed_custom_warnings: set[tuple[str, str]] = set()
         self.last_successful_update: datetime | None = None
         self.last_size: tuple[int, int] | None = None
-        self.pane_render_cache: dict[int, tuple[tuple[object, ...], str, tuple[DashboardOverlayPlacement, ...]]] = {}
+        self.pane_render_cache: dict[
+            int, tuple[tuple[object, ...], str, tuple[DashboardOverlayPlacement, ...]]
+        ] = {}
         self.screen = FramePainter(sys.stdout)
         self.history = DashboardHistory(capture_dashboard_state(self))
         self.displayed_layout: ResolvedPaneLayout | None = None

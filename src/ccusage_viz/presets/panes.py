@@ -65,6 +65,7 @@ _PERSISTED_CUSTOM_EXPLICIT = frozenset(
     }
 )
 
+
 def _chart_wire(chart: object) -> dict[str, object]:
     if isinstance(chart, CustomChartConfig):
         return {
@@ -138,10 +139,12 @@ def _chart_wire(chart: object) -> dict[str, object]:
         return base
     raise AssertionError(f"unsupported chart type: {type(chart)!r}")
 
+
 def _attachment_wire(*, style: str | None, theme: str | None) -> dict[str, object] | None:
     if style is None and theme is None:
         return None
     return {"style": style, "theme": theme}
+
 
 def _attachment_parse(value: object) -> tuple[str | None, str | None]:
     if value is None:
@@ -156,12 +159,14 @@ def _attachment_parse(value: object) -> tuple[str | None, str | None]:
     theme = _optional_choice(wire["theme"], COLOR_SCHEMES, "monitor attachment.theme")
     return style, theme
 
+
 def _pane_fields(
     wire: Mapping[str, object], fields: frozenset[str], label: str
 ) -> tuple[Mapping[str, object], tuple[str | None, str | None]]:
     payload = dict(wire)
     attachment = _attachment_parse(payload.pop("attachment", None))
     return _exact(payload, fields, label), attachment
+
 
 def _parse_builtin_chart(value: Mapping[str, object]) -> ChartPaneConfig:
     kind = _choice(
@@ -233,6 +238,7 @@ def _parse_builtin_chart(value: Mapping[str, object]) -> ChartPaneConfig:
             ),
         )
     return ChartPaneConfig(chart)
+
 
 def _parse_pane(value: object) -> PaneConfig:
     wire = _expect_mapping(value, "pane")
@@ -419,6 +425,7 @@ def _parse_pane(value: object) -> PaneConfig:
             raise DashboardPresetValidationError("unsupported animation style") from exc
         return AnimationPaneConfig(spec, _overlay_parse(wire["overlay"]))
     raise DashboardPresetValidationError(f"unsupported pane kind: {kind}")
+
 
 def _pane_wire(pane: object) -> dict[str, object]:
     if isinstance(pane, EmptyPaneConfig):

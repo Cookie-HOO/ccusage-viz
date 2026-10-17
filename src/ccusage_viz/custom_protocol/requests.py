@@ -69,6 +69,7 @@ class CustomChartRequest:
     def to_json_bytes(self) -> bytes:
         return _json_bytes(self.to_wire())
 
+
 @dataclass(frozen=True, slots=True)
 class CustomSummaryRequest:
     request_id: str
@@ -108,6 +109,7 @@ class CustomSummaryRequest:
     def to_json_bytes(self) -> bytes:
         return _json_bytes(self.to_wire())
 
+
 @dataclass(frozen=True, slots=True)
 class CustomProbeRequest:
     request_id: str
@@ -128,6 +130,7 @@ class CustomProbeRequest:
     def to_json_bytes(self) -> bytes:
         return _json_bytes(self.to_wire())
 
+
 @dataclass(frozen=True, slots=True)
 class V2ProbeRequest:
     request_id: str
@@ -147,6 +150,7 @@ class V2ProbeRequest:
 
     def to_json_bytes(self) -> bytes:
         return _json_bytes(self.to_wire())
+
 
 @dataclass(frozen=True, slots=True)
 class V2ChartRequest:
@@ -249,6 +253,7 @@ class V2ChartRequest:
     def to_json_bytes(self) -> bytes:
         return _json_bytes(self.to_wire())
 
+
 @dataclass(frozen=True, slots=True)
 class V2MonitorRequest:
     request_id: str
@@ -288,6 +293,7 @@ class V2MonitorRequest:
 
     def to_json_bytes(self) -> bytes:
         return _json_bytes(self.to_wire())
+
 
 @dataclass(frozen=True, slots=True)
 class V2SummaryRequest:
@@ -331,6 +337,7 @@ class V2SummaryRequest:
     def to_json_bytes(self) -> bytes:
         return _json_bytes(self.to_wire())
 
+
 CustomRequest: TypeAlias = (
     CustomChartRequest
     | CustomSummaryRequest
@@ -344,6 +351,7 @@ CustomRequest: TypeAlias = (
 CustomPaneRequest = CustomChartRequest
 
 CustomDashboardSummaryRequest = CustomSummaryRequest
+
 
 def canonical_custom_request_key(request: CustomRequest) -> tuple[object, ...]:
     if isinstance(request, (CustomProbeRequest, V2ProbeRequest)):

@@ -61,6 +61,7 @@ def _accepted_custom_metric_help_node(
         ),
     )
 
+
 def _custom_metric_group_switch_available(pane: TuiCustomPane) -> bool:
     """Whether the accepted V2 Metric belongs to one declared Metric Group."""
 
@@ -81,6 +82,7 @@ def _custom_metric_group_switch_available(pane: TuiCustomPane) -> bool:
         and any(group.id == metric.group_id for group in descriptor.metric_groups)
     )
 
+
 def _cycle_dimension(
     values: tuple[str | None, ...],
     current: str | None,
@@ -96,6 +98,7 @@ def _cycle_dimension(
         if blocked is None or candidate != blocked:
             return candidate
     return current
+
 
 def _cycle_custom_partitioning(
     config: CustomChartConfig,
@@ -146,6 +149,7 @@ def _cycle_custom_partitioning(
         )
     return config
 
+
 def _cycle_custom_grouping(
     config: CustomChartConfig, groupings: tuple[str | None, ...], *, step: int = 1
 ) -> CustomChartConfig:
@@ -174,13 +178,16 @@ def _cycle_custom_grouping(
         presentation=presentation,
     )
 
+
 _CUSTOM_MONITOR_WINDOWS = (300, 900, 1800, 3600, 21600, 43200, 86400)
+
 
 def _cycle_custom_monitor_window(window_seconds: int, *, step: int = 1) -> int:
     nearest = min(_CUSTOM_MONITOR_WINDOWS, key=lambda value: abs(value - window_seconds))
     return _CUSTOM_MONITOR_WINDOWS[
         (_CUSTOM_MONITOR_WINDOWS.index(nearest) + step) % len(_CUSTOM_MONITOR_WINDOWS)
     ]
+
 
 def _custom_capability_for_component(
     component: CustomHistoricalComponent | CustomMonitorComponent,
@@ -195,10 +202,12 @@ def _custom_capability_for_component(
 
     return component.capability
 
+
 def _custom_capability(pane: TuiCustomPane) -> CustomChartCapability | V2MonitorCapability | None:
     """Return the active Dashboard custom pane capability."""
 
     return _custom_capability_for_component(pane.component)
+
 
 def _custom_period_adjustment_chart(
     chart: CustomChartConfig,
@@ -209,6 +218,7 @@ def _custom_period_adjustment_chart(
     if isinstance(capability, CustomChartCapability):
         return replace(chart, metric_periods=capability.periods)
     return chart
+
 
 def _custom_period_adjustment_target(
     component: CustomHistoricalComponent,
@@ -226,6 +236,7 @@ def _custom_period_adjustment_target(
             return replace(chart, metric_periods=_custom_metric_periods(metric, chart.kind))
     return _custom_period_adjustment_chart(chart, component.capability)
 
+
 def _ranking_search_eligible(pane: TuiPane) -> bool:
     """Whether a pane can own an in-memory historical Ranking search query."""
     if not isinstance(pane, (TuiChartPane, TuiCustomPane)) or pane.body_view != "chart":
@@ -240,10 +251,12 @@ def _ranking_search_eligible(pane: TuiPane) -> bool:
         and pane.component.candidate.chart.kind == "ranking"
     )
 
+
 def _finish_ranking_search_editing(pane: TuiPane | None) -> None:
     """Leave a pane-local Ranking search editor without clearing its filter."""
     if isinstance(pane, (TuiChartPane, TuiCustomPane)):
         pane.ranking_search.editing = False
+
 
 def _custom_top_refresh_required(
     component: CustomHistoricalComponent,
@@ -260,6 +273,7 @@ def _custom_top_refresh_required(
         return False
     capability = component.capability
     return capability is None or capability.max_items is None or updated.top <= capability.max_items
+
 
 def _custom_top_limit_notice(pane: TuiCustomPane, translator: Translator) -> tuple[str, ...]:
     """Return the active Dataset source bound as a notice below its chart."""
@@ -278,6 +292,7 @@ def _custom_top_limit_notice(pane: TuiCustomPane, translator: Translator) -> tup
         return ()
     return (translator.text("status.custom_top_source_limit", max=capability.max_items),)
 
+
 def _custom_runtime_filters(
     component: CustomHistoricalComponent | CustomMonitorComponent,
 ) -> tuple[CustomFilter, ...]:
@@ -285,6 +300,7 @@ def _custom_runtime_filters(
 
     runtime = component.runtime
     return runtime.filters if runtime is not None else ()
+
 
 def _custom_pane_adjustment_bindings(pane: TuiCustomPane, page: str) -> tuple[tuple[str, str], ...]:
     """Return the active custom actions for one Dashboard adjustment page."""
@@ -350,6 +366,7 @@ def _custom_pane_adjustment_bindings(pane: TuiCustomPane, page: str) -> tuple[tu
     actions.append(("L", "custom_logs"))
     return tuple(actions)
 
+
 def _adjust_custom_monitor_chart(
     chart: CustomChartConfig, key: str, *, aggregation: str = "sum"
 ) -> CustomChartConfig:
@@ -373,10 +390,12 @@ def _adjust_custom_monitor_chart(
         return adjust_custom_chart(chart, key)
     return chart
 
+
 def _custom_pane_adjustment_actions(
     pane: TuiCustomPane, page: str, translator: Translator
 ) -> tuple[AdjustmentAction, ...]:
     return _localized_actions(_custom_pane_adjustment_bindings(pane, page), translator)
+
 
 def _custom_pane_adjustment_keys(pane: TuiCustomPane, page: str) -> frozenset[str]:
     return frozenset(
@@ -385,6 +404,7 @@ def _custom_pane_adjustment_keys(pane: TuiCustomPane, page: str) -> frozenset[st
         for character in binding
         if character not in {"/", " "}
     )
+
 
 def _custom_pane_adjustment_state(pane: TuiCustomPane, page: str, translator: Translator) -> str:
     chart = pane.component.candidate
@@ -414,6 +434,7 @@ def _custom_pane_adjustment_state(pane: TuiCustomPane, page: str, translator: Tr
         runtime=translator.text("status.tui_running"),
         settings=settings,
     )
+
 
 def _custom_adjustment_footer(
     pane: TuiCustomPane,

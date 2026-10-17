@@ -1,5 +1,3 @@
-
-
 from datetime import date
 
 from ccusage_viz.coverage import DateInterval
@@ -14,6 +12,7 @@ from ccusage_viz.custom_protocol.requests import (
 
 def text(en: str, zh_cn: str) -> dict[str, str]:
     return {"en": en, "zh-CN": zh_cn}
+
 
 def chart_request(**changes: object) -> CustomChartRequest:
     values: dict[str, object] = {
@@ -32,6 +31,7 @@ def chart_request(**changes: object) -> CustomChartRequest:
     values.update(changes)
     return CustomChartRequest(**values)  # type: ignore[arg-type]
 
+
 def summary_request(**changes: object) -> CustomSummaryRequest:
     values: dict[str, object] = {
         "request_id": "summary-1",
@@ -47,6 +47,7 @@ def summary_request(**changes: object) -> CustomSummaryRequest:
     values.update(changes)
     return CustomSummaryRequest(**values)  # type: ignore[arg-type]
 
+
 def probe_request(**changes: object) -> CustomProbeRequest:
     values: dict[str, object] = {
         "request_id": "probe-1",
@@ -55,8 +56,10 @@ def probe_request(**changes: object) -> CustomProbeRequest:
     values.update(changes)
     return CustomProbeRequest(**values)  # type: ignore[arg-type]
 
+
 def unit() -> dict[str, object]:
     return {"id": "page", "label": text("pages", "页"), "placement": "suffix", "decimal_places": 0}
+
 
 def v2_probe_descriptor() -> dict[str, object]:
     return {
@@ -140,6 +143,7 @@ def v2_probe_descriptor() -> dict[str, object]:
         "environment": [],
     }
 
+
 def partitioned_ranking_request(**changes: object) -> V2ChartRequest:
     values: dict[str, object] = {
         "request_id": "chart-v2-grouped",
@@ -156,6 +160,7 @@ def partitioned_ranking_request(**changes: object) -> V2ChartRequest:
     values.update(changes)
     return V2ChartRequest(**values)  # type: ignore[arg-type]
 
+
 def ranking_series(
     identifier: str = "model", value: object = "7", *, date_value: str = "2026-10-08"
 ) -> dict[str, object]:
@@ -166,10 +171,12 @@ def ranking_series(
         "value": value,
     }
 
+
 def ranking_group(
     identifier: str, label: str, series: list[dict[str, object]]
 ) -> dict[str, object]:
     return {"id": identifier, "label": text(label, label), "series": series}
+
 
 def v2_ranking_response_root(
     request: V2ChartRequest, *, max_items: int | None = None
@@ -199,6 +206,7 @@ def v2_ranking_response_root(
         "data": {"groups": []},
     }
 
+
 def capabilities() -> dict[str, object]:
     return {
         "group_by": [{"id": "book", "label": text("Book", "书籍")}],
@@ -215,6 +223,7 @@ def capabilities() -> dict[str, object]:
             for kind in ("timeline", "stack", "calendar", "ranking")
         },
     }
+
 
 def probe_response() -> dict[str, object]:
     request = probe_request()
@@ -254,6 +263,7 @@ def probe_response() -> dict[str, object]:
         },
     }
 
+
 def chart_response(point_value: object = "1.25") -> dict[str, object]:
     request = chart_request()
     return {
@@ -279,11 +289,13 @@ def chart_response(point_value: object = "1.25") -> dict[str, object]:
         },
     }
 
+
 def comparison(status: str = "ready", base_value: str | None = "12") -> dict[str, str]:
     result = {"status": status}
     if base_value is not None:
         result["base_value"] = base_value
     return result
+
 
 def summary_response() -> dict[str, object]:
     request = summary_request()

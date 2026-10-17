@@ -1,15 +1,3 @@
-
-
-
-
-
-
-
-
-
-
-
-
 from ccusage_viz.chart_models import (
     MetricDescriptor,
     ObservedScope,
@@ -43,6 +31,7 @@ def test_observed_ranking_uses_recent_range_without_historical_percentage() -> N
     assert "%" not in output
     assert "2026-01-01" not in output
 
+
 def test_observed_ranking_reclaims_percentage_space_for_labels() -> None:
     label = "gpt-5.6-very-long-model-name"
     model = RankingModel(
@@ -63,6 +52,7 @@ def test_observed_ranking_reclaims_percentage_space_for_labels() -> None:
     assert display_width(wide) <= 80
     assert all(display_width(line) <= 40 for line in narrow.splitlines())
 
+
 def test_observed_ranking_uses_content_driven_label_width() -> None:
     model = RankingModel(
         (),
@@ -79,6 +69,7 @@ def test_observed_ranking_uses_content_driven_label_width() -> None:
 
     assert "A #" in row
     assert "A           " not in row
+
 
 def test_monitor_ranking_dot_replaces_the_middle_bar_with_a_single_dot_track() -> None:
     model = RankingModel(
@@ -116,6 +107,7 @@ def test_monitor_ranking_dot_replaces_the_middle_bar_with_a_single_dot_track() -
     assert all("●" not in row and "·" not in row for row in ranking_rows)
     assert all(display_width(row) <= 80 for row in dotted_rows)
 
+
 def test_monitor_project_ranking_and_list_preserve_exact_agent_labels() -> None:
     model = RankingModel(
         (),
@@ -138,6 +130,7 @@ def test_monitor_project_ranking_and_list_preserve_exact_agent_labels() -> None:
     assert "Tokens · Ranking · by Project · 15m window" in ranking
     assert "claude · app" in ranking and "codex · app" in ranking
     assert "claude · app" in listing and "codex · app" in listing
+
 
 def test_observed_ranking_does_not_compact_shared_model_prefixes() -> None:
     model = RankingModel(

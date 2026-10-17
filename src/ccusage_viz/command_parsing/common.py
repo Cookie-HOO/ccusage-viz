@@ -44,6 +44,7 @@ _PANE_FORBIDDEN_OPTIONS = frozenset(
     }
 )
 
+
 def _explicit_fields(argv: list[str]) -> frozenset[str]:
     fields = set()
     for argument in argv:

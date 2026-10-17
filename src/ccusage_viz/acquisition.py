@@ -299,9 +299,7 @@ def custom_historical_query_intent(
     process = process or ProcessConfig()
     from ccusage_viz.core.custom_ranking_time import TimestampRange
 
-    timestamp_range = (
-        config.date_range if isinstance(config.date_range, TimestampRange) else None
-    )
+    timestamp_range = config.date_range if isinstance(config.date_range, TimestampRange) else None
     if timestamp_range is not None and (config.metric_id is None or config.kind != "ranking"):
         raise ValueError("timestamp ranges require a v2 custom ranking")
     interval = (

@@ -1,4 +1,3 @@
-
 from dataclasses import replace
 
 import pytest
@@ -50,6 +49,7 @@ def test_grouped_dashboard_inner_series_copy_uses_group_aware_payload(dashboard)
 
     run([click_series, verify])
 
+
 def test_copy_all_uses_every_filtered_entry_without_focus_or_query_work(dashboard):
     run, panes, frames, focuses, layouts, decoder, copied, opened, _ = dashboard
 
@@ -71,16 +71,17 @@ def test_copy_all_uses_every_filtered_entry_without_focus_or_query_work(dashboar
 
     run([click_all, verify_all])
 
+
 def test_copy_all_failure_does_not_show_success(dashboard):
     run, panes, frames, focuses, layouts, decoder, copied, *_ = dashboard
-    run.monkeypatch.setattr(tui_events, 'copy_command', lambda text: False)
-    run.monkeypatch.setattr(tui_pointer, 'copy_command', lambda text: False)
-    run.monkeypatch.setattr(tui_pane_events, 'copy_command', lambda text: False)
-    run.monkeypatch.setattr(tui_datasets_chooser, 'copy_command', lambda text: False)
-    run.monkeypatch.setattr(tui_datasets_modal, 'copy_command', lambda text: False)
-    run.monkeypatch.setattr(tui_pointer, 'copy_command', lambda text: False)
-    run.monkeypatch.setattr(tui_datasets_chooser, 'copy_command', lambda text: False)
-    run.monkeypatch.setattr(tui_datasets_modal, 'copy_command', lambda text: False)
+    run.monkeypatch.setattr(tui_events, "copy_command", lambda text: False)
+    run.monkeypatch.setattr(tui_pointer, "copy_command", lambda text: False)
+    run.monkeypatch.setattr(tui_pane_events, "copy_command", lambda text: False)
+    run.monkeypatch.setattr(tui_datasets_chooser, "copy_command", lambda text: False)
+    run.monkeypatch.setattr(tui_datasets_modal, "copy_command", lambda text: False)
+    run.monkeypatch.setattr(tui_pointer, "copy_command", lambda text: False)
+    run.monkeypatch.setattr(tui_datasets_chooser, "copy_command", lambda text: False)
+    run.monkeypatch.setattr(tui_datasets_modal, "copy_command", lambda text: False)
 
     def click_all():
         hit = panes[0].ranking_viewport.copy_all_hit
@@ -95,6 +96,7 @@ def test_copy_all_failure_does_not_show_success(dashboard):
         return KeyEvent("\x03")
 
     run([click_all, verify_failure])
+
 
 def test_copy_all_respects_search_and_includes_offscreen_matches(dashboard):
     run, panes, frames, focuses, layouts, decoder, copied, *_ = dashboard
@@ -116,11 +118,20 @@ def test_copy_all_respects_search_and_includes_offscreen_matches(dashboard):
 
     run([click_all, verify_search])
 
+
 def test_scroll_copy_link_and_search_use_visible_stable_id(dashboard):
     run, panes, frames, focuses, layouts, decoder, copied, opened, _ = dashboard
     target_id = []
-    run.monkeypatch.setattr(tui_custom_rendering, '_custom_ranking_copyable_entries', lambda *args: pytest.fail('full-list copy lookup'))
-    run.monkeypatch.setattr(tui_pointer, '_custom_ranking_copyable_entries', lambda *args: pytest.fail('full-list copy lookup'))
+    run.monkeypatch.setattr(
+        tui_custom_rendering,
+        "_custom_ranking_copyable_entries",
+        lambda *args: pytest.fail("full-list copy lookup"),
+    )
+    run.monkeypatch.setattr(
+        tui_pointer,
+        "_custom_ranking_copyable_entries",
+        lambda *args: pytest.fail("full-list copy lookup"),
+    )
 
     def click_visible(*, link=False):
         pane = panes[0]

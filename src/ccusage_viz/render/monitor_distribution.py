@@ -30,7 +30,6 @@ def _dimension_label(model: TimeOfDayDistributionModel, context: RenderContext) 
     return context.translator.text("label.total")
 
 
-
 def _series_colors(model: TimeOfDayDistributionModel, context: RenderContext) -> dict[object, int]:
     colors = categorical_colors((series.key for series in model.series), context.color_scheme)
     scheme = get_color_scheme(context.color_scheme)

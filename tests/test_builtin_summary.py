@@ -23,7 +23,9 @@ from ccusage_viz.processing.summaries import (
 _DEFAULT_FILTERS = Filters()
 
 
-def _options(*, fixed_bounds: bool = False, filters: Filters = _DEFAULT_FILTERS) -> StandaloneLaunch:
+def _options(
+    *, fixed_bounds: bool = False, filters: Filters = _DEFAULT_FILTERS
+) -> StandaloneLaunch:
     return StandaloneLaunch(
         process=ProcessConfig(),
         host=StandaloneHostConfig(),
@@ -49,7 +51,9 @@ def _record(
 
 
 def test_builtin_summary_filters_records_over_all_plan_intervals() -> None:
-    chart = _options(filters=Filters(agents=("claude",), models=("sonnet",), projects=("web (claude)",)))
+    chart = _options(
+        filters=Filters(agents=("claude",), models=("sonnet",), projects=("web (claude)",))
+    )
     plan = summary_query_plan(date(2026, 1, 7), "day")
     records = (
         _record(

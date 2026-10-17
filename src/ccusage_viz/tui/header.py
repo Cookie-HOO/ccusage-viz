@@ -65,6 +65,7 @@ def _header_options(
         chart,
     )
 
+
 def _new_header(options: DashboardLaunch, runtime: QueryRuntime) -> DashboardHeader:
     return DashboardHeader(
         _header_options(options),
@@ -74,6 +75,7 @@ def _new_header(options: DashboardLaunch, runtime: QueryRuntime) -> DashboardHea
         summary_period=options.host.header_summary,
         token_enabled=any(isinstance(pane, ChartPaneConfig) for pane in options.panes),
     )
+
 
 def _custom_source_conflict(
     panes: list[TuiPane], source: CustomCommandSource, *, replacing_index: int | None = None
@@ -90,6 +92,7 @@ def _custom_source_conflict(
             return existing, source
     return None
 
+
 def _dashboard_custom_source_conflict(
     panes: list[TuiPane],
 ) -> tuple[CustomCommandSource, CustomCommandSource] | None:
@@ -104,6 +107,7 @@ def _dashboard_custom_source_conflict(
         if not custom_command_sources_equivalent(previous, source):
             return previous, source
     return None
+
 
 def _custom_source_conflict_message(
     conflict: tuple[CustomCommandSource, CustomCommandSource],
@@ -136,6 +140,7 @@ def _custom_source_conflict_message(
         )
     )
 
+
 def _custom_dashboard_sources(panes: list[TuiPane]) -> tuple[CustomDashboardSource, ...]:
     """Choose the first visible Pane context for each distinct dataset ID."""
     sources: dict[str, CustomDashboardSource] = {}
@@ -151,6 +156,7 @@ def _custom_dashboard_sources(panes: list[TuiPane]) -> tuple[CustomDashboardSour
             CustomDashboardSource(config.source, config, summary_mode),
         )
     return tuple(sources.values())
+
 
 def _reconcile_custom_dashboard_summaries(
     header: DashboardHeader,
@@ -187,10 +193,12 @@ def _reconcile_custom_dashboard_summaries(
         added.append(summary)
     return tuple(added)
 
+
 def _invalidate_custom_dashboard_summaries(header: DashboardHeader) -> None:
     for summary in header.custom_summaries.values():
         summary.generation += 1
         summary.lifecycle.detach_active()
+
 
 def _set_header_theme(header: DashboardHeader, theme: str) -> None:
     header.options = replace(
@@ -201,13 +209,16 @@ def _set_header_theme(header: DashboardHeader, theme: str) -> None:
         ),
     )
 
+
 def _cycle_header_summary(period: str, *, step: int = 1) -> str:
     """Cycle Dashboard header summary scopes in either direction."""
     return _cycle(HEADER_SUMMARIES, period, step)
 
+
 def _next_header_summary(period: str) -> str:
     """Return the next Dashboard header summary scope."""
     return _cycle_header_summary(period)
+
 
 def _header_refresh_interval(
     header: DashboardHeader, *, aggressive: bool = False, today=None
@@ -227,6 +238,7 @@ def _header_refresh_interval(
         )
     return DateInterval(current, current)
 
+
 def _header_summary(header: DashboardHeader, period: str):
     if period == "none":
         return None
@@ -237,6 +249,7 @@ def _header_summary(header: DashboardHeader, period: str):
         header.coverage,
     )
     return summary
+
 
 def _replace_header_interval(
     records: tuple[UsageRecord, ...], snapshot: UsageSnapshot
@@ -249,6 +262,7 @@ def _replace_header_interval(
         or not any(item.since <= record.day <= item.until for item in intervals)
     )
     return (*retained, *snapshot.records)
+
 
 def _dashboard_title_line(title: str, freshness: str, width: int, *, color: bool = True) -> str:
     """Center the title with version left and freshness anchored right."""
@@ -265,6 +279,7 @@ def _dashboard_title_line(title: str, freshness: str, width: int, *, color: bool
     line = version + " " * max(1, start - version_width) + title
     gap = max(int(bool(freshness)), width - display_width(line) - freshness_width)
     return pad_width(clip_width(line + " " * gap + freshness, width), width)
+
 
 def _header_lines(
     header: DashboardHeader,

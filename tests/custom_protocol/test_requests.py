@@ -1,4 +1,3 @@
-
 from dataclasses import replace
 from datetime import UTC, date, datetime
 from zoneinfo import ZoneInfo
@@ -26,6 +25,7 @@ def test_v2_ranking_date_request_accepts_every_valid_ranking_period(period: str)
 
     assert request.to_wire()["range"]["period"] == period
 
+
 def test_v2_chart_request_requires_chart_kind() -> None:
     with pytest.raises(ValueError, match="requires chart_kind"):
         V2ChartRequest(
@@ -36,6 +36,7 @@ def test_v2_chart_request_requires_chart_kind() -> None:
             start_date=date(2026, 1, 1),
             end_date=date(2026, 1, 2),
         )
+
 
 def test_v2_ranking_timestamp_request_uses_half_open_timestamp_wire_and_utc_key() -> None:
     first = V2ChartRequest(
@@ -61,6 +62,7 @@ def test_v2_ranking_timestamp_request_uses_half_open_timestamp_wire_and_utc_key(
     }
     assert canonical_custom_request_key(first) == canonical_custom_request_key(equivalent)
 
+
 def test_v2_timestamp_request_dst_fold_instants_have_distinct_keys() -> None:
     zone = ZoneInfo("America/New_York")
     first = V2ChartRequest(
@@ -80,6 +82,7 @@ def test_v2_timestamp_request_dst_fold_instants_have_distinct_keys() -> None:
     )
 
     assert canonical_custom_request_key(first) != canonical_custom_request_key(second)
+
 
 @pytest.mark.parametrize(
     "changes",
@@ -112,6 +115,7 @@ def test_v2_timestamp_request_rejects_invalid_or_out_of_scope_shapes(
     with pytest.raises(ValueError):
         V2ChartRequest(**(values | changes))  # type: ignore[arg-type]
 
+
 def test_v2_request_omits_undeclared_partition_but_emits_declared_null() -> None:
     common = {
         "request_id": "chart-v2-partition",
@@ -133,6 +137,7 @@ def test_v2_request_omits_undeclared_partition_but_emits_declared_null() -> None
         V2ChartRequest(**{**common, "partition_by": "logical_model"}, partition_declared=True)
     )
 
+
 def test_v2_request_rejects_partition_when_capability_is_undeclared() -> None:
     with pytest.raises(ValueError, match="partition_by requires partition_declared"):
         V2ChartRequest(
@@ -146,6 +151,7 @@ def test_v2_request_rejects_partition_when_capability_is_undeclared() -> None:
             partition_declared=False,
             chart_kind="ranking",
         )
+
 
 def test_v2_chart_top_is_transmitted_and_distinguishes_request_identity() -> None:
     request = V2ChartRequest(
@@ -175,6 +181,7 @@ def test_v2_chart_top_is_transmitted_and_distinguishes_request_identity() -> Non
         )
     )
 
+
 def test_probe_request_has_no_query_or_timezone() -> None:
     request = probe_request()
 
@@ -188,6 +195,7 @@ def test_probe_request_has_no_query_or_timezone() -> None:
         (),
         "probe",
     )
+
 
 def test_request_wire_shapes_keep_chart_and_summary_inputs_separate() -> None:
     chart = chart_request()
@@ -213,6 +221,7 @@ def test_request_wire_shapes_keep_chart_and_summary_inputs_separate() -> None:
         },
     }
 
+
 def test_canonical_summary_identity_excludes_chart_inputs_and_request_id() -> None:
     first = summary_request()
     second = summary_request(request_id="other")
@@ -224,6 +233,7 @@ def test_canonical_summary_identity_excludes_chart_inputs_and_request_id() -> No
     assert canonical_custom_request_key(first) != canonical_custom_request_key(
         summary_request(scope="week", year_over_year=None)
     )
+
 
 def test_chart_identity_contains_graph_inputs() -> None:
     assert canonical_custom_request_key(chart_request()) != canonical_custom_request_key(
@@ -239,16 +249,19 @@ def test_chart_identity_contains_graph_inputs() -> None:
         chart_request(timezone="America/Los_Angeles")
     )
 
+
 @pytest.mark.parametrize("request_factory", [chart_request, summary_request])
 @pytest.mark.parametrize("timezone", ["", "Mars/Olympus"])
 def test_requests_require_a_valid_iana_timezone(request_factory: object, timezone: str) -> None:
     with pytest.raises(ValueError, match="timezone"):
         request_factory(timezone=timezone)  # type: ignore[operator]
 
+
 @pytest.mark.parametrize("period", ["week", "0d", "1W"])
 def test_chart_request_rejects_invalid_period(period: str) -> None:
     with pytest.raises(ValueError, match="period"):
         chart_request(period=period)
+
 
 def test_fixed_chart_request_serializes_null_period() -> None:
     assert chart_request(period=None).to_wire()["range"]["period"] is None

@@ -184,7 +184,9 @@ def test_builtin_summary_query_ignores_chart_display_shape() -> None:
 
 def test_builtin_summary_plan_follows_timeline_stack_granularity_only() -> None:
     today = date(2026, 9, 30)
-    timeline = replace(options("timeline"), chart=replace(options("timeline").chart, granularity="month"))
+    timeline = replace(
+        options("timeline"), chart=replace(options("timeline").chart, granularity="month")
+    )
     stack = replace(options("stack"), chart=replace(options("stack").chart, granularity="week"))
 
     assert builtin_summary_query_plan(timeline, today=today).scope == "month"
@@ -195,7 +197,9 @@ def test_builtin_summary_plan_follows_timeline_stack_granularity_only() -> None:
 
 def test_builtin_summary_plan_uses_one_total_for_fixed_range() -> None:
     fixed_range = DateRange(date(2026, 8, 1), date(2026, 8, 19), fixed_bounds=True)
-    selected = replace(options("timeline"), chart=replace(options("timeline").chart, date_range=fixed_range))
+    selected = replace(
+        options("timeline"), chart=replace(options("timeline").chart, date_range=fixed_range)
+    )
 
     plan = builtin_summary_query_plan(selected, today=date(2026, 9, 30))
 

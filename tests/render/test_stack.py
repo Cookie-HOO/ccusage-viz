@@ -1,4 +1,3 @@
-
 import re
 from datetime import date
 
@@ -35,6 +34,7 @@ def test_layout_summary_blocks_stacks_facts_without_separators() -> None:
     assert rows == ("甲乙", "\x1b[1m丙丁\x1b[0m", "戊己")
     assert all(display_width(row) <= context.width for row in rows)
 
+
 def test_stack_normalized_style_uses_percent_axis() -> None:
     model = StackModel(
         (date(2026, 1, 1),),
@@ -48,6 +48,7 @@ def test_stack_normalized_style_uses_percent_axis() -> None:
         model, RenderContext(100, 24, load_translator("en"), color=False, style="normalized")
     )
     assert "100%" in output
+
 
 def test_stack_legend_has_component_swatches() -> None:
     model = StackModel(
@@ -68,6 +69,7 @@ def test_stack_legend_has_component_swatches() -> None:
     assert "■ Output" in unicode_output
     assert "● Cache" in unicode_output
 
+
 def test_stack_hidden_legend_keeps_heading_and_omits_component_keys() -> None:
     model = StackModel(
         (date(2026, 1, 1),),
@@ -87,6 +89,7 @@ def test_stack_hidden_legend_keeps_heading_and_omits_component_keys() -> None:
     assert "Tokens · Stack · 2026-01-01–2026-01-01" in output
     assert "# Input" not in output
     assert "= Output" not in output
+
 
 def test_stack_style_selects_solid_or_pattern_markers(monkeypatch: pytest.MonkeyPatch) -> None:
     model = StackModel(
@@ -114,6 +117,7 @@ def test_stack_style_selects_solid_or_pattern_markers(monkeypatch: pytest.Monkey
     assert "/" in pattern
     assert "\\" in pattern
 
+
 def test_stacked_grid_aligns_axis_and_distributes_non_divisible_slots() -> None:
     days = tuple(date(2026, 9, index) for index in range(3, 17))
     model = StackModel(
@@ -130,6 +134,7 @@ def test_stacked_grid_aligns_axis_and_distributes_non_divisible_slots() -> None:
 
     assert baseline.index("+") == data_row.index("|")
     assert all(display_width(line) == 80 for line in chart)
+
 
 def test_stacked_bars_use_equal_cell_widths_when_plotext_pitch_is_fractional() -> None:
     days = tuple(date(2026, 1, index) for index in range(1, 8))
@@ -148,6 +153,7 @@ def test_stacked_bars_use_equal_cell_widths_when_plotext_pitch_is_fractional() -
     widths = [len(run) for run in re.findall(r"#+", output.splitlines()[2])]
 
     assert widths == [4] * 7
+
 
 def test_stacked_slots_do_not_change_when_components_or_periods_are_zero() -> None:
     days = tuple(date(2026, 1, index) for index in range(1, 8))
@@ -190,6 +196,7 @@ def test_stacked_slots_do_not_change_when_components_or_periods_are_zero() -> No
     zero_starts = [match.start() for match in re.finditer(r"#+", with_zeros.splitlines()[-3])]
 
     assert zero_starts == [baseline_starts[index] for index in (0, 1, 3, 4, 5, 6)]
+
 
 def test_grouped_stack_uses_uniform_day_pitch_and_explicit_width(
     monkeypatch: pytest.MonkeyPatch,
@@ -235,6 +242,7 @@ def test_grouped_stack_uses_uniform_day_pitch_and_explicit_width(
         },
     ]
 
+
 def test_grouped_stack_keeps_component_slots_when_a_value_is_zero(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -266,6 +274,7 @@ def test_grouped_stack_keeps_component_slots_when_a_value_is_zero(
         ([0.0, 1.0, 2.0], [0, 50, 50], 0.8 / 3),
         ([0.8 / 3, 1 + 0.8 / 3, 2 + 0.8 / 3], [25, 25, 0], 0.8 / 3),
     ]
+
 
 def test_grouped_thin_stack_narrows_bars_without_changing_day_pitch(
     monkeypatch: pytest.MonkeyPatch,
@@ -304,6 +313,7 @@ def test_grouped_thin_stack_narrows_bars_without_changing_day_pitch(
     assert thin[0][1] < broad[0][1]
     assert thin[0][0][1] - thin[0][0][0] == broad[0][0][1] - broad[0][0][0] == 1
 
+
 def test_grouped_stack_rejects_width_too_narrow_for_components() -> None:
     model = StackModel(
         (date(2026, 1, 1), date(2026, 1, 2)),
@@ -319,6 +329,7 @@ def test_grouped_stack_rejects_width_too_narrow_for_components() -> None:
             model, RenderContext(15, 24, load_translator("en"), color=False, style="grouped")
         )
     assert caught.value.key == "error.stack_grouped_width"
+
 
 def test_grouped_stack_budgets_each_wrapped_summary_row(monkeypatch: pytest.MonkeyPatch) -> None:
     summary = PeriodSummary(

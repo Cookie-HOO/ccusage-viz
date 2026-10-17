@@ -55,6 +55,7 @@ def test_custom_ranking_uses_capability_sort_direction_for_entries_and_prior_ran
     assert [series.id for series in projection.series] == ["recent", "older"]
     assert [series.previous_rank for series in projection.series] == [2, 1]
 
+
 def test_grouped_projection_period_all_retains_dated_totals_without_comparison() -> None:
     source = _grouped_response((("one", (("a", "2"),)),))
     group = source.data.groups[0]  # type: ignore[index]
@@ -92,6 +93,7 @@ def test_grouped_projection_period_all_retains_dated_totals_without_comparison()
     assert projection.groups[0].total == Decimal("5")
     assert not projection.comparison_available
 
+
 @pytest.mark.parametrize("current_grouped", (False, True))
 def test_ranking_rejects_incompatible_current_and_comparison_shapes(
     current_grouped: bool,
@@ -120,6 +122,7 @@ def test_ranking_rejects_incompatible_current_and_comparison_shapes(
             comparison_config=comparison_chart,
         )
 
+
 def test_comparison_response_is_validated_against_its_own_query_capability() -> None:
     current = response((("a", "1"),))
     previous = replace(
@@ -142,6 +145,7 @@ def test_comparison_response_is_validated_against_its_own_query_capability() -> 
             comparison_config=comparison_chart,
         )
 
+
 def test_custom_ranking_derives_decimal_comparison_facts_from_raw_responses() -> None:
     current = response((("api", "3"), ("app", "1")))
     previous = response((("api", "1"), ("app", "2"), ("batch", "4")), point_date=date(2026, 8, 30))
@@ -163,6 +167,7 @@ def test_custom_ranking_derives_decimal_comparison_facts_from_raw_responses() ->
     assert api.comparison_ready
     assert app.previous_total == Decimal("2")
     assert app.previous_rank == 2
+
 
 def test_custom_ranking_distinguishes_missing_comparison_response_from_new_series() -> None:
     current = response((("api", "3"), ("app", "2"), ("batch", "1")))
@@ -193,6 +198,7 @@ def test_custom_ranking_distinguishes_missing_comparison_response_from_new_serie
     assert api.comparison_ready and api.previous_total == Decimal("1")
     assert not app.comparison_ready and app.previous_total is None
     assert not other.comparison_ready and other.previous_total is None
+
 
 def test_custom_ranking_hides_unavailable_comparison_columns_and_labels_new_entries() -> None:
     current = response((("api", "3"), ("app", "2"), ("batch", "1")))
@@ -250,6 +256,7 @@ def test_custom_ranking_hides_unavailable_comparison_columns_and_labels_new_entr
     assert "新增" in app_line
     assert "新上榜" in app_line
 
+
 def test_timestamp_comparison_is_contiguous_with_the_accepted_anchor() -> None:
     end = datetime(2026, 10, 15, 12, 0, tzinfo=UTC)
     current = TimestampRange(end - timedelta(minutes=10), end, relative_until=True, period="10m")
@@ -266,6 +273,7 @@ def test_timestamp_comparison_is_contiguous_with_the_accepted_anchor() -> None:
         period="10m",
         fixed_bounds=True,
     )
+
 
 def test_component_accepts_matching_comparison_without_replacing_current_projection() -> None:
     component = CustomHistoricalComponent(config(kind="ranking"))
@@ -285,6 +293,7 @@ def test_component_accepts_matching_comparison_without_replacing_current_project
     assert app.previous_total == Decimal("2")
     assert not component.comparison_is_pending
 
+
 def test_component_rejects_stale_or_unrequested_comparison_response() -> None:
     component = CustomHistoricalComponent(config(kind="ranking"))
     assert component.accept_response(response())
@@ -295,6 +304,7 @@ def test_component_rejects_stale_or_unrequested_comparison_response() -> None:
         CustomCompletion(component.generation, component.candidate, response(), "comparison")
     )
     assert component.comparison_response is None
+
 
 @pytest.mark.parametrize(
     ("density", "expected"),
@@ -313,6 +323,7 @@ def test_ranking_comparison_request_uses_complete_content_densities(
     if request is not None:
         assert request.date_range.fixed_bounds
 
+
 def test_ranking_all_period_never_requests_a_prior_range() -> None:
     component = CustomHistoricalComponent(
         replace(
@@ -324,6 +335,7 @@ def test_ranking_all_period_never_requests_a_prior_range() -> None:
     )
 
     assert component.comparison_request_config() is None
+
 
 @pytest.mark.parametrize(
     ("comparison", "expected"),
@@ -340,6 +352,7 @@ def test_ranking_comparison_capability_controls_prior_range_requests(
     )
 
     assert (component.comparison_request_config() is not None) is expected
+
 
 def test_comparison_semantic_change_cancels_pending_and_rejects_completion_and_failure() -> None:
     component = CustomHistoricalComponent(config(kind="ranking"))
@@ -358,6 +371,7 @@ def test_comparison_semantic_change_cancels_pending_and_rejects_completion_and_f
     assert component.comparison_error is None
     assert component.comparison_response is None
     assert component.render_revision == revision
+
 
 def test_comparison_disable_clears_existing_error_and_rejects_stale_failure() -> None:
     component = CustomHistoricalComponent(config(kind="ranking"))
@@ -379,6 +393,7 @@ def test_comparison_disable_clears_existing_error_and_rejects_stale_failure() ->
     stale = RuntimeError("stale failure")
     assert not component.fail(stale, generation=component.generation, purpose="comparison")
     assert component.comparison_error is None
+
 
 def test_accepted_comparison_detaches_and_reattaches_only_for_matching_request() -> None:
     component = CustomHistoricalComponent(config(kind="ranking"))
@@ -411,6 +426,7 @@ def test_accepted_comparison_detaches_and_reattaches_only_for_matching_request()
     assert component.comparison_response is accepted_comparison
     assert component.model is not None
     assert not component.model.comparison_available
+
 
 def test_custom_ranking_prefers_dataset_owned_localized_comparison_display() -> None:
     current = response((("book", "10"),))

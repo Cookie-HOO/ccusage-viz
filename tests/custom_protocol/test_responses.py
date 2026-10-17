@@ -69,6 +69,7 @@ def test_v2_monitor_response_parses_optional_group_description() -> None:
     )
     assert parsed.observation.groups[0].display is None
 
+
 def test_v2_monitor_response_parses_optional_group_display() -> None:
     request = V2MonitorRequest(
         "monitor-disp",
@@ -104,6 +105,7 @@ def test_v2_monitor_response_parses_optional_group_display() -> None:
     assert parsed.observation.groups[0].display == LocalizedText("69.2%", "69.2%")
     assert parsed.observation.groups[0].description is None
 
+
 def test_v2_monitor_response_normalizes_empty_group_description() -> None:
     request = V2MonitorRequest(
         "monitor-norm",
@@ -138,6 +140,7 @@ def test_v2_monitor_response_normalizes_empty_group_description() -> None:
     assert isinstance(parsed, V2MonitorResponse)
     assert parsed.observation.groups[0].description is None
 
+
 def test_v2_monitor_response_rejects_malformed_group_description() -> None:
     request = V2MonitorRequest(
         "monitor-mal",
@@ -170,6 +173,7 @@ def test_v2_monitor_response_rejects_malformed_group_description() -> None:
     }
     with pytest.raises(CustomProtocolError, match="v2 monitor group description"):
         parse_custom_response(json.dumps(response).encode(), request)
+
 
 def test_v2_query_response_requires_a_complete_descriptor_and_runtime_controls() -> None:
     descriptor = v2_probe_descriptor()
@@ -212,6 +216,7 @@ def test_v2_query_response_requires_a_complete_descriptor_and_runtime_controls()
     assert parsed.descriptor.default_metric_id == "tokens"  # type: ignore[union-attr]
     assert parsed.runtime.filters[0].id == "project"  # type: ignore[union-attr]
 
+
 @pytest.mark.parametrize("field", ("descriptor", "runtime"))
 def test_v2_query_response_rejects_missing_snapshot_fields(field: str) -> None:
     request = V2MonitorRequest(
@@ -237,6 +242,7 @@ def test_v2_query_response_rejects_missing_snapshot_fields(field: str) -> None:
     with pytest.raises(CustomProtocolError, match=field):
         parse_custom_response(json.dumps(response).encode(), request)
 
+
 def test_probe_response_parses_dataset_capabilities_and_defaults() -> None:
     result = parse_custom_response(json.dumps(probe_response()).encode(), probe_request())
 
@@ -249,6 +255,7 @@ def test_probe_response_parses_dataset_capabilities_and_defaults() -> None:
     assert descriptor.environment[0].required
     assert descriptor.environment[0].sensitive
 
+
 def test_chart_response_accepts_exact_decimal_strings() -> None:
     result = parse_custom_response(json.dumps(chart_response()).encode(), chart_request())
 
@@ -256,15 +263,18 @@ def test_chart_response_accepts_exact_decimal_strings() -> None:
     with pytest.raises(FrozenInstanceError):
         result.dataset.title.en = "Other"  # type: ignore[union-attr,misc]
 
+
 @pytest.mark.parametrize("value", [1.25, "", "NaN", "Infinity", "1e3", "-2E-3"])
 def test_chart_response_rejects_nonordinary_decimal_values(value: object) -> None:
     with pytest.raises(CustomProtocolError, match="decimal string"):
         parse_custom_response(json.dumps(chart_response(value)).encode(), chart_request())
 
+
 def test_chart_response_does_not_require_or_accept_a_summary() -> None:
     result = parse_custom_response(json.dumps(chart_response()).encode(), chart_request())
 
     assert not hasattr(result, "summary")
+
 
 @pytest.mark.parametrize(
     ("request_factory", "response_factory"),
@@ -285,6 +295,7 @@ def test_success_response_parses_unknown_warning_codes(
     assert result.warnings[0].code == "future_source_notice"
     assert result.warnings[0].message.zh_cn == "提示"
 
+
 @pytest.mark.parametrize(
     "warning", [{"code": "notice"}, {"message": text("Heads up", "提示")}, "notice"]
 )
@@ -295,6 +306,7 @@ def test_success_response_rejects_malformed_warnings(warning: object) -> None:
     with pytest.raises(CustomProtocolError, match="warning"):
         parse_custom_response(json.dumps(response).encode(), chart_request())
 
+
 def test_summary_response_uses_current_decimal_and_source_display() -> None:
     result = parse_custom_response(json.dumps(summary_response()).encode(), summary_request())
 
@@ -303,12 +315,14 @@ def test_summary_response_uses_current_decimal_and_source_display() -> None:
     assert metric.current.display.zh_cn == "15 页"
     assert metric.sequential.base_value == Decimal("12")
 
+
 def test_summary_response_requires_current_display() -> None:
     response = summary_response()
     del response["summary"]["metric"]["current"]["display"]  # type: ignore[index]
 
     with pytest.raises(CustomProtocolError, match="display"):
         parse_custom_response(json.dumps(response).encode(), summary_request())
+
 
 @pytest.mark.parametrize(
     ("status", "base", "error"),
@@ -325,6 +339,7 @@ def test_summary_comparison_state_rules(status: str, base: str | None, error: st
     with pytest.raises(CustomProtocolError, match=error):
         parse_custom_response(json.dumps(response).encode(), summary_request())
 
+
 @pytest.mark.parametrize("field", ["protocol", "request_id", "request_kind"])
 def test_response_envelope_must_match_request(field: str) -> None:
     response = chart_response()
@@ -332,11 +347,13 @@ def test_response_envelope_must_match_request(field: str) -> None:
     with pytest.raises(CustomProtocolError):
         parse_custom_response(json.dumps(response).encode(), chart_request())
 
+
 def test_chart_response_does_not_require_dataset_id_echo() -> None:
     response = chart_response()
     response.pop("dataset_id")
 
     assert parse_custom_response(json.dumps(response).encode(), chart_request())
+
 
 def test_error_response_preserves_structured_dataset_failure() -> None:
     response = chart_response()
@@ -361,6 +378,7 @@ def test_error_response_preserves_structured_dataset_failure() -> None:
         "field": "range.period",
         "value": "14d",
     }
+
 
 def test_error_response_id_mismatch_explains_protocol_compatibility() -> None:
     response = chart_response()

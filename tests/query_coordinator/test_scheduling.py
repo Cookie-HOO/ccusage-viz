@@ -34,6 +34,7 @@ def test_physical_query_scheduling_metadata_does_not_change_fingerprint() -> Non
     assert scheduled.scheduling_limit == 4
     assert scheduled.speculative
 
+
 @pytest.mark.parametrize(
     ("group", "limit"),
     [(None, 4), ("project-fallback", None), ("", 4), ("project-fallback", 0), ("x", -1)],
@@ -48,6 +49,7 @@ def test_physical_query_rejects_invalid_scheduling_metadata(
             scheduling_group=group,
             scheduling_limit=limit,
         )
+
 
 def test_slow_irrelevant_speculation_does_not_delay_primary_result() -> None:
     slow_started = Event()
@@ -80,6 +82,7 @@ def test_slow_irrelevant_speculation_does_not_delay_primary_result() -> None:
         assert time.monotonic() - started < 0.5
     finally:
         release_slow.set()
+
 
 def test_speculation_cannot_starve_max_parallel_primaries() -> None:
     release = Event()
@@ -115,6 +118,7 @@ def test_speculation_cannot_starve_max_parallel_primaries() -> None:
     release.set()
     assert handle.result(1).records
 
+
 def test_detach_while_waiting_for_execution_slot_skips_execution() -> None:
     release = Event()
     provider = RecordingProvider([], Lock(), Event(), release)
@@ -134,6 +138,7 @@ def test_detach_while_waiting_for_execution_slot_skips_execution() -> None:
     assert active.result(1).records
     time.sleep(0.1)
     assert provider.calls == ["active"]
+
 
 def test_scheduling_group_limits_speculative_execution_to_four() -> None:
     lock = Lock()
@@ -179,6 +184,7 @@ def test_scheduling_group_limits_speculative_execution_to_four() -> None:
     assert handle.result(1).records
     assert maximum == 4
 
+
 def test_shared_speculation_survives_one_plan_detaching() -> None:
     b_started = Event()
     release_b = Event()
@@ -220,6 +226,7 @@ def test_shared_speculation_survives_one_plan_detaching() -> None:
     assert retained.result(1).records
     assert calls.count("shared-b") == 1
 
+
 @pytest.mark.parametrize(
     ("first_scheduling", "second_scheduling"),
     (
@@ -256,6 +263,7 @@ def test_inflight_fingerprint_shares_despite_different_scheduling_metadata(
     assert first.result(1).records
     assert second.result(1).records
     assert provider.calls == ["same"]
+
 
 def test_scheduling_group_rejects_conflicting_limits() -> None:
     release = Event()

@@ -34,8 +34,10 @@ def _parse_window(value: str) -> int:
         raise UsageError("error.window_range")
     return seconds
 
+
 def _chart_kind(namespace: argparse.Namespace) -> str:
     return getattr(namespace, "chart_kind", None) or namespace.command or "timeline"
+
 
 def _chart_from_namespace(namespace: argparse.Namespace, *, timezone: str | None = None):
     command = _chart_kind(namespace)
@@ -118,12 +120,14 @@ def _chart_from_namespace(namespace: argparse.Namespace, *, timezone: str | None
         namespace.other,
     )
 
+
 def _request_timezone(namespace: argparse.Namespace) -> str:
     try:
         timezone = getattr(namespace, "timezone", None)
         return validate_timezone(timezone) if timezone else system_timezone()
     except ValueError as exc:
         raise UsageError("error.arguments", detail=str(exc)) from exc
+
 
 def _custom_chart_from_namespace(
     namespace: argparse.Namespace,
@@ -231,6 +235,7 @@ def _custom_chart_from_namespace(
         metric_id=namespace.metric,
         partition_by=partition_by,
     )
+
 
 def _validate_chart(
     namespace: argparse.Namespace, chart, *, explicit: frozenset[str], demo: str | None

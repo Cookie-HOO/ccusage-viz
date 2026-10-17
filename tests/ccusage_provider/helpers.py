@@ -32,6 +32,7 @@ def intent(chart_kind: str) -> QueryIntent:
         (("chart_kind", chart_kind),),
     )
 
+
 def project_intent(
     *,
     source_id: str = "learned-source",
@@ -53,6 +54,7 @@ def project_intent(
         (("chart_kind", "ranking"),),
         ExecutionContext(executable, 10, 1024, environment),
     )
+
 
 def observation_payload(*agents: str, total: int = 20) -> bytes:
     return json.dumps(
@@ -77,10 +79,12 @@ def observation_payload(*agents: str, total: int = 20) -> bytes:
         }
     ).encode()
 
+
 def _observation(plan: PhysicalPlan) -> PhysicalQuery:
     return next(
         query for query in plan.queries if query.operation == "unified_daily_agent_observation"
     )
+
 
 def _fallback_replacement_case(
     *, observation_total: int = 20, fallback_total: int = 20, attributed: bool = True

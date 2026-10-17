@@ -737,9 +737,7 @@ def render_grouped_custom_ranking_viewport(
         if marker < 0:
             continue
         copy_column = display_width(visible_line[:marker])
-        link_column = (
-            display_width(visible_line.rsplit("→", 1)[0]) if "→" in visible_line else None
-        )
+        link_column = display_width(visible_line.rsplit("→", 1)[0]) if "→" in visible_line else None
         if link_column is not None and link_column >= context.width:
             link_column = None
         screen_row = viewport.body_top + screen_index

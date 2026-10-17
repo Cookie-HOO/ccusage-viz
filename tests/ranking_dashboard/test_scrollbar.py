@@ -1,4 +1,3 @@
-
 from dataclasses import replace
 
 from ccusage_viz.formatting import strip_ansi
@@ -72,6 +71,7 @@ def test_dashboard_scrollbar_hover_expands_and_collapses_thumb(dashboard):
 
     run([hover_thumb, verify_hovered, drag_thumb, verify_dragged, verify_compact])
 
+
 def test_grouped_dashboard_scrollbar_drag_uses_active_viewport(dashboard):
     run, panes, frames, focuses, layouts, decoder, copied, opened, size = dashboard
     del frames, decoder, copied, opened
@@ -135,6 +135,7 @@ def test_grouped_dashboard_scrollbar_drag_uses_active_viewport(dashboard):
 
     run([grab_grouped_thumb, drag_to_bottom, verify_grouped_bottom, KeyEvent("\x03")])
 
+
 def test_scrollbar_drag_moves_body_and_releases_capture(dashboard):
     run, panes, frames, focuses, layouts, decoder, *_ = dashboard
 
@@ -197,6 +198,7 @@ def test_scrollbar_drag_moves_body_and_releases_capture(dashboard):
 
     run([prime, grab_thumb, drag_down, check_dragged, check_released, check_inert])
 
+
 def test_scrollbar_track_click_pages_without_starting_drag(dashboard):
     run, panes, frames, focuses, layouts, decoder, *_ = dashboard
 
@@ -235,6 +237,7 @@ def test_scrollbar_track_click_pages_without_starting_drag(dashboard):
         return KeyEvent("\x03")
 
     run([prime, click_below_thumb, check_paged, check_no_drag])
+
 
 def test_scrollbar_stationary_grab_and_release_cancel_do_not_move(dashboard):
     run, panes, frames, focuses, layouts, decoder, *_ = dashboard

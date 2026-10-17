@@ -93,7 +93,9 @@ def test_stack_uses_the_requested_native_grouping() -> None:
 
     assert stack.grouping == "agent"
     assert stack.components
-    assert all(component.label not in {"input", "output", "cache"} for component in stack.components)
+    assert all(
+        component.label not in {"input", "output", "cache"} for component in stack.components
+    )
 
 
 def test_filters_or_within_dimension_and_and_across_dimensions() -> None:

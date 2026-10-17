@@ -261,9 +261,7 @@ class AnimationRenderer:
                     if session.spec.effect.category is EffectCategory.TIME
                     else virtual_wall_time(session, now)
                 ),
-                pause_label=(
-                    session.activity_label if not session.playback_requested else None
-                ),
+                pause_label=(session.activity_label if not session.playback_requested else None),
                 logical_state=(
                     LogicalState.ACTIVE if session.playback_requested else LogicalState.IDLE
                 )

@@ -1,8 +1,3 @@
-
-
-
-
-
 from datetime import date
 
 import pytest
@@ -37,6 +32,7 @@ def test_calendar_and_stack_use_canonical_metric_first_headings() -> None:
     assert "Token · 活跃日历 · 1y" in calendar_output
     assert "Token · 分组构成 · by 模型 · 14d" in stack_output
 
+
 @pytest.mark.parametrize("ascii", [True, False])
 def test_calendar_styles_use_geometry_not_zero_cell_outlines(ascii: bool) -> None:
     model = CalendarModel(
@@ -63,6 +59,7 @@ def test_calendar_styles_use_geometry_not_zero_cell_outlines(ascii: bool) -> Non
     assert grid.splitlines()[2][3:] == f"   {full_mark} "
     assert relative != grid
 
+
 def test_calendar_keeps_seven_rows_with_sparse_aligned_weekday_labels() -> None:
     calendar = render_calendar(
         CalendarModel(tuple(CalendarDay(date(2026, 1, day), usage(day)) for day in range(1, 8))),
@@ -72,6 +69,7 @@ def test_calendar_keeps_seven_rows_with_sparse_aligned_weekday_labels() -> None:
 
     assert [row[:3] for row in day_rows] == ["Mo ", "   ", "We ", "   ", "Fr ", "   ", "   "]
     assert all(display_width(row[:3]) == 3 for row in day_rows)
+
 
 def test_calendar_month_labels_align_to_the_first_week_containing_the_month() -> None:
     calendar = render_calendar(
@@ -85,6 +83,7 @@ def test_calendar_month_labels_align_to_the_first_week_containing_the_month() ->
 
     assert month_header.index("Fe") == 3
     assert monday[3] == "."
+
 
 def test_calendar_color_styles_use_background_swatches_and_distinct_geometry() -> None:
     model = CalendarModel(
@@ -121,6 +120,7 @@ def test_calendar_color_styles_use_background_swatches_and_distinct_geometry() -
     assert strip_ansi(grid).splitlines()[2][3:] == "     "
     assert relative != grid
 
+
 @pytest.mark.parametrize(
     ("density", "has_stats", "has_streaks", "has_legend"),
     (
@@ -150,6 +150,7 @@ def test_calendar_footer_follows_density(
     assert ("Longest streak" in calendar) is has_streaks
     assert ("Less . o O # More" in calendar) is has_legend
 
+
 def test_calendar_grid_uses_only_positive_color_swatches() -> None:
     calendar = render_calendar(
         CalendarModel(
@@ -176,6 +177,7 @@ def test_calendar_grid_uses_only_positive_color_swatches() -> None:
     assert "\x1b[38;5;" not in calendar
     assert "Less" in calendar and "More" in calendar
 
+
 def test_calendar_uses_one_cell_per_week_when_width_requires_compact_stride() -> None:
     first = date(2025, 1, 1)
     calendar = render_calendar(
@@ -192,6 +194,7 @@ def test_calendar_uses_one_cell_per_week_when_width_requires_compact_stride() ->
     assert all(len(row[3:]) == 53 for row in day_rows)
     assert all(display_width(line) <= 58 for line in calendar.splitlines())
 
+
 def test_calendar_footer_keeps_average_without_peak_and_clips_rows_independently() -> None:
     calendar = render_calendar(
         CalendarModel((CalendarDay(date(2026, 1, 1), usage(0)),)),
@@ -202,6 +205,7 @@ def test_calendar_footer_keeps_average_without_peak_and_clips_rows_independently
     assert any("Daily average" in line for line in lines)
     assert not any("Peak" in line for line in lines)
     assert all(len(line) <= 32 for line in lines)
+
 
 def test_calendar_labels_follow_selected_language() -> None:
     calendar = render_calendar(

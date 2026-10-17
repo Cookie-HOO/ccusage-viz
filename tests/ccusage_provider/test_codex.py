@@ -41,6 +41,7 @@ def test_codex_normalization_attributes_a_singleton_query_to_its_day() -> None:
     assert record.project.raw_id == "/workspace/project"
     assert record.usage.total == 20
 
+
 def test_range_codex_ranking_normalization_anchors_totals_at_interval_end() -> None:
     query = PhysicalQuery(
         ProviderRef("ccusage"),
@@ -68,6 +69,7 @@ def test_range_codex_ranking_normalization_anchors_totals_at_interval_end() -> N
     assert record.project is not None
     assert record.project.raw_id == "/workspace/project"
     assert record.usage.total == 20
+
 
 def test_codex_normalization_uses_local_session_cwd(monkeypatch: pytest.MonkeyPatch) -> None:
     query = PhysicalQuery(
@@ -103,6 +105,7 @@ def test_codex_normalization_uses_local_session_cwd(monkeypatch: pytest.MonkeyPa
     assert record.day == date(2026, 1, 3)
     assert fragment.provider_metadata == ()
 
+
 def test_codex_normalization_falls_back_without_treating_directory_as_project(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -111,7 +114,9 @@ def test_codex_normalization_falls_back_without_treating_directory_as_project(
         "codex_sessions",
         coverage=DateCoverage.from_interval(date(2026, 1, 3), date(2026, 1, 3)),
     )
-    monkeypatch.setattr("ccusage_viz.providers.ccusage_fallback.resolve_codex_session_cwds", lambda _: {})
+    monkeypatch.setattr(
+        "ccusage_viz.providers.ccusage_fallback.resolve_codex_session_cwds", lambda _: {}
+    )
     payload = {
         "sessions": [
             {
@@ -137,6 +142,7 @@ def test_codex_normalization_falls_back_without_treating_directory_as_project(
     assert record.session_id == "2026/01/03/rollout-missing"
     assert fragment.provider_metadata == ()
 
+
 def test_codex_incomplete_attribution_retains_session_on_fixed_project_record(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -145,7 +151,9 @@ def test_codex_incomplete_attribution_retains_session_on_fixed_project_record(
         "codex_sessions",
         coverage=DateCoverage.from_interval(date(2026, 1, 3), date(2026, 1, 3)),
     )
-    monkeypatch.setattr("ccusage_viz.providers.ccusage_fallback.resolve_codex_session_cwds", lambda _: {})
+    monkeypatch.setattr(
+        "ccusage_viz.providers.ccusage_fallback.resolve_codex_session_cwds", lambda _: {}
+    )
     fragment = CCUSAGE_DEFINITION.provider.normalize(
         PhysicalResult(
             query,
@@ -171,6 +179,7 @@ def test_codex_incomplete_attribution_retains_session_on_fixed_project_record(
     assert record.project.display_name == "Unassigned"
     assert record.attribution == "unassigned"
     assert record.session_id == "2026/01/03/rollout-unassigned"
+
 
 def test_codex_normalization_rejects_non_singleton_coverage() -> None:
     query = PhysicalQuery(

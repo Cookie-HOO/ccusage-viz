@@ -1,7 +1,3 @@
-
-
-
-
 import pytest
 
 from ccusage_viz.cli.configuration import _to_options
@@ -29,6 +25,7 @@ def test_subcommand_help_is_localized(
     assert caught.value.code == 0
     assert description in capsys.readouterr().out
 
+
 def test_invalid_chart_kind_lists_only_chart_kinds_and_suggests_match() -> None:
     tr = load_translator("en")
     parser = build_parser(tr)
@@ -43,6 +40,7 @@ def test_invalid_chart_kind_lists_only_chart_kinds_and_suggests_match() -> None:
     assert "Did you mean 'timeline'?" in text
     assert "dashboard" not in text
 
+
 def test_rejected_subcommand_accepts_repr_quoted_choice_rendering() -> None:
     assert (
         _rejected_subcommand(
@@ -52,6 +50,7 @@ def test_rejected_subcommand_accepts_repr_quoted_choice_rendering() -> None:
         )
         == "timline"
     )
+
 
 def test_invalid_dataset_operation_lists_only_dataset_operations() -> None:
     tr = load_translator("en")
@@ -66,6 +65,7 @@ def test_invalid_dataset_operation_lists_only_dataset_operations() -> None:
     assert "Did you mean" not in text
     assert "timeline" not in text
 
+
 def test_invalid_chart_kind_guidance_is_localized_in_chinese() -> None:
     tr = load_translator("zh")
     parser = build_parser(tr)
@@ -77,6 +77,7 @@ def test_invalid_chart_kind_guidance_is_localized_in_chinese() -> None:
     assert "支持的命令：timeline, calendar, stack, ranking, monitor" in text
     assert "你是不是想输入 'timeline'？" in text
 
+
 def test_invalid_option_value_does_not_gain_subcommand_guidance() -> None:
     tr = load_translator("en")
     parser = build_parser(tr)
@@ -86,6 +87,7 @@ def test_invalid_option_value_does_not_gain_subcommand_guidance() -> None:
 
     assert caught.value.key == "error.arguments"
     assert "Supported commands" not in format_error(caught.value, tr)
+
 
 def test_all_commands_accept_exactly_four_density_values() -> None:
     parser = build_parser(load_translator("en"))
@@ -99,6 +101,7 @@ def test_all_commands_accept_exactly_four_density_values() -> None:
         parser.parse_args(["chart", "timeline", "--density", "standard"])
     assert caught.value.key == "error.arguments"
 
+
 def test_animate_help_is_localized(capsys: pytest.CaptureFixture[str]) -> None:
     parser = build_parser(load_translator("zh"))
 
@@ -106,6 +109,7 @@ def test_animate_help_is_localized(capsys: pytest.CaptureFixture[str]) -> None:
         parser.parse_args(["animate", "--help"])
 
     assert "运行不依赖数据提供方的终端动画" in capsys.readouterr().out
+
 
 def test_animate_invalid_style_fails_during_option_materialization() -> None:
     parser = build_parser(load_translator("en"))
@@ -115,6 +119,7 @@ def test_animate_invalid_style_fails_during_option_materialization() -> None:
     with pytest.raises(UsageError):
         _to_options(parser.parse_args(["animate", "not-an-animation"]))
 
+
 def test_all_commands_accept_themes() -> None:
     parser = build_parser(load_translator("en"))
     for command in ("timeline", "calendar", "stack", "ranking", "monitor"):
@@ -123,6 +128,7 @@ def test_all_commands_accept_themes() -> None:
     with pytest.raises(UsageError) as caught:
         parser.parse_args(["chart", "timeline", "--theme", "unknown"])
     assert caught.value.key == "error.arguments"
+
 
 @pytest.mark.parametrize(
     ("command", "style"),
@@ -160,6 +166,7 @@ def test_commands_accept_their_own_styles(command: str, style: str) -> None:
     parser = build_parser(load_translator("en"))
     assert parser.parse_args(["chart", command, "--style", style]).style == style
 
+
 def test_root_help_lists_localized_subcommand_summaries(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -170,6 +177,7 @@ def test_root_help_lists_localized_subcommand_summaries(
     output = capsys.readouterr().out
     assert "绘制独立图表" in output
     assert "animate" in output
+
 
 def test_monitor_parser_keeps_startup_selectors() -> None:
     parser = build_parser(load_translator("en"))
@@ -196,11 +204,13 @@ def test_monitor_parser_keeps_startup_selectors() -> None:
     assert options.chart.filters.models == ("sonnet",)
     assert options.chart.filters.projects == ("app",)
 
+
 def test_monitor_parser_rejects_unknown_grouping() -> None:
     parser = build_parser(load_translator("en"))
     with pytest.raises(UsageError) as caught:
         parser.parse_args(["chart", "monitor", "--by", "token"])
     assert caught.value.key == "error.arguments"
+
 
 def test_dashboard_help_exposes_public_named_layouts(
     capsys: pytest.CaptureFixture[str],
@@ -215,6 +225,7 @@ def test_dashboard_help_exposes_public_named_layouts(
     assert "--layout" in output
     assert "spotlight-wide2" in output
     assert "spotlight-monitor" not in output
+
 
 @pytest.mark.parametrize(
     ("arguments", "key", "values"),

@@ -37,6 +37,7 @@ def _time_state_command(launcher: str = "ccuv") -> str:
 
     return time_state_overlay_command(launcher)
 
+
 def parse_pane_fragment(
     fragment: str, *, host: DashboardLaunch | None = None, language: str = "en"
 ) -> PaneConfig:

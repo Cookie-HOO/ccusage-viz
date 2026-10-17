@@ -60,6 +60,7 @@ def test_primary_response_retains_its_protocol_warnings() -> None:
     assert component.accept_response(warned)
     assert component.accepted_warnings == (warning,)
 
+
 def test_warning_free_primary_response_clears_accepted_warnings() -> None:
     component = CustomHistoricalComponent(config())
     warning = CustomProtocolWarning("coverage", LocalizedText("using 2d", "使用 2 天"))
@@ -71,6 +72,7 @@ def test_warning_free_primary_response_clears_accepted_warnings() -> None:
 
     assert component.accept_response(response())
     assert component.accepted_warnings == ()
+
 
 def test_projection_rejects_manually_constructed_partition_selection_outside_capability() -> None:
     source = _grouped_response((("one", (("a", "1"),)),))
@@ -86,6 +88,7 @@ def test_projection_rejects_manually_constructed_partition_selection_outside_cap
             ),
         )
 
+
 def test_projection_rejects_manually_constructed_flat_selection_for_required_partition() -> None:
     source = _grouped_response((("one", (("a", "1"),)),))
 
@@ -94,6 +97,7 @@ def test_projection_rejects_manually_constructed_flat_selection_for_required_par
             source,
             config(kind="ranking", partition_by=None, group_by="real_model", top=None),
         )
+
 
 def test_grouped_projection_preserves_dataset_order_and_projects_each_group() -> None:
     projection = process_custom_historical(
@@ -134,6 +138,7 @@ def test_grouped_projection_preserves_dataset_order_and_projects_each_group() ->
     assert first.display == LocalizedText("Total small-first", "总计 small-first")
     assert first.link == "https://example.com/small-first"
 
+
 def test_grouped_projection_keeps_full_facts_when_other_is_hidden_and_supports_signed_values() -> (
     None
 ):
@@ -158,6 +163,7 @@ def test_grouped_projection_keeps_full_facts_when_other_is_hidden_and_supports_s
     assert shown_group.series[-1].total == Decimal("-6")
     assert [item.id for item in hidden_group.series] == ["positive"]
 
+
 def test_grouped_projection_preserves_zero_totals_and_deterministic_ranks() -> None:
     projection = process_custom_historical(
         _grouped_response((("zeroes", (("b", "0"), ("a", "0"))),)),
@@ -176,6 +182,7 @@ def test_grouped_projection_preserves_zero_totals_and_deterministic_ranks() -> N
         ("b", Decimal(), 2),
     ]
     assert group.total == group.maximum == Decimal()
+
 
 def test_grouped_projection_sorts_ties_and_ascending_values_independently() -> None:
     projection = process_custom_historical(
@@ -198,6 +205,7 @@ def test_grouped_projection_sorts_ties_and_ascending_values_independently() -> N
     ]
     assert [[item.rank for item in group.series] for group in projection.groups] == [[1, 2, 3], [1]]
     assert projection.groups[1].maximum == Decimal("-1")
+
 
 def test_grouped_projection_matches_previous_within_group_and_treats_moves_as_new() -> None:
     current = _grouped_response(
@@ -231,6 +239,7 @@ def test_grouped_projection_matches_previous_within_group_and_treats_moves_as_ne
     assert not two.comparison_ready and two.previous_total is None
     assert not two.series[0].comparison_ready
 
+
 def test_grouped_projection_scopes_repeated_inner_ids_to_their_group() -> None:
     current = _grouped_response((("one", (("shared", "5"),)), ("two", (("shared", "7"),))))
     previous = _grouped_response(
@@ -259,12 +268,14 @@ def test_grouped_projection_scopes_repeated_inner_ids_to_their_group() -> None:
         Decimal("11"),
     ]
 
+
 def test_grouped_data_is_rejected_for_non_ranking_projection() -> None:
     with pytest.raises(CustomProjectionError, match="only by ranking"):
         process_custom_historical(
             _grouped_response((("one", (("a", "1"),)),)),
             config(kind="timeline", partition_by=None, group_by=None),
         )
+
 
 def test_top_n_and_other_are_local_decimal_operations() -> None:
     projection = process_custom_historical(response(), config())
@@ -274,9 +285,11 @@ def test_top_n_and_other_are_local_decimal_operations() -> None:
     assert projection.series[-1].values[0] == Decimal("2")
     assert projection.series[-1].values[1] == Decimal("0")
 
+
 def test_projection_rejects_selected_filter_option_outside_capabilities() -> None:
     with pytest.raises(CustomProjectionError, match="filter options"):
         process_custom_historical(response(), config(filters=(("genre", ("unknown",)),)))
+
 
 def test_projection_accepts_and_accumulates_overlapping_month_bucket() -> None:
     monthly = replace(
@@ -309,6 +322,7 @@ def test_projection_accepts_and_accumulates_overlapping_month_bucket() -> None:
     assert projection.days == (date(2026, 9, 1),)
     assert projection.series[0].values == (Decimal("4.00"),)
 
+
 def test_projection_rejects_non_overlapping_aggregation_bucket() -> None:
     monthly = replace(
         response((("total", "1"),), point_date=date(2026, 8, 1)),
@@ -326,6 +340,7 @@ def test_projection_rejects_non_overlapping_aggregation_bucket() -> None:
     with pytest.raises(CustomProjectionError, match="outside the requested range"):
         process_custom_historical(monthly, chart)
 
+
 def test_primary_v1_response_clears_previously_accepted_v2_metadata() -> None:
     component = CustomHistoricalComponent(config(metric_id="stars"))
     assert component.apply_provider_result(
@@ -337,6 +352,7 @@ def test_primary_v1_response_clears_previously_accepted_v2_metadata() -> None:
 
     assert component.v2_descriptor is None
 
+
 def test_component_accepts_provider_chart_response_without_legacy_summary() -> None:
     legacy = response()
     chart = CustomChartResponse(legacy.dataset, legacy.capabilities, legacy.data)
@@ -345,12 +361,14 @@ def test_component_accepts_provider_chart_response_without_legacy_summary() -> N
     assert component.apply_provider_result(SimpleNamespace(custom_response=chart))
     assert component.accepted_response is chart
 
+
 def test_component_rejects_provider_summary_response_for_chart() -> None:
     component = CustomHistoricalComponent(config())
     summary = CustomSummaryResponse(response().summary)
 
     with pytest.raises(TypeError, match="chart response"):
         component.apply_provider_result(SimpleNamespace(custom_response=summary))
+
 
 def test_timestamp_completion_for_distinct_dst_fold_instant_is_rejected() -> None:
     zone = ZoneInfo("America/New_York")
@@ -379,6 +397,7 @@ def test_timestamp_completion_for_distinct_dst_fold_instant_is_rejected() -> Non
     assert not component.apply_result(CustomCompletion(component.generation, first, response()))
     assert component.accepted_config is None
 
+
 def test_timestamp_completion_for_an_older_exact_range_is_rejected() -> None:
     first_end = datetime(2026, 10, 15, 12, 0, tzinfo=UTC)
     first = config(
@@ -406,6 +425,7 @@ def test_timestamp_completion_for_an_older_exact_range_is_rejected() -> None:
     assert not component.apply_result(CustomCompletion(component.generation, first, response()))
     assert component.accepted_config is None
 
+
 def test_custom_failure_without_presentation_metadata_uses_chart_and_range_only() -> None:
     chart = config(
         group_by=None,
@@ -423,6 +443,7 @@ def test_custom_failure_without_presentation_metadata_uses_chart_and_range_only(
     assert "internal_dataset_id" not in rendered
     assert "internal_metric_id" not in rendered
 
+
 def test_date_only_summary_support_restores_after_leaving_subday_period() -> None:
     end = datetime(2026, 10, 15, 12, 0, tzinfo=UTC)
     subday = config(
@@ -435,6 +456,7 @@ def test_date_only_summary_support_restores_after_leaving_subday_period() -> Non
 
     assert not custom_date_summary_supported(subday)
     assert custom_date_summary_supported(replace(subday, date_range=RANGE))
+
 
 def test_component_clears_accepted_projection_after_failed_source_replacement() -> None:
     component = CustomHistoricalComponent(config())
@@ -450,6 +472,7 @@ def test_component_clears_accepted_projection_after_failed_source_replacement() 
     assert component.presentation is not None
     assert component.error is not None
 
+
 def test_component_preserves_accepted_projection_after_same_query_refresh_failure() -> None:
     component = CustomHistoricalComponent(config())
     assert component.accept_response(response())
@@ -457,6 +480,7 @@ def test_component_preserves_accepted_projection_after_same_query_refresh_failur
 
     assert component.fail(RuntimeError("source unavailable"), generation=component.generation)
     assert component.model is accepted
+
 
 def test_component_clears_month_projection_after_week_replacement_failure() -> None:
     monthly = config(
@@ -475,6 +499,7 @@ def test_component_clears_month_projection_after_week_replacement_failure() -> N
     assert component.accepted_response is None
     assert component.presentation is not None
     assert component.candidate.date_range.period == "1w"
+
 
 def test_period_unsupported_failure_clears_an_accepted_projection() -> None:
     component = CustomHistoricalComponent(config())
@@ -496,6 +521,7 @@ def test_period_unsupported_failure_clears_an_accepted_projection() -> None:
     assert component.accepted_response is None
     assert component.error is failure
 
+
 def test_non_period_unsupported_failure_clears_the_replacement_projection() -> None:
     component = CustomHistoricalComponent(config())
     assert component.accept_response(response())
@@ -513,6 +539,7 @@ def test_non_period_unsupported_failure_clears_the_replacement_projection() -> N
     assert component.model is None
     assert component.accepted_response is None
     assert component.error is failure
+
 
 def test_custom_replacement_requires_only_source_query_fields() -> None:
     current = config()
@@ -534,6 +561,7 @@ def test_custom_replacement_requires_only_source_query_fields() -> None:
         replace(current, presentation=replace(current.presentation, theme="ocean")),
     )
 
+
 @pytest.mark.parametrize(
     "updated",
     (
@@ -547,6 +575,7 @@ def test_local_projection_changes_require_custom_reprojection(updated: object) -
 
     assert callable(updated)
     assert custom_projection_replacement_required(current, updated(current))
+
 
 def test_custom_summary_replacement_requires_only_summary_query_fields() -> None:
     current = config()
@@ -576,12 +605,14 @@ def test_custom_summary_replacement_requires_only_summary_query_fields() -> None
         replace(current, presentation=replace(current.presentation, theme="ocean")),
     )
 
+
 def test_component_rejects_stale_response_without_mutation() -> None:
     component = CustomHistoricalComponent(config())
     component.configure(replace(component.candidate, group_by=None), data_affecting=True)
 
     assert not component.apply_result(CustomCompletion(0, config(), response()))
     assert component.model is None
+
 
 def test_component_rejects_same_generation_response_for_different_candidate() -> None:
     component = CustomHistoricalComponent(config())
@@ -592,6 +623,7 @@ def test_component_rejects_same_generation_response_for_different_candidate() ->
     assert component.accepted_response is None
     assert component.accepted_config is None
     assert component.model is None
+
 
 def test_component_reprojects_only_display_local_configuration() -> None:
     component = CustomHistoricalComponent(config())
@@ -608,6 +640,7 @@ def test_component_reprojects_only_display_local_configuration() -> None:
     assert component.accepted_config is accepted_config
     assert component.accepted_response is accepted_response
     assert component.generation == generation
+
 
 @pytest.mark.parametrize(
     ("updated", "expected_labels"),
@@ -639,6 +672,7 @@ def test_local_projection_config_invokes_processor_and_preserves_semantics(
     assert component.model is not None
     assert [series.label.en for series in component.model.series] == expected_labels
 
+
 @pytest.mark.parametrize(
     ("updated", "expected_labels"),
     (
@@ -666,6 +700,7 @@ def test_primary_pending_completion_accepts_local_projection_drift(
     assert component.retrieval_top == issued.top
     assert not component.is_pending
 
+
 @pytest.mark.parametrize(
     ("density", "current", "comparison"),
     (
@@ -692,6 +727,7 @@ def test_custom_summary_uses_complete_content_densities(
     assert ("Today’s Read 3.50 pages" in output) is current
     assert ("75.0%" in output) is comparison
 
+
 def test_custom_summary_formats_declared_decimal_unit_without_token_adapter() -> None:
     summary = response().summary
     context = RenderContext(22, 24, load_translator("en"), color=False)
@@ -702,6 +738,7 @@ def test_custom_summary_formats_declared_decimal_unit_without_token_adapter() ->
     assert "75.0%" in output
     assert "??" in output
     assert all(display_width(line) <= context.width for line in output.splitlines())
+
 
 def test_custom_ranking_prefers_dataset_owned_localized_display() -> None:
     source = response((("book", "10"),))
@@ -735,6 +772,7 @@ def test_custom_ranking_prefers_dataset_owned_localized_display() -> None:
     assert "10 章" in chinese
     assert "10.00 pages" not in english
 
+
 def test_non_ranking_custom_projection_rejects_project_links() -> None:
     source = response((("book", "10"),))
     source = replace(
@@ -747,6 +785,7 @@ def test_non_ranking_custom_projection_rejects_project_links() -> None:
 
     with pytest.raises(CustomProjectionError, match="presentation fields"):
         process_custom_historical(source, config(kind="timeline", group_by=None, top=None))
+
 
 def test_custom_ranking_other_never_inherits_a_project_link() -> None:
     source = response((("first", "10"), ("second", "5")))
@@ -768,6 +807,7 @@ def test_custom_ranking_other_never_inherits_a_project_link() -> None:
     first, other = projection.series
     assert first.link == "https://example.com/projects/first"
     assert other.is_other and other.link is None
+
 
 def test_custom_ranking_preserves_long_dataset_labels_without_prefix_compaction() -> None:
     source = response((("doctor", "10"), ("doctor-sandbox", "5")))
@@ -800,6 +840,7 @@ def test_custom_ranking_preserves_long_dataset_labels_without_prefix_compaction(
     assert "project-doctor" in output
     assert "project-doctor-sandbox" in output
     assert "…doctor" not in output
+
 
 def test_custom_series_labels_follow_the_active_language() -> None:
     projection = process_custom_historical(

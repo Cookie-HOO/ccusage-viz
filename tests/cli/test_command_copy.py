@@ -40,9 +40,7 @@ def test_custom_command_sources_use_filesystem_identity_for_absolute_paths(tmp_p
     executable_alias.symlink_to(executable)
     database_alias.symlink_to(database)
 
-    registered = CustomCommandSource(
-        "reading", (str(executable), "--database", str(database))
-    )
+    registered = CustomCommandSource("reading", (str(executable), "--database", str(database)))
     equivalent = CustomCommandSource(
         "reading", (str(executable_alias), "--database", str(database_alias))
     )
@@ -69,6 +67,7 @@ def test_custom_command_sources_use_filesystem_identity_for_absolute_paths(tmp_p
         ),
     )
 
+
 def test_subday_ranking_command_preserves_period_without_dates_or_granularity() -> None:
     end = datetime(2026, 10, 15, 12, tzinfo=UTC)
     chart = CustomChartConfig(
@@ -87,6 +86,7 @@ def test_subday_ranking_command_preserves_period_without_dates_or_granularity() 
     assert "--until" not in command
     assert "--granularity" not in command
 
+
 def test_fixed_timestamp_range_command_copy_is_explicitly_unsupported() -> None:
     end = datetime(2026, 10, 15, 12, tzinfo=UTC)
     chart = CustomChartConfig(
@@ -99,6 +99,7 @@ def test_fixed_timestamp_range_command_copy_is_explicitly_unsupported() -> None:
 
     with pytest.raises(ValueError, match="CLI has no timestamp-bound flags"):
         format_full_command(launch)
+
 
 def test_installed_custom_command_round_trips_without_executable_path() -> None:
     chart = CustomChartConfig(
@@ -118,6 +119,7 @@ def test_installed_custom_command_round_trips_without_executable_path() -> None:
     assert "/private/datasets" not in command
     assert "--command" not in command
     assert "--installed" not in shlex.split(command)
+
 
 def test_custom_standalone_command_round_trips() -> None:
     parser = build_parser(load_translator("en"))
@@ -151,12 +153,14 @@ def test_custom_standalone_command_round_trips() -> None:
     )
     assert reparsed == expected
 
+
 def test_wrap_command_breaks_at_tokens_within_display_width() -> None:
     command = "ccuv chart timeline --period 14d --by model --top 3"
     wrapped = wrap_command(command, 20)
     assert "\n" in wrapped
     assert " ".join(wrapped.splitlines()) == command
     assert all(display_width(line) <= 20 for line in wrapped.splitlines())
+
 
 def test_concise_commands_omit_effective_defaults() -> None:
     parser = build_parser(load_translator("en"))
@@ -195,6 +199,7 @@ def test_concise_commands_omit_effective_defaults() -> None:
     )
     assert format_command(explicit) == "ccuv chart timeline --timezone Asia/Shanghai"
 
+
 def test_concise_monitor_command_uses_grouped_effective_defaults() -> None:
     parser = build_parser(load_translator("en"))
     grouped = _to_options(parser.parse_args(["chart", "monitor", "--by", "model"]))
@@ -206,6 +211,7 @@ def test_concise_monitor_command_uses_grouped_effective_defaults() -> None:
     assert format_command(non_default).endswith("--timezone Asia/Shanghai --style points")
     assert "--by model --top 4" in format_command(non_default)
 
+
 def test_concise_command_keeps_effect_bearing_private_project_filter() -> None:
     parser = build_parser(load_translator("en"))
     launch = _to_options(parser.parse_args(["chart", "timeline", "--project", "/private/project"]))
@@ -216,11 +222,13 @@ def test_concise_command_keeps_effect_bearing_private_project_filter() -> None:
     assert command == "ccuv chart timeline --project /private/project --timezone Asia/Shanghai"
     assert reparsed.chart.filters == launch.chart.filters
 
+
 def test_project_aggregation_is_rejected_by_chart_commands() -> None:
     parser = build_parser(load_translator("en"))
 
     with pytest.raises(UsageError):
         parser.parse_args(["chart", "ranking", "--project-aggregation", "exact"])
+
 
 def test_monitor_copy_keeps_startup_selection() -> None:
     launch = StandaloneLaunch(
@@ -236,6 +244,7 @@ def test_monitor_copy_keeps_startup_selection() -> None:
     )
     assert format_command(launch) == "ccuv chart monitor --by model --agent claude --model sonnet"
 
+
 def test_full_command_preserves_implicit_until_semantics() -> None:
     parser = build_parser(load_translator("en"))
     launch = _to_options(parser.parse_args(["chart", "timeline", "--since", "2026-09-01"]))
@@ -245,6 +254,7 @@ def test_full_command_preserves_implicit_until_semantics() -> None:
     assert reparsed.chart.date_range == launch.chart.date_range
     assert reparsed.chart.date_range.implicit_until
     assert reparsed.chart.date_range.fixed_bounds
+
 
 def test_command_serializers_round_trip_typed_launch() -> None:
     launch = StandaloneLaunch(

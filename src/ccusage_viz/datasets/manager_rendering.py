@@ -20,14 +20,18 @@ class ManagerView:
     frame: Frame
     selected_id: str | None
 
+
 def _text(value, translator: Translator) -> str:
     return value.zh_cn if translator.language == "zh" else value.en
+
 
 def _descriptor_title(descriptor, translator: Translator) -> str:
     return _text(descriptor.dataset.title, translator)
 
+
 def _descriptor_description(descriptor, translator: Translator) -> str:
     return _text(descriptor.dataset.description, translator)
+
 
 def _descriptor_metric_rows(descriptor, translator: Translator) -> tuple[str, ...]:
     if not isinstance(descriptor, V2ProbeDescriptor):
@@ -42,6 +46,7 @@ def _descriptor_metric_rows(descriptor, translator: Translator) -> tuple[str, ..
         )
         rows.append(f"{_text(metric.title, translator)} · {metric.aggregation} · {charts}")
     return tuple(rows)
+
 
 def _list_rows(
     statuses: tuple[DatasetRegistrationStatus, ...],
@@ -90,7 +95,10 @@ def _list_rows(
             )
     return rows or [translator.text("status.dataset_manager_empty")]
 
-def _detail_rows(status: DatasetRegistrationStatus, translator: Translator, width: int) -> list[str]:
+
+def _detail_rows(
+    status: DatasetRegistrationStatus, translator: Translator, width: int
+) -> list[str]:
     descriptor = status.registration.probe.descriptor
     required = tuple(item for item in descriptor.environment if item.required)
     optional = tuple(item for item in descriptor.environment if not item.required)
@@ -106,16 +114,14 @@ def _detail_rows(status: DatasetRegistrationStatus, translator: Translator, widt
                 if present
                 else "status.dataset_environment_missing"
             )
-            rows.extend(
-                (
-                    f"{item.name} · {state} · {_text(item.label, translator)}",
-                )
-            )
+            rows.extend((f"{item.name} · {state} · {_text(item.label, translator)}",))
         return rows
+
     def section(key: str) -> str:
         return emphasize(
             translator.text(key), color=get_color_scheme("classic").highlight, enabled=True
         )
+
     rows = [
         section("status.dataset_details_dataset"),
         _descriptor_title(descriptor, translator),
@@ -144,6 +150,7 @@ def _detail_rows(status: DatasetRegistrationStatus, translator: Translator, widt
     ]
     return [clip_width(row, width) for row in rows]
 
+
 def _manifest_rows(manifest: DatasetManifest, translator: Translator, width: int) -> list[str]:
     required = tuple(item for item in manifest.environment if item.required)
     optional = tuple(item for item in manifest.environment if not item.required)
@@ -161,13 +168,13 @@ def _manifest_rows(manifest: DatasetManifest, translator: Translator, width: int
         if descriptor is not None
         else _text(manifest.metric.title, translator)
     )
-    description = (
-        _descriptor_description(descriptor, translator) if descriptor is not None else ""
-    )
+    description = _descriptor_description(descriptor, translator) if descriptor is not None else ""
+
     def section(key: str) -> str:
         return emphasize(
             translator.text(key), color=get_color_scheme("classic").highlight, enabled=True
         )
+
     rows = [
         section("status.dataset_details_dataset"),
         title,
@@ -183,14 +190,18 @@ def _manifest_rows(manifest: DatasetManifest, translator: Translator, width: int
     ]
     return [clip_width(row, width) for row in rows]
 
+
 def _side_by_side(left: list[str], right: list[str], *, left_width: int, right_width: int) -> str:
     rows: list[str] = []
     count = max(len(left), len(right))
     for index in range(count):
         left_row = left[index] if index < len(left) else ""
         right_row = right[index] if index < len(right) else ""
-        rows.append(f"{pad_width(clip_width(left_row, left_width), left_width)} │ {clip_width(right_row, right_width)}")
+        rows.append(
+            f"{pad_width(clip_width(left_row, left_width), left_width)} │ {clip_width(right_row, right_width)}"
+        )
     return "\n".join(rows)
+
 
 def render_dataset_manager(
     statuses: tuple[DatasetRegistrationStatus, ...],
@@ -239,6 +250,7 @@ def render_dataset_manager(
         ),
         selected_status.registration.dataset_id if selected_status is not None else None,
     )
+
 
 def format_dataset_list(
     statuses: tuple[DatasetRegistrationStatus, ...], translator: Translator

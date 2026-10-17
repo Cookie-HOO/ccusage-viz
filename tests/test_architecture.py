@@ -329,9 +329,8 @@ def test_reusable_historical_views_do_not_import_watch_host() -> None:
         violation
         for violation in violations
         if violation.split(":", 1)[0] in {"data_view.py", "historical_render.py"}
-        or violation.split(":", 1)[0] in {
-            path.name for path in (PACKAGE_ROOT / "tui").rglob("*.py")
-        }
+        or violation.split(":", 1)[0]
+        in {path.name for path in (PACKAGE_ROOT / "tui").rglob("*.py")}
     ] == []
 
 
