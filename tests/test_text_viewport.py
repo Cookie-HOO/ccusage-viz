@@ -45,7 +45,7 @@ def test_text_viewport_overflow_uses_visible_row_count() -> None:
 def test_wrap_text_rows_preserves_paragraphs_and_display_width() -> None:
     rows = wrap_text_rows("first paragraph\n\n中文错误详情 token-without-break", width=8)
 
-    assert rows[0] == "first"
+    assert rows[0] == "first pa"
     assert "" in rows
     assert all(display_width(row) <= 8 for row in rows)
 

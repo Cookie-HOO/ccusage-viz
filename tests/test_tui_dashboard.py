@@ -629,7 +629,7 @@ def test_dashboard_defaults_to_a_filled_four_pane_dashboard() -> None:
     options = _to_options(parser.parse_args(["dashboard"]))
     assert "dashboard" == "dashboard"
     assert isinstance(options.panes[0], AnimationPaneConfig)
-    assert options.panes[0].animation.style == "analog-clock"
+    assert options.panes[0].animation.style == "digital-clock"
     assert tuple(pane.chart.kind for pane in options.panes[1:]) == (
         "timeline",
         "stack",
@@ -3727,7 +3727,9 @@ def test_ranking_top_above_available_projects_keeps_all_available_projects() -> 
         UsageRecord(
             period.since,
             f"agent-{index}",
-            TokenUsage.from_parts(total=index, input=index),
+            TokenUsage.from_parts(
+                total=index, input=index, output=0, cache_read=0, cache_creation=0
+            ),
             SourceKind.UNIFIED_DAILY,
         )
         for index in range(1, 10)

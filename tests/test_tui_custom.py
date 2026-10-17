@@ -1,4 +1,5 @@
 import threading
+from concurrent.futures import Future
 from contextlib import nullcontext
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
@@ -2537,8 +2538,26 @@ def test_dashboard_metric_modal_wraps_to_target_pane_and_submits_selected_metric
         def ready_registered_sources(self) -> tuple[object, ...]:
             return (status,)
 
+        def refresh(self, _dataset_id: str) -> object:
+            return status
+
         def registered_command_source(self, _dataset_id: str) -> CustomCommandSource:
             return CustomCommandSource("dataset", ("dataset",))
+
+    class ImmediateExecutor:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        def submit(self, function: object, *args: object) -> Future[object]:
+            future: Future[object] = Future()
+            try:
+                future.set_result(function(*args))
+            except Exception as exc:
+                future.set_exception(exc)
+            return future
+
+        def shutdown(self, **_kwargs: object) -> None:
+            pass
 
     class FailedHandle:
         def result(self) -> object:
@@ -2577,6 +2596,8 @@ def test_dashboard_metric_modal_wraps_to_target_pane_and_submits_selected_metric
             KeyEvent("m"),
             KeyEvent("r"),
             KeyEvent("k"),
+            KeyEvent("k"),
+            KeyEvent("k"),
             KeyEvent("\r"),
             KeyEvent("\r"),
             KeyEvent("j"),
@@ -2591,6 +2612,7 @@ def test_dashboard_metric_modal_wraps_to_target_pane_and_submits_selected_metric
         )
     )
     monkeypatch.setattr("ccusage_viz.datasets.service.DatasetService", DatasetService)
+    monkeypatch.setattr(tui_module, "ThreadPoolExecutor", ImmediateExecutor)
     monkeypatch.setattr(tui_module, "build_query_runtime", Runtime)
     monkeypatch.setattr(tui_module, "FramePainter", Screen)
     monkeypatch.setattr(tui_module, "tui_input_mode", __import__("contextlib").nullcontext)

@@ -74,7 +74,8 @@ def test_tui_is_not_a_dashboard_compatibility_alias() -> None:
 def test_dashboard_header_uses_host_summary_and_tracks_global_theme() -> None:
     parser = build_parser(load_translator("en"))
     options = _to_options(
-        parser.parse_args(["dashboard", "--header-summary", "quarter", "--theme", "nord"])
+        parser.parse_args(["dashboard", "--header-summary", "quarter", "--theme", "nord"]),
+        explicit=frozenset(("header_summary", "color_scheme")),
     )
 
     runtime = build_query_runtime()
@@ -119,7 +120,10 @@ def test_header_summary_cycle_includes_none_and_wraps() -> None:
 
 def test_header_refresh_uses_missing_coverage_then_current_day() -> None:
     parser = build_parser(load_translator("en"))
-    options = _to_options(parser.parse_args(["dashboard", "--header-summary", "month"]))
+    options = _to_options(
+        parser.parse_args(["dashboard", "--header-summary", "month"]),
+        explicit=frozenset(("header_summary",)),
+    )
     header = _new_header(options, build_query_runtime())
     today = date(2026, 3, 15)
 
@@ -264,7 +268,10 @@ def test_header_renders_custom_metrics_against_their_accepted_scope() -> None:
 
 def test_header_none_keeps_title_without_unknown_detail() -> None:
     parser = build_parser(load_translator("en"))
-    options = _to_options(parser.parse_args(["dashboard", "--header-summary", "none"]))
+    options = _to_options(
+        parser.parse_args(["dashboard", "--header-summary", "none"]),
+        explicit=frozenset(("header_summary",)),
+    )
     header = _new_header(options, build_query_runtime())
 
     compact = _header_lines(header, "compact", load_translator("en"), Terminal(60, 4, False, True))
