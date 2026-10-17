@@ -17,7 +17,9 @@ from ccusage_viz.datasets.service import DatasetService
 from ccusage_viz.diagnostics import format_error
 from ccusage_viz.formatting import clip_width, display_width, pad_width, wrap_width
 from ccusage_viz.i18n import Translator
+from ccusage_viz.render.base import RenderContext
 from ccusage_viz.render.palette import get_color_scheme
+from ccusage_viz.render.ranking_presentation import render_ranking_description
 from ccusage_viz.terminal import (
     Frame,
     FramePainter,
@@ -36,6 +38,17 @@ class ManagerView:
 
 def _text(value, translator: Translator) -> str:
     return value.zh_cn if translator.language == "zh" else value.en
+
+
+def _read_manager_event(
+    decoder: InputDecoder, read_input: Callable[[], object] | None
+) -> object:
+    """Read one nested-manager event and preserve global Ctrl-C semantics."""
+
+    event = read_input() if read_input is not None else read_event(decoder, 0.1)
+    if isinstance(event, KeyEvent) and event.value == "\x03":
+        raise KeyboardInterrupt
+    return event
 
 
 def _descriptor_title(descriptor, translator: Translator) -> str:
@@ -299,7 +312,7 @@ def _read_local_command(
             height=get_terminal_size().lines,
         )
         screen.paint(frame)
-        event = read_input() if read_input is not None else read_event(decoder, 0.1)
+        event = _read_manager_event(decoder, read_input)
         if isinstance(event, PasteEvent):
             command += event.value
             continue
@@ -353,7 +366,7 @@ def _choose_dataset_source(
                 height=get_terminal_size().lines,
             )
         )
-        event = read_input() if read_input is not None else read_event(decoder, 0.1)
+        event = _read_manager_event(decoder, read_input)
         if not isinstance(event, KeyEvent):
             continue
         if event.value == "h":
@@ -381,7 +394,7 @@ def _confirm(
 ) -> bool:
     while True:
         screen.paint(compose_frame(body, title, controls, height=get_terminal_size().lines))
-        event = read_input() if read_input is not None else read_event(decoder, 0.1)
+        event = _read_manager_event(decoder, read_input)
         if not isinstance(event, KeyEvent):
             continue
         if event.value == "h":
@@ -591,7 +604,7 @@ def _show_manager_help(
         )
     )
     while True:
-        event = read_input() if read_input is not None else read_event(decoder, 0.1)
+        event = _read_manager_event(decoder, read_input)
         if isinstance(event, KeyEvent) and event.value in {"h", "\x1b", "\r", "\n"}:
             return
 
@@ -647,12 +660,41 @@ def _load_official_preview(
                     height=get_terminal_size().lines,
                 )
             )
-            event = read_input() if read_input is not None else read_event(decoder, 0.1)
+            event = _read_manager_event(decoder, read_input)
             if isinstance(event, KeyEvent) and event.value == "\x1b":
                 return None
         return future.result()
     finally:
         executor.shutdown(wait=False, cancel_futures=True)
+
+
+def _official_catalog_rows(
+    entries: tuple[object, ...],
+    translator: Translator,
+    *,
+    selected: int,
+    width: int,
+    color: bool,
+) -> tuple[str, ...]:
+    """Render official entries with Custom Ranking's item/description hierarchy."""
+
+    context = RenderContext(width, 1, translator, color=color, color_scheme="classic")
+    rows: list[str] = []
+    for item_index, entry in enumerate(entries):
+        rows.append(
+            clip_width(
+                f"{'›' if item_index == selected else ' '} "
+                f"{_text(entry.title, translator)} · {entry.id}",
+                width,
+            )
+        )
+        available = max(1, width - 2)
+        description_rows = wrap_width(_text(entry.summary, translator), available)
+        for row_index, row in enumerate(description_rows[:2]):
+            if row_index == 1 and len(description_rows) > 2:
+                row = clip_width(row, max(0, available - 1)) + "…"
+            rows.append("  " + render_ranking_description(row, context))
+    return tuple(rows)
 
 
 def _register_official(
@@ -671,12 +713,13 @@ def _register_official(
         return translator.text("status.datasets_official_empty")
     index = 0
     while True:
-        rows = [
-            f"{'›' if item_index == index else ' '} "
-            f"{_text(entry.title, translator)} · {entry.id}\n"
-            f"  {_text(entry.summary, translator)}"
-            for item_index, entry in enumerate(entries)
-        ]
+        rows = _official_catalog_rows(
+            entries,
+            translator,
+            selected=index,
+            width=get_terminal_size().columns,
+            color=True,
+        )
         screen.paint(
             compose_frame(
                 "\n".join(rows),
@@ -685,7 +728,7 @@ def _register_official(
                 height=get_terminal_size().lines,
             )
         )
-        event = read_input() if read_input is not None else read_event(decoder, 0.1)
+        event = _read_manager_event(decoder, read_input)
         if not isinstance(event, KeyEvent):
             continue
         if event.value == "h":
@@ -758,7 +801,7 @@ def _read_github_repository(
                 height=get_terminal_size().lines,
             )
         )
-        event = read_input() if read_input is not None else read_event(decoder, 0.1)
+        event = _read_manager_event(decoder, read_input)
         if isinstance(event, PasteEvent):
             repository += event.value
             continue
@@ -857,7 +900,7 @@ def run_dataset_manager(service: DatasetService, translator: Translator) -> int:
                     if help_open
                     else view.frame
                 )
-                event = read_event(decoder, 0.1)
+                event = _read_manager_event(decoder, None)
                 if not isinstance(event, KeyEvent):
                     continue
                 key = event.value
@@ -865,8 +908,6 @@ def run_dataset_manager(service: DatasetService, translator: Translator) -> int:
                     if key in {"h", "\x1b", "\r", "\n"}:
                         help_open = False
                     continue
-                if key == "\x03":
-                    return 0
                 if key == "\x1b":
                     if details:
                         details = False
@@ -941,6 +982,8 @@ def run_dataset_manager(service: DatasetService, translator: Translator) -> int:
                             )
                         except Exception as exc:
                             notice = format_error(exc, translator)
+    except KeyboardInterrupt:
+        return 0
     finally:
         screen.finish()
         set_cursor_visible(sys.stdout, True)

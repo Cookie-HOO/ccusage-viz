@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
+import pytest
+
 from ccusage_viz.custom_models import (
     CustomCapabilities,
     CustomChartCapability,
@@ -14,7 +18,9 @@ from ccusage_viz.datasets.manager import (
     _choose_dataset_source,
     _manager_help_frame,
     _manager_help_lines,
+    _official_catalog_rows,
     _read_github_repository,
+    _register_official,
     format_dataset_list,
     render_dataset_manager,
 )
@@ -163,6 +169,50 @@ def test_dataset_list_formats_local_records_without_running_commands() -> None:
 
     assert "weread 0.1.0 · Ready" in output
     assert "Disabled" in output
+
+
+def test_official_catalog_description_reuses_custom_ranking_muted_style() -> None:
+    entry = SimpleNamespace(
+        id="weread",
+        title=LocalizedText("WeRead", "微信读书"),
+        summary=LocalizedText(
+            "Visualize reading activity", "将微信读书的阅读时长和书籍活动可视化。"
+        ),
+    )
+
+    rows = _official_catalog_rows(
+        (entry,), load_translator("zh"), selected=0, width=80, color=True
+    )
+
+    assert rows[0] == "› 微信读书 · weread"
+    assert "\x1b[" not in rows[0]
+    assert f"\x1b[38;5;{get_color_scheme('classic').muted}m\x1b[2m" in rows[1]
+    assert "将微信读书的阅读时长和书籍活动可视化。" in rows[1]
+
+
+def test_official_catalog_ctrl_c_interrupts_nested_browser() -> None:
+    entry = SimpleNamespace(
+        id="weread",
+        title=LocalizedText("WeRead", "微信读书"),
+        summary=LocalizedText("Visualize reading activity", "阅读活动"),
+    )
+
+    class Service:
+        def official_entries(self):
+            return (entry,)
+
+    class Screen:
+        def paint(self, _frame: Frame, **_kwargs: object) -> None:
+            pass
+
+    with pytest.raises(KeyboardInterrupt):
+        _register_official(
+            Service(),  # type: ignore[arg-type]
+            Screen(),  # type: ignore[arg-type]
+            load_translator("en"),
+            InputDecoder(),
+            read_input=lambda: KeyEvent("\x03"),
+        )
 
 
 def test_add_source_chooser_lists_three_sources_and_selects_local() -> None:
