@@ -29,10 +29,13 @@ the authoritative and up-to-date list, plus setup and source-specific details.
 
 ## Product scope
 
-ccusage-viz focuses exclusively on **token consumption** and metrics derived
-from token consumption, such as observed tokens per minute (TPM). It does not
-provide session analytics, request counts, elapsed-time metrics, costs,
-pricing, balances, quotas, allowances, or other non-token account analytics.
+ccusage-viz visualizes built-in **token consumption** and metrics derived from
+it, such as observed tokens per minute (TPM). It does not provide built-in
+session analytics, request counts, elapsed-time metrics, costs, pricing,
+balances, quotas, allowances, or other non-token account analytics. A registered
+[Dataset](docs/dataset-user-guide.md) can separately add its own externally
+owned metrics—such as reading, CI, builds, spend, bytes, or local-service
+activity—without changing ccusage token collection.
 
 Historical date boundaries use the local IANA timezone by default. Pass
 `--timezone AREA/LOCATION` to select another calendar context; copied commands
@@ -59,7 +62,9 @@ remains available to the draft.
 > It fills the selected default grid or explicit `--grid`/layout with temporary
 > `empty` panes. Add an installed Dataset with only its chart type and Dataset ID:
 > `--pane 'chart timeline --dataset weread'`. Arbitrary commands add `--command`.
-> See the [custom command protocol guide](docs/custom-command-protocol.md).
+> See the [Dataset user guide](docs/dataset-user-guide.md) to install or register a
+> Dataset, and the [custom command protocol guide](docs/custom-command-protocol.md)
+> when you are building one.
 
 ```bash
 ccuv dashboard
@@ -160,8 +165,10 @@ ccuv chart ranking --dataset router --partition-by logical_model --group-by real
 ```
 
 For commands, filters, controls, styles, and data semantics, see the
-[usage guide](docs/usage.md). The [architecture overview](docs/architecture.md)
-is intended for maintainers.
+[usage guide](docs/usage.md). To install, register, or use external Metrics,
+read the [Dataset user guide](docs/dataset-user-guide.md); Dataset authors should
+start with the [developer guide](docs/dataset-developer-guide.md). The
+[architecture overview](docs/architecture.md) is intended for maintainers.
 
 ## Install, update, and remove
 

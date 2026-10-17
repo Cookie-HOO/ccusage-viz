@@ -26,9 +26,10 @@ Gemini CLI、Antigravity、Grok Build CLI 和 ZCode。完整且最新的列表�
 
 ## 产品边界
 
-ccusage-viz 只关注 **Token 消耗** 与由 Token 消耗直接推导的指标，例如观测到的
-每分钟 Token 数（TPM）。它不提供会话分析、调用次数、耗时指标、成本、定价、余额、
-额度、配额或其他非 Token 的账户分析。
+ccusage-viz 可视化内置的 **Token 消耗** 与由其直接推导的指标，例如观测到的
+每分钟 Token 数（TPM）。它不内置会话分析、调用次数、耗时指标、成本、定价、余额、
+额度、配额或其他非 Token 的账户分析。注册的
+[Dataset](docs/dataset-user-guide.zh-CN.md) 可以独立加入由外部数据源拥有语义的指标，例如阅读、CI、构建、金额、字节或本地服务活动，且不会改变 ccusage 的 Token 采集。
 
 > 本项目与 `ccusage` 项目及其维护者没有隶属关系，也未获得其背书。
 
@@ -44,7 +45,8 @@ Dashboard 提供与当前界面对应的帮助：按 `h` 查看当前可用控�
 > 若要在不创建默认 ccusage Pane 或请求的情况下启动，请使用 `ccuv dashboard --empty`。
 > 它会以选定的默认网格或显式 `--grid`/layout 填充临时 `empty` Pane。可通过
 > `--pane 'custom timeline --dataset reading --command "my-reader ccuv"'` 加入命令驱动的自定义数据。
-> 详见[自定义命令协议指南](docs/custom-command-protocol.zh-CN.md)。
+> 安装、注册和使用 Dataset 请见 [Dataset 使用者指南](docs/dataset-user-guide.zh-CN.md)；
+> 开发 Dataset 请见[自定义命令协议指南](docs/custom-command-protocol.zh-CN.md)。
 
 ```bash
 ccuv dashboard
@@ -114,7 +116,7 @@ ccuv dashboard weekly-review --ccusage-bin /opt/bin/ccusage
 ccuv chart ranking --dataset router --partition-by logical_model --group-by real_model
 ```
 
-命令、筛选、控制、样式和数据语义请参阅[使用指南](docs/usage.zh-CN.md)。
+命令、筛选、控制、样式和数据语义请参阅[使用指南](docs/usage.zh-CN.md)。安装、注册和使用外部 Metric 请见[Dataset 使用者指南](docs/dataset-user-guide.zh-CN.md)；Dataset 作者请从[开发者指南](docs/dataset-developer-guide.zh-CN.md)开始。
 [架构文档](docs/architecture.zh-CN.md)面向维护者。
 
 ## 安装、更新与卸载

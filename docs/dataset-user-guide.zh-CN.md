@@ -55,7 +55,7 @@ ccuv dataset list
 | 选择 | `j` / `k` 或方向键 | 移动当前注册项。 |
 | 详情 | Enter | 查看 Metric、支持图、环境变量、来源、版本；Enter/Esc 返回。 |
 | 添加 | `+` | 选择官方、GitHub 或本地命令。 |
-| 刷新 | `r` | 对每一个启用的 Dataset 重跑 Probe，更新安全元数据。 |
+| 刷新 | `r` | 对每一个启用的 Dataset 重跑 Probe，更新安全元数据。Dashboard 在选择器中选中 Dataset 后、进入 Metric/chart kind 选择前也会重新 Probe。 |
 | 启用/禁用 | `d` | 切换当前项能否用于 Dashboard 和刷新。 |
 | 删除 | `x` | 确认后删除。本地只删除 ccuv 注册；官方/GitHub 还删除受管理安装文件。 |
 | 升级 | `u` | 有可用更新时确认并安装新 Release。 |
@@ -83,7 +83,7 @@ ccuv chart monitor --dataset router --metric tokens
 
 通过 `ccuv dataset` 的详情查看每个 Metric 支持哪些图。历史 Metric 可以支持 Timeline、Calendar、Stack、Ranking 的任意组合；只有声明 Monitor capability 的 Metric 才能运行 Monitor。
 
-当 Dataset 声明 Metric Group 时，交互式 Dataset 选择器会显示本地化的 Group 标题，并把成员 Metric 缩进到标题下；空 Group 不显示。未加入 Group 的 Metric 仍在所有 Group 后平铺显示。未声明 Group 的 Dataset 保持原有平铺选择器。
+当 Dataset 声明 Metric Group 时，交互式 Dataset 选择器会显示本地化的 Group 标题，并把成员 Metric 缩进到标题下；空 Group 不显示。未加入 Group 的 Metric 仍在所有 Group 后平铺显示。未声明 Group 的 Dataset 保持原有平铺选择器。窄选择器中向上导航会先显示被裁掉的组标题，再让选择回绕，以保留当前 Metric 的上下文。
 
 在已选中的 Custom 图 Pane 内，`m` 和 `M` 会在当前 Group 中支持当前图表类型的 Metric 间前后循环。ccuv 会保留当前查询选择；如果下一个 Metric 的声明 capability 不接受当前 period、group 或 granularity，则保持当前 Metric 并显示短暂警告。成功切换后替换已选 Metric；目标请求失败时保持此前的图或 Monitor 选中。
 
@@ -119,7 +119,7 @@ ccuv dashboard --empty --grid 2x2 \
   --pane 'chart monitor --dataset router --metric tokens'
 ```
 
-每个 `--pane` 都是正常 chart fragment。Metric capability 仍限制 ccuv 实际会发送的请求；CLI 参数仍会覆盖 Dataset default。
+每个 `--pane` 都是正常 chart fragment。Metric capability 仍限制 ccuv 实际会发送的请求；CLI 参数仍会覆盖 Dataset default。Preset 会保留 Custom Ranking 的条目间距和 Monitor 附件；共享同一 Dataset ID 的 Pane 必须解析为相同命令，ccuv 会拒绝含混的来源命令，而不是静默选择其一。
 
 ## 保存、迁移与排错
 
@@ -134,3 +134,5 @@ Dashboard preset 会保存 Dataset ID、图表配置、本地命令 Dataset 的 
 | filter/group 失败 | capability 可能变了；按 `r` 刷新后选择声明过的值。 |
 | Monitor 时间范围似乎不对 | Dataset 的 `window_seconds` 是事实窗口；本地 `window` 控制仅改变 ccuv 显示多少已接受历史。 |
 | 请求失败后仍显示旧图 | 同一查询刷新失败会保留最后接受的图；变化后的查询只显示候选/错误，不混用旧选择的数据。 |
+| Dashboard 选择 Dataset 后显示“不可用” | 新 Probe 发现没有可选 Metric/chart capability，或 Dataset 响应无效。用 `ccuv dataset` 检查 Dataset，修复配置后重试。 |
+| Dashboard 拒绝 Dataset 命令冲突 | 同一 Dataset ID 的 Pane 必须使用等价 argv（指向同一文件的绝对路径别名可接受）。替换或移除冲突 Pane。 |

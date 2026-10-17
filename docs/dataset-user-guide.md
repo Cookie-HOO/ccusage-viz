@@ -94,7 +94,7 @@ In `ccuv dataset`:
 | Select | `j` / `k` or arrows | Moves the selected registration. |
 | Details | Enter | Shows Metrics, supported charts, environment variables, source, and version. Enter/Escape returns. |
 | Add | `+` | Choose official, GitHub, or local command source. |
-| Refresh | `r` | Re-runs Probe for every enabled Dataset and updates safe metadata. |
+| Refresh | `r` | Re-runs Probe for every enabled Dataset and updates safe metadata. Dashboard also performs a fresh Probe for the Dataset selected in its chooser before it advances to Metric/kind selection. |
 | Enable/disable | `d` | Toggles the selected registration's availability in Dashboard and refreshes. |
 | Remove | `x` | Confirms removal. Local removal deletes only ccuv's registration; managed official/GitHub removal also deletes its installed artifact. |
 | Upgrade | `u` | When a managed Dataset has an available update, confirms and installs it. |
@@ -135,7 +135,9 @@ Monitor is only available when that Metric declares Monitor capability.
 When a Dataset declares Metric Groups, the interactive Dataset picker shows a
 localized Group heading and indents its Metrics below it. Empty Groups are not
 shown. Metrics without a Group remain flat entries after all Groups. A Dataset
-that does not declare Groups keeps the original flat picker.
+that does not declare Groups keeps the original flat picker. In a short chooser,
+Up first reveals a clipped Group heading before the selection wraps, so the
+selected Metric always regains its context.
 
 In a selected Custom chart pane, `m` and `M` cycle forward and backward among
 Metrics in the current Group that support the active chart kind. ccuv keeps the
@@ -198,7 +200,9 @@ ccuv dashboard --empty --grid 2x2 \
 
 Each `--pane` is a normal chart fragment. Dataset metric capabilities still
 limit what ccuv will request; command-line options remain explicit overrides of
-Dataset defaults.
+Dataset defaults. Presets retain Custom Ranking item spacing and Monitor
+attachments. Panes sharing one Dataset ID must resolve to the same command;
+ccuv rejects ambiguous source commands rather than choosing one silently.
 
 ## Save And Share
 
@@ -218,5 +222,7 @@ must be portable to another machine.
 | GitHub install cannot find a release | The repo needs a latest non-draft release, a platform-named `.tar.gz`, and a checksum asset. |
 | A Metric or chart type is not selectable | The Metric's Probe does not declare that capability. Choose a supported Metric/kind or contact the Dataset developer. |
 | A selected filter/group fails | The Dataset may have changed its capability. Refresh (`r`) and choose a declared option. |
+| Dashboard shows `Unavailable` after choosing a Dataset | The fresh Probe found no selectable Metric/chart capability, or the Dataset response was invalid. Inspect the Dataset with `ccuv dataset`, correct its setup, and try again. |
+| Dashboard refuses a Dataset command conflict | Panes with the same Dataset ID must use equivalent command argv (absolute-path aliases to the same files are accepted). Replace or remove the conflicting Pane. |
 | Monitor looks like it covers the wrong time period | The Dataset owns the factual `window_seconds`; the local `window` control merely changes how much accepted Monitor history ccuv displays. |
 | Old data remains after a failed request | ccuv retains the last accepted view for a same-query refresh. A changed query shows its candidate/error rather than facts from a different selection. |
