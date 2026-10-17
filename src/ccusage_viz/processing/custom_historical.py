@@ -20,11 +20,9 @@ from ccusage_viz.custom_models import (
     CustomUnit,
     LocalizedText,
 )
-from ccusage_viz.custom_protocol import (
-    CustomChartResponse,
-    CustomProtocolError,
-    validate_partition_selection,
-)
+from ccusage_viz.custom_protocol.primitives import CustomProtocolError
+from ccusage_viz.custom_protocol.probe import validate_partition_selection
+from ccusage_viz.custom_protocol.responses import CustomChartResponse
 from ccusage_viz.options import CustomChartConfig
 from ccusage_viz.processing.summaries import period_end, period_start
 

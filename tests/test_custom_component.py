@@ -49,7 +49,7 @@ from ccusage_viz.custom_models import (
     V2RankingGroup,
     V2Runtime,
 )
-from ccusage_viz.custom_protocol import (
+from ccusage_viz.custom_protocol.responses import (
     CustomChartResponse,
     CustomPaneResponse,
     CustomSummaryResponse,

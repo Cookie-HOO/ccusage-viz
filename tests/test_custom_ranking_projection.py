@@ -18,7 +18,7 @@ from ccusage_viz.custom_models import (
     V2RankingGroup,
     V2Runtime,
 )
-from ccusage_viz.custom_protocol import V2ChartResponse
+from ccusage_viz.custom_protocol.responses import V2ChartResponse
 from ccusage_viz.data_view import custom_data_payload, render_custom_data
 from ccusage_viz.i18n import load_translator
 from ccusage_viz.options import ChartPresentation, CustomChartConfig, CustomCommandSource

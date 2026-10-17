@@ -31,7 +31,7 @@ from ccusage_viz.custom_models import (
     V2ProbeDescriptor,
     V2Runtime,
 )
-from ccusage_viz.custom_protocol import V2MonitorResponse
+from ccusage_viz.custom_protocol.responses import V2MonitorResponse
 from ccusage_viz.options import CustomChartConfig, compatible_styles, is_monitor_ranking_style
 from ccusage_viz.render.palette import COLOR_SCHEMES
 

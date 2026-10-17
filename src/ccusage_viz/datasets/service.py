@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from ccusage_viz.acquisition import custom_probe_query_intent, custom_v2_probe_query_intent
-from ccusage_viz.custom_protocol import CustomProbeResponse, V2ProbeResponse
+from ccusage_viz.custom_protocol.responses import CustomProbeResponse, V2ProbeResponse
 from ccusage_viz.datasets.archive import extract_dataset_archive, sha256_bytes
 from ccusage_viz.datasets.github import (
     download_release_artifact,

@@ -22,7 +22,7 @@ from ccusage_viz.custom_models import (
     V2MonitorCapability,
     V2ProbeDescriptor,
 )
-from ccusage_viz.custom_protocol import CustomProbeResponse, V2ProbeResponse
+from ccusage_viz.custom_protocol.responses import CustomProbeResponse, V2ProbeResponse
 from ccusage_viz.datasets.archive import sha256_bytes
 from ccusage_viz.datasets.models import ReleaseArtifact
 from ccusage_viz.datasets.service import DatasetService

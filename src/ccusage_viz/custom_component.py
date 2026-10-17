@@ -24,7 +24,7 @@ from ccusage_viz.custom_models import (
     V2ProbeDescriptor,
     V2Runtime,
 )
-from ccusage_viz.custom_protocol import CustomChartResponse, V2ChartResponse
+from ccusage_viz.custom_protocol.responses import CustomChartResponse, V2ChartResponse
 from ccusage_viz.errors import QueryError
 from ccusage_viz.options import CustomChartConfig, has_complete_content, is_v2_custom_ranking
 from ccusage_viz.processing.custom_historical import (

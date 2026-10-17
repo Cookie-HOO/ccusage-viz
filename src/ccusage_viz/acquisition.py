@@ -6,7 +6,7 @@ from typing import cast
 
 from ccusage_viz.core.time import local_today
 from ccusage_viz.coverage import DateCoverage, DateInterval
-from ccusage_viz.custom_protocol import (
+from ccusage_viz.custom_protocol.requests import (
     CustomChartRequest,
     CustomProbeRequest,
     CustomSummaryRequest,

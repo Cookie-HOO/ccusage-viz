@@ -12,9 +12,8 @@ from ccusage_viz.custom_models import (
     CustomProbeDescriptor,
     V2ProbeDescriptor,
 )
-from ccusage_viz.custom_protocol import (
-    parse_probe_descriptor,
-    parse_v2_probe_descriptor,
+from ccusage_viz.custom_protocol.probe import parse_probe_descriptor, parse_v2_probe_descriptor
+from ccusage_viz.custom_protocol.probe_wire import (
     probe_descriptor_to_wire,
     v2_probe_descriptor_to_wire,
 )

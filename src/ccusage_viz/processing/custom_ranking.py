@@ -14,7 +14,7 @@ from ccusage_viz.custom_models import (
     V2RankingData,
     V2RankingGroup,
 )
-from ccusage_viz.custom_protocol import V2ChartResponse
+from ccusage_viz.custom_protocol.responses import V2ChartResponse
 from ccusage_viz.options import CustomChartConfig
 from ccusage_viz.processing.custom_historical import CustomProjectionError, SortDirection
 

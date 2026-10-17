@@ -108,13 +108,12 @@ from ccusage_viz.custom_monitor_component import (
     custom_monitor_styles,
     resolve_metric,
 )
-from ccusage_viz.custom_protocol import (
+from ccusage_viz.custom_protocol.requests import CustomSummaryRequest, V2SummaryRequest
+from ccusage_viz.custom_protocol.responses import (
     CustomProbeResponse,
-    CustomSummaryRequest,
     CustomSummaryResponse,
     V2MonitorResponse,
     V2ProbeResponse,
-    V2SummaryRequest,
     V2SummaryResponse,
 )
 from ccusage_viz.dashboard import DASHBOARD_PRESETS

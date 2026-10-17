@@ -7,13 +7,13 @@ from dataclasses import dataclass
 from threading import Event
 
 from ccusage_viz.coverage import DateCoverage
-from ccusage_viz.custom_protocol import (
+from ccusage_viz.custom_protocol.parsing import parse_custom_response
+from ccusage_viz.custom_protocol.primitives import CustomProtocolError
+from ccusage_viz.custom_protocol.requests import (
     CustomProbeRequest,
-    CustomProtocolError,
     CustomRequest,
     V2ProbeRequest,
     canonical_custom_request_key,
-    parse_custom_response,
 )
 from ccusage_viz.errors import QueryError
 from ccusage_viz.providers.ccusage import _communicate_bounded, _decode_stderr

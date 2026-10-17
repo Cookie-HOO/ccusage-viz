@@ -20,7 +20,7 @@ from ccusage_viz.custom_models import (
     V2MetricGroup,
     V2ProbeDescriptor,
 )
-from ccusage_viz.custom_protocol import V2ChartRequest
+from ccusage_viz.custom_protocol.requests import V2ChartRequest
 from ccusage_viz.i18n import load_translator
 from ccusage_viz.lifecycle import QueryTrigger
 from ccusage_viz.options import CustomChartConfig, CustomCommandSource

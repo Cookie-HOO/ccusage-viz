@@ -17,9 +17,9 @@ from ccusage_viz.bootstrap import build_query_runtime
 from ccusage_viz.configuration import apply_custom_probe_defaults, v2_metric_probe_descriptor
 from ccusage_viz.core.custom_ranking_time import TimestampRange
 from ccusage_viz.custom_models import V2RankingData
-from ccusage_viz.custom_protocol import (
+from ccusage_viz.custom_protocol.requests import V2ChartRequest
+from ccusage_viz.custom_protocol.responses import (
     CustomChartResponse,
-    V2ChartRequest,
     V2ChartResponse,
     V2ProbeResponse,
 )

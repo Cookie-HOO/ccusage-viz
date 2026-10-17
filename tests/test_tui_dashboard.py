@@ -44,7 +44,7 @@ from ccusage_viz.custom_models import (
     V2MetricGroup,
     V2ProbeDescriptor,
 )
-from ccusage_viz.custom_protocol import CustomChartResponse, CustomProbeResponse
+from ccusage_viz.custom_protocol.responses import CustomChartResponse, CustomProbeResponse
 from ccusage_viz.domain import Notice, SourceKind, TokenUsage, UsageRecord
 from ccusage_viz.errors import QueryError, SchemaError, UsageError
 from ccusage_viz.formatting import display_width, strip_ansi

@@ -26,7 +26,7 @@ from ccusage_viz.custom_monitor_component import (
     custom_monitor_styles,
     resolve_metric,
 )
-from ccusage_viz.custom_protocol import V2MonitorResponse
+from ccusage_viz.custom_protocol.responses import V2MonitorResponse
 from ccusage_viz.i18n import load_translator
 from ccusage_viz.lifecycle import FixedIntervalScheduler, LifecycleOperation
 from ccusage_viz.options import (

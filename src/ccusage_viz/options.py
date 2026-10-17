@@ -577,7 +577,7 @@ def validate_custom_partition_selection(
 ) -> None:
     """Validate locally constructed V2 Ranking partition state."""
 
-    from ccusage_viz.custom_protocol import validate_partition_selection
+    from ccusage_viz.custom_protocol.probe import validate_partition_selection
 
     try:
         validate_partition_selection(partition_by, group_by, capability)

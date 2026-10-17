@@ -53,13 +53,13 @@ from ccusage_viz.custom_monitor_component import (
     CustomMonitorComponent,
     custom_monitor_y_axis_max,
 )
-from ccusage_viz.custom_protocol import (
+from ccusage_viz.custom_protocol.requests import V2SummaryRequest
+from ccusage_viz.custom_protocol.responses import (
     CustomChartResponse,
     CustomPaneResponse,
     CustomSummaryResponse,
     V2ChartResponse,
     V2MonitorResponse,
-    V2SummaryRequest,
 )
 from ccusage_viz.errors import QueryError
 from ccusage_viz.formatting import display_width, strip_ansi

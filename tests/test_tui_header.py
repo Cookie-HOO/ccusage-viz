@@ -14,7 +14,7 @@ from ccusage_viz.custom_models import (
     CustomSummaryMetric,
     LocalizedText,
 )
-from ccusage_viz.custom_protocol import CustomSummaryResponse
+from ccusage_viz.custom_protocol.responses import CustomSummaryResponse
 from ccusage_viz.domain import SourceKind, TokenUsage, UsageRecord
 from ccusage_viz.errors import UsageError
 from ccusage_viz.formatting import display_width
