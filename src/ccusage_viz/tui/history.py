@@ -18,7 +18,7 @@ from ccusage_viz.custom_component import (
     custom_replacement_required,
     custom_summary_replacement_required,
 )
-from ccusage_viz.dashboard import DASHBOARD_PRESETS, enable_monitor_attachment
+from ccusage_viz.dashboard import DASHBOARD_PRESETS
 from ccusage_viz.dashboard_preset_store import DashboardPresetStore, DashboardPresetStoreError
 from ccusage_viz.dashboard_state import DashboardPaneState, DashboardState
 from ccusage_viz.datasets.paths import dashboard_preset_state_root
@@ -162,8 +162,6 @@ def builtin_preset_launch(session: TuiSession, name: str) -> DashboardLaunch:
         parse_pane_fragment(fragment, host=base, language=session.translator.language)
         for fragment in preset.panels
     )
-    if name in {"wide-clock", "narrow-clock"}:
-        panes = enable_monitor_attachment(panes)
     if (
         name in {"wide-clock", "narrow-clock"}
         and panes

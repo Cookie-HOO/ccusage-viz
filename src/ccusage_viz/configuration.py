@@ -28,6 +28,7 @@ from ccusage_viz.options import (
     StandaloneLaunch,
     TimelineConfig,
     compatible_styles,
+    default_monitor_attachment_style,
     is_v2_custom_ranking,
     resolve_date_range,
 )
@@ -42,7 +43,7 @@ def _default_dashboard_chart_presentation(kind: str) -> ChartPresentation:
             "calendar": "relative",
             "stack": "stacked",
             "ranking": "dot",
-            "monitor": "points",
+            "monitor": "ranking",
         }[kind],
         density="full" if kind == "ranking" else "compact",
     )
@@ -67,7 +68,7 @@ def default_pane(kind: str, *, dashboard: DashboardLaunch) -> ChartPaneConfig:
             chart = RankingConfig("ranking", date_range, presentation=presentation)
         else:
             raise ValueError(f"unknown chart kind: {kind}")
-    return ChartPaneConfig(chart)
+    return ChartPaneConfig(chart, attachment_style=default_monitor_attachment_style(chart))
 
 
 def apply_custom_probe_defaults(
@@ -290,28 +291,28 @@ def default_custom_pane(
     date_range = resolve_date_range(
         "timeline" if kind == "monitor" else kind, period=None, since=None, until=None
     )
-    return CustomChartPaneConfig(
-        CustomChartConfig(
-            kind,
-            source,
-            date_range,
-            presentation=presentation,
-            metric_id=metric_id,
-            metric_summary=metric_summary,  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
-            metric_periods=metric_periods,
-            metric_titles=metric_titles,
-        )
+    chart = CustomChartConfig(
+        kind,
+        source,
+        date_range,
+        presentation=presentation,
+        metric_id=metric_id,
+        metric_summary=metric_summary,  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+        metric_periods=metric_periods,
+        metric_titles=metric_titles,
     )
+    return CustomChartPaneConfig(chart, attachment_style=default_monitor_attachment_style(chart))
 
 
 def focused_dashboard_from_chart(launch: StandaloneLaunch) -> DashboardLaunch:
     """Adapt a chart CLI launch to a headerless one-Pane Dashboard."""
 
     chart = launch.chart
+    attachment_style = default_monitor_attachment_style(chart)
     pane = (
-        CustomChartPaneConfig(chart)
+        CustomChartPaneConfig(chart, attachment_style=attachment_style)
         if isinstance(chart, CustomChartConfig)
-        else ChartPaneConfig(chart)
+        else ChartPaneConfig(chart, attachment_style=attachment_style)
     )
     interval_field = "sampling_interval" if chart.kind == "monitor" else "refresh_interval"
     explicit = (launch.explicit - {"interval"}) | {interval_field}

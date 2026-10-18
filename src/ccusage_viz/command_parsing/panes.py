@@ -27,6 +27,7 @@ from ccusage_viz.options import (
     DashboardLaunch,
     EmptyPaneConfig,
     PaneConfig,
+    default_monitor_attachment_style,
 )
 
 
@@ -83,7 +84,9 @@ def parse_pane_fragment(
                     "error.arguments",
                     detail="Dashboard --ascii conflicts with an explicit Pane --theme",
                 )
-            return CustomChartPaneConfig(chart)
+            return CustomChartPaneConfig(
+                chart, attachment_style=default_monitor_attachment_style(chart)
+            )
         except UsageError as exc:
             raise UsageError("error.tui_panel", value=fragment) from exc
     if tokens[0] == "animate":
@@ -171,4 +174,4 @@ def parse_pane_fragment(
         )
     except UsageError as exc:
         raise UsageError("error.tui_panel", value=fragment) from exc
-    return ChartPaneConfig(chart)
+    return ChartPaneConfig(chart, attachment_style=default_monitor_attachment_style(chart))

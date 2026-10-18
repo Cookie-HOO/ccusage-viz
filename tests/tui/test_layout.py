@@ -314,7 +314,7 @@ def test_pane_chooser_uses_operation_specific_copy(
     )
     assert painted[0][1:] == (
         "Replace pane",
-        "j/k select · Enter replace · Esc cancel",
+        "j/k or ↑/↓ select · Enter replace · Esc cancel",
     )
 
 

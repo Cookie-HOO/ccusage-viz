@@ -255,8 +255,8 @@ Animation 是独立资源类型，不是 Chart 变体，也不是所有图表默
 裁剪和清理，而具名主题仍由动画库负责。它只向声明支持状态的效果传递 active/idle。动画 Pane 不拥有 Provider、
 查询运行时、scheduler 或 lifecycle operation。
 
-Monitor 附件只属于其所在的 Monitor Pane 或独立 Monitor Host，默认关闭。用户可在 ranking/list 视图的高级
-控制中启用；已有可比较的已接受 interval 后它才渲染，并用 ccuv 已接受的 Token 增量为声明支持状态的效果决定
+Monitor 附件只属于其所在的 Monitor Pane 或独立 Monitor Host；ranking/list 视图默认启用 `mole-cat`，时序视图默认关闭。用户可在 ranking/list 视图的高级
+控制中切换或关闭；已有可比较的已接受 interval 后它才渲染，并用 ccuv 已接受的 Token 增量为声明支持状态的效果决定
 active 或 idle。附件 deadline 只重绘当前 Frame，绝不会发起查询。启用的附件使用 `classic` 主题；高级控制会循环
 全部动画库声明为 Monitor 可用的效果，随后进入 ccuv 本地的`无`。这个临时`无`状态不属于 catalog、不创建 provider
 工作，也不能用于独立动画或 Dashboard 动画 Pane。

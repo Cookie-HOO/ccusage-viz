@@ -15,7 +15,7 @@ from ccusage_viz.command_parsing.charts import (
 )
 from ccusage_viz.command_parsing.errors import _invalid_choice_error
 from ccusage_viz.command_parsing.panes import _time_state_command, parse_pane_fragment
-from ccusage_viz.dashboard import DASHBOARD_PRESETS, enable_monitor_attachment
+from ccusage_viz.dashboard import DASHBOARD_PRESETS
 from ccusage_viz.dashboard_layout import (
     NAMED_LAYOUTS,
     fixed_shape,
@@ -349,7 +349,6 @@ def _to_options(
             for fragment in fragments
         )
         if preset_name in {"wide-clock", "narrow-clock"} and panes:
-            panes = enable_monitor_attachment(panes)
             first = panes[0]
             if isinstance(first, AnimationPaneConfig):
                 panes = (

@@ -35,7 +35,9 @@ def test_dashboard_monitor_default_does_not_change_explicit_or_standalone_total(
     panel = dashboard.panes[0]
     standalone = _to_options(parser.parse_args(["chart", "monitor"]))
 
-    assert _new_pane_options("monitor", dashboard).chart.by == "model"
+    inserted = _new_pane_options("monitor", dashboard)
+    assert inserted.chart.by == "model"
+    assert inserted.chart.presentation.style == "ranking"
     assert panel.chart.by is None
     assert standalone.chart.by is None
 
@@ -58,16 +60,28 @@ def test_dashboard_animation_panes_keep_independent_session_state() -> None:
     assert second.session.playback_requested
 
 
-def test_dashboard_monitor_attachment_starts_disabled() -> None:
+def test_dashboard_monitor_ranking_attachment_defaults_to_mole_cat() -> None:
     parser = build_parser(load_translator("en"))
-    options = _to_options(parser.parse_args(["dashboard", "--pane", "monitor --by model"]))
+    options = _to_options(
+        parser.parse_args(["dashboard", "--pane", "monitor --by model --style ranking"])
+    )
+    pane = _new_pane(options, options.panes[0], "dashboard:pane:0", build_query_runtime())
+
+    assert pane.attachment is not None
+    assert pane.attachment.spec.style == "mole-cat"
+    assert pane.attachment.theme == "classic"
+    assert pane.attachment_enabled
+    assert not pane.attachment.visible
+
+
+def test_dashboard_temporal_monitor_attachment_starts_disabled() -> None:
+    parser = build_parser(load_translator("en"))
+    options = _to_options(parser.parse_args(["dashboard", "--pane", "monitor --style bars"]))
     pane = _new_pane(options, options.panes[0], "dashboard:pane:0", build_query_runtime())
 
     assert pane.attachment is not None
     assert pane.attachment.spec.style == animation_style_choices("monitor")[0]
-    assert pane.attachment.theme == "classic"
     assert not pane.attachment_enabled
-    assert not pane.attachment.visible
 
 
 def test_dashboard_monitor_attachment_tracks_only_accepted_activity() -> None:
@@ -114,6 +128,8 @@ def test_dashboard_monitor_attachment_hides_outside_ranking_and_list() -> None:
     pane = _new_pane(options, options.panes[0], "pane:monitor")
     assert isinstance(pane, tui_models.TuiChartPane)
     assert pane.attachment is not None
+    assert pane.attachment.spec.style == "mole-cat"
+    assert pane.attachment_enabled
 
     body = _append_monitor_attachment(
         pane,
@@ -135,8 +151,8 @@ def test_dashboard_monitor_attachment_hides_outside_ranking_and_list() -> None:
         now=2.0,
         translator=load_translator("en"),
     )
-    assert body == "chart"
-    assert not pane.attachment.visible
+    assert body != "chart"
+    assert pane.attachment.visible
 
     pane.attachment_enabled = True
     body = _append_monitor_attachment(
