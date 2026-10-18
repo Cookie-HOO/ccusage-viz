@@ -63,8 +63,18 @@ def _dashboard_registration_statuses(
     """Include unavailable registrations while tolerating legacy service collaborators."""
 
     registrations = getattr(service, "registrations", None)
-    return tuple(
+    statuses = tuple(
         registrations() if registrations is not None else service.ready_registered_sources()
+    )
+    order = {"ready": 0, "setup_required": 1, "unavailable": 2, "disabled": 3}
+    return tuple(
+        sorted(
+            statuses,
+            key=lambda status: (
+                order.get(getattr(status, "availability", "ready"), 99),
+                status.registration.dataset_id,
+            ),
+        )
     )
 
 
