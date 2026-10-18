@@ -6,6 +6,34 @@
 - **Minor (`0.x.0`)**: substantial new user-facing capabilities or source integrations before 1.0.
 - Before `1.0`, public interfaces may still change between releases.
 
+## 0.3.2
+
+`0.3.2` improves Windows terminal compatibility and tightens Dashboard, Dataset,
+and preset interactions without changing data or Token metric semantics:
+
+- Windows console input now normalizes arrows and related extended keys, enables
+  virtual-terminal output where available, and supports native clipboard copy;
+  Linux Wayland/X11 clipboard tools are supported alongside macOS `pbcopy`;
+- animated Unicode row fallback now paints replacement content before erasing its
+  old suffix, preventing framed Dashboard panes from visibly flashing when a
+  Windows console cannot hide intermediate synchronized-output states;
+- Dataset installation prompts handle editing consistently, distinguish GitHub
+  connectivity failures, and show registered but unavailable Datasets with their
+  readiness state and missing environment-variable names;
+- Dashboard preset management moves from `Ctrl-P` to `Ctrl-O`, list and layout
+  selectors accept arrow keys, named presets accept timezone overrides, and saved
+  presets retain language, timezone, and `ccusage-bin` while remaining compatible
+  with existing preset files;
+- language detection now consults an explicit override, Windows/macOS UI language,
+  standard locale environment variables, and Python locale fallback; Chinese UI
+  locales, including Traditional Chinese locales, use the available Chinese catalog;
+- Overlay editing treats Backspace as deletion, uses `?` for editor help, and moves
+  Overlay offsets with `h/j/k/l` in the Animation Pane Advanced page so arrows remain
+  available for Pane navigation;
+- Monitor `ranking` and `list` views now enable the `mole-cat` attachment by default,
+  including newly inserted Monitor panes and all presets that use those views; temporal
+  Monitor views remain animation-free.
+
 ## 0.3.1
 
 `0.3.1` hardens cross-platform startup and small CLI failure paths, and replaces
