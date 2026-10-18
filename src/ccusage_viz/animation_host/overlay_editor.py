@@ -189,7 +189,7 @@ def _run_overlay_editor(
         elif key in {"\r", "\n"}:
             overlay.apply_draft(mode, draft)
             return
-        elif key == "\x08":
+        elif key == "?":
             _run_animation_help(
                 screen,
                 decoder,
@@ -199,7 +199,7 @@ def _run_overlay_editor(
                 body_lines=_editor_help_lines(translator, ascii=terminal.ascii),
                 hint_key="",
                 close_key="status.overlay_editor_help_close",
-                close_events=frozenset({"h", "\x08", "\x1b", "\r", "\n", "\x03"}),
+                close_events=frozenset({"?", "\x1b", "\r", "\n", "\x03"}),
             )
         elif key == "\x15":
             if mode == "text":
@@ -219,7 +219,7 @@ def _run_overlay_editor(
                 text_draft = updated
             else:
                 command_draft = updated
-        elif key == "\x7f" and cursor_index:
+        elif key in {"\x7f", "\x08"} and cursor_index:
             updated = draft[: cursor_index - 1] + draft[cursor_index:]
             cursors[mode] -= 1
             if mode == "text":

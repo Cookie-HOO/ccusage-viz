@@ -134,25 +134,25 @@ def handle_pane_adjustment(session: TuiSession, event: object, key: object, *, n
                     pane.session, target="pane", step=1 if key == "s" else -1, now=now
                 ),
             )
-        elif session.adjustment_page == "advanced" and key == "\x1b[A":
+        elif session.adjustment_page == "advanced" and key == "k":
             record_mutation(
                 session,
                 ("pane", session.focused, "overlay-offset"),
                 lambda pane=animation_pane: pane.overlay.adjust_offset(dy=-1),
             )
-        elif session.adjustment_page == "advanced" and key == "\x1b[B":
+        elif session.adjustment_page == "advanced" and key == "j":
             record_mutation(
                 session,
                 ("pane", session.focused, "overlay-offset"),
                 lambda pane=animation_pane: pane.overlay.adjust_offset(dy=1),
             )
-        elif session.adjustment_page == "advanced" and key == "\x1b[C":
+        elif session.adjustment_page == "advanced" and key == "l":
             record_mutation(
                 session,
                 ("pane", session.focused, "overlay-offset"),
                 lambda pane=animation_pane: pane.overlay.adjust_offset(dx=1),
             )
-        elif session.adjustment_page == "advanced" and key == "\x1b[D":
+        elif session.adjustment_page == "advanced" and key == "h":
             record_mutation(
                 session,
                 ("pane", session.focused, "overlay-offset"),

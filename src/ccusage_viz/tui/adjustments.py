@@ -308,7 +308,7 @@ _ANIMATION_PANE_QUICK_BINDINGS = (
 )
 
 _ANIMATION_PANE_ADVANCED_BINDINGS = (
-    ("↑/↓/←/→", "overlay_move"),
+    ("h/j/k/l", "overlay_move"),
     ("0", "overlay_reset"),
     ("e", "overlay_edit"),
     ("i", "overlay_interval"),
@@ -322,9 +322,8 @@ def _animation_pane_adjustment_keys(page: str) -> frozenset[str]:
     bindings = (
         _ANIMATION_PANE_QUICK_BINDINGS if page == "quick" else _ANIMATION_PANE_ADVANCED_BINDINGS
     )
-    key_map = {"↑": "\x1b[A", "↓": "\x1b[B", "→": "\x1b[C", "←": "\x1b[D"}
     return frozenset(
-        key_map.get(character, character)
+        character
         for binding, _label in bindings
         if binding != "Space"
         for character in binding

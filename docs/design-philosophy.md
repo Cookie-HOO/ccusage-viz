@@ -176,7 +176,7 @@ This document records the stable product concepts and design constraints of `ccu
 
    **Exception:** Capitalization is not a generic reverse rule. `N` and `n` deliberately insert before or after the focused Pane; `u/U` remain undo/redo; `H` is Dashboard Header presentation; `L` is custom diagnostics or animation history; and page-scoped `P` retains its declared Advanced project-label action. Other controls remain lowercase-only unless their active footer explicitly presents a directional pair.
 
-8. **Non-text directional surfaces support both arrow keys and `hjkl`.**
+8. **Non-text directional surfaces support both arrow keys and `hjkl`, except when one set already owns navigation at that scope.** Animation Overlay offset uses `hjkl` in its Advanced adjustment page so arrow keys remain available for Pane navigation.
 
    A navigation or adjustment surface that is not a text editor must also accept `k`, `j`, `h`, or `l` respectively and perform the identical state transition. Controls may combine both key sets in space-sensitive guidance, but the two entry paths must never differ in boundaries, cycling, or confirmation behavior. Text editors retain their own text-entry contract.
 
