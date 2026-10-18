@@ -152,7 +152,7 @@ def dispatch_event(session: TuiSession, event: object, *, now: float) -> None:
                 axis="row",
                 delta=1 if key == "\x0b" else -1,
             )
-        elif key == "\x08":
+        elif key == "?":
             open_help(session, context="editor")
         elif key == "\x15":
             session.overlay_editor.replace_draft("")
@@ -173,7 +173,7 @@ def dispatch_event(session: TuiSession, event: object, *, now: float) -> None:
                 else pane.overlay.config.command or ""
             )
             session.overlay_editor.cursor = len(session.overlay_editor.draft)
-        elif key == "\x7f" and session.overlay_editor.cursor:
+        elif key in {"\x7f", "\x08"} and session.overlay_editor.cursor:
             cursor = session.overlay_editor.cursor
             session.overlay_editor.replace_draft(
                 session.overlay_editor.draft[: cursor - 1] + session.overlay_editor.draft[cursor:]
@@ -350,7 +350,14 @@ def dispatch_event(session: TuiSession, event: object, *, now: float) -> None:
             apply_dashboard_state(session, session.history.current)
         paint(session)
         return
-    if key == "h":
+    animation_move_left = (
+        key == "h"
+        and session.adjustment_mode == "pane"
+        and session.adjustment_page == "advanced"
+        and session.focused is not None
+        and isinstance(session.panes[session.focused], TuiAnimationPane)
+    )
+    if key == "h" and not animation_move_left:
         open_help(session)
         return
     if key == "c":
@@ -392,7 +399,7 @@ def dispatch_event(session: TuiSession, event: object, *, now: float) -> None:
             refresh_custom_summaries(session, trigger=LifecycleTrigger.MANUAL, replace_active=True)
         )
         paint(session, force=True)
-    elif key == "\x10" and session.body_view == "chart":
+    elif key == "\x0f" and session.body_view == "chart":
         open_preset_manager(session)
         paint(session)
         return

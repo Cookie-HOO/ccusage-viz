@@ -119,7 +119,7 @@ def test_standalone_overlay_editor_ctrl_u_clears_active_draft(monkeypatch, trans
         overlay.close()
 
 
-def test_standalone_overlay_editor_ctrl_h_opens_help_and_del_deletes(
+def test_standalone_overlay_editor_question_opens_help_and_backspace_deletes(
     monkeypatch, translator
 ) -> None:
     class RecordingPainter:
@@ -133,9 +133,9 @@ def test_standalone_overlay_editor_ctrl_h_opens_help_and_del_deletes(
     painter = RecordingPainter()
     events = iter(
         (
+            animate_module.KeyEvent("?"),
+            animate_module.KeyEvent("?"),
             animate_module.KeyEvent("\x08"),
-            animate_module.KeyEvent("h"),
-            animate_module.KeyEvent("\x7f"),
             animate_module.KeyEvent("h"),
             animate_module.KeyEvent("\r"),
         )
@@ -166,7 +166,7 @@ def test_standalone_overlay_editor_ctrl_h_opens_help_and_del_deletes(
         assert "DRAFT" in painted
         assert "COMPLETE" in painted
         assert "Animation overlay commands time out after 30 seconds." not in painted
-        assert "Ctrl-H/Enter/Esc close" in painted
+        assert "?/Enter/Esc close" in painted
     finally:
         overlay.close()
 

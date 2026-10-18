@@ -244,7 +244,10 @@ def test_dashboard_animation_pane_resolves_unambiguous_shortcuts() -> None:
     assert _animation_adjustment_target_page("quick", "e") == "advanced"
     assert _animation_adjustment_target_page("advanced", "t") == "quick"
     assert _animation_adjustment_target_page("quick", "p") == "quick"
-    assert _animation_adjustment_target_page("advanced", "\x1b[A") == "advanced"
+    for key in "hjkl":
+        assert _animation_adjustment_target_page("advanced", key) == "advanced"
+    for key in ("\x1b[A", "\x1b[B", "\x1b[C", "\x1b[D", "[", "]"):
+        assert _animation_adjustment_target_page("advanced", key) is None
     assert _animation_adjustment_target_page("quick", "?") is None
 
 
