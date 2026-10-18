@@ -321,7 +321,7 @@ def test_animation_pane_footer_exposes_dashboard_management_without_view() -> No
     assert "x delete" in quick[3]
     assert "v switch view" not in quick[3]
     assert "y copy" not in quick[3]
-    assert "Tab select next" in quick[4]
+    assert "↑/↓/←/→ / Tab select pane" in quick[4]
     assert "{ / } width" in quick[4]
     assert "J / K height" in quick[4]
     assert quick[2:] == advanced[2:]
@@ -356,7 +356,7 @@ def test_empty_pane_footer_exposes_dashboard_management_without_local_actions() 
     assert "x delete" in footer[1]
     assert "v switch view" not in footer[1]
     assert "y copy" not in footer[1]
-    assert "Tab select next" in footer[2]
+    assert "↑/↓/←/→ / Tab select pane" in footer[2]
     assert "{ / } width" in footer[2]
     assert "J / K height" in footer[2]
     assert "Quick settings" not in "\n".join(footer)
@@ -416,7 +416,7 @@ def test_tui_adjustment_footer_separates_dashboard_management() -> None:
     assert "Dashboard Pane Management" in quick_rows[2]
     assert "v switch view" in quick_rows[3]
     assert "N insert before" in quick_rows[3]
-    assert "Tab select next" in quick_rows[4]
+    assert "↑/↓/←/→ / Tab select pane" in quick_rows[4]
     assert quick_rows[2:] == advanced_rows[2:]
     assert "[Finish]" not in "\n".join(quick_rows)
     chinese_advanced = _adjustment_footer(

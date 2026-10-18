@@ -35,6 +35,7 @@ from ccusage_viz.historical_component import (
     HistoricalPurpose,
     UsageSnapshot,
 )
+from ccusage_viz.history_selection import HistorySelectionState
 from ccusage_viz.lifecycle import FixedIntervalScheduler, LifecycleOperation
 from ccusage_viz.monitor_component import MonitorCompletion, MonitorComponent
 from ccusage_viz.options import (
@@ -100,6 +101,7 @@ class CustomOutcome:
     error: BaseException | None = None
     purpose: Literal["probe", "primary", "comparison"] = "primary"
     comparison_request_config: CustomChartConfig | None = None
+    request: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,6 +109,15 @@ class CustomLogRecord:
     timestamp: datetime
     status: str
     detail: str
+    request: str = ""
+
+
+@dataclass(slots=True)
+class CustomLogsState:
+    """Selectable Dataset request log displayed within one Custom Pane."""
+
+    pane_index: int
+    table: HistorySelectionState[CustomLogRecord] = field(default_factory=HistorySelectionState)
 
 
 @dataclass(slots=True)

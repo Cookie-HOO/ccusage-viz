@@ -13,6 +13,7 @@ from ccusage_viz.custom_component import CustomHistoricalComponent, custom_date_
 from ccusage_viz.custom_filter_draft import run_custom_filter_editor
 from ccusage_viz.custom_models import CustomChartCapability
 from ccusage_viz.custom_monitor_component import CustomMonitorComponent
+from ccusage_viz.dashboard_layout import pane_in_direction
 from ccusage_viz.data_view import body_view_copy_kind, cycle_body_view
 from ccusage_viz.filter_draft import discover_filter_choices, run_filter_editor
 from ccusage_viz.historical_component import (
@@ -67,6 +68,7 @@ from ccusage_viz.tui.input import (
 )
 from ccusage_viz.tui.layout import _grid_for_pane_count
 from ccusage_viz.tui.models import (
+    CustomLogsState,
     OverlayEditorState,
     OverlayHistoryState,
     TuiAnimationPane,
@@ -100,6 +102,29 @@ def handle_pane_adjustment(session: TuiSession, event: object, key: object, *, n
     assert session.focused is not None
     pane = session.panes[session.focused]
     focused_index = session.focused
+    if (
+        key in {"\x1b[A", "\x1b[B", "\x1b[C", "\x1b[D"}
+        and session.displayed_layout is not None
+        and not (
+            isinstance(pane, (TuiChartPane, TuiCustomPane))
+            and (
+                pane.body_view != "chart"
+                or (
+                    isinstance(pane, TuiCustomPane)
+                    and pane.component.error is not None
+                    and (
+                        isinstance(pane.component, CustomMonitorComponent)
+                        or pane.component.model is None
+                    )
+                )
+            )
+        )
+    ):
+        session.focused = pane_in_direction(session.displayed_layout, session.focused, key)
+        if session.focused != focused_index:
+            session.adjustment_page = "quick"
+        paint(session)
+        return
     if isinstance(pane, TuiAnimationPane):
         if key == "a":
             session.adjustment_page = "advanced" if session.adjustment_page == "quick" else "quick"
@@ -287,7 +312,7 @@ def handle_pane_adjustment(session: TuiSession, event: object, key: object, *, n
                 summary_affecting=True,
             )
         elif key == "L":
-            session.custom_logs_pane = focused_index
+            session.custom_logs = CustomLogsState(focused_index)
         elif (
             isinstance(component, CustomMonitorComponent)
             and session.adjustment_page == "advanced"
@@ -614,6 +639,7 @@ def handle_pane_adjustment(session: TuiSession, event: object, key: object, *, n
     next_focused = _adjustment_target(session.focused, key, len(session.panes))
     if next_focused != session.focused:
         session.focused = next_focused
+        session.adjustment_page = "quick"
         paint(session)
         return
     if key == "r":

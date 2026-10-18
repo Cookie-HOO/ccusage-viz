@@ -25,6 +25,13 @@ from ccusage_viz.formatting import (
     strip_ansi,
     truncate_width,
 )
+from ccusage_viz.history_selection import (
+    HistorySelectionState,
+    reconcile_history_selection,
+)
+from ccusage_viz.history_selection import (
+    move_history_selection as _move_history_selection,
+)
 from ccusage_viz.i18n import Translator
 from ccusage_viz.lifecycle import FixedIntervalScheduler
 
@@ -118,13 +125,7 @@ class ExecutionRecord:
     stderr_truncated: bool
 
 
-@dataclass(slots=True)
-class OverlayHistoryTableState:
-    """Run-local selection and dimensions for one command-history table."""
-
-    selected: ExecutionRecord | None = None
-    selected_index: int = 0
-    offset: int = 0
+OverlayHistoryTableState = HistorySelectionState[ExecutionRecord]
 
 
 @dataclass(frozen=True, slots=True)
@@ -434,23 +435,9 @@ def render_history_table(
 
     width = max(1, available_width)
     visible = min(len(records), max(1, available_height - 2))
-    if not records:
-        state.selected = None
-        state.selected_index = 0
-        state.offset = 0
+    selected_index = reconcile_history_selection(state, records, visible)
+    if selected_index is None:
         return OverlayHistoryTable(clip_width(empty, width), None)
-
-    if state.selected in records:
-        selected_index = records.index(state.selected)
-    else:
-        selected_index = min(max(0, state.selected_index), len(records) - 1)
-        state.selected = records[selected_index]
-    state.selected_index = selected_index
-    state.offset = min(max(0, state.offset), max(0, len(records) - visible))
-    if selected_index < state.offset:
-        state.offset = selected_index
-    elif selected_index >= state.offset + visible:
-        state.offset = selected_index - visible + 1
 
     # Time and elapsed duration identify each execution, so preserve both at
     # every usable history width.  Wider hosts get the complete five-column
@@ -525,13 +512,9 @@ def render_history_table(
 def move_history_selection(
     state: OverlayHistoryTableState, records: tuple[ExecutionRecord, ...], step: int
 ) -> None:
-    """Move selection through newest-first records without crossing boundaries."""
+    """Compatibility wrapper around the shared bounded-history interaction."""
 
-    if not records:
-        return
-    current = records.index(state.selected) if state.selected in records else state.selected_index
-    state.selected_index = min(max(0, current + step), len(records) - 1)
-    state.selected = records[state.selected_index]
+    _move_history_selection(state, records, step)
 
 
 class AnimationOverlayRuntime:

@@ -180,6 +180,37 @@ def pane_at(layout: PaneLayout, x: int, y: int) -> int | None:
     return None
 
 
+def pane_in_direction(layout: PaneLayout, current: int, key: str) -> int:
+    """Return the nearest Pane in one spatial direction, or retain focus."""
+
+    if key == "\x1b[D":
+        return (current - 1) % len(layout.panes)
+    if key == "\x1b[C":
+        return (current + 1) % len(layout.panes)
+    directions = {
+        "\x1b[A": (0, -1),
+        "\x1b[B": (0, 1),
+    }
+    if key not in directions:
+        return current
+    source = layout.pane(current)
+    source_x = source.left + source.width / 2
+    source_y = source.top + source.height / 2
+    dx, dy = directions[key]
+    candidates: list[tuple[float, float, int]] = []
+    for target in layout.panes:
+        if target.index == current:
+            continue
+        target_x = target.left + target.width / 2
+        target_y = target.top + target.height / 2
+        primary = (target_x - source_x) * dx + (target_y - source_y) * dy
+        if primary <= 0:
+            continue
+        secondary = abs((target_y - source_y) if dx else (target_x - source_x))
+        candidates.append((secondary, primary, target.index))
+    return min(candidates)[2] if candidates else current
+
+
 def resolve_pane_layout(
     *,
     layout: str,

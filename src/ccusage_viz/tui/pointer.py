@@ -37,7 +37,7 @@ def handle_ranking_wheel(session: TuiSession, event: WheelEvent) -> None:
         or (session.chooser_overlay is not None)
         or (session.overlay_editor is not None)
         or (session.overlay_history is not None)
-        or (session.custom_logs_pane is not None)
+        or (session.custom_logs is not None)
     ):
         return
     selected = layout_pane_at(
@@ -67,7 +67,7 @@ def handle_scrollbar_hover(session: TuiSession, event: MouseEvent) -> bool:
         or (session.chooser_overlay is not None)
         or (session.overlay_editor is not None)
         or (session.overlay_history is not None)
-        or (session.custom_logs_pane is not None)
+        or (session.custom_logs is not None)
     )
     hovered: int | None = None
     if not blocked and (not event.pressed):
@@ -102,7 +102,7 @@ def handle_scrollbar_drag(session: TuiSession, event: MouseEvent) -> bool:
         or (session.chooser_overlay is not None)
         or (session.overlay_editor is not None)
         or (session.overlay_history is not None)
-        or (session.custom_logs_pane is not None)
+        or (session.custom_logs is not None)
     )
     if blocked:
         session.scrollbar_drag = None
@@ -204,7 +204,7 @@ def handle_pane_mouse(session: TuiSession, event: MouseEvent) -> bool:
         if selected != session.focused and double_click and (selected is not None):
             session.overlay_editor = None
             session.overlay_history = None
-            session.custom_logs_pane = None
+            session.custom_logs = None
             session.focused = selected
             session.adjustment_page = "quick"
             session.adjustment_timer = AdjustmentIdleTimer()

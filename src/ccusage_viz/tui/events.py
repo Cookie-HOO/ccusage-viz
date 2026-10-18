@@ -9,9 +9,10 @@ from ccusage_viz.animation_host.overlay_editor import (
     _editor_next_word,
     _editor_previous_word,
 )
-from ccusage_viz.animation_overlay import format_execution_record, move_history_selection
+from ccusage_viz.animation_overlay import format_execution_record
 from ccusage_viz.command_copy import copy_command
 from ccusage_viz.data_view import cycle_dashboard_body_view
+from ccusage_viz.history_selection import move_history_selection
 from ccusage_viz.lifecycle import LifecycleTrigger
 from ccusage_viz.text_viewport import next_text_offset
 from ccusage_viz.tui.adjustments import (
@@ -214,26 +215,35 @@ def dispatch_event(session: TuiSession, event: object, *, now: float) -> None:
             session.overlay_editor.cursor = cursor + 1
         paint(session)
         return
-    if session.custom_logs_pane is not None:
+    if session.custom_logs is not None:
         if not isinstance(event, KeyEvent):
             return
         key = event.value
-        pane = session.panes[session.custom_logs_pane]
+        state = session.custom_logs
+        pane = session.panes[state.pane_index]
         assert isinstance(pane, TuiCustomPane)
+        records = tuple(reversed(pane.logs))
+        selection = state.table
         if key == "\x03":
             raise KeyboardInterrupt
         if key == "\x1b":
-            session.custom_logs_pane = None
-        elif key in {"y", "Y"}:
+            session.custom_logs = None
+        elif key == "\x1b[A":
+            move_history_selection(selection, records, -1)
+        elif key == "\x1b[B":
+            move_history_selection(selection, records, 1)
+        elif key in {"y", "Y", "\r", "\n"} and selection.selected is not None:
+            record = selection.selected
+            diagnostic = "\n".join(
+                (
+                    f"{record.timestamp.isoformat()} {record.status}: {record.detail}",
+                    f"request: {record.request or '(unavailable)'}",
+                )
+            )
             session.copy_feedback.show(
                 session.translator.text(
                     "status.data_copied"
-                    if copy_command(
-                        "\n".join(
-                            f"{record.timestamp.isoformat()} {record.status}: {record.detail}"
-                            for record in pane.logs
-                        )
-                    )
+                    if copy_command(diagnostic)
                     else "status.command_copy_failed"
                 )
             )
@@ -399,7 +409,7 @@ def dispatch_event(session: TuiSession, event: object, *, now: float) -> None:
             refresh_custom_summaries(session, trigger=LifecycleTrigger.MANUAL, replace_active=True)
         )
         paint(session, force=True)
-    elif key == "\x0f" and session.body_view == "chart":
+    elif key == "P" and session.body_view == "chart":
         open_preset_manager(session)
         paint(session)
         return

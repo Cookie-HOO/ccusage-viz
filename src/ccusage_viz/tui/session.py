@@ -22,6 +22,7 @@ from ccusage_viz.tui.header import (
 )
 from ccusage_viz.tui.layout import _dashboard_structure
 from ccusage_viz.tui.models import (
+    CustomLogsState,
     DashboardDatasetModalState,
     DashboardOverlayPlacement,
     HelpOverlayState,
@@ -84,7 +85,7 @@ class TuiSession:
         self.current_preset_key: str | None = None
         self.overlay_editor: OverlayEditorState | None = None
         self.overlay_history: OverlayHistoryState | None = None
-        self.custom_logs_pane: int | None = None
+        self.custom_logs: CustomLogsState | None = None
         self.help_overlay: HelpOverlayState | None = None
         self.help_was_active = False
         self.last_click: tuple[int, float] | None = None

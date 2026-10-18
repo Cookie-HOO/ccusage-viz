@@ -4,7 +4,7 @@
 
 [![PyPI](https://img.shields.io/pypi/v/ccusage-viz.svg)](https://pypi.org/project/ccusage-viz/) [![Python](https://img.shields.io/pypi/pyversions/ccusage-viz.svg)](https://pypi.org/project/ccusage-viz/) [![License: GPL v3](https://img.shields.io/badge/License-GPL%20v3-blue.svg)](LICENSE) [![CI](https://github.com/Cookie-HOO/ccusage-viz/actions/workflows/ci.yml/badge.svg)](https://github.com/Cookie-HOO/ccusage-viz/actions/workflows/ci.yml)
 
-> **Alpha · 0.3.2** — interfaces may change before 1.0. See the [roadmap](docs/roadmap.md) for current direction.
+> **Alpha · 0.3.3** — interfaces may change before 1.0. See the [roadmap](docs/roadmap.md) for current direction.
 
 `ccusage-viz` is an independent, unofficial terminal visualizer for
 [`ccusage`](https://github.com/ryoppippi/ccusage) token data. It turns
@@ -145,7 +145,7 @@ ccuv dashboard
 ### Your Dashboard presets
 
 In Dashboard browse mode, press `Ctrl-S` to save the current Dashboard under a name,
-or `Ctrl-O` to open the full-screen preset manager. The manager lists built-in and
+or `P` to open the full-screen preset manager. The manager lists built-in and
 your saved presets; use arrows or `j`/`k` to select, `Enter` to load, `s` to
 save, and `x` to delete a selected user preset. Built-ins can be loaded but not
 deleted. Saving a user preset with a built-in name intentionally overrides it;

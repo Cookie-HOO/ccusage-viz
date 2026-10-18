@@ -52,10 +52,27 @@ _MOUSE_WHEEL = 0b1000000
 
 def set_mouse_reporting(enabled: bool) -> None:
     """Enable or disable Dashboard mouse reports for the current terminal."""
-    if os.name != "posix":
-        return
     sys.stdout.write(_MOUSE_ENABLE if enabled else _MOUSE_DISABLE)
     sys.stdout.flush()
+
+
+def _set_windows_virtual_terminal_input() -> tuple[object, int] | None:
+    """Enable Windows VT input so mouse reports use the shared SGR decoder."""
+
+    try:
+        import ctypes
+
+        kernel32 = getattr(ctypes, "windll").kernel32  # noqa: B009
+        handle = kernel32.GetStdHandle(-10)  # STD_INPUT_HANDLE
+        mode = ctypes.c_ulong()
+        if not kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+            return None
+        previous = mode.value
+        if not kernel32.SetConsoleMode(handle, previous | 0x0200):
+            return None
+        return kernel32, previous
+    except (AttributeError, OSError):
+        return None
 
 
 _ESCAPE_DELAY = 0.03
@@ -282,8 +299,22 @@ class InputDecoder:
 
 @contextmanager
 def tui_input_mode() -> Iterator[InputDecoder]:
-    """Enter cbreak mode and opt into SGR primary-button mouse reports on POSIX."""
+    """Enter raw input mode and opt into SGR mouse reports."""
     decoder = InputDecoder()
+    if os.name == "nt":
+        console = _set_windows_virtual_terminal_input()
+        try:
+            set_mouse_reporting(True)
+            yield decoder
+        finally:
+            try:
+                set_mouse_reporting(False)
+            finally:
+                if console is not None:
+                    kernel32, previous = console
+                    handle = kernel32.GetStdHandle(-10)
+                    kernel32.SetConsoleMode(handle, previous)
+        return
     if os.name != "posix":
         yield decoder
         return

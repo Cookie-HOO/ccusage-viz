@@ -126,8 +126,14 @@ def start_pane_submission(
     return (historical_future, submission.cancel)
 
 
-def record_custom_log(session: TuiSession, pane: TuiCustomPane, status: str, detail: str) -> None:
-    pane.logs.append(CustomLogRecord(datetime.now().astimezone(), status, detail))
+def record_custom_log(
+    session: TuiSession,
+    pane: TuiCustomPane,
+    status: str,
+    detail: str,
+    request: str = "",
+) -> None:
+    pane.logs.append(CustomLogRecord(datetime.now().astimezone(), status, detail, request))
     pane.logs[:] = pane.logs[-20:]
 
 
@@ -166,7 +172,12 @@ def start_custom_submission(
         handle = session.runtime.submit(intent)
         return (
             session.executor.submit(
-                _await_custom_submission, handle, operation.generation, "probe"
+                _await_custom_submission,
+                handle,
+                operation.generation,
+                "probe",
+                None,
+                intent.payload.to_json_bytes().decode("utf-8"),
             ),
             handle.cancel,
         )
@@ -185,7 +196,12 @@ def start_custom_submission(
         handle = session.runtime.submit(intent)
         return (
             session.executor.submit(
-                _await_custom_submission, handle, operation.generation, "primary"
+                _await_custom_submission,
+                handle,
+                operation.generation,
+                "primary",
+                None,
+                intent.payload.to_json_bytes().decode("utf-8"),
             ),
             handle.cancel,
         )
@@ -217,6 +233,7 @@ def start_custom_submission(
             operation.generation,
             purpose,
             config if purpose == "comparison" else None,
+            intent.payload.to_json_bytes().decode("utf-8"),
         ),
         handle.cancel,
     )
@@ -340,7 +357,14 @@ def start_custom_pane_summary_submission(
     summary.requested_as_of_date = request.current.until
     handle = session.runtime.submit(intent)
     return (
-        session.executor.submit(_await_custom_submission, handle, operation.generation),
+        session.executor.submit(
+            _await_custom_submission,
+            handle,
+            operation.generation,
+            "primary",
+            None,
+            intent.payload.to_json_bytes().decode("utf-8"),
+        ),
         handle.cancel,
     )
 
@@ -572,7 +596,14 @@ def start_custom_summary_submission(
         summary.requested_as_of_date = request.current.until
     handle = session.runtime.submit(intent)
     return (
-        session.executor.submit(_await_custom_submission, handle, operation.generation),
+        session.executor.submit(
+            _await_custom_submission,
+            handle,
+            operation.generation,
+            "primary",
+            None,
+            intent.payload.to_json_bytes().decode("utf-8"),
+        ),
         handle.cancel,
     )
 

@@ -260,6 +260,7 @@ def _await_custom_submission(
     generation: int,
     purpose: Literal["probe", "primary", "comparison"] = "primary",
     comparison_request_config: CustomChartConfig | None = None,
+    request: str = "",
 ) -> CustomOutcome:
     try:
         return CustomOutcome(
@@ -267,6 +268,7 @@ def _await_custom_submission(
             result=handle.result(),
             purpose=purpose,
             comparison_request_config=comparison_request_config,
+            request=request,
         )
     except BaseException as exc:
         return CustomOutcome(
@@ -274,6 +276,7 @@ def _await_custom_submission(
             error=exc,
             purpose=purpose,
             comparison_request_config=comparison_request_config,
+            request=request,
         )
 
 
