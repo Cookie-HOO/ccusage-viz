@@ -58,7 +58,10 @@ def row_updates(previous: str, current: str, row: int) -> str:
     """Address only changed spans (row is one-based), never split wide glyphs."""
     old, new = _cells(previous), _cells(current)
     if old is None or new is None:
-        return f"\x1b[{row};1H\x1b[2K{current}"
+        # Paint before erasing the old suffix. Some Windows consoles expose the
+        # intermediate blank row because synchronized output is unsupported,
+        # which makes Dashboard pane frames flash beside animated Unicode rows.
+        return f"\x1b[{row};1H{current}\x1b[0K"
     width = max(len(old), len(new))
     old.extend(_Glyph(" ", "", "", i, 1) for i in range(len(old), width))
     new.extend(_Glyph(" ", "", "", i, 1) for i in range(len(new), width))

@@ -55,5 +55,11 @@ def test_hyperlink_is_closed_after_partial_output() -> None:
     assert output == f"\x1b[1;2H{opening}x{closing}"
 
 
-def test_unknown_controls_fall_back_to_row_replacement() -> None:
-    assert repaint("a", "\x1b[2Cb") == "\x1b[1;1H\x1b[2K\x1b[2Cb"
+def test_unknown_controls_fall_back_without_exposing_an_empty_row() -> None:
+    assert repaint("a", "\x1b[2Cb") == "\x1b[1;1H\x1b[2Cb\x1b[0K"
+
+
+def test_complex_unicode_fallback_preserves_animation_frame_during_repaint() -> None:
+    assert repaint("│ old 👩‍💻 frame │", "│ new 👩‍💻 frame │") == (
+        "\x1b[1;1H│ new 👩‍💻 frame │\x1b[0K"
+    )
