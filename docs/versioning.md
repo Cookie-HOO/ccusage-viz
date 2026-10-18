@@ -6,6 +6,24 @@
 - **Minor (`0.x.0`)**: substantial new user-facing capabilities or source integrations before 1.0.
 - Before `1.0`, public interfaces may still change between releases.
 
+## 0.3.3
+
+`0.3.3` fixes Windows Dashboard interaction and makes Dataset diagnostics easier
+to inspect without changing query or Token metric semantics:
+
+- Windows redirected text output uses UTF-8, so emoji-backed clock overlays no
+  longer fail under a GBK code page; Windows VT input also enables Dashboard
+  mouse reporting and restores the prior console mode on exit;
+- Pane adjustment supports double-click focus, cyclic previous/next selection
+  with Left/Right or Tab, and topology-aware Up/Down selection while preserving
+  arrows for scrolling text and error views;
+- every Custom Dataset Pane now offers a selectable `L` request history shared
+  with Overlay history navigation, and copies one safe protocol request plus its
+  validated diagnostic without credentials or raw stderr;
+- Dashboard preset management uses plain `P` rather than terminal-reserved
+  Ctrl shortcuts, with controls, contextual help, and public documentation
+  updated consistently.
+
 ## 0.3.2
 
 `0.3.2` improves Windows terminal compatibility and tightens Dashboard, Dataset,
@@ -20,7 +38,7 @@ and preset interactions without changing data or Token metric semantics:
 - Dataset installation prompts handle editing consistently, distinguish GitHub
   connectivity failures, and show registered but unavailable Datasets with their
   readiness state and missing environment-variable names;
-- Dashboard preset management moves from `Ctrl-P` to `Ctrl-O`, list and layout
+- Dashboard preset management uses `P` instead of a terminal-reserved Ctrl shortcut; list and layout
   selectors accept arrow keys, named presets accept timezone overrides, and saved
   presets retain language, timezone, and `ccusage-bin` while remaining compatible
   with existing preset files;
