@@ -8,6 +8,7 @@ from ccusage_viz.datasets.models import (
     DatasetManifest,
     DatasetRegistrationStatus,
     LocalDatasetSource,
+    ManagedDatasetSource,
 )
 from ccusage_viz.formatting import clip_width, pad_width, wrap_width
 from ccusage_viz.i18n import Translator
@@ -80,6 +81,10 @@ def _list_rows(
             descriptor = item.registration.probe.descriptor
             marker = "›" if index == selected else " "
             title = clip_width(_descriptor_title(descriptor, translator), name_width)
+            version = descriptor.version
+            if item.registration.available_update is not None:
+                candidate = item.registration.available_update.release_tag.removeprefix("v")
+                version = f"{version} → {candidate}"
             source = translator.text(
                 "label.dataset_source_local"
                 if isinstance(item.registration.source, LocalDatasetSource)
@@ -88,7 +93,7 @@ def _list_rows(
             rows.append(
                 clip_width(
                     f"{marker} {pad_width(title, name_width)} "
-                    f"{pad_width(descriptor.version, version_width)} "
+                    f"{pad_width(version, version_width)} "
                     f"{pad_width(source, source_width)}",
                     width,
                 )
@@ -122,12 +127,33 @@ def _detail_rows(
             translator.text(key), color=get_color_scheme("classic").highlight, enabled=True
         )
 
+    update = status.registration.available_update
+    source = status.registration.source
+    version_rows = [
+        translator.text("status.dataset_details_current_version", version=descriptor.version)
+    ]
+    if isinstance(source, ManagedDatasetSource):
+        version_rows.append(
+            translator.text(
+                "status.dataset_details_update_available",
+                current=source.release_tag,
+                candidate=update.release_tag,
+            )
+            if update is not None
+            else translator.text("status.dataset_details_up_to_date")
+        )
+    else:
+        version_rows.append(translator.text("status.dataset_details_local_update"))
+
     rows = [
         section("status.dataset_details_dataset"),
         _descriptor_title(descriptor, translator),
         *wrap_width(_descriptor_description(descriptor, translator), width),
         *(_descriptor_metric_rows(descriptor, translator)),
         descriptor.source_timezone or translator.text("status.dataset_timezone_unspecified"),
+        "",
+        section("status.dataset_details_version"),
+        *version_rows,
         "",
         section("status.dataset_details_supports"),
         *(_descriptor_metric_rows(descriptor, translator)),
@@ -215,6 +241,34 @@ def render_dataset_manager(
 ) -> ManagerView:
     selected = min(max(selected, 0), max(0, len(statuses) - 1))
     selected_status = statuses[selected] if statuses else None
+    updates_available = any(item.registration.available_update is not None for item in statuses)
+    current_update = (
+        selected_status is not None and selected_status.registration.available_update is not None
+    )
+
+    def list_controls() -> tuple[str, ...]:
+        actions_key = (
+            "status.dataset_manager_actions_current_and_all"
+            if current_update
+            else (
+                "status.dataset_manager_actions_all"
+                if updates_available
+                else "status.dataset_manager_actions"
+            )
+        )
+        return (
+            translator.text("status.dataset_manager_browse_controls"),
+            translator.text(actions_key),
+        )
+
+    def detail_controls() -> tuple[str, ...]:
+        rows = [translator.text("status.dataset_manager_detail_browse_controls")]
+        if current_update:
+            rows.append(translator.text("status.dataset_manager_detail_actions_current_and_all"))
+        elif updates_available:
+            rows.append(translator.text("status.dataset_manager_detail_actions_all"))
+        return tuple(rows)
+
     if details and selected_status is not None and width >= 100:
         left_width = max(32, (width - 3) * 42 // 100)
         right_width = width - left_width - 3
@@ -224,21 +278,13 @@ def render_dataset_manager(
             left_width=left_width,
             right_width=right_width,
         )
-        controls = (
-            translator.text("status.dataset_manager_upgrade_controls")
-            if selected_status.registration.available_update is not None
-            else translator.text("status.dataset_manager_controls")
-        )
+        controls = detail_controls()
     elif details and selected_status is not None:
         body = "\n".join(_detail_rows(selected_status, translator, width))
-        controls = (
-            translator.text("status.dataset_manager_detail_upgrade_controls")
-            if selected_status.registration.available_update is not None
-            else translator.text("status.dataset_manager_detail_controls")
-        )
+        controls = detail_controls()
     else:
         body = "\n".join(_list_rows(statuses, translator, selected=selected, width=width))
-        controls = translator.text("status.dataset_manager_controls")
+        controls = list_controls()
     notices = () if notice is None else (notice,)
     return ManagerView(
         compose_frame(

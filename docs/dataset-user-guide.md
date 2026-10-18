@@ -94,10 +94,11 @@ In `ccuv dataset`:
 | Select | `j` / `k` or arrows | Moves the selected registration. |
 | Details | Enter | Shows Metrics, supported charts, environment variables, source, and version. Enter/Escape returns. |
 | Add | `+` | Choose official, GitHub, or local command source. |
-| Refresh | `r` | Re-runs Probe for every enabled Dataset and updates safe metadata. Dashboard also performs a fresh Probe for the Dataset selected in its chooser before it advances to Metric/kind selection. |
+| Refresh | `r` | Re-runs Probe for every enabled Dataset, updates safe metadata, and checks managed official/GitHub Datasets for new releases. The completion notice reports unavailable and upgradeable counts. Dashboard also performs a fresh Probe for the Dataset selected in its chooser before it advances to Metric/kind selection. |
 | Enable/disable | `d` | Toggles the selected registration's availability in Dashboard and refreshes. |
 | Remove | `x` | Confirms removal. Local removal deletes only ccuv's registration; managed official/GitHub removal also deletes its installed artifact. |
-| Upgrade | `u` | When a managed Dataset has an available update, confirms and installs it. |
+| Upgrade current | `u` | Confirms and upgrades only the selected Dataset when it has a detected release. |
+| Upgrade all | `U` | Confirms and upgrades every Dataset with a detected release, continuing if an individual upgrade fails. The list and details show current and candidate versions. |
 | Help | `h` | Explains current manager controls and required setup. |
 | Exit | Ctrl-C | Closes the manager. |
 

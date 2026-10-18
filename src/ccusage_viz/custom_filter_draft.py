@@ -97,8 +97,11 @@ class CustomFilterDraft:
     def clear(self, filter_id: str) -> CustomFilterDraft:
         return replace(self, filters=tuple(item for item in self.filters if item[0] != filter_id))
 
-    def cycle_columns(self) -> CustomFilterDraft:
-        return replace(self, columns=self.columns % 3 + 1, option_index=0, viewport_row=0)
+    def clear_all(self) -> CustomFilterDraft:
+        return replace(self, filters=())
+
+    def set_columns(self, columns: int) -> CustomFilterDraft:
+        return replace(self, columns=columns, option_index=0, viewport_row=0)
 
 
 def run_custom_filter_editor(
@@ -121,14 +124,14 @@ def run_custom_filter_editor(
         if help_visible:
             body = _render_custom_filter_help(translator, width, height)
         else:
-            draft = _normalise_draft(draft, choices, translator, width, height, filters)
+            draft = _normalise_draft(draft, choices, translator, width, height, draft.filters)
             body = _render_custom_filter_draft(
                 draft,
                 choices,
                 translator,
                 width,
                 height,
-                accepted=filters,
+                accepted=draft.filters,
                 color=color,
                 color_scheme=color_scheme,
             )
@@ -149,7 +152,7 @@ def run_custom_filter_editor(
             if event.pressed and event.button == 0:
                 tab_index = _filter_index_at(
                     event,
-                    _tab_layout(choices, translator, draft.filter_index, filters, width),
+                    _tab_layout(choices, translator, draft.filter_index, draft.filters, width),
                 )
                 if tab_index is not None:
                     draft = replace(
@@ -164,7 +167,7 @@ def run_custom_filter_editor(
                 current = draft.current_filter(choices)
                 options = _matching_options(current, draft.query, translator)
                 option_index = _option_index_at(
-                    event, draft, options, choices, translator, filters, width, height
+                    event, draft, options, choices, translator, draft.filters, width, height
                 )
                 if current is not None and option_index is not None:
                     draft = draft.toggle(current, options[option_index].id)
@@ -208,7 +211,9 @@ def run_custom_filter_editor(
             if current is not None:
                 draft = draft.clear(current.id)
         elif key == "C":
-            draft = draft.cycle_columns()
+            draft = draft.clear_all()
+        elif key in {"1", "2", "3"}:
+            draft = draft.set_columns(int(key))
         elif key == " ":
             current = draft.current_filter(choices)
             options = (

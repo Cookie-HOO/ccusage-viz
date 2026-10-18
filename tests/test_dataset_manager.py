@@ -24,12 +24,15 @@ from ccusage_viz.datasets.manager_runtime import (
     _choose_dataset_source,
     _manager_help_frame,
     _manager_help_lines,
+    _upgrade_all,
 )
 from ccusage_viz.datasets.models import (
     DatasetProbeSnapshot,
     DatasetRegistration,
     DatasetRegistrationStatus,
+    DatasetUpdateCandidate,
     LocalDatasetSource,
+    ManagedDatasetSource,
 )
 from ccusage_viz.i18n import load_translator
 from ccusage_viz.render.palette import get_color_scheme
@@ -37,7 +40,7 @@ from ccusage_viz.terminal import Frame
 from ccusage_viz.tui_input import InputDecoder, KeyEvent
 
 
-def status(*, availability: str = "ready") -> DatasetRegistrationStatus:
+def status(*, availability: str = "ready", update: bool = False) -> DatasetRegistrationStatus:
     text = LocalizedText("WeRead", "微信读书")
     descriptor = CustomProbeDescriptor(
         "weread-1",
@@ -63,11 +66,22 @@ def status(*, availability: str = "ready") -> DatasetRegistrationStatus:
     )
     registration = DatasetRegistration(
         "weread",
-        LocalDatasetSource(("weread", "ccuv")),
+        (
+            ManagedDatasetSource(
+                "official",
+                "Cookie-HOO/ccuv-dataset-weread",
+                "v0.1.0",
+                "weread.tar.gz",
+                "a" * 64,
+            )
+            if update
+            else LocalDatasetSource(("weread", "ccuv"))
+        ),
         availability != "disabled",
         "2026-10-07T00:00:00+00:00",
         "2026-10-07T00:00:00+00:00",
         DatasetProbeSnapshot("weread", descriptor, "2026-10-07T00:00:00+00:00"),
+        DatasetUpdateCandidate("v0.1.1", "weread.tar.gz", "b" * 64) if update else None,
     )
     return DatasetRegistrationStatus(registration, availability)  # type: ignore[arg-type]
 
@@ -108,7 +122,7 @@ def test_manager_uses_a_separate_detail_page_on_narrow_terminals() -> None:
 
     assert "Daily reading time" in body
     assert "local command · Ready" not in body
-    assert rendered.frame.rows[-1] == "Enter / Esc back"
+    assert rendered.frame.rows[-1] == "Enter / Esc back · h help"
 
 
 def test_dataset_setup_help_expands_environment_instructions() -> None:
@@ -166,11 +180,50 @@ def test_manager_general_help_explains_the_dynamic_dataset_list() -> None:
 def test_manager_footer_follows_dashboard_browse_order_without_quit() -> None:
     rendered = render_dataset_manager((status(),), load_translator("en"), width=100, height=24)
 
-    assert rendered.frame.rows[-1] == (
-        "r refresh all · + add · Enter details · d disable · x remove · j/k or ↑/↓ select · h help"
+    assert rendered.frame.rows[-2:] == (
+        "r refresh all · Enter details · j/k or ↑/↓ select · h help",
+        "+ add · d disable · x remove",
     )
-    assert "q quit" not in rendered.frame.rows[-1]
-    assert "i details" not in rendered.frame.rows[-1]
+    assert "q quit" not in "\n".join(rendered.frame.rows[-2:])
+    assert "i details" not in "\n".join(rendered.frame.rows[-2:])
+
+
+def test_manager_shows_detected_update_in_list_details_and_controls() -> None:
+    rendered = render_dataset_manager(
+        (status(update=True),), load_translator("en"), width=80, height=28
+    )
+    details = render_dataset_manager(
+        (status(update=True),), load_translator("en"), details=True, width=80, height=28
+    )
+
+    assert "0.1.0 → 0.1.1" in "\n".join(rendered.frame.rows)
+    assert rendered.frame.rows[-2:] == (
+        "r refresh all · Enter details · j/k or ↑/↓ select · h help",
+        "+ add · u upgrade current · U upgrade all · d disable · x remove",
+    )
+    assert "Current version: 0.1.0" in "\n".join(details.frame.rows)
+    assert "Update available: v0.1.0 → v0.1.1" in "\n".join(details.frame.rows)
+    assert details.frame.rows[-2:] == (
+        "Enter / Esc back · h help",
+        "u upgrade current · U upgrade all",
+    )
+
+
+def test_upgrade_all_continues_after_an_individual_failure() -> None:
+    statuses = (status(update=True), status(update=True))
+
+    class Service:
+        calls: list[str] = []
+
+        def upgrade(self, dataset_id: str) -> None:
+            self.calls.append(dataset_id)
+            if len(self.calls) == 1:
+                raise RuntimeError("failed")
+
+    service = Service()
+
+    assert _upgrade_all(service, statuses) == (1, 1)  # type: ignore[arg-type]
+    assert service.calls == ["weread", "weread"]
 
 
 def test_dataset_list_formats_local_records_without_running_commands() -> None:

@@ -55,10 +55,11 @@ ccuv dataset list
 | 选择 | `j` / `k` 或方向键 | 移动当前注册项。 |
 | 详情 | Enter | 查看 Metric、支持图、环境变量、来源、版本；Enter/Esc 返回。 |
 | 添加 | `+` | 选择官方、GitHub 或本地命令。 |
-| 刷新 | `r` | 对每一个启用的 Dataset 重跑 Probe，更新安全元数据。Dashboard 在选择器中选中 Dataset 后、进入 Metric/chart kind 选择前也会重新 Probe。 |
+| 刷新 | `r` | 对每一个启用的 Dataset 重跑 Probe、更新安全元数据，并检查官方/GitHub 受管理 Dataset 的新 Release；完成提示会报告不可用和可升级数量。Dashboard 在选择器中选中 Dataset 后、进入 Metric/chart kind 选择前也会重新 Probe。 |
 | 启用/禁用 | `d` | 切换当前项能否用于 Dashboard 和刷新。 |
 | 删除 | `x` | 确认后删除。本地只删除 ccuv 注册；官方/GitHub 还删除受管理安装文件。 |
-| 升级 | `u` | 有可用更新时确认并安装新 Release。 |
+| 升级当前 | `u` | 当前选中 Dataset 已检测到新 Release 时，确认并只升级这一项。 |
+| 升级全部 | `U` | 确认并升级所有已检测到新 Release 的 Dataset，单项失败不会阻断其余升级。列表和详情都会展示当前与候选版本。 |
 | 帮助 | `h` | 查看当前管理器控制和配置说明。 |
 | 退出 | Ctrl-C | 关闭管理器。 |
 

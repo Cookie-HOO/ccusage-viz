@@ -6,6 +6,21 @@
 - **Minor (`0.x.0`)**: substantial new user-facing capabilities or source integrations before 1.0.
 - Before `1.0`, public interfaces may still change between releases.
 
+## 0.3.4
+
+`0.3.4` improves Dataset maintenance and custom-filter editing without changing
+ccuv's default official-ccusage dependency or built-in Token semantics:
+
+- Dataset refresh now checks managed official/GitHub installations for newer
+  releases, shows current and candidate versions in the list and detail views,
+  and reports unavailable and upgradeable counts;
+- `u` upgrades the selected Dataset while `U` confirms and upgrades every
+  detected candidate, continuing after individual failures;
+- custom Dataset filters now update tab counts from the in-progress draft,
+  use `C` to clear every filter, and use `1`/`2`/`3` to select the column count;
+- the README documents optional `my-ccusage` native installers and the explicit
+  `--ccusage-bin my-ccusage` selection required for DSH and WorkBuddy support.
+
 ## 0.3.3
 
 `0.3.3` fixes Windows Dashboard interaction and makes Dataset diagnostics easier

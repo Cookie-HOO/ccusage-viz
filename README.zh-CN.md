@@ -4,7 +4,7 @@
 
 [![PyPI](https://img.shields.io/pypi/v/ccusage-viz.svg)](https://pypi.org/project/ccusage-viz/) [![Python](https://img.shields.io/pypi/pyversions/ccusage-viz.svg)](https://pypi.org/project/ccusage-viz/) [![License: GPL v3](https://img.shields.io/badge/License-GPL%20v3-blue.svg)](LICENSE) [![CI](https://github.com/Cookie-HOO/ccusage-viz/actions/workflows/ci.yml/badge.svg)](https://github.com/Cookie-HOO/ccusage-viz/actions/workflows/ci.yml)
 
-> **Alpha · 0.3.3** — 在 1.0 前接口仍可能变化。当前方向请见[路线图](docs/roadmap.zh-CN.md)。
+> **Alpha · 0.3.4** — 在 1.0 前接口仍可能变化。当前方向请见[路线图](docs/roadmap.zh-CN.md)。
 
 `ccusage-viz` 是面向 [`ccusage`](https://github.com/ryoppippi/ccusage) Token
 数据的独立、非官方终端可视化工具。它把 `ccusage` 命令输出转换为交互式终端图表，
@@ -232,28 +232,29 @@ npm install -g ccusage
 npm 不可用时，请手动安装 [`ccusage`](https://github.com/ryoppippi/ccusage)。
 
 > [!TIP]
-> 已发布的 `ccusage` 包不包含 DeepSeek Harness（DSH）统计。非官方的固定版本
-> [`Cookie-HOO/ccusage-dsh`](https://github.com/Cookie-HOO/ccusage-dsh)
-> 为 Windows、macOS 和 Linux 提供经过验证且支持 `ccusage dsh` 报告的原生构建。
+> ccuv 默认仍使用官方 `ccusage`。若还需要 DeepSeek Harness（DSH）与 WorkBuddy
+> 统计，可安装非官方的
+> [`Cookie-HOO/my-ccusage`](https://github.com/Cookie-HOO/my-ccusage)
+> 发行版，并通过 `--ccusage-bin` 显式选择它。
 >
 > Windows x64（PowerShell）：
 >
 > ```powershell
-> irm https://raw.githubusercontent.com/Cookie-HOO/ccusage-dsh/main/install.ps1 | iex
-> ccuv dashboard --ccusage-bin "$env:LOCALAPPDATA\Programs\ccusage-dsh\ccusage-dsh.exe"
+> irm https://raw.githubusercontent.com/Cookie-HOO/my-ccusage/main/install.ps1 | iex
+> ccuv dashboard --ccusage-bin my-ccusage
 > ```
 >
 > macOS 或 Linux：
 >
 > ```bash
-> curl -fsSL https://raw.githubusercontent.com/Cookie-HOO/ccusage-dsh/main/install.sh | sh
-> ccuv dashboard --ccusage-bin "$HOME/.local/bin/ccusage-dsh"
+> curl -fsSL https://raw.githubusercontent.com/Cookie-HOO/my-ccusage/main/install.sh | sh
+> ccuv dashboard --ccusage-bin my-ccusage
 > ```
 >
 > 安装脚本会验证 Release 校验和；也可以从
-> [最新 Release](https://github.com/Cookie-HOO/ccusage-dsh/releases/latest)
-> 手动下载 archive 和校验和。该项目仍是可能与上游产生偏差的非官方 fork；ccuv
-> 本身没有 DSH collector。
+> [最新 Release](https://github.com/Cookie-HOO/my-ccusage/releases/latest)
+> 手动下载 archive 和校验和。`my-ccusage` 跟随上游 ccusage，并补充 DSH 与
+> WorkBuddy adapter；它仍是非官方发行版，ccuv 本身没有 DSH 或 WorkBuddy collector。
 
 ## 延伸阅读
 

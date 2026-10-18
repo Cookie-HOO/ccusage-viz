@@ -4,7 +4,7 @@
 
 [![PyPI](https://img.shields.io/pypi/v/ccusage-viz.svg)](https://pypi.org/project/ccusage-viz/) [![Python](https://img.shields.io/pypi/pyversions/ccusage-viz.svg)](https://pypi.org/project/ccusage-viz/) [![License: GPL v3](https://img.shields.io/badge/License-GPL%20v3-blue.svg)](LICENSE) [![CI](https://github.com/Cookie-HOO/ccusage-viz/actions/workflows/ci.yml/badge.svg)](https://github.com/Cookie-HOO/ccusage-viz/actions/workflows/ci.yml)
 
-> **Alpha · 0.3.3** — interfaces may change before 1.0. See the [roadmap](docs/roadmap.md) for current direction.
+> **Alpha · 0.3.4** — interfaces may change before 1.0. See the [roadmap](docs/roadmap.md) for current direction.
 
 `ccusage-viz` is an independent, unofficial terminal visualizer for
 [`ccusage`](https://github.com/ryoppippi/ccusage) token data. It turns
@@ -305,29 +305,29 @@ Ctrl-C, or EOF cancels it. Demo mode, redirected/noninteractive runs, and custom
 unavailable.
 
 > [!TIP]
-> The published `ccusage` package does not include DeepSeek Harness (DSH)
-> statistics. The unofficial, pinned
-> [`Cookie-HOO/ccusage-dsh`](https://github.com/Cookie-HOO/ccusage-dsh)
-> distribution provides verified native builds with `ccusage dsh` reports for
-> Windows, macOS, and Linux.
+> The official `ccusage` command remains ccuv's default. To additionally include
+> DeepSeek Harness (DSH) and WorkBuddy usage, install the unofficial
+> [`Cookie-HOO/my-ccusage`](https://github.com/Cookie-HOO/my-ccusage)
+> distribution and select it explicitly with `--ccusage-bin`.
 >
 > Windows x64 (PowerShell):
 >
 > ```powershell
-> irm https://raw.githubusercontent.com/Cookie-HOO/ccusage-dsh/main/install.ps1 | iex
-> ccuv dashboard --ccusage-bin "$env:LOCALAPPDATA\Programs\ccusage-dsh\ccusage-dsh.exe"
+> irm https://raw.githubusercontent.com/Cookie-HOO/my-ccusage/main/install.ps1 | iex
+> ccuv dashboard --ccusage-bin my-ccusage
 > ```
 >
 > macOS or Linux:
 >
 > ```bash
-> curl -fsSL https://raw.githubusercontent.com/Cookie-HOO/ccusage-dsh/main/install.sh | sh
-> ccuv dashboard --ccusage-bin "$HOME/.local/bin/ccusage-dsh"
+> curl -fsSL https://raw.githubusercontent.com/Cookie-HOO/my-ccusage/main/install.sh | sh
+> ccuv dashboard --ccusage-bin my-ccusage
 > ```
 >
 > The installers verify release checksums. Manual archives and checksums are on
-> the [latest release](https://github.com/Cookie-HOO/ccusage-dsh/releases/latest).
-> This remains an unofficial fork that may drift from upstream; ccuv has no DSH
+> the [latest release](https://github.com/Cookie-HOO/my-ccusage/releases/latest).
+> `my-ccusage` tracks upstream ccusage and supplements it with DSH and WorkBuddy
+> adapters. It remains an unofficial distribution; ccuv has no DSH or WorkBuddy
 > collector of its own.
 
 ## Further reading

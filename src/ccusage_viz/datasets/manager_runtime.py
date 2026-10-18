@@ -257,8 +257,8 @@ def _manager_help_lines(
                 (translator.text("status.dataset_help_add"), ()),
                 (translator.text("status.dataset_help_details"), ()),
                 *(
-                    ((translator.text("status.dataset_help_upgrade"), ()),)
-                    if status is not None and status.registration.available_update is not None
+                    ((translator.text("status.dataset_help_upgrade_all"), ()),)
+                    if any(item.registration.available_update is not None for item in statuses)
                     else ()
                 ),
                 (translator.text("status.dataset_help_enable"), ()),
@@ -344,6 +344,23 @@ def _show_manager_help(
         event = _read_manager_event(decoder, read_input)
         if isinstance(event, KeyEvent) and event.value in {"h", "\x08", "\x1b", "\r", "\n"}:
             return
+
+
+def _upgrade_all(
+    service: DatasetService, statuses: tuple[DatasetRegistrationStatus, ...]
+) -> tuple[int, int]:
+    """Upgrade every detected candidate, continuing after individual failures."""
+    succeeded = 0
+    failed = 0
+    for status in statuses:
+        if status.registration.available_update is None:
+            continue
+        try:
+            service.upgrade(status.registration.dataset_id)
+            succeeded += 1
+        except Exception:
+            failed += 1
+    return succeeded, failed
 
 
 def run_dataset_manager(service: DatasetService, translator: Translator) -> int:
@@ -434,19 +451,18 @@ def run_dataset_manager(service: DatasetService, translator: Translator) -> int:
                 elif key == "r":
                     refreshed = service.refresh_all()
                     unavailable = sum(item.availability == "unavailable" for item in refreshed)
-                    notice = translator.text(
-                        "status.dataset_refresh_complete", unavailable=unavailable
+                    upgrades = sum(
+                        item.registration.available_update is not None for item in refreshed
                     )
-                elif (
-                    key == "u"
-                    and details
-                    and view.selected_id is not None
-                    and statuses[selected].registration.available_update is not None
-                ):
+                    notice = translator.text(
+                        "status.dataset_refresh_complete",
+                        unavailable=unavailable,
+                        upgrades=upgrades,
+                    )
+                elif key == "u" and view.selected_id is not None:
                     current = statuses[selected].registration
                     candidate = current.available_update
-                    assert candidate is not None
-                    if _confirm(
+                    if candidate is not None and _confirm(
                         screen,
                         translator,
                         decoder,
@@ -468,6 +484,28 @@ def run_dataset_manager(service: DatasetService, translator: Translator) -> int:
                             )
                         except Exception as exc:
                             notice = format_error(exc, translator)
+                elif key == "U":
+                    candidates = tuple(
+                        item.registration
+                        for item in statuses
+                        if item.registration.available_update is not None
+                    )
+                    if candidates and _confirm(
+                        screen,
+                        translator,
+                        decoder,
+                        translator.text(
+                            "status.dataset_upgrade_all_confirm", count=len(candidates)
+                        ),
+                        title=translator.text("status.dataset_upgrade_all_title"),
+                        controls=translator.text("status.dataset_upgrade_all_controls"),
+                    ):
+                        succeeded, failed = _upgrade_all(service, statuses)
+                        notice = translator.text(
+                            "status.dataset_upgrade_all_complete",
+                            succeeded=succeeded,
+                            failed=failed,
+                        )
     except KeyboardInterrupt:
         return 0
     finally:
