@@ -13,6 +13,7 @@ from ccusage_viz.cli.routing import (
 from ccusage_viz.command_parsing.common import _explicit_fields
 from ccusage_viz.command_parsing.parser import build_parser
 from ccusage_viz.configuration import standalone_from_chart_pane
+from ccusage_viz.core.time import local_today
 from ccusage_viz.dashboard_preset_store import DashboardPresetStore, DashboardPresetStoreError
 from ccusage_viz.errors import UsageError
 from ccusage_viz.i18n import load_translator
@@ -87,7 +88,7 @@ def test_installed_dataset_defaults_use_host_timezone_today(
     )
 
     assert isinstance(launch.chart, CustomChartConfig)
-    assert launch.chart.date_range.until == date.today()
+    assert launch.chart.date_range.until == local_today(timezone="Asia/Shanghai")
     assert launch.host.timezone == "Asia/Shanghai"
 
 
