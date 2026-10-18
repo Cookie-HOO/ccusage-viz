@@ -6,6 +6,15 @@
 - **次版本（`0.x.0`）**：`1.0` 前重大的新面向用户能力或数据源集成。
 - 在 `1.0` 前，公开接口仍可能在各个版本之间变化。
 
+## 0.3.3
+
+`0.3.3` 修复 Windows Dashboard 交互，并让 Dataset 诊断更易检查，不改变查询或 Token Metric 语义：
+
+- Windows 重定向文字输出改用 UTF-8，带 emoji 的时钟 Overlay 不再因 GBK 代码页失败；Windows VT 输入也会启用 Dashboard 鼠标报告，并在退出时恢复原控制台模式；
+- Pane 调整支持双击聚焦、使用左右键或 Tab 循环选择前后 Pane，以及按拓扑使用上下键选择；文字和错误视图仍保留方向键滚动；
+- 所有 Custom Dataset Pane 的 `L` 请求历史都支持与 Overlay 历史共用的选择交互，可复制单条安全协议请求及验证后的诊断，不包含凭据或原始 stderr；
+- Dashboard 预设管理改用普通 `P`，避免终端保留的 Ctrl 组合键；控制栏、上下文帮助和公开文档保持一致。
+
 ## 0.3.2
 
 `0.3.2` 改进 Windows 终端兼容性，并收紧 Dashboard、Dataset 与预设交互，不改变数据或 Token Metric 语义：
@@ -13,7 +22,7 @@
 - Windows 控制台输入现在会规范化方向键等扩展按键，在可用时启用虚拟终端输出，并支持原生剪贴板复制；除 macOS `pbcopy` 外也支持 Linux Wayland/X11 剪贴板工具；
 - 复杂 Unicode 动画行 fallback 会先绘制替换内容，再清除旧行尾；Windows 控制台即使无法隐藏同步输出的中间状态，带框 Dashboard Pane 也不会因整行先被清空而闪烁；
 - Dataset 安装输入支持一致的编辑操作，能区分 GitHub 连接失败，并在 Dashboard 中按就绪状态显示全部注册项、缺失环境变量及对应帮助；
-- Dashboard 预设管理快捷键从 `Ctrl-P` 改为 `Ctrl-O`，列表与布局选择器支持方向键，具名预设允许时区覆盖；保存的预设保留语言、时区和 `ccusage-bin`，同时兼容已有预设文件；
+- Dashboard 预设管理使用 `P`，避免终端占用 Ctrl 组合键；列表与布局选择器支持方向键，具名预设允许时区覆盖；保存的预设保留语言、时区和 `ccusage-bin`，同时兼容已有预设文件；
 - 语言检测现在依次参考显式覆盖、Windows/macOS UI 语言、标准 Locale 环境变量和 Python Locale fallback；包括繁体中文在内的中文 UI Locale 使用当前中文文案；
 - Overlay 编辑将 Backspace 作为删除键、以 `?` 打开编辑帮助，并在动画 Pane 高级页使用 `h/j/k/l` 移动 Overlay，从而把方向键保留给 Pane 导航；
 - Monitor 的 `ranking` 与 `list` 视图现在默认启用 `mole-cat` 附加动画，包括新插入的 Monitor Pane 以及所有使用这些视图的预设；时序 Monitor 视图仍默认不启用动画。
