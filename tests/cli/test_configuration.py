@@ -510,7 +510,11 @@ def test_dashboard_narrow_clock_reuses_narrow_panes_with_short_clock_row() -> No
     assert isinstance(narrow_clock.panes[0], AnimationPaneConfig)
     assert narrow_clock.panes[0].animation.style == "digital-clock"
     assert narrow_clock.panes[0].overlay.position == "bottom-right"
-    assert narrow_clock.panes[1:] == narrow.panes
+    assert tuple(pane.chart for pane in narrow_clock.panes[1:]) == tuple(
+        pane.chart for pane in narrow.panes
+    )
+    assert narrow_clock.panes[-1].attachment_style == "mole-cat"
+    assert narrow.panes[-1].attachment_style is None
     assert narrow_clock.host.grid == "4x1"
     assert narrow_clock.host.row_weights == (6, 14, 14, 12)
     assert narrow_clock.host.style == "framed"
@@ -525,7 +529,11 @@ def test_dashboard_wide_clock_reuses_wide_panes_below_compact_digital_clock_row(
     assert isinstance(wide_clock.panes[0], AnimationPaneConfig)
     assert wide_clock.panes[0].animation.style == "digital-clock"
     assert wide_clock.panes[0].overlay.position == "bottom-right"
-    assert wide_clock.panes[1:] == wide.panes
+    assert tuple(pane.chart for pane in wide_clock.panes[1:]) == tuple(
+        pane.chart for pane in wide.panes
+    )
+    assert wide_clock.panes[-1].attachment_style == "mole-cat"
+    assert wide.panes[-1].attachment_style is None
     assert wide_clock.host.grid == "2x2"
     assert wide_clock.host.layout == "spotlight-wide"
     assert wide_clock.host.row_weights == (5, 15, 14)
