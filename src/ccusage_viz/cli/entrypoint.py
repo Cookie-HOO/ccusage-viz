@@ -90,7 +90,8 @@ def main(argv: list[str] | None = None) -> int:
         options = _to_options(namespace, explicit=explicit, launcher=launcher)
         _validate_configuration(options)
         route = _route(options)
-        return run(route.launch, tr)
+        route_language = getattr(route.launch, "language", None)
+        return run(route.launch, load_translator(route_language) if route_language else tr)
     except VizError as exc:
         text = format_error(
             exc,

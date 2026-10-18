@@ -55,7 +55,7 @@ def materialize_preset(
             panes.append(replace(pane, chart=replace(chart, source=source)))
         else:
             panes.append(pane)
-    return DashboardLaunch(record.process, record.host, tuple(panes))  # type: ignore[arg-type]
+    return DashboardLaunch(record.process, record.host, tuple(panes), language=record.language)  # type: ignore[arg-type]
 
 
 def empty_preset_launch(launch: DashboardLaunch) -> DashboardLaunch:

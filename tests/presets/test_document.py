@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import replace
 from datetime import timedelta
 from math import nan
 
@@ -30,6 +31,18 @@ def test_document_rejects_unknown_fields_nonfinite_values_and_duplicate_names() 
     duplicates["presets"].append(deepcopy(duplicates["presets"][0]))
     with pytest.raises(DashboardPresetValidationError, match="unique"):
         DashboardPresetDocument.parse(duplicates)
+
+
+def test_preset_language_round_trips_and_legacy_record_defaults_to_unspecified() -> None:
+    record = preset_from_launch("review", replace(_launch(), language="zh"), now=NOW)
+    wire = DashboardPresetDocument((record,)).to_wire()
+
+    assert wire["presets"][0]["language"] == "zh"
+    assert DashboardPresetDocument.parse(wire).presets[0].language == "zh"
+
+    legacy = deepcopy(wire)
+    del legacy["presets"][0]["language"]
+    assert DashboardPresetDocument.parse(legacy).presets[0].language is None
 
 
 def test_document_save_overwrite_preserves_created_at_and_updates_timestamp() -> None:

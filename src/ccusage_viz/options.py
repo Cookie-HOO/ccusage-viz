@@ -344,6 +344,7 @@ class DashboardLaunch:
     panes: tuple[PaneConfig, ...]
     explicit: frozenset[str] = frozenset()
     launcher: str = "ccuv"
+    language: str | None = None
 
     def __post_init__(self) -> None:
         sources: dict[str, CustomCommandSource] = {}

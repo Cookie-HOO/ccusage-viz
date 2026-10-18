@@ -145,7 +145,7 @@ ccuv dashboard
 ### Your Dashboard presets
 
 In Dashboard browse mode, press `Ctrl-S` to save the current Dashboard under a name,
-or `Ctrl-P` to open the full-screen preset manager. The manager lists built-in and
+or `Ctrl-O` to open the full-screen preset manager. The manager lists built-in and
 your saved presets; use arrows or `j`/`k` to select, `Enter` to load, `s` to
 save, and `x` to delete a selected user preset. Built-ins can be loaded but not
 deleted. Saving a user preset with a built-in name intentionally overrides it;
@@ -171,9 +171,10 @@ unnamed `ccuv dashboard --empty` flow remains available for composing a new
 temporary Dashboard. A demo-enabled preset stays demo-enabled when loaded;
 Dashboard currently has no runtime control for turning demo off.
 
-Presets persist declarative Dashboard configuration, including installed Dataset
-references, local-command argv, and executable Overlay commands, but never query
-results, environments, credentials, or UI/runtime state. Presets are trusted
+Presets persist declarative Dashboard configuration, including language, timezone,
+`ccusage-bin`, installed Dataset references, local-command argv, and executable
+Overlay commands, but never query results, environments, credentials, or UI/runtime
+state. An explicit `--lang` overrides the preset language. Presets are trusted
 user-local automation: load only presets you trust, because loading one can run
 the commands it contains. Presets live in ccuv's private state directory under
 `dashboard-presets/presets.json` (`~/Library/Application Support/ccuv` on macOS,

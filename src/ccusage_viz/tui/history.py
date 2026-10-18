@@ -12,6 +12,7 @@ from shutil import get_terminal_size
 
 from ccusage_viz.animation import animation_spec
 from ccusage_viz.animation_overlay import OverlayConfig
+from ccusage_viz.clock_overlay import time_state_overlay_command
 from ccusage_viz.command_copy import format_full_dashboard_command
 from ccusage_viz.custom_component import (
     custom_replacement_required,
@@ -26,6 +27,7 @@ from ccusage_viz.historical_component import (
     HistoricalChartComponent,
     historical_replacement_required,
 )
+from ccusage_viz.i18n import load_translator
 from ccusage_viz.lifecycle import LifecycleTrigger
 from ccusage_viz.options import (
     AnimationPaneConfig,
@@ -85,6 +87,7 @@ def active_dashboard_launch(session: TuiSession) -> DashboardLaunch:
             header_summary=state.header_summary,
         ),
         tuple(pane.config for pane in state.panes),
+        language=session.translator.language,
     )
 
 
@@ -153,6 +156,7 @@ def builtin_preset_launch(session: TuiSession, name: str) -> DashboardLaunch:
         ),
         (),
         launcher=session.options.launcher,
+        language=session.translator.language,
     )
     panes = tuple(
         parse_pane_fragment(fragment, host=base, language=session.translator.language)
@@ -167,7 +171,7 @@ def builtin_preset_launch(session: TuiSession, name: str) -> DashboardLaunch:
             replace(
                 panes[0],
                 overlay=OverlayConfig(
-                    command=f"{session.options.launcher} text time-state --run",
+                    command=time_state_overlay_command(session.options.launcher),
                     position="bottom-right",
                 ),
             ),
@@ -218,12 +222,21 @@ def execute_preset_command(session: TuiSession, command: object) -> None:
                     command.key.removeprefix("user:")
                 )
                 launch = materialize_preset(record, DatasetService().installed_command_source)
+            loaded_language = (
+                session.translator.language
+                if session.options.was_explicit("lang")
+                else launch.language or session.translator.language
+            )
             loaded_options = replace(
-                launch, explicit=session.options.explicit, launcher=session.options.launcher
+                launch,
+                explicit=session.options.explicit,
+                launcher=session.options.launcher,
+                language=loaded_language,
             )
 
             def apply_loaded_preset() -> None:
                 session.options = loaded_options
+                session.translator = load_translator(loaded_language)
                 apply_dashboard_state(session, preset_state_from_launch(session, loaded_options))
 
             record_mutation(session, ("preset", "load", command.key), apply_loaded_preset)
