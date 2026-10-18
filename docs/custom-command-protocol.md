@@ -467,7 +467,7 @@ ccuv dashboard --empty --grid 2x2 \
 
 Dashboard presets begin with built-in token-consumption templates, and the
 Dashboard preset manager can also save complete user configurations. In browse
-mode, press `Ctrl-S` to save and `Ctrl-P` to manage saved presets. Presets retain installed
+mode, press `Ctrl-S` to save and `Ctrl-O` to manage saved presets. Presets retain installed
 Dataset identities, local-command Dataset argv, and command-driven overlays.
 They are trusted user-local automation: loading a preset can execute its commands,
 so only load presets you trust. Presets never contain environment variables,

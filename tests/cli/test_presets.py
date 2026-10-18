@@ -191,7 +191,6 @@ def test_dashboard_narrow_and_all_presets_expand_to_concrete_state() -> None:
         ["dashboard", "wide", "--refresh-interval", "20"],
         ["dashboard", "wide", "--pane", "calendar"],
         ["dashboard", "wide", "--query-timeout", "20"],
-        ["dashboard", "wide", "--timezone", "UTC"],
     ),
 )
 def test_dashboard_named_preset_rejects_configuration_overrides(arguments: list[str]) -> None:
@@ -201,6 +200,16 @@ def test_dashboard_named_preset_rejects_configuration_overrides(arguments: list[
         _to_options(parser.parse_args(arguments), explicit=_explicit_fields(arguments))
 
     assert caught.value.key == "error.arguments"
+
+
+def test_dashboard_named_preset_allows_timezone_override() -> None:
+    parser = build_parser(load_translator("en"))
+    arguments = ["dashboard", "wide", "--timezone", "Asia/Shanghai"]
+
+    options = _to_options(parser.parse_args(arguments), explicit=_explicit_fields(arguments))
+
+    assert options.host.timezone == "Asia/Shanghai"
+    assert options.was_explicit("timezone")
 
 
 def test_dashboard_named_preset_allows_ccusage_bin_override() -> None:

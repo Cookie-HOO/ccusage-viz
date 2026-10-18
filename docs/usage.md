@@ -742,7 +742,7 @@ Dashboard has separate navigation and ownership rules. In browse mode:
 | --- | --- |
 | `r` | In chart browse mode, refresh all panes; it has no action in the full-command view. |
 | `Ctrl-S` | Save the current Dashboard as a named preset. |
-| `Ctrl-P` | Open the full-screen Dashboard preset manager. |
+| `Ctrl-O` | Open the full-screen Dashboard preset manager. |
 | Mouse click | Adjust the clicked pane. |
 | `d` | Open global Dashboard adjustment. |
 | `h` | Open contextual Help. In the full-command view, lowercase `h` goes to the first line. |

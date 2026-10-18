@@ -154,14 +154,14 @@ def _to_options(
         preset_name = namespace.preset
         user_records = ()
         if preset_name is not None:
-            disallowed = explicit - {"demo", "lang", "empty", "ccusage_bin"}
+            disallowed = explicit - {"demo", "lang", "empty", "ccusage_bin", "timezone"}
             if disallowed:
                 names = ", ".join(f"--{name.replace('_', '-')}" for name in sorted(disallowed))
                 raise UsageError(
                     "error.arguments",
                     detail=(
                         "a named dashboard preset only permits --demo, --lang, --empty, "
-                        f"and --ccusage-bin; received {names}"
+                        f"--ccusage-bin, and --timezone; received {names}"
                     ),
                 )
             try:
@@ -205,7 +205,17 @@ def _to_options(
                             demo_seed=_demo_seed(namespace),
                         ),
                     )
-                named_launch = replace(named_launch, explicit=explicit, launcher=launcher)
+                if "timezone" in explicit:
+                    named_launch = replace(
+                        named_launch,
+                        host=replace(named_launch.host, timezone=timezone),
+                    )
+                named_launch = replace(
+                    named_launch,
+                    explicit=explicit,
+                    launcher=launcher,
+                    language=namespace.lang if "lang" in explicit else named_launch.language,
+                )
                 return empty_preset_launch(named_launch) if namespace.empty else named_launch
         if preset_name is None and not namespace.panes and not namespace.empty:
             structural_options = {"grid", "layout", "column_weights", "row_weights"}
@@ -333,7 +343,7 @@ def _to_options(
                 else namespace.dashboard_style
             ),
         )
-        launch = DashboardLaunch(process, host, (), explicit, launcher)
+        launch = DashboardLaunch(process, host, (), explicit, launcher, language=namespace.lang)
         panes = tuple(
             parse_pane_fragment(fragment, host=launch, language=namespace.lang or "en")
             for fragment in fragments

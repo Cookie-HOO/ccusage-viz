@@ -9,6 +9,7 @@ from ccusage_viz.presets.panes import _pane_wire, _parse_pane
 from ccusage_viz.presets.values import (
     DashboardPresetValidationError,
     _exact,
+    _expect_mapping,
     _host_parse,
     _host_wire,
     _process_parse,
@@ -32,6 +33,7 @@ class DashboardPresetRecord:
     process: ProcessConfig
     host: DashboardHostConfig
     panes: tuple[PaneConfig, ...]
+    language: str | None = None
 
     def __post_init__(self) -> None:
         validate_preset_name(self.name)
@@ -41,6 +43,8 @@ class DashboardPresetRecord:
             raise DashboardPresetValidationError("preset updated_at cannot precede created_at")
         if not self.panes:
             raise DashboardPresetValidationError("a Dashboard preset requires at least one pane")
+        if self.language not in {None, "en", "zh"}:
+            raise DashboardPresetValidationError("preset language must be en or zh")
         _host_parse(_host_wire(self.host), len(self.panes))
 
     def to_wire(self) -> dict[str, object]:
@@ -48,6 +52,7 @@ class DashboardPresetRecord:
             "name": self.name,
             "created_at": _timestamp_wire(self.created_at),
             "updated_at": _timestamp_wire(self.updated_at),
+            "language": self.language,
             "process": _process_wire(self.process),
             "host": _host_wire(self.host),
             "panes": [_pane_wire(pane) for pane in self.panes],
@@ -55,11 +60,10 @@ class DashboardPresetRecord:
 
     @classmethod
     def parse(cls, value: object) -> DashboardPresetRecord:
-        wire = _exact(
-            value,
-            frozenset(("name", "created_at", "updated_at", "process", "host", "panes")),
-            "preset",
-        )
+        wire = _expect_mapping(value, "preset")
+        fields = frozenset(("name", "created_at", "updated_at", "process", "host", "panes"))
+        if frozenset(wire) not in {fields, fields | {"language"}}:
+            _exact(value, fields | {"language"}, "preset")
         name = validate_preset_name(_string(wire["name"], "preset.name"))
         created_at, updated_at = (
             _timestamp(wire["created_at"], "preset.created_at"),
@@ -77,10 +81,11 @@ class DashboardPresetRecord:
             _process_parse(wire["process"]),
             _host_parse(wire["host"], len(panes)),
             panes,
+            None if wire.get("language") is None else _string(wire["language"], "preset.language"),
         )
 
     def materialize(self) -> DashboardLaunch:
-        return DashboardLaunch(self.process, self.host, self.panes)  # type: ignore[arg-type]
+        return DashboardLaunch(self.process, self.host, self.panes, language=self.language)  # type: ignore[arg-type]
 
 
 @dataclass(frozen=True, slots=True)
@@ -144,4 +149,5 @@ def preset_from_launch(
         launch.process,
         launch.host,
         tuple(launch.panes),
+        launch.language,
     )
