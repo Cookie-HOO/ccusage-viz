@@ -113,8 +113,7 @@ chooser can add an Animation pane with the default rain style; the pane's quick
 controls cycle every currently eligible catalog effect.
 
 For `monitor` styles `ranking` and `list`, the `mole-cat` attachment is enabled by default.
-In the advanced adjustment view, press `s` to enable the first
-Monitor-eligible effect; `s`/`S` then cycles every effect declared by
+In the advanced adjustment view, `s`/`S` cycles every effect declared by
 `term-animate`, followed by ccuv-local `none`. An enabled attachment starts
 with the `classic` library theme, independently of the Monitor chart theme.
 It stays hidden until the Monitor establishes a comparable accepted interval,

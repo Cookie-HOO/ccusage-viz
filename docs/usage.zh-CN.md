@@ -96,8 +96,8 @@ ccuv dashboard --pane "timeline --period 7d" --pane "animate rain"
 Dashboard preset 不会自动添加动画 Pane；但 Dashboard 的面板选择器可以加入默认 rain 的动画 Pane，
 其快捷调整页会循环当前所有符合条件的 catalog 动画。
 
-对于 `monitor` 的 `ranking` 与 `list` 样式，默认启用 `mole-cat` 附件。在高级调整页中按 `s` 可启用第一个
-Monitor-eligible 效果；随后 `s`/`S` 会循环 term-animate 声明的所有效果，最后进入 ccuv 本地的`无`。
+对于 `monitor` 的 `ranking` 与 `list` 样式，默认启用 `mole-cat` 附件。在高级调整页中，`s`/`S` 会循环
+term-animate 声明的所有效果，最后进入 ccuv 本地的`无`。
 启用后的附件使用 `classic` 动画库主题，独立于 Monitor 图表主题。Monitor 建立可比较的已接受 interval 前，
 附件不会显示；之后仅当最近一次**已接受** interval 的总 Token 增量严格大于零时播放。零增量会让支持状态的
 场景显示 idle；基线/重新基线、pending、error 和丢弃的样本都不会推进它。`t`/`T` 调整保存的附件主题。
