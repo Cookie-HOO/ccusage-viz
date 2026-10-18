@@ -49,7 +49,7 @@ def test_custom_filter_controls_full_line() -> None:
 
     assert controls == (
         "h Help · ←/→ switch filter · ↑/↓ or j/k select · / search · Space toggle · "
-        "c clear current · C columns · Enter apply · Esc cancel"
+        "c clear current · C clear all · 1/2/3 columns · Enter apply · Esc cancel"
     )
 
 
@@ -87,7 +87,7 @@ def test_custom_filter_help_lists_every_active_shortcut() -> None:
         "←/→ switch filter",
         "↑/↓ or j/k select",
         "/ search · Type · Backspace · Enter done · Esc clear",
-        "Space toggle · c clear current · C columns",
+        "Space toggle · c clear current · C clear all · 1/2/3 columns",
         "Enter apply · Esc cancel",
         "h/Esc back",
     ]
@@ -159,16 +159,16 @@ def test_multi_select_preserves_existing_toggle_behavior() -> None:
     assert draft.toggle(choice, "history").filters == (("category", ("fiction", "history")),)
 
 
-def test_tab_rows_render_accepted_counts_without_using_unsubmitted_draft() -> None:
+def test_tab_rows_render_unsubmitted_draft_counts() -> None:
     choice = CHOICES[0]
     accepted = (("category", ("fiction",)),)
     draft = CustomFilterDraft(accepted).toggle(choice, "history")
 
     rendered = _render_custom_filter_draft(
-        draft, (choice,), load_translator("en"), 80, accepted=accepted
+        draft, (choice,), load_translator("en"), 80, accepted=draft.filters
     )
 
-    assert "[Category 1/2]" in rendered
+    assert "[Category 2/2]" in rendered
     assert "Selected 2 / 2" in rendered
 
 
@@ -267,7 +267,7 @@ def test_custom_filter_help_ignores_inputs_and_preserves_the_complete_draft() ->
     events = iter(
         (
             "\x1b[C",
-            "C",
+            "2",
             "j",
             "j",
             "j",
@@ -308,7 +308,7 @@ def test_custom_filter_help_ignores_inputs_and_preserves_the_complete_draft() ->
     assert "←/→ switch filter" in help_body
     assert "↑/↓ or j/k select" in help_body
     assert "/ search" in help_body
-    assert "Space toggle · c clear current · C columns" in help_body
+    assert "Space toggle · c clear current · C clear all" in help_body
     assert "Enter apply · Esc cancel" in help_body
 
 
@@ -402,12 +402,12 @@ def test_custom_filter_editor_searches_localized_labels_and_clears_current_tab()
     assert draft.clear("category").filters == (("source", ("app",)),)
 
 
-def test_custom_filter_editor_cycles_one_to_three_columns() -> None:
+def test_custom_filter_editor_sets_one_to_three_columns() -> None:
     draft = CustomFilterDraft(())
 
-    assert draft.cycle_columns().columns == 2
-    assert draft.cycle_columns().cycle_columns().columns == 3
-    assert draft.cycle_columns().cycle_columns().cycle_columns().columns == 1
+    assert draft.set_columns(1).columns == 1
+    assert draft.set_columns(2).columns == 2
+    assert draft.set_columns(3).columns == 3
 
 
 def test_custom_filter_editor_search_retains_enter_and_escape_clears_query() -> None:
@@ -519,7 +519,7 @@ def test_custom_filter_editor_clicks_scrolled_second_column_option() -> None:
             for index in range(8)
         ),
     )
-    events = iter(("C", "j", "j", MouseEvent(0, 17, 5, True, 0), "\r"))
+    events = iter(("2", "j", "j", MouseEvent(0, 17, 5, True, 0), "\r"))
 
     result = run_custom_filter_editor(
         (),
@@ -558,8 +558,8 @@ def test_custom_filter_editor_renders_counts_columns_and_scrolled_options() -> N
     assert "option-6" in body
 
 
-def test_custom_filter_editor_clears_only_active_tab_and_cycles_columns() -> None:
-    keys = iter(("C", "C", "C", "c", "\r"))
+def test_custom_filter_editor_clears_only_active_tab_and_sets_columns() -> None:
+    keys = iter(("2", "3", "1", "c", "\r"))
 
     result = run_custom_filter_editor(
         (("category", ("fiction",)), ("source", ("app",))),
@@ -572,6 +572,45 @@ def test_custom_filter_editor_clears_only_active_tab_and_cycles_columns() -> Non
     )
 
     assert result == (("source", ("app",)),)
+
+
+def test_custom_filter_editor_uppercase_c_clears_all_tabs() -> None:
+    keys = iter(("C", "\r"))
+
+    result = run_custom_filter_editor(
+        (("category", ("fiction",)), ("source", ("app",))),
+        CHOICES,
+        load_translator("en"),
+        width=80,
+        height=12,
+        paint=lambda _body, _controls: None,
+        read_key=lambda: next(keys),
+    )
+
+    assert result == ()
+
+
+def test_custom_filter_editor_updates_all_tab_counts_from_the_draft() -> None:
+    frames: list[str] = []
+    keys = iter((" ", "\x1b[C", " ", "C", "\r"))
+
+    result = run_custom_filter_editor(
+        (("category", ("fiction",)),),
+        CHOICES,
+        load_translator("en"),
+        width=80,
+        height=12,
+        paint=lambda body, _controls: frames.append(body),
+        read_key=lambda: next(keys),
+    )
+
+    assert result == ()
+    assert "[Category 1/2]" in frames[0]
+    assert "[Category 0/2]" in frames[1]
+    assert "Category 0/2" in frames[3]
+    assert "[Source 1/1]" in frames[3]
+    assert "Category 0/2" in frames[4]
+    assert "[Source 0/1]" in frames[4]
 
 
 def test_custom_filter_editor_hides_duplicate_dataset_option_labels() -> None:
