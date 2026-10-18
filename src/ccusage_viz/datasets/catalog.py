@@ -169,8 +169,10 @@ def fetch_official_catalog(url: str = CATALOG_URL) -> OfficialCatalog:
     try:
         with urlopen(request, timeout=20) as response:  # noqa: S310 - fixed HTTPS catalog URL.
             payload = response.read(min(MAX_CATALOG_BYTES, MAX_DOWNLOAD_BYTES) + 1)
-    except (HTTPError, URLError, TimeoutError, OSError) as exc:
+    except HTTPError as exc:
         raise UsageError("error.dataset_catalog_unavailable") from exc
+    except (URLError, TimeoutError, OSError) as exc:
+        raise UsageError("error.dataset_catalog_network") from exc
     if len(payload) > MAX_CATALOG_BYTES:
         raise UsageError("error.dataset_catalog_invalid")
     return parse_and_verify_official_catalog(payload)

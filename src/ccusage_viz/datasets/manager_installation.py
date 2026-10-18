@@ -218,12 +218,12 @@ def _read_github_repository(
             continue
         if not isinstance(event, KeyEvent):
             continue
-        if event.value == "h":
+        if event.value == "\x08":
             _show_manager_help(screen, translator, decoder, read_input=read_input)
             continue
         if event.value == "\x1b":
             return None
-        if event.value in {"\x7f", "\b"}:
+        if event.value == "\x7f":
             repository = repository[:-1]
         elif event.value in {"\r", "\n"}:
             return repository.strip() or None

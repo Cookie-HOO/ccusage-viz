@@ -46,9 +46,9 @@ def test_catalogs_have_the_same_keys_and_placeholders() -> None:
     )
     assert (
         EN_MESSAGES["status.tui_preset_operations"]
-        == "Ctrl-S save as new preset · Ctrl-P manage presets"
+        == "Ctrl-S save as new preset · Ctrl-O manage presets"
     )
-    assert ZH_MESSAGES["status.tui_preset_operations"] == "Ctrl-S 保存为新预设 · Ctrl-P 管理预设"
+    assert ZH_MESSAGES["status.tui_preset_operations"] == "Ctrl-S 保存为新预设 · Ctrl-O 管理预设"
     assert " d adjust dashboard " in EN_MESSAGES["status.tui_chart_controls"]
     assert "c {action}" not in EN_MESSAGES["status.tui_chart_controls"]
     assert " d 调整仪表盘 " in ZH_MESSAGES["status.tui_chart_controls"]
@@ -160,11 +160,11 @@ def test_catalogs_have_the_same_keys_and_placeholders() -> None:
     assert "Ctrl-B 上个词" in ZH_MESSAGES["status.overlay_editor_controls_navigation"]
     assert "Ctrl-W 下个词" in ZH_MESSAGES["status.overlay_editor_controls_navigation"]
     assert "Tab switch source" in EN_MESSAGES["status.overlay_editor_controls_draft"]
-    assert "Ctrl-H help" in EN_MESSAGES["status.overlay_editor_controls_draft"]
+    assert "? help" in EN_MESSAGES["status.overlay_editor_controls_draft"]
     assert "DEL delete" not in EN_MESSAGES["status.overlay_editor_controls_draft"]
     assert "Ctrl-U clear" in EN_MESSAGES["status.overlay_editor_controls_draft"]
     assert "Tab 切换来源" in ZH_MESSAGES["status.overlay_editor_controls_draft"]
-    assert "Ctrl-H 帮助" in ZH_MESSAGES["status.overlay_editor_controls_draft"]
+    assert "? 帮助" in ZH_MESSAGES["status.overlay_editor_controls_draft"]
     assert "DEL 删除" not in ZH_MESSAGES["status.overlay_editor_controls_draft"]
     assert "Ctrl-U 清空" in ZH_MESSAGES["status.overlay_editor_controls_draft"]
     assert "OVERALL" in EN_MESSAGES["status.overlay_editor_controls_dashboard_overall"]
@@ -186,10 +186,10 @@ def test_catalogs_have_the_same_keys_and_placeholders() -> None:
     assert "命令模式" in ZH_MESSAGES["status.tui_help_editor_source_command"]
     assert "输出 stdout 的 Shell 命令" in ZH_MESSAGES["status.tui_help_editor_source_command"]
     assert "Ctrl-B/Ctrl-W word" in EN_MESSAGES["status.tui_help_editor_navigation_detail"]
-    assert "Ctrl-H help" in EN_MESSAGES["status.tui_help_editor_draft_detail"]
+    assert "? help" in EN_MESSAGES["status.tui_help_editor_draft_detail"]
     assert "Enter apply active source" in EN_MESSAGES["status.tui_help_editor_complete_detail"]
     assert "Ctrl-B/Ctrl-W 词语" in ZH_MESSAGES["status.tui_help_editor_navigation_detail"]
-    assert "Ctrl-H 帮助" in ZH_MESSAGES["status.tui_help_editor_draft_detail"]
+    assert "? 帮助" in ZH_MESSAGES["status.tui_help_editor_draft_detail"]
     assert "Enter 应用当前来源" in ZH_MESSAGES["status.tui_help_editor_complete_detail"]
     assert "Ctrl-J/Ctrl-K" in EN_MESSAGES["status.tui_help_editor_dashboard_height"]
     assert "子图高度" in ZH_MESSAGES["status.tui_help_editor_dashboard_height"]
@@ -279,8 +279,8 @@ def test_catalogs_have_the_same_keys_and_placeholders() -> None:
         ("zh_CN", "zh"),
         ("zh-Hans-CN", "zh"),
         ("zh_SG", "zh"),
-        ("zh_TW", "en"),
-        ("zh-Hant", "en"),
+        ("zh_TW", "zh"),
+        ("zh-Hant", "zh"),
         ("en_US", "en"),
         (None, "en"),
     ],
@@ -289,7 +289,25 @@ def test_locale_detection(
     locale_name: str | None, expected: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     if locale_name is None:
+        for name in ("CCUV_LANG", "LANGUAGE", "LC_ALL", "LC_MESSAGES", "LANG"):
+            monkeypatch.delenv(name, raising=False)
+        monkeypatch.setattr("ccusage_viz.i18n._system_ui_locale", lambda: None)
         monkeypatch.setattr("locale.getlocale", lambda: (None))
         assert detect_language() == expected
     else:
         assert detect_language(locale_name) == expected
+
+
+def test_language_detection_prefers_override_then_system_ui_then_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CCUV_LANG", "en")
+    monkeypatch.setenv("LANG", "zh_CN.UTF-8")
+    monkeypatch.setattr("ccusage_viz.i18n._system_ui_locale", lambda: "zh-Hans-CN")
+    assert detect_language() == "en"
+
+    monkeypatch.delenv("CCUV_LANG")
+    assert detect_language() == "zh"
+
+    monkeypatch.setattr("ccusage_viz.i18n._system_ui_locale", lambda: None)
+    assert detect_language() == "zh"

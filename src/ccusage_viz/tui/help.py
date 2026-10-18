@@ -301,6 +301,17 @@ def help_lines(session: TuiSession, width: int) -> tuple[str, ...]:
                 )
             )
             return tuple(clip_width(line, width) for line in rows)
+        elif session.help_overlay.context == "dataset-input":
+            rows = [help_heading(session.translator.text("status.tui_help_section_controls"))]
+            rows.extend(
+                tree_node(
+                    "",
+                    session.translator.text("status.tui_help_dataset_input"),
+                    (),
+                    is_last=True,
+                )
+            )
+            return tuple(clip_width(line, width) for line in rows)
         elif session.help_overlay.context == "editor":
             rows = [help_heading(session.translator.text("status.tui_help_section_controls"))]
             groups = editor_help_groups(dashboard=True)
