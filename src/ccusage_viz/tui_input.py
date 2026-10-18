@@ -71,6 +71,15 @@ _SGR_MOUSE = re.compile(r"\x1b\[<(\d+);(\d+);(\d+)([Mm])")
 _SGR_MOUSE_PREFIX = re.compile(r"\x1b\[<\d*(?:;\d*){0,2}$")
 _MALFORMED_SGR_MOUSE = re.compile(r"\x1b\[<[^Mm]{0,61}[Mm]")
 _UNKNOWN_CSI = re.compile(r"\x1b\[[0-?]+[ -/]*[@-~]")
+_WINDOWS_EXTENDED_KEYS = {
+    "H": "\x1b[A",
+    "P": "\x1b[B",
+    "K": "\x1b[D",
+    "M": "\x1b[C",
+    "G": "\x1b[H",
+    "O": "\x1b[F",
+    "S": "\x1b[3~",
+}
 
 
 class InputDecoder:
@@ -319,7 +328,13 @@ def read_event(decoder: InputDecoder, timeout: float) -> InputEvent | None:
         import msvcrt
 
         if msvcrt.kbhit():
-            decoder.feed(msvcrt.getwch())
+            value = msvcrt.getwch()
+            if value in {"\x00", "\xe0"}:
+                # Windows console special keys arrive as a two-character pair.
+                # Normalize them to the same ANSI sequences used by POSIX terminals.
+                suffix = msvcrt.getwch()
+                value = _WINDOWS_EXTENDED_KEYS.get(suffix, "")
+            decoder.feed(value)
         else:
             time.sleep(timeout)
     else:

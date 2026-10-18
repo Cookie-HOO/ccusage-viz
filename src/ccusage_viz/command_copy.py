@@ -392,12 +392,24 @@ def wrap_command(command: str, width: int) -> str:
 
 
 def copy_command(command: str) -> bool:
-    executable = which("pbcopy")
-    if executable is None:
+    candidates = (
+        ("pbcopy", ()),
+        ("clip.exe", ()),
+        ("clip", ()),
+        ("wl-copy", ()),
+        ("xclip", ("-selection", "clipboard")),
+        ("xsel", ("--clipboard", "--input")),
+    )
+    resolved = next(
+        ((executable, arguments) for name, arguments in candidates if (executable := which(name))),
+        None,
+    )
+    if resolved is None:
         return False
+    executable, arguments = resolved
     try:
         subprocess.run(
-            [executable],
+            [executable, *arguments],
             input=command,
             text=True,
             check=True,

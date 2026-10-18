@@ -1,4 +1,5 @@
 from io import StringIO
+from types import SimpleNamespace
 
 import pytest
 
@@ -125,6 +126,19 @@ def test_tui_input_keeps_ordinary_key_after_malformed_mouse_report() -> None:
     decoder.feed("\x1b[<0;;3Mq")
 
     assert decoder.next() == KeyEvent("q")
+
+
+def test_windows_extended_arrow_key_is_normalized_to_ansi(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    decoder = InputDecoder()
+    values = iter(("\xe0", "P"))
+    fake_msvcrt = SimpleNamespace(kbhit=lambda: True, getwch=lambda: next(values))
+
+    monkeypatch.setattr(tui_input_module.os, "name", "nt")
+    monkeypatch.setitem(__import__("sys").modules, "msvcrt", fake_msvcrt)
+
+    assert tui_input_module.read_event(decoder, 0) == KeyEvent("\x1b[B")
 
 
 def test_tui_input_mode_disables_mouse_and_restores_terminal_on_error(
