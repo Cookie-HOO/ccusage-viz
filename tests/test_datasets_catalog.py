@@ -3,12 +3,18 @@ from __future__ import annotations
 import base64
 import json
 from datetime import UTC, datetime
+from urllib.error import HTTPError, URLError
 
 import pytest
 import rfc8785
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from ccusage_viz.datasets.catalog import CATALOG_PUBLIC_KEY_B64, parse_and_verify_official_catalog
+import ccusage_viz.datasets.catalog as catalog_module
+from ccusage_viz.datasets.catalog import (
+    CATALOG_PUBLIC_KEY_B64,
+    fetch_official_catalog,
+    parse_and_verify_official_catalog,
+)
 from ccusage_viz.errors import UsageError
 
 
@@ -57,6 +63,26 @@ def catalog_entry() -> dict[str, object]:
             }
         ],
     }
+
+
+def test_catalog_distinguishes_github_connectivity_from_unavailable_index(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_network(*_args: object, **_kwargs: object) -> object:
+        raise URLError("offline")
+
+    monkeypatch.setattr(catalog_module, "urlopen", fail_network)
+    with pytest.raises(UsageError) as network:
+        fetch_official_catalog()
+    assert network.value.key == "error.dataset_catalog_network"
+
+    def fail_http(*_args: object, **_kwargs: object) -> object:
+        raise HTTPError("catalog", 503, "unavailable", {}, None)
+
+    monkeypatch.setattr(catalog_module, "urlopen", fail_http)
+    with pytest.raises(UsageError) as unavailable:
+        fetch_official_catalog()
+    assert unavailable.value.key == "error.dataset_catalog_unavailable"
 
 
 def test_compiled_catalog_public_key_is_a_raw_ed25519_key() -> None:

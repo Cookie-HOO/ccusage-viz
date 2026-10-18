@@ -49,12 +49,12 @@ def _read_local_command(
             continue
         if not isinstance(event, KeyEvent):
             continue
-        if event.value == "h":
+        if event.value == "\x08":
             _show_manager_help(screen, translator, decoder, read_input=read_input)
             continue
         if event.value == "\x1b":
             return None
-        if event.value in {"\x7f", "\b"}:
+        if event.value == "\x7f":
             command = command[:-1]
             continue
         if event.value in {"\r", "\n"}:
@@ -342,7 +342,7 @@ def _show_manager_help(
     )
     while True:
         event = _read_manager_event(decoder, read_input)
-        if isinstance(event, KeyEvent) and event.value in {"h", "\x1b", "\r", "\n"}:
+        if isinstance(event, KeyEvent) and event.value in {"h", "\x08", "\x1b", "\r", "\n"}:
             return
 
 

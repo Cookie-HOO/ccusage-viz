@@ -244,6 +244,23 @@ def test_add_source_chooser_lists_three_sources_and_selects_local() -> None:
     assert "Local command" in output
 
 
+def test_github_prompt_accepts_h_as_repository_input() -> None:
+    class Screen:
+        def paint(self, _frame: Frame, **_kwargs: object) -> None:
+            pass
+
+    events = iter((KeyEvent("h"), KeyEvent("\r")))
+
+    repository = _read_github_repository(
+        Screen(),  # type: ignore[arg-type]
+        load_translator("en"),
+        InputDecoder(),
+        read_input=lambda: next(events),
+    )
+
+    assert repository == "h"
+
+
 def test_github_prompt_is_rendered_separately_from_controls() -> None:
     frames: list[Frame] = []
 
@@ -260,4 +277,4 @@ def test_github_prompt_is_rendered_separately_from_controls() -> None:
     )
 
     assert "Enter OWNER/REPOSITORY" in "\n".join(frames[0].rows[:-1])
-    assert frames[0].rows[-1] == "Enter discover · Esc back"
+    assert frames[0].rows[-1] == ("Type · DEL delete · Ctrl-H help · Enter discover · Esc back")

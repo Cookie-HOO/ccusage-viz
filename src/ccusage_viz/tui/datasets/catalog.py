@@ -418,6 +418,16 @@ def _install_github_dataset(
             if not isinstance(event, KeyEvent):
                 continue
             key = event.value
+            if key == "\x08" and artifact is None and resolving is None and installing is None:
+                from ccusage_viz.datasets.manager_runtime import _show_manager_help
+
+                _show_manager_help(
+                    screen,
+                    translator,
+                    decoder,
+                    read_input=read_input,
+                )
+                continue
             if key == "\x1b":
                 if resolving is not None or installing is not None:
                     continue
@@ -437,7 +447,7 @@ def _install_github_dataset(
                     resolving = executor.submit(service.resolve_github_repository, repository)
                     error = None
                 continue
-            if key in {"\x7f", "\b"}:
+            if key == "\x7f":
                 repository = repository[:-1]
                 error = None
             elif len(key) == 1 and key.isprintable():

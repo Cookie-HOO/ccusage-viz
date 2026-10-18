@@ -563,7 +563,10 @@ class DatasetService:
             catalog = self.official_catalog()
             official = catalog.entry_for_repository(normalized)
         except UsageError as error:
-            if error.key != "error.dataset_catalog_unavailable":
+            if error.key not in {
+                "error.dataset_catalog_unavailable",
+                "error.dataset_catalog_network",
+            }:
                 raise
         else:
             if official is not None:

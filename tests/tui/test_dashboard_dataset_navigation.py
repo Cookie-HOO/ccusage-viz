@@ -46,6 +46,22 @@ from ccusage_viz.tui.pane_lifecycle import _new_pane
 from ccusage_viz.tui_input import KeyEvent
 
 
+def test_dashboard_dataset_availability_names_missing_environment() -> None:
+    status = SimpleNamespace(
+        availability="setup_required",
+        missing_environment=(SimpleNamespace(name="WEREAD_COOKIE"),),
+    )
+
+    assert (
+        tui_datasets_modal._dataset_registration_availability(status, load_translator("en"))
+        == "Setup required: WEREAD_COOKIE"
+    )
+    assert (
+        tui_datasets_modal._dataset_registration_availability(status, load_translator("zh"))
+        == "需要配置：WEREAD_COOKIE"
+    )
+
+
 def test_run_tui_dashboard_dataset_entry_keeps_installed_titles_in_source_stage(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

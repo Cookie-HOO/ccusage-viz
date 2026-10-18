@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from ccusage_viz.datasets.service import DatasetService
     from ccusage_viz.tui.session import TuiSession
 
 import shlex
@@ -23,6 +24,7 @@ from ccusage_viz.datasets.models import (
 )
 from ccusage_viz.diagnostics import format_error
 from ccusage_viz.errors import QueryError, UsageError
+from ccusage_viz.i18n import Translator
 from ccusage_viz.options import CustomChartConfig, CustomChartPaneConfig, CustomCommandSource
 from ccusage_viz.render.palette import get_color_scheme
 from ccusage_viz.terminal import Terminal, compose_frame, emphasize
@@ -55,6 +57,30 @@ from ccusage_viz.tui.pane_lifecycle import _insert_pane, _replace_pane
 from ccusage_viz.tui_input import KeyEvent, PasteEvent
 
 
+def _dashboard_registration_statuses(
+    service: DatasetService,
+) -> tuple[DatasetRegistrationStatus, ...]:
+    """Include unavailable registrations while tolerating legacy service collaborators."""
+
+    registrations = getattr(service, "registrations", None)
+    return tuple(
+        registrations() if registrations is not None else service.ready_registered_sources()
+    )
+
+
+def _dataset_registration_availability(
+    status: DatasetRegistrationStatus, translator: Translator
+) -> str:
+    availability_key = getattr(status, "availability", "ready")
+    missing_environment = getattr(status, "missing_environment", ())
+    if missing_environment:
+        return translator.text(
+            "status.dataset_setup_required_names",
+            names=", ".join(item.name for item in missing_environment),
+        )
+    return translator.text(f"status.dataset_{availability_key}")
+
+
 def open_dataset_modal(
     session: TuiSession, action: str, pane_index: int, *, initial: CustomChartConfig | None = None
 ) -> None:
@@ -63,7 +89,7 @@ def open_dataset_modal(
 
     service = DatasetService()
     try:
-        statuses = tuple(service.ready_registered_sources())
+        statuses = _dashboard_registration_statuses(service)
         error = None
     except UsageError as exc:
         statuses = ()
@@ -129,8 +155,9 @@ def _paint_dataset_modal(session: TuiSession) -> None:
             for item_index, status in enumerate(entries):
                 selected = "›" if item_index == modal.index else " "
                 descriptor = status.registration.probe.descriptor
+                availability = _dataset_registration_availability(status, session.translator)
                 rows.append(
-                    f"{selected} {_dataset_title(descriptor.dataset.title, session.translator)} {descriptor.version} · {session.translator.text('status.dataset_ready')}"
+                    f"{selected} {_dataset_title(descriptor.dataset.title, session.translator)} {descriptor.version} · {availability}"
                 )
             body, modal.offset = _chooser_viewport(
                 rows,
@@ -424,7 +451,7 @@ def collect_dataset_modal(session: TuiSession) -> bool:
     if modal.stage == "installing":
         try:
             modal.future.result()
-            modal.statuses = tuple(modal.service.ready_registered_sources())
+            modal.statuses = _dashboard_registration_statuses(modal.service)
             modal.draft.dataset_id = modal.selected_dataset_id or ""
             modal.stage, modal.index, modal.offset = ("installed", 0, 0)
             modal.error = None
@@ -468,7 +495,7 @@ def collect_dataset_modal(session: TuiSession) -> bool:
             if installed is None:
                 raise UsageError("error.dataset_corrupt")
             modal.draft.dataset_id = installed.dataset_id
-            modal.statuses = tuple(modal.service.ready_registered_sources())
+            modal.statuses = _dashboard_registration_statuses(modal.service)
             modal.stage, modal.index, modal.offset = ("installed", 0, 0)
             modal.error = None
         except UsageError as exc:
@@ -547,6 +574,9 @@ def handle_dataset_modal(session: TuiSession, event: object) -> None:
             modal.index = (modal.index - 1) % len(entries)
         elif key in {"\r", "\n"} and entries:
             status = entries[modal.index]
+            if not getattr(status, "ready", True):
+                modal.error = _dataset_registration_availability(status, session.translator)
+                return
             modal.draft.dataset_id = status.registration.dataset_id
             modal.metrics = ()
             modal.metric_id = None
@@ -602,7 +632,9 @@ def handle_dataset_modal(session: TuiSession, event: object) -> None:
                 modal.stage, modal.index, modal.offset = ("installed", 0, 0)
         return
     if modal.stage == "github":
-        if key == "\x1b":
+        if key == "\x08" and modal.future is None and modal.artifact is None:
+            open_help(session, context="dataset-input")
+        elif key == "\x1b":
             if modal.future is not None:
                 return
             if modal.artifact is not None:
@@ -626,7 +658,7 @@ def handle_dataset_modal(session: TuiSession, event: object) -> None:
                     modal.draft.command,
                 )
                 modal.error = None
-        elif key in {"\x7f", "\x08"}:
+        elif key == "\x7f":
             modal.draft.command = modal.draft.command[:-1]
             modal.error = None
         elif len(key) == 1 and key.isprintable():
@@ -740,7 +772,9 @@ def handle_dataset_modal(session: TuiSession, event: object) -> None:
                     ),
                 )
         return
-    if key == "\x1b":
+    if key == "\x08" and modal.draft.field in {1, 2}:
+        open_help(session, context="dataset-input")
+    elif key == "\x1b":
         modal.stage, modal.index, modal.offset = ("source", 0, 0)
     elif key in {"\t", "\x1b[B"}:
         modal.draft.field = (modal.draft.field + 1) % 3
@@ -779,7 +813,7 @@ def handle_dataset_modal(session: TuiSession, event: object) -> None:
             modal.error = str(exc)
     elif modal.draft.field in {1, 2}:
         value = modal.draft.dataset_id if modal.draft.field == 1 else modal.draft.command
-        if key in {"\x7f", "\x08"}:
+        if key == "\x7f":
             value = value[:-1]
         elif len(key) == 1 and key.isprintable():
             value += key
