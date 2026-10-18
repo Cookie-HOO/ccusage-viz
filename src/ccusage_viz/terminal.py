@@ -54,6 +54,25 @@ _SHOW_CURSOR = "\x1b[?25h"
 _RESET_STYLE = "\x1b[0m"
 
 
+def _enable_windows_virtual_terminal() -> None:
+    """Enable ANSI processing in the classic Windows console when available."""
+
+    if os.name != "nt":
+        return
+    try:
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        handle = kernel32.GetStdHandle(-11)  # STD_OUTPUT_HANDLE
+        mode = ctypes.c_ulong()
+        if kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+            kernel32.SetConsoleMode(handle, mode.value | 0x0004)
+    except (AttributeError, OSError):
+        # Windows Terminal/ConPTY already understands VT; redirected streams do not
+        # expose a console mode and need no mutation here.
+        return
+
+
 def emphasize(text: str, *, color: int, enabled: bool) -> str:
     """Render a bold themed terminal heading without renderer-global state."""
 
@@ -71,6 +90,7 @@ def set_cursor_visible(stream: TextIO, visible: bool) -> None:
 
 class FramePainter:
     def __init__(self, stream: TextIO = sys.stdout) -> None:
+        _enable_windows_virtual_terminal()
         self.stream = stream
         self.painted = False
         self.finished = False

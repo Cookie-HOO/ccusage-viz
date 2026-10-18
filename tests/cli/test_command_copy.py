@@ -4,8 +4,9 @@ from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
+import ccusage_viz.command_copy as command_copy_module
 from ccusage_viz.cli.configuration import _to_options
-from ccusage_viz.command_copy import format_command, format_full_command, wrap_command
+from ccusage_viz.command_copy import copy_command, format_command, format_full_command, wrap_command
 from ccusage_viz.command_parsing.parser import build_parser
 from ccusage_viz.core.custom_ranking_time import TimestampRange
 from ccusage_viz.core.time import DateRange, local_today
@@ -28,6 +29,43 @@ from ccusage_viz.options import (
     custom_command_sources_equivalent,
     resolve_date_range,
 )
+
+
+@pytest.mark.parametrize(
+    ("available", "expected"),
+    (
+        ({"pbcopy"}, ["/bin/pbcopy"]),
+        ({"clip.exe"}, ["/bin/clip.exe"]),
+        ({"wl-copy"}, ["/bin/wl-copy"]),
+        ({"xclip"}, ["/bin/xclip", "-selection", "clipboard"]),
+        ({"xsel"}, ["/bin/xsel", "--clipboard", "--input"]),
+    ),
+)
+def test_copy_command_selects_platform_clipboard_backend(
+    monkeypatch: pytest.MonkeyPatch, available: set[str], expected: list[str]
+) -> None:
+    calls: list[tuple[list[str], str]] = []
+    monkeypatch.setattr(
+        command_copy_module,
+        "which",
+        lambda name: f"/bin/{name}" if name in available else None,
+    )
+    monkeypatch.setattr(
+        command_copy_module.subprocess,
+        "run",
+        lambda arguments, **kwargs: calls.append((arguments, kwargs["input"])),
+    )
+
+    assert copy_command("copied text")
+    assert calls == [(expected, "copied text")]
+
+
+def test_copy_command_reports_unavailable_without_a_backend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(command_copy_module, "which", lambda _name: None)
+
+    assert not copy_command("copied text")
 
 
 def test_custom_command_sources_use_filesystem_identity_for_absolute_paths(tmp_path) -> None:
