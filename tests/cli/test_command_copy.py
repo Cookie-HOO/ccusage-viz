@@ -9,7 +9,7 @@ from ccusage_viz.cli.configuration import _to_options
 from ccusage_viz.command_copy import copy_command, format_command, format_full_command, wrap_command
 from ccusage_viz.command_parsing.parser import build_parser
 from ccusage_viz.core.custom_ranking_time import TimestampRange
-from ccusage_viz.core.time import DateRange, local_today
+from ccusage_viz.core.time import DateRange
 from ccusage_viz.errors import UsageError
 from ccusage_viz.formatting import display_width
 from ccusage_viz.i18n import load_translator
@@ -159,7 +159,9 @@ def test_installed_custom_command_round_trips_without_executable_path() -> None:
     assert "--installed" not in shlex.split(command)
 
 
-def test_custom_standalone_command_round_trips() -> None:
+def test_custom_standalone_command_round_trips(monkeypatch: pytest.MonkeyPatch) -> None:
+    current_day = date(2026, 10, 18)
+    monkeypatch.setattr("ccusage_viz.options.local_today", lambda *_args, **_kwargs: current_day)
     parser = build_parser(load_translator("en"))
     chart = CustomChartConfig(
         "timeline",
@@ -185,7 +187,7 @@ def test_custom_standalone_command_round_trips() -> None:
         chart=replace(
             launch.chart,
             date_range=resolve_date_range(
-                "timeline", period="30d", since=None, until=None, today=local_today()
+                "timeline", period="30d", since=None, until=None, today=current_day
             ),
         ),
     )
