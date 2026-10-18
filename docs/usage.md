@@ -112,7 +112,7 @@ Dashboard presets do not add animation Panes automatically, but the Dashboard pa
 chooser can add an Animation pane with the default rain style; the pane's quick
 controls cycle every currently eligible catalog effect.
 
-For `monitor` styles `ranking` and `list`, attachments are disabled by default.
+For `monitor` styles `ranking` and `list`, the `mole-cat` attachment is enabled by default.
 In the advanced adjustment view, press `s` to enable the first
 Monitor-eligible effect; `s`/`S` then cycles every effect declared by
 `term-animate`, followed by ccuv-local `none`. An enabled attachment starts

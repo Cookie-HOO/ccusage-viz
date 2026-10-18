@@ -426,6 +426,18 @@ def is_monitor_ranking_style(style: str) -> bool:
     return style in {"ranking", "ranking-dot", "list"}
 
 
+def default_monitor_attachment_style(chart: object) -> str | None:
+    """Enable Mole Cat for Monitor ranking/list defaults, but not other views."""
+
+    return (
+        "mole-cat"
+        if isinstance(chart, (MonitorConfig, CustomChartConfig))
+        and chart.kind == "monitor"
+        and chart.presentation.style in {"ranking", "list"}
+        else None
+    )
+
+
 def monitor_shows_window_control(chart: MonitorConfig) -> bool:
     return not is_monitor_ranking_style(chart.presentation.style)
 

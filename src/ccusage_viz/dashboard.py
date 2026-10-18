@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
-
-from ccusage_viz.options import ChartPaneConfig, MonitorConfig, PaneConfig
+from dataclasses import dataclass
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,19 +70,6 @@ DASHBOARD_PRESETS["wide-clock"] = DashboardPreset(
     style="framed",
     row_weights=(5, 15, 14),
 )
-
-
-def enable_monitor_attachment(
-    panes: tuple[PaneConfig, ...], style: str = "mole-cat"
-) -> tuple[PaneConfig, ...]:
-    """Enable one built-in Monitor attachment without changing ordinary defaults."""
-
-    return tuple(
-        replace(pane, attachment_style=style)
-        if isinstance(pane, ChartPaneConfig) and isinstance(pane.chart, MonitorConfig)
-        else pane
-        for pane in panes
-    )
 
 
 DASHBOARD_PRESETS["single"] = DashboardPreset(

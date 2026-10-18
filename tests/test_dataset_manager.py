@@ -167,7 +167,7 @@ def test_manager_footer_follows_dashboard_browse_order_without_quit() -> None:
     rendered = render_dataset_manager((status(),), load_translator("en"), width=100, height=24)
 
     assert rendered.frame.rows[-1] == (
-        "r refresh all · + add · Enter details · d disable · x remove · j/k select · h help"
+        "r refresh all · + add · Enter details · d disable · x remove · j/k or ↑/↓ select · h help"
     )
     assert "q quit" not in rendered.frame.rows[-1]
     assert "i details" not in rendered.frame.rows[-1]

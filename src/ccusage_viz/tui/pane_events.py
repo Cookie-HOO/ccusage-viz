@@ -6,7 +6,7 @@ from datetime import datetime
 from shutil import get_terminal_size
 
 from ccusage_viz.adjustment_timeout import AdjustmentTimeout
-from ccusage_viz.animation import AnimationSessionState, cycle_monitor_attachment
+from ccusage_viz.animation import AnimationSessionState, animation_spec, cycle_monitor_attachment
 from ccusage_viz.animation_host.runtime import cycle_animation_style
 from ccusage_viz.command_copy import copy_command
 from ccusage_viz.custom_component import CustomHistoricalComponent, custom_date_summary_supported
@@ -521,7 +521,9 @@ def handle_pane_adjustment(session: TuiSession, event: object, key: object, *, n
             if updated != base:
 
                 def apply_custom_presentation(
-                    pane: TuiCustomPane = pane, config: CustomChartConfig = updated
+                    pane: TuiCustomPane = pane,
+                    config: CustomChartConfig = updated,
+                    previous: CustomChartConfig = base,
                 ) -> None:
                     if isinstance(
                         pane.component, CustomHistoricalComponent
@@ -529,6 +531,15 @@ def handle_pane_adjustment(session: TuiSession, event: object, key: object, *, n
                         apply_custom_query(config, mutation="top")
                     else:
                         pane.component.configure(config, data_affecting=False)
+                    if (
+                        pane.attachment is not None
+                        and config.presentation.style != previous.presentation.style
+                        and config.presentation.style in {"ranking", "list"}
+                    ):
+                        pane.attachment.set_style(
+                            animation_spec("mole-cat", target="monitor"), time.monotonic()
+                        )
+                        pane.attachment_enabled = True
 
                 record_mutation(
                     session,
@@ -825,6 +836,17 @@ def handle_pane_adjustment(session: TuiSession, event: object, key: object, *, n
                 component.configure(updated, data_affecting=data_affecting)
                 if updated.host.interval != base.host.interval:
                     pane.scheduler.rebuild(updated.host.interval, now=time.monotonic())
+                if (
+                    pane.attachment is not None
+                    and isinstance(base.chart, MonitorConfig)
+                    and isinstance(updated.chart, MonitorConfig)
+                    and updated.chart.presentation.style != base.chart.presentation.style
+                    and updated.chart.presentation.style in {"ranking", "list"}
+                ):
+                    pane.attachment.set_style(
+                        animation_spec("mole-cat", target="monitor"), time.monotonic()
+                    )
+                    pane.attachment_enabled = True
                 if data_affecting:
                     refresh(session, pane_index, trigger=LifecycleTrigger.CONFIGURATION)
                 elif (
