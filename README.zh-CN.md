@@ -4,7 +4,7 @@
 
 [![PyPI](https://img.shields.io/pypi/v/ccusage-viz.svg)](https://pypi.org/project/ccusage-viz/) [![Python](https://img.shields.io/pypi/pyversions/ccusage-viz.svg)](https://pypi.org/project/ccusage-viz/) [![License: GPL v3](https://img.shields.io/badge/License-GPL%20v3-blue.svg)](LICENSE) [![CI](https://github.com/Cookie-HOO/ccusage-viz/actions/workflows/ci.yml/badge.svg)](https://github.com/Cookie-HOO/ccusage-viz/actions/workflows/ci.yml)
 
-> **Alpha · 0.3.1** — 在 1.0 前接口仍可能变化。当前方向请见[路线图](docs/roadmap.zh-CN.md)。
+> **Alpha · 0.3.2** — 在 1.0 前接口仍可能变化。当前方向请见[路线图](docs/roadmap.zh-CN.md)。
 
 `ccusage-viz` 是面向 [`ccusage`](https://github.com/ryoppippi/ccusage) Token
 数据的独立、非官方终端可视化工具。它把 `ccusage` 命令输出转换为交互式终端图表，
@@ -145,7 +145,7 @@ ccuv dashboard weekly-review --ccusage-bin /opt/bin/ccusage
 | 监测 `monitor` | 累计柱 | `ccuv chart monitor --style cumulative-bars` | 查看本地自然日内保留的 Token 增量。按 `w` 切换今天/昨天，按 `g` 切换每小时/半小时桶；未观测时段与已观测零值保持区分。 | <img src="docs/assets/readme/standalone-monitor-cumulative-bars.png" alt="预览" width="180"> |
 | 监测 `monitor` | 排名 | `ccuv chart monitor --style ranking --by project` | 在观测窗口内按所选维度排名。 | <img src="docs/assets/readme/standalone-monitor-ranking.png" alt="预览" width="180"> |
 | 监测 `monitor` | 列表 | `ccuv chart monitor --style list` | 在观测结果旁展示进程和条目详情。 | <img src="docs/assets/readme/standalone-monitor-list.png" alt="预览" width="180"> |
-| 监测 `monitor` | 动画附件 | 在 `monitor` 的 `ranking` 或 `list` 样式中：按 `m`，再按 `s` | 数据下方的可选动画，默认关闭。`s`/`S` 循环适用效果和 ccuv 本地的 `无`；`t`/`T` 仅调整附件主题。它会等待可比较的已接受 interval，且绝不会触发额外用量查询。 | <img src="docs/assets/readme/standalone-monitor-animation.gif" alt="预览" width="180"> |
+| 监测 `monitor` | 动画附件 | 在 `monitor` 的 `ranking` 或 `list` 样式中：按 `m`，再按 `s` | ranking/list 数据下方默认启用 Mole Cat 动画。`s`/`S` 循环适用效果和 ccuv 本地的 `无`；`t`/`T` 仅调整附件主题。它会等待可比较的已接受 interval，且绝不会触发额外用量查询。 | <img src="docs/assets/readme/standalone-monitor-animation.gif" alt="预览" width="180"> |
 
 > [!TIP]
 > 项目 Ranking 默认使用保守的 **Name** 聚合：无歧义的 Claude–Codex 配对会成为一个图表项目。按 `v`

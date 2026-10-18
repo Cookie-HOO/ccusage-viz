@@ -4,7 +4,7 @@
 
 [![PyPI](https://img.shields.io/pypi/v/ccusage-viz.svg)](https://pypi.org/project/ccusage-viz/) [![Python](https://img.shields.io/pypi/pyversions/ccusage-viz.svg)](https://pypi.org/project/ccusage-viz/) [![License: GPL v3](https://img.shields.io/badge/License-GPL%20v3-blue.svg)](LICENSE) [![CI](https://github.com/Cookie-HOO/ccusage-viz/actions/workflows/ci.yml/badge.svg)](https://github.com/Cookie-HOO/ccusage-viz/actions/workflows/ci.yml)
 
-> **Alpha · 0.3.1** — interfaces may change before 1.0. See the [roadmap](docs/roadmap.md) for current direction.
+> **Alpha · 0.3.2** — interfaces may change before 1.0. See the [roadmap](docs/roadmap.md) for current direction.
 
 `ccusage-viz` is an independent, unofficial terminal visualizer for
 [`ccusage`](https://github.com/ryoppippi/ccusage) token data. It turns
@@ -207,7 +207,7 @@ it focused, replace the Pane, or expand it into a multi-Pane Dashboard.
 | Monitor `monitor` | Cumulative bars | `ccuv chart monitor --style cumulative-bars` | Retained local-day token increments. Press `w` for Today/Yesterday and `g` for hourly/half-hour buckets; unobserved periods remain distinct from observed zero values. | <img src="docs/assets/readme/standalone-monitor-cumulative-bars.png" alt="Preview" width="180"> |
 | Monitor `monitor` | Ranking | `ccuv chart monitor --style ranking --by project` | The selected dimension ranked within its observed window. | <img src="docs/assets/readme/standalone-monitor-ranking.png" alt="Preview" width="180"> |
 | Monitor `monitor` | List | `ccuv chart monitor --style list` | Process and item detail alongside the observation. | <img src="docs/assets/readme/standalone-monitor-list.png" alt="Preview" width="180"> |
-| Monitor `monitor` | Animation attachment | In Monitor `ranking` or `list`: press `m`, then `s` | Optional animation below the data. Disabled by default; `s`/`S` cycles eligible effects and ccuv-local `none`, while `t`/`T` changes only its theme. It waits for a comparable accepted interval and never causes another usage query. | <img src="docs/assets/readme/standalone-monitor-animation.gif" alt="Preview" width="180"> |
+| Monitor `monitor` | Animation attachment | In Monitor `ranking` or `list`: press `m`, then `s` | Animation below ranking/list data, defaulting to Mole Cat; `s`/`S` cycles eligible effects and ccuv-local `none`, while `t`/`T` changes only its theme. It waits for a comparable accepted interval and never causes another usage query. | <img src="docs/assets/readme/standalone-monitor-animation.gif" alt="Preview" width="180"> |
 
 > [!TIP]
 > Project Ranking uses conservative **Name** aggregation by default: an unambiguous
