@@ -36,7 +36,7 @@ _ANIMATION_PANE_CONTENT_ACTIONS = (
 _PANE_POSITION_ACTIONS = (
     ("[", "previous"),
     ("]", "next"),
-    ("Tab", "next_pane"),
+    ("↑/↓/←/→ / Tab", "select_pane"),
     ("{ / }", "width"),
     ("J / K", "height"),
 )

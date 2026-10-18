@@ -141,6 +141,39 @@ def test_windows_extended_arrow_key_is_normalized_to_ansi(
     assert tui_input_module.read_event(decoder, 0) == KeyEvent("\x1b[B")
 
 
+def test_windows_tui_input_mode_enables_mouse_and_restores_console(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[object] = []
+
+    class Kernel32:
+        def GetStdHandle(self, value: int) -> int:
+            calls.append(("handle", value))
+            return 7
+
+        def SetConsoleMode(self, handle: int, mode: int) -> None:
+            calls.append(("mode", handle, mode))
+
+    monkeypatch.setattr(tui_input_module.os, "name", "nt")
+    monkeypatch.setattr(
+        tui_input_module, "_set_windows_virtual_terminal_input", lambda: (Kernel32(), 123)
+    )
+    monkeypatch.setattr(
+        tui_input_module, "set_mouse_reporting", lambda enabled: calls.append(("mouse", enabled))
+    )
+
+    with tui_input_module.tui_input_mode():
+        calls.append("body")
+
+    assert calls == [
+        ("mouse", True),
+        "body",
+        ("mouse", False),
+        ("handle", -10),
+        ("mode", 7, 123),
+    ]
+
+
 def test_tui_input_mode_disables_mouse_and_restores_terminal_on_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

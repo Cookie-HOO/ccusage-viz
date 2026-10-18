@@ -22,6 +22,7 @@ from ccusage_viz.dashboard_layout import (
 )
 from ccusage_viz.dashboard_layout import PaneLayout as ResolvedPaneLayout
 from ccusage_viz.formatting import clip_width
+from ccusage_viz.history_selection import reconcile_history_selection
 from ccusage_viz.render.base import RenderContext
 from ccusage_viz.terminal import Terminal, compose_frame
 from ccusage_viz.terminal_ui import controls_line
@@ -333,12 +334,23 @@ def paint(session: TuiSession, *, force: bool = False, animation_only: bool = Fa
                     )
                 )
                 continue
-            if session.custom_logs_pane == index:
+            if session.custom_logs is not None and session.custom_logs.pane_index == index:
                 assert isinstance(pane, TuiCustomPane)
-                rows = tuple(
-                    f"{session.translator.text(f'status.custom_log_{record.status}')} {record.timestamp:%H:%M:%S}: {record.detail}"
-                    for record in pane.logs
-                ) or (session.translator.text("status.custom_logs_empty"),)
+                records = tuple(reversed(pane.logs))
+                state = session.custom_logs.table
+                visible = max(1, interior_height - 2)
+                selected_index = reconcile_history_selection(state, records, visible)
+                if selected_index is not None:
+                    rows = tuple(
+                        f"{'›' if position == selected_index else ' '} "
+                        f"{session.translator.text(f'status.custom_log_{record.status}')} "
+                        f"{record.timestamp:%H:%M:%S}: {record.detail}"
+                        for position, record in enumerate(
+                            records[state.offset : state.offset + visible], start=state.offset
+                        )
+                    )
+                else:
+                    rows = (session.translator.text("status.custom_logs_empty"),)
                 rendered_panes.append(
                     "\n".join(
                         compose_frame(

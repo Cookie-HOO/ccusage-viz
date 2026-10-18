@@ -1,3 +1,5 @@
+import io
+
 import pytest
 
 from ccusage_viz import __version__
@@ -68,6 +70,22 @@ def test_text_time_state_writes_a_localized_dynamic_status(
 ) -> None:
     assert main(["text", "time-state", "--lang", "zh"]) == 0
     assert capsys.readouterr().out.startswith(("🛌", "🌅", "💼", "🍜", "🌆"))
+
+
+def test_windows_redirected_output_is_reconfigured_to_utf8(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ccusage_viz.cli import entrypoint
+
+    raw = io.BytesIO()
+    stream = io.TextIOWrapper(raw, encoding="gbk")
+    monkeypatch.setattr(entrypoint.os, "name", "nt")
+    monkeypatch.setattr(entrypoint.sys, "stdout", stream)
+
+    assert main(["text", "time-state", "--lang", "zh"]) == 0
+    stream.flush()
+    assert stream.encoding.lower().replace("-", "") == "utf8"
+    assert raw.getvalue().decode("utf-8").startswith(("🛌", "🌅", "💼", "🍜", "🌆"))
 
 
 def test_text_time_state_detects_language_when_omitted(

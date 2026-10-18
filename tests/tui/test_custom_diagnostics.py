@@ -59,8 +59,15 @@ def test_custom_log_records_render_localized_statuses() -> None:
     assert isinstance(pane, tui_models.TuiCustomPane)
     pane.logs.extend(
         (
-            tui_models.CustomLogRecord(datetime(2026, 9, 30, 10, 20), "ok", "done"),
-            tui_models.CustomLogRecord(datetime(2026, 9, 30, 10, 21), "error", "failed"),
+            tui_models.CustomLogRecord(
+                datetime(2026, 9, 30, 10, 20), "ok", "done", '{"request_kind":"chart"}'
+            ),
+            tui_models.CustomLogRecord(
+                datetime(2026, 9, 30, 10, 21),
+                "error",
+                "failed",
+                '{"request_kind":"summary"}',
+            ),
         )
     )
 

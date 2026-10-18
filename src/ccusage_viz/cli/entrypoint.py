@@ -38,7 +38,19 @@ def _preparse_language(argv: list[str]) -> str:
     return namespace.lang or detect_language()
 
 
+def _configure_windows_pipe_encoding(stream: object) -> None:
+    """Use UTF-8 for redirected Windows output consumed by overlay commands."""
+
+    if os.name != "nt" or getattr(stream, "isatty", lambda: True)():
+        return
+    reconfigure = getattr(stream, "reconfigure", None)
+    if reconfigure is not None:
+        reconfigure(encoding="utf-8")
+
+
 def main(argv: list[str] | None = None) -> int:
+    _configure_windows_pipe_encoding(sys.stdout)
+    _configure_windows_pipe_encoding(sys.stderr)
     raw_args = list(sys.argv[1:] if argv is None else argv)
     launcher = os.environ.get("CCUV_LAUNCHER") or "ccuv"
     short_circuit = probe_short_circuit(raw_args)

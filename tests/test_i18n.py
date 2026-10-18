@@ -46,9 +46,9 @@ def test_catalogs_have_the_same_keys_and_placeholders() -> None:
     )
     assert (
         EN_MESSAGES["status.tui_preset_operations"]
-        == "Ctrl-S save as new preset · Ctrl-O manage presets"
+        == "Ctrl-S save as new preset · P manage presets"
     )
-    assert ZH_MESSAGES["status.tui_preset_operations"] == "Ctrl-S 保存为新预设 · Ctrl-O 管理预设"
+    assert ZH_MESSAGES["status.tui_preset_operations"] == "Ctrl-S 保存为新预设 · P 管理预设"
     assert " d adjust dashboard " in EN_MESSAGES["status.tui_chart_controls"]
     assert "c {action}" not in EN_MESSAGES["status.tui_chart_controls"]
     assert " d 调整仪表盘 " in ZH_MESSAGES["status.tui_chart_controls"]
@@ -57,8 +57,8 @@ def test_catalogs_have_the_same_keys_and_placeholders() -> None:
     assert ZH_MESSAGES["status.tui_pane_management_divider"] == "━━ Dashboard 子图管理 ━━"
     assert EN_MESSAGES["label.adjust_replace"] == "replace"
     assert ZH_MESSAGES["label.adjust_replace"] == "替换"
-    assert EN_MESSAGES["label.adjust_next_pane"] == "select next"
-    assert ZH_MESSAGES["label.adjust_next_pane"] == "选择下一项"
+    assert EN_MESSAGES["label.adjust_select_pane"] == "select pane"
+    assert ZH_MESSAGES["label.adjust_select_pane"] == "选择子图"
     assert EN_MESSAGES["label.adjust_custom_logs"] == "logs"
     assert ZH_MESSAGES["label.adjust_custom_logs"] == "日志"
     assert EN_MESSAGES["label.adjust_chart"] == "adjust chart"

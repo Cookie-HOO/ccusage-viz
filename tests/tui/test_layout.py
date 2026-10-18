@@ -28,7 +28,7 @@ import ccusage_viz.tui.session as tui_session
 from ccusage_viz.cli.configuration import _to_options
 from ccusage_viz.command_parsing.parser import build_parser
 from ccusage_viz.coverage import DateCoverage
-from ccusage_viz.dashboard_layout import resolve_pane_layout
+from ccusage_viz.dashboard_layout import pane_in_direction, resolve_pane_layout
 from ccusage_viz.deltas import RefreshRanks
 from ccusage_viz.formatting import display_width
 from ccusage_viz.i18n import load_translator
@@ -50,6 +50,33 @@ from ccusage_viz.tui.layout import (
 from ccusage_viz.tui.pane_lifecycle import _insert_pane, _replace_pane
 from ccusage_viz.tui.rendering import _local_pane_content
 from ccusage_viz.tui_input import InputDecoder, KeyEvent
+
+
+def test_horizontal_pane_navigation_cycles_pane_order() -> None:
+    layout = resolve_pane_layout(layout="2x2", pane_count=4, width=80, height=24)
+
+    assert pane_in_direction(layout, 0, "\x1b[C") == 1
+    assert pane_in_direction(layout, 1, "\x1b[C") == 2
+    assert pane_in_direction(layout, 3, "\x1b[C") == 0
+    assert pane_in_direction(layout, 3, "\x1b[D") == 2
+    assert pane_in_direction(layout, 2, "\x1b[D") == 1
+    assert pane_in_direction(layout, 0, "\x1b[D") == 3
+
+
+def test_vertical_pane_navigation_uses_resolved_spatial_layout() -> None:
+    layout = resolve_pane_layout(layout="2x2", pane_count=4, width=80, height=24)
+
+    assert pane_in_direction(layout, 0, "\x1b[B") == 2
+    assert pane_in_direction(layout, 3, "\x1b[A") == 1
+    assert pane_in_direction(layout, 0, "\x1b[A") == 0
+
+
+def test_vertical_pane_navigation_prefers_alignment_in_spanning_layout() -> None:
+    layout = resolve_pane_layout(layout="spotlight-wide", pane_count=5, width=80, height=24)
+
+    assert pane_in_direction(layout, 0, "\x1b[B") == 1
+    assert pane_in_direction(layout, 2, "\x1b[A") == 0
+    assert pane_in_direction(layout, 1, "\x1b[B") == 3
 
 
 def test_tui_accepts_repeatable_pane_fragments_and_grid() -> None:

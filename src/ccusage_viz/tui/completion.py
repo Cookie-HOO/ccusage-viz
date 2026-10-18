@@ -163,6 +163,13 @@ def collect(session: TuiSession) -> bool:
                 summary.lifecycle.abandon(operation)
             elif outcome.error is not None:
                 summary.error = outcome.error
+                record_custom_log(
+                    session,
+                    pane,
+                    "error",
+                    _custom_failure_log_detail(outcome.error, session.translator),
+                    outcome.request,
+                )
                 summary.lifecycle.complete(operation, generation=outcome.generation)
                 changed = True
             elif outcome.result is None:
@@ -177,6 +184,13 @@ def collect(session: TuiSession) -> bool:
                 summary.accepted_at = datetime.now().astimezone()
                 summary.accepted_period = summary.requested_period
                 summary.accepted_as_of_date = summary.requested_as_of_date
+                record_custom_log(
+                    session,
+                    pane,
+                    "ok",
+                    session.translator.text("status.custom_query_succeeded"),
+                    outcome.request,
+                )
                 summary.lifecycle.complete(operation, generation=outcome.generation)
                 session.last_successful_update = summary.accepted_at
                 changed = True
@@ -330,6 +344,7 @@ def collect(session: TuiSession) -> bool:
                             pane,
                             "error",
                             _custom_failure_log_detail(outcome.error, session.translator),
+                            outcome.request,
                         )
                         pane.lifecycle.complete(operation, generation=outcome.generation)
                         changed = True
@@ -438,6 +453,7 @@ def collect(session: TuiSession) -> bool:
                             pane,
                             "ok",
                             session.translator.text("status.custom_query_succeeded"),
+                            outcome.request,
                         )
                         pane.lifecycle.complete(operation, generation=outcome.generation)
                         session.last_successful_update = pane.component.accepted_at
@@ -465,6 +481,7 @@ def collect(session: TuiSession) -> bool:
                         pane,
                         "ok",
                         session.translator.text("status.custom_query_succeeded"),
+                        outcome.request,
                     )
                     pane.lifecycle.complete(operation, generation=outcome.generation)
                     session.last_successful_update = pane.component.accepted_at

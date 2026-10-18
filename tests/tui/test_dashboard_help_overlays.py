@@ -96,7 +96,7 @@ def test_dashboard_preset_shortcuts_open_the_manager_and_do_not_adjust_dashboard
         (
             KeyEvent("p"),
             KeyEvent("s"),
-            KeyEvent("\x10"),
+            KeyEvent("P"),
             KeyEvent("\x1b"),
             KeyEvent("\x13"),
             KeyEvent("\x1b"),
