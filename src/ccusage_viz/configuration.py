@@ -289,7 +289,11 @@ def default_custom_pane(
         raise ValueError(f"unknown custom chart kind: {kind}")
     presentation = _default_dashboard_chart_presentation(kind)
     date_range = resolve_date_range(
-        "timeline" if kind == "monitor" else kind, period=None, since=None, until=None
+        "timeline" if kind == "monitor" else kind,
+        period=None,
+        since=None,
+        until=None,
+        timezone=dashboard.host.timezone,
     )
     chart = CustomChartConfig(
         kind,
