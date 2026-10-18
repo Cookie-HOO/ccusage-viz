@@ -208,6 +208,12 @@ def help_lines(session: TuiSession, width: int) -> tuple[str, ...]:
             if modal.stage == "source" and modal.statuses:
                 status = modal.statuses[modal.index]
                 descriptor = status.registration.probe.descriptor
+                availability = session.translator.text(f"status.dataset_{status.availability}")
+                if status.missing_environment:
+                    availability = session.translator.text(
+                        "status.dataset_setup_required_names",
+                        names=", ".join(item.name for item in status.missing_environment),
+                    )
                 sections = (
                     (
                         "status.tui_help_section_selecting",
@@ -224,6 +230,10 @@ def help_lines(session: TuiSession, width: int) -> tuple[str, ...]:
                                 "status.tui_help_dataset_chooser_selected",
                                 name=_dataset_title(descriptor.dataset.title, session.translator),
                                 version=descriptor.version,
+                            ),
+                            session.translator.text(
+                                "status.tui_help_dataset_chooser_selected_state",
+                                state=availability,
                             ),
                             descriptor.dataset.description.zh_cn
                             if session.translator.language == "zh"
