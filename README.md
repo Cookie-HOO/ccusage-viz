@@ -120,8 +120,8 @@ remains available to the draft.
 
 > [!TIP]
 > To start without default ccusage panes or requests, use `ccuv dashboard --empty`.
-> It fills the selected default grid or explicit `--columns`/`--spotlight` topology with temporary
-> `empty` panes. Add an installed Dataset with only its chart type and Dataset ID:
+> It creates four temporary `empty` panes; `--columns` and `--spotlight` control only their
+> topology. Add an installed Dataset with only its chart type and Dataset ID:
 > `--pane 'chart timeline --dataset weread'`. Arbitrary commands add `--command`.
 > See the [Dataset user guide](docs/dataset-user-guide.md) to install or register a
 > Dataset, and the [custom command protocol guide](docs/custom-command-protocol.md)
@@ -134,11 +134,27 @@ ccuv dashboard
 | Preset | Command | Layout | Preview |
 | --- | --- | --- | --- |
 | `single` | `ccuv dashboard single` | A single live analog clock without a text overlay or Dashboard frame. | - |
-| 【Recommended—wide terminal】 `wide-clock` **(default without a preset)** | `ccuv dashboard wide-clock` | Best for an all-purpose overview with a compact live digital clock. Digital clock + balanced 2×2. | <img src="docs/assets/readme/dashboard-wide-clock.png" alt="Preview" width="180"> |
-| 【Recommended—sidebar】 `narrow-clock` | `ccuv dashboard narrow-clock` | Best for a sidebar with a live clock. Clock + vertical 4×1. | <img src="docs/assets/readme/dashboard-narrow-clock.png" alt="Preview" width="180"> |
-| `wide` | `ccuv dashboard wide` | Best for a balanced data-only overview. Balanced 2×2. | <img src="docs/assets/readme/dashboard-wide.png" alt="Preview" width="180"> |
+| 【Recommended—wide terminal】 `wide-clock` **(default without a preset)** | `ccuv dashboard wide-clock` | Compact digital clock in one full-width spotlight row, followed by two-column data panes. | <img src="docs/assets/readme/dashboard-wide-clock.png" alt="Preview" width="180"> |
+| 【Recommended—sidebar】 `narrow-clock` | `ccuv dashboard narrow-clock` | Digital clock and data panes in one column. | <img src="docs/assets/readme/dashboard-narrow-clock.png" alt="Preview" width="180"> |
+| `wide` | `ccuv dashboard wide` | Balanced two-column data-only overview. | <img src="docs/assets/readme/dashboard-wide.png" alt="Preview" width="180"> |
 | `narrow` | `ccuv dashboard narrow` | Best for a compact, narrow-terminal overview. Vertical focus. | <img src="docs/assets/readme/dashboard-narrow.png" alt="Preview" width="180"> |
 | `all` | `ccuv dashboard all` | Best for comparing many pane types at once. Broad gallery. | <img src="docs/assets/readme/dashboard-all.png" alt="Preview" width="180"> |
+
+### Flexible Dashboard topology
+
+Presets decide Pane content and presentation; topology independently decides where the current
+ordered Panes appear. The first `--spotlight N` Panes each occupy a full-width row, and the
+remaining Panes flow left-to-right into `--columns C` columns:
+
+```bash
+ccuv dashboard wide --columns 3 --spotlight 1
+```
+
+In Dashboard-global adjustment mode, press `z` to preview and edit both values. Use Up/Down or
+`j`/`k` to select a field, Left/Right or `-`/`+` to adjust it, Enter to commit the whole edit,
+and Escape to cancel. With a Pane selected, `{`/`}` resize its shared column and `J`/`K` resize
+its row. The former `--grid`, `--layout`, `spotlight-wide`, and `spotlight-wide2` interfaces are
+no longer supported.
 
 ### Your Dashboard presets
 
@@ -177,9 +193,11 @@ user-local automation: load only presets you trust, because loading one can run
 the commands it contains. Presets live in ccuv's private state directory under
 `dashboard-presets/presets.json` (`~/Library/Application Support/ccuv` on macOS,
 `%LOCALAPPDATA%/ccuv` on Windows, or `${XDG_STATE_HOME:-~/.local/state}/ccuv` on
-other systems). A missing installed Dataset leaves a preset loadable and its pane
-reports the unavailable source; only unreadable, malformed, or unsupported preset
-storage is shown as unavailable and protected from overwrites.
+other systems). Saved presets now use schema `ccuv.dashboard-presets/v2`. Existing v1 presets
+are not migrated or loaded; on the first new save, ccuv archives the original v1 file as a
+private backup and starts a v2 collection. Malformed JSON and unknown schemas remain protected
+from overwrite. A missing installed Dataset leaves a valid v2 preset loadable while its Pane
+reports the unavailable source.
 
 > [!TIP]
 > Dashboard coordinates pane queries: identical in-flight provider requests are

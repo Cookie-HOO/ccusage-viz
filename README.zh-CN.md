@@ -88,7 +88,7 @@ Dashboard 提供与当前界面对应的帮助：按 `h` 查看当前可用控�
 
 > [!TIP]
 > 若要在不创建默认 ccusage Pane 或请求的情况下启动，请使用 `ccuv dashboard --empty`。
-> 它会以选定的默认网格或显式 `--columns`/`--spotlight` topology 填充临时 `empty` Pane。可通过
+> 它会创建四个临时 `empty` Pane；`--columns` 和 `--spotlight` 只控制它们的拓扑。可通过
 > `--pane 'chart timeline --dataset reading --command "my-reader ccuv"'` 加入命令驱动的自定义数据。
 > 安装、注册和使用 Dataset 请见 [Dataset 使用者指南](docs/dataset-user-guide.zh-CN.md)；
 > 开发 Dataset 请见[自定义命令协议指南](docs/custom-command-protocol.zh-CN.md)。
@@ -100,11 +100,25 @@ ccuv dashboard
 | 预设 | 命令 | 布局 | 预览 |
 | --- | --- | --- | --- |
 | `single` | `ccuv dashboard single` | 单个实时模拟时钟，无文字叠层和 Dashboard 边框。 | - |
-| 【推荐-宽终端】 `wide-clock` **（未指定预设时的默认值）** | `ccuv dashboard wide-clock` | 推荐用于带紧凑实时数字时钟的通用总览。数字时钟 + 均衡 2×2。 | <img src="docs/assets/readme/dashboard-wide-clock.png" alt="预览" width="180"> |
-| 【推荐-侧边栏】 `narrow-clock` | `ccuv dashboard narrow-clock` | 推荐用于带实时时钟的侧边栏。时钟 + 纵向 4×1。 | <img src="docs/assets/readme/dashboard-narrow-clock.png" alt="预览" width="180"> |
-| `wide` | `ccuv dashboard wide` | 推荐用于只看数据的均衡总览。均衡 2×2。 | <img src="docs/assets/readme/dashboard-wide.png" alt="预览" width="180"> |
+| 【推荐-宽终端】 `wide-clock` **（未指定预设时的默认值）** | `ccuv dashboard wide-clock` | 数字时钟占一行全宽聚焦区，其余数据 Pane 按两列排列。 | <img src="docs/assets/readme/dashboard-wide-clock.png" alt="预览" width="180"> |
+| 【推荐-侧边栏】 `narrow-clock` | `ccuv dashboard narrow-clock` | 数字时钟与数据 Pane 按单列排列。 | <img src="docs/assets/readme/dashboard-narrow-clock.png" alt="预览" width="180"> |
+| `wide` | `ccuv dashboard wide` | 均衡的双列纯数据总览。 | <img src="docs/assets/readme/dashboard-wide.png" alt="预览" width="180"> |
 | `narrow` | `ccuv dashboard narrow` | 推荐用于窄终端中的紧凑总览。纵向聚焦。 | <img src="docs/assets/readme/dashboard-narrow.png" alt="预览" width="180"> |
 | `all` | `ccuv dashboard all` | 推荐用于同时比较多种 Pane。宽广画廊。 | <img src="docs/assets/readme/dashboard-all.png" alt="预览" width="180"> |
+
+### 灵活的 Dashboard 拓扑
+
+预设决定 Pane 内容与显示，拓扑独立决定当前有序 Pane 的空间排列。前 `--spotlight N` 个 Pane
+从上到下各占一整行，其余 Pane 从左到右按 `--columns C` 列排列：
+
+```bash
+ccuv dashboard wide --columns 3 --spotlight 1
+```
+
+在 Dashboard 全局调整模式按 `z` 即可实时预览和编辑两个值：上下方向键或 `j`/`k` 选择字段，
+左右方向键或 `-`/`+` 调整数值，Enter 整体提交，Escape 取消。选中 Pane 后，`{`/`}` 调整共享列宽，
+`J`/`K` 调整所在行高。不再支持旧的 `--grid`、`--layout`、`spotlight-wide` 和
+`spotlight-wide2` 接口。
 
 ### 你的 Dashboard 预设
 
@@ -121,7 +135,7 @@ ccuv dashboard weekly-review --ccusage-bin /opt/bin/ccusage
 
 具名预设的 `--empty` 会保留布局、权重、显示设置、刷新/采样节奏、时区、demo 和进程设置及其他安全的 ccuv 配置，但仅在内存中将每个 Pane 替换为空白 Pane；绝不会修改已保存的预设。原有未命名的 `ccuv dashboard --empty` 仍可用于临时组合新的 Dashboard。启用 demo 的预设加载后仍会启用 demo；Dashboard 目前没有运行时关闭 demo 的控制。
 
-预设会持久化声明式 Dashboard 配置，包括语言、时区、`ccusage-bin`、已安装 Dataset 的引用、本地命令 argv 和可执行 Overlay 命令，但不会保存查询结果、环境变量、凭据或 UI/运行时状态。显式传入的 `--lang` 会覆盖预设语言。预设属于可信的用户本地自动化配置：加载预设会执行其中包含的命令，因此只能加载你信任的预设。预设保存在 ccuv 的私有状态目录 `dashboard-presets/presets.json`：macOS 为 `~/Library/Application Support/ccuv`，Windows 为 `%LOCALAPPDATA%/ccuv`，其他系统为 `${XDG_STATE_HOME:-~/.local/state}/ccuv`。缺少已安装 Dataset 不会使预设不可加载，受影响 Pane 会报告不可用的数据源；只有预设存储不可读、格式错误或版本不支持时才显示为不可用，并阻止覆盖写入。
+预设会持久化声明式 Dashboard 配置，包括语言、时区、`ccusage-bin`、已安装 Dataset 的引用、本地命令 argv 和可执行 Overlay 命令，但不会保存查询结果、环境变量、凭据或 UI/运行时状态。显式传入的 `--lang` 会覆盖预设语言。预设属于可信的用户本地自动化配置：加载预设会执行其中包含的命令，因此只能加载你信任的预设。预设保存在 ccuv 的私有状态目录 `dashboard-presets/presets.json`：macOS 为 `~/Library/Application Support/ccuv`，Windows 为 `%LOCALAPPDATA%/ccuv`，其他系统为 `${XDG_STATE_HOME:-~/.local/state}/ccuv`。保存格式已升级为 `ccuv.dashboard-presets/v2`：旧 v1 不会迁移或加载；首次保存新预设时，ccuv 会把原 v1 文件归档为私有备份，再创建 v2 集合。损坏 JSON 与未知 schema 仍受保护、不会被覆盖。缺少已安装 Dataset 不会使有效 v2 预设不可加载，受影响 Pane 会报告不可用的数据源。
 
 > [!TIP]
 > Dashboard 会协调 Pane 查询：多个 Pane 刷新时，相同的进行中 Provider 请求会被共享，避免重复工作。
@@ -151,7 +165,7 @@ ccuv dashboard weekly-review --ccusage-bin /opt/bin/ccusage
 > 使用 `--project-aggregation exact` 可关闭跨 Agent 聚合。
 
 > [!TIP]
-> 想将多个聚焦图表一同查看？可以从聚焦图表会话添加 Pane，或直接组合自定义 Dashboard，并自行选择网格或命名布局。参阅[使用指南](docs/usage.zh-CN.md)。
+> 想将多个聚焦图表一同查看？可以从聚焦图表会话添加 Pane，或直接组合自定义 Dashboard，并自行选择列数和聚焦数量。参阅[使用指南](docs/usage.zh-CN.md)。
 
 已声明该能力的 V2 Dataset 可以在每个逻辑模型中独立排列真实模型：
 

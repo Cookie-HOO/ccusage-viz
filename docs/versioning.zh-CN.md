@@ -8,9 +8,18 @@
 
 ## 0.3.4
 
-`0.3.4` 改进 Dataset 维护与自定义筛选编辑，不改变 ccuv 默认依赖官方 ccusage
-的行为，也不改变内置 Token 语义：
+`0.3.4` 增加灵活的 Dashboard 拓扑，改进 Dataset 维护与自定义筛选编辑，并收紧
+Dataset capability 声明；不改变 ccuv 默认依赖官方 ccusage 的行为，也不改变内置 Token 语义：
 
+- Dashboard 布局统一由 `--columns` 与前导 `--spotlight` Pane 数量表达：聚焦 Pane
+  从上到下各占一整行，其余 Pane 按指定列数排列；全局 `z` 编辑器会事务式实时预览两个值，
+  `{`/`}` 与 `J`/`K` 继续直接调整列宽和行高；
+- `wide`、`narrow`、`all`、时钟变体与 `single` 继续作为完整预设；删除旧的
+  `--grid`、`--layout`、`spotlight-wide` 与 `spotlight-wide2` 接口；
+- 保存的 Dashboard 预设升级为 `ccuv.dashboard-presets/v2`；v1 不迁移、不加载，
+  但首次保存新预设时会先归档原 v1 文件，再创建 v2 集合；损坏文件和未知 schema 仍禁止覆盖；
+- Custom Dataset 周期控制继续只在当前图表 capability 声明的有序周期中循环；
+  WeRead Ranking 声明现与分组数据源约束一致，只提供 `1w`、`1mo`、`1y`；
 - Dataset 刷新会检查受管理的官方/GitHub 安装是否存在新版，在列表和详情中展示
   当前版本与候选版本，并报告不可用和可升级数量；
 - `u` 升级当前 Dataset，`U` 经确认后升级全部已检测候选；单项失败不会阻断其余升级；
