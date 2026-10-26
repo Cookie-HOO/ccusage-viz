@@ -782,7 +782,7 @@ normal help intentionally omits advanced `--query-timeout` and Dashboard weight
 options; this guide records them so their constraints are clear.
 
 
-## Flexible Dashboard topology (0.3.4)
+## Flexible Dashboard topology (0.3.5)
 
 Dashboard presets (`single`, `wide`, `wide-clock`, `narrow`, `narrow-clock`, and `all`) are complete startup configurations. Spatial layout is independent and uses two integers:
 

@@ -615,7 +615,7 @@ Dashboard 有独立的导航和归属规则。浏览模式中：
 `ccuv --lang zh dashboard --help`。常规帮助刻意省略高级 `--query-timeout` 和 Dashboard 权重参数；本文记录它们以明确约束。
 
 
-## 灵活的 Dashboard 拓扑（0.3.4）
+## 灵活的 Dashboard 拓扑（0.3.5）
 
 Dashboard 预设（`single`、`wide`、`wide-clock`、`narrow`、`narrow-clock`、`all`）是完整的启动配置；空间布局独立使用两个整数：
 
