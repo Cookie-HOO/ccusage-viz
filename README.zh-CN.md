@@ -82,9 +82,9 @@ ccuv dataset list
 
 Dashboard 提供与当前界面对应的帮助：按 `h` 查看当前可用控制；在图表浏览模式中按 `c` 显示或隐藏控制栏。编辑 Overlay 文本或命令时，请使用 `Ctrl-H`，这样字面量 `h` 仍可输入草稿。
 
-## Dashboard 预设
+## Dashboard
 
-`dashboard` 将彼此独立配置的图表组合在同一终端中。未提供位置预设时，`dashboard` 默认使用 `wide-clock`：
+`dashboard` 将彼此独立配置的图表组合在同一终端中。未提供位置预设时默认使用 `wide-clock`：
 
 > [!TIP]
 > 若要在不创建默认 ccusage Pane 或请求的情况下启动，请使用 `ccuv dashboard --empty`。
@@ -97,7 +97,9 @@ Dashboard 提供与当前界面对应的帮助：按 `h` 查看当前可用控�
 ccuv dashboard
 ```
 
-| 预设 | 命令 | 布局 | 预览 |
+### 内置预设
+
+| 预设 | 命令 | 默认排列 | 预览 |
 | --- | --- | --- | --- |
 | `single` | `ccuv dashboard single` | 单个实时模拟时钟，无文字叠层和 Dashboard 边框。 | - |
 | 【推荐-宽终端】 `wide-clock` **（未指定预设时的默认值）** | `ccuv dashboard wide-clock` | 数字时钟占一行全宽聚焦区，其余数据 Pane 按两列排列。 | <img src="docs/assets/readme/dashboard-wide-clock.png" alt="预览" width="180"> |

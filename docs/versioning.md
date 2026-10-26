@@ -8,9 +8,9 @@
 
 ## 0.3.4
 
-`0.3.4` adds flexible Dashboard topology, improves Dataset maintenance and
-custom-filter editing, and tightens Dataset capability declarations without changing
-ccuv's default official-ccusage dependency or built-in Token semantics:
+`0.3.4` adds flexible Dashboard topology and improves Dataset maintenance and
+custom-filter editing without changing ccuv's default official-ccusage dependency
+or built-in Token semantics:
 
 - Dashboard layout is now expressed by `--columns` plus a leading `--spotlight`
   Pane count: spotlight Panes occupy consecutive full-width rows and the remainder
@@ -22,9 +22,7 @@ ccuv's default official-ccusage dependency or built-in Token semantics:
 - saved Dashboard presets use `ccuv.dashboard-presets/v2`; v1 presets are not
   migrated or loaded, but the first new save archives the original v1 file before
   creating a v2 collection. Malformed or unknown-schema files remain protected;
-- Custom Dataset period controls continue to cycle only through the active chart
-  capability's declared ordered periods. The WeRead Ranking declaration now matches
-  its grouped source contract exactly and offers only `1w`, `1mo`, and `1y`;
+- WeRead Ranking no longer offers time ranges that its grouped source cannot serve;
 - Dataset refresh now checks managed official/GitHub installations for newer
   releases, shows current and candidate versions in the list and detail views,
   and reports unavailable and upgradeable counts;

@@ -114,9 +114,9 @@ active surface, and press `c` in chart-browse mode to show or hide its footer.
 While editing Overlay text or a command, use `Ctrl-H` instead so the literal `h`
 remains available to the draft.
 
-## Dashboard presets
+## Dashboard
 
-`dashboard` composes independently configured charts in one terminal. Without a positional preset, `dashboard` defaults to `wide-clock`:
+`dashboard` composes independently configured charts in one terminal. Without a positional preset, it defaults to `wide-clock`:
 
 > [!TIP]
 > To start without default ccusage panes or requests, use `ccuv dashboard --empty`.
@@ -131,7 +131,9 @@ remains available to the draft.
 ccuv dashboard
 ```
 
-| Preset | Command | Layout | Preview |
+### Built-in presets
+
+| Preset | Command | Default arrangement | Preview |
 | --- | --- | --- | --- |
 | `single` | `ccuv dashboard single` | A single live analog clock without a text overlay or Dashboard frame. | - |
 | 【Recommended—wide terminal】 `wide-clock` **(default without a preset)** | `ccuv dashboard wide-clock` | Compact digital clock in one full-width spotlight row, followed by two-column data panes. | <img src="docs/assets/readme/dashboard-wide-clock.png" alt="Preview" width="180"> |
