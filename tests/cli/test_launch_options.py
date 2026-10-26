@@ -82,7 +82,7 @@ def test_chart_launch_becomes_focused_one_pane_dashboard() -> None:
     ):
         dashboard = focused_dashboard_from_chart(launch)
         assert dashboard.process == launch.process
-        assert dashboard.host.grid == "1x1"
+        assert (dashboard.host.columns, dashboard.host.spotlight) == (1, 0)
         assert dashboard.host.header_style == "hidden"
         assert dashboard.host.header_summary == "none"
         assert dashboard.host.ascii == launch.host.ascii

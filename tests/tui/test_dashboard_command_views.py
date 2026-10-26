@@ -127,8 +127,8 @@ def test_dashboard_layout_weights_round_trip_through_full_command() -> None:
                 "timeline",
                 "--pane",
                 "ranking",
-                "--grid",
-                "1x2",
+                "--columns",
+                "2",
                 "--column-weight",
                 "2",
                 "--column-weight",
@@ -144,22 +144,23 @@ def test_dashboard_layout_weights_round_trip_through_full_command() -> None:
 
     assert "--column-weight 16 --column-weight 8" in full
     assert "--row-weight 24" in full
-    assert reparsed.host.grid == "1x2"
+    assert (reparsed.host.columns, reparsed.host.spotlight) == (2, 0)
     assert reparsed.host.column_weights == (16, 8)
     assert reparsed.host.row_weights == (24,)
 
 
-def test_full_dashboard_command_explicit_grid_overrides_source_named_layout() -> None:
+def test_full_dashboard_command_explicit_topology_overrides_source() -> None:
     parser = build_parser(load_translator("en"))
-    dashboard = _to_options(parser.parse_args(["dashboard", "spotlight-wide"]))
+    dashboard = _to_options(parser.parse_args(["dashboard", "wide-clock"]))
 
-    full = format_full_dashboard_command(dashboard, grid="2x2")
+    full = format_full_dashboard_command(dashboard, columns=3, spotlight=2)
     reparsed = _to_options(parser.parse_args(shlex.split(full)[1:]))
 
-    assert "--grid 2x2" in full
+    assert "--columns 3" in full
+    assert "--spotlight 2" in full
+    assert "--grid" not in full
     assert "--layout" not in full
-    assert reparsed.host.grid == "2x2"
-    assert reparsed.host.layout is None
+    assert (reparsed.host.columns, reparsed.host.spotlight) == (3, 2)
 
 
 def test_full_dashboard_command_serializes_runtime_layout_weight_overrides() -> None:
@@ -195,7 +196,8 @@ def test_full_dashboard_command_includes_private_and_runtime_configuration() -> 
     full = format_full_dashboard_command(
         dashboard,
         dashboard.panes,
-        layout="auto",
+        columns=1,
+        spotlight=0,
         header_style="compact",
         header_summary="month",
         dashboard_style="split",

@@ -6,8 +6,8 @@ from dataclasses import dataclass
 @dataclass(frozen=True, slots=True)
 class DashboardPreset:
     panels: tuple[str, ...]
-    grid: str
-    layout: str | None = None
+    columns: int
+    spotlight: int = 0
     refresh_interval: float = 60.0
     sampling_interval: float = 15.0
     header_summary: str = "day"
@@ -23,20 +23,14 @@ DEFAULT_DASHBOARD_PANELS = (
 )
 DEFAULT_DASHBOARD_MONITOR_PANEL = DEFAULT_DASHBOARD_PANELS[-1]
 DASHBOARD_PRESETS = {
-    "wide": DashboardPreset(DEFAULT_DASHBOARD_PANELS, "2x2", style="framed"),
-    "spotlight-wide": DashboardPreset(
-        DEFAULT_DASHBOARD_PANELS[:3], "2x2", layout="spotlight-wide", style="framed"
-    ),
-    "spotlight-wide2": DashboardPreset(
-        DEFAULT_DASHBOARD_PANELS, "2x2", layout="spotlight-wide2", style="framed"
-    ),
+    "wide": DashboardPreset(DEFAULT_DASHBOARD_PANELS, 2, style="framed"),
     "narrow": DashboardPreset(
         (
             "timeline --period 14d --style line-points --theme nord --density compact",
             "ranking --period 14d --by project --style dot --theme gruvbox --density compact",
             "monitor --window 1h --by model --style ranking --theme dracula --density compact",
         ),
-        "3x1",
+        1,
         style="framed",
     ),
     "all": DashboardPreset(
@@ -52,29 +46,27 @@ DASHBOARD_PRESETS = {
             "monitor --by agent --style ranking --theme gruvbox --density minimal",
             "monitor --by project --style ranking --theme solarized --density minimal",
         ),
-        "5x2",
+        2,
         style="split",
     ),
 }
 
 DASHBOARD_PRESETS["narrow-clock"] = DashboardPreset(
     ("animate digital-clock", *DASHBOARD_PRESETS["narrow"].panels),
-    "4x1",
+    1,
     style="framed",
     row_weights=(3, 7, 7, 6),
 )
 DASHBOARD_PRESETS["wide-clock"] = DashboardPreset(
     ("animate digital-clock", *DASHBOARD_PRESETS["wide"].panels),
-    "2x2",
-    layout="spotlight-wide",
+    2,
+    spotlight=1,
     style="framed",
     row_weights=(5, 15, 14),
 )
-
-
 DASHBOARD_PRESETS["single"] = DashboardPreset(
     ("animate analog-clock",),
-    "1x1",
+    1,
     header_summary="none",
     style="minimal",
 )

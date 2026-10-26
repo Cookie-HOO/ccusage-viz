@@ -125,7 +125,7 @@ def test_chart_routes_to_focused_dashboard_runner(monkeypatch: pytest.MonkeyPatc
     assert len(received) == 1
     dashboard = received[0]
     assert dashboard.panes[0].chart == custom.chart
-    assert dashboard.host.grid == "1x1"
+    assert (dashboard.host.columns, dashboard.host.spotlight) == (1, 0)
     assert dashboard.host.header_summary == "none"
     assert dependency_calls == [custom]
 
@@ -142,4 +142,4 @@ def test_historical_charts_share_the_dashboard_runner(monkeypatch: pytest.Monkey
 
     assert application.run(options(), load_translator("en")) == 1
     assert application.run(options(), load_translator("en")) == 2
-    assert all(item.host.grid == "1x1" for item in received)
+    assert all((item.host.columns, item.host.spotlight) == (1, 0) for item in received)

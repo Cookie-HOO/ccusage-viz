@@ -6,7 +6,6 @@ from time import monotonic
 import pytest
 
 import ccusage_viz.tui.adjustments as tui_adjustments
-import ccusage_viz.tui.dashboard_events as tui_dashboard_events
 import ccusage_viz.tui.datasets.blocking as tui_datasets_blocking
 import ccusage_viz.tui.datasets.catalog as tui_datasets_catalog
 import ccusage_viz.tui.datasets.chooser as tui_datasets_chooser
@@ -40,9 +39,8 @@ def dashboard(monkeypatch):
         build_parser(load_translator("en")).parse_args(
             [
                 "dashboard",
-                "--empty",
-                "--grid",
-                "1x2",
+                "--columns",
+                "2",
                 "--pane",
                 "empty",
                 "--pane",
@@ -109,7 +107,6 @@ def dashboard(monkeypatch):
     monkeypatch.setattr(tui_structure, "_new_pane", lambda *args, **kwargs: next(supplied))
     monkeypatch.setattr(tui_history, "_new_pane", lambda *args, **kwargs: next(supplied))
     monkeypatch.setattr(tui_session, "FramePainter", Screen)
-    monkeypatch.setattr(tui_adjustments, "FramePainter", Screen)
     monkeypatch.setattr(tui_datasets_catalog, "FramePainter", Screen)
     monkeypatch.setattr(tui_datasets_chooser, "FramePainter", Screen)
     monkeypatch.setattr(tui_layout, "_compose_resolved_panes", compose)
@@ -118,7 +115,6 @@ def dashboard(monkeypatch):
     monkeypatch.setattr(tui_events, "get_terminal_size", lambda: terminal_size(size))
     monkeypatch.setattr(tui_runtime, "get_terminal_size", lambda: terminal_size(size))
     monkeypatch.setattr(tui_painting, "get_terminal_size", lambda: terminal_size(size))
-    monkeypatch.setattr(tui_dashboard_events, "get_terminal_size", lambda: terminal_size(size))
     monkeypatch.setattr(tui_pointer, "get_terminal_size", lambda: terminal_size(size))
     monkeypatch.setattr(tui_pane_events, "get_terminal_size", lambda: terminal_size(size))
     monkeypatch.setattr(tui_help, "get_terminal_size", lambda: terminal_size(size))

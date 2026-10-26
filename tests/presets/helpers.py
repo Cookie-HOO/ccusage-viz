@@ -46,7 +46,7 @@ def _launch(*, panes: tuple[object, ...] | None = None) -> DashboardLaunch:
     return DashboardLaunch(
         ProcessConfig("custom-ccusage", 9.5, 2048, (("API_TOKEN", "secret"),)),
         DashboardHostConfig(
-            grid="1x1" if len(resolved_panes) == 1 else "3x3",
+            columns=1 if len(resolved_panes) == 1 else 3,
             timezone="Asia/Shanghai",
             demo_size="small",
             demo_seed=3,
@@ -54,7 +54,11 @@ def _launch(*, panes: tuple[object, ...] | None = None) -> DashboardLaunch:
             sampling_interval=7,
             header_interval=5,
             column_weights=(1,) if len(resolved_panes) == 1 else (2, 3, 4),
-            row_weights=(1,) if len(resolved_panes) == 1 else (2, 3, 4),
+            row_weights=(1,)
+            * (
+                (len(resolved_panes) + (1 if len(resolved_panes) == 1 else 3) - 1)
+                // (1 if len(resolved_panes) == 1 else 3)
+            ),
         ),
         resolved_panes,  # type: ignore[arg-type]
         explicit=frozenset({"demo"}),

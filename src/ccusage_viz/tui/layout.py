@@ -2,42 +2,11 @@ from __future__ import annotations
 
 from ccusage_viz.animation_overlay import clip_overlay_placements, compose_overlay_row
 from ccusage_viz.dashboard_layout import PaneLayout as ResolvedPaneLayout
-from ccusage_viz.dashboard_layout import PaneRect, layout_for_pane_count, resolve_pane_layout
-from ccusage_viz.dashboard_layout import parse_grid as parse_numeric_grid
+from ccusage_viz.dashboard_layout import PaneRect
 from ccusage_viz.formatting import clip_width, pad_width
 from ccusage_viz.render.base import RenderContext, styled_text
 from ccusage_viz.render.palette import get_color_scheme
 from ccusage_viz.tui.models import DashboardOverlayPlacement, PaneLayout
-
-
-def _grid_shape(grid: str, count: int) -> tuple[int, int]:
-    """Return logical bands for compatibility with rectangular-grid callers."""
-    layout = resolve_pane_layout(
-        layout=grid,
-        pane_count=count,
-        width=max(8, count * 8),
-        height=max(6, count * 6),
-        divider_style="none",
-    )
-    return layout.topology.rows, layout.topology.columns
-
-
-def _grid_for_pane_count(grid: str, pane_count: int) -> str:
-    return layout_for_pane_count(grid, pane_count)
-
-
-def _practical_grid(pane_count: int) -> str:
-    """Return the smallest two-column grid suitable for numeric layout editing."""
-    if pane_count == 1:
-        return "1x1"
-    columns = 2
-    rows = (pane_count + columns - 1) // columns
-    return f"{rows}x{columns}"
-
-
-def parse_grid(value: str, pane_count: int) -> str | None:
-    """Normalize a runtime numeric grid only when it can display every pane."""
-    return parse_numeric_grid(value, pane_count)
 
 
 def _dashboard_structure(style: str) -> tuple[str, str]:

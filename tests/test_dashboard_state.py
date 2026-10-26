@@ -10,8 +10,8 @@ def test_dashboard_state_is_immutable_declarative_value() -> None:
     pane = DashboardPaneState(pane_id=7, config=EmptyPaneConfig(), body_view="chart")
     state = DashboardState(
         panes=(pane,),
-        grid="1x1",
-        layout=None,
+        columns=1,
+        spotlight=0,
         column_weights=None,
         row_weights=None,
         theme="classic",

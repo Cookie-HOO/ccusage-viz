@@ -212,7 +212,7 @@ def test_monitor_parser_rejects_unknown_grouping() -> None:
     assert caught.value.key == "error.arguments"
 
 
-def test_dashboard_help_exposes_public_named_layouts(
+def test_dashboard_help_exposes_topology_parameters(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     parser = build_parser(load_translator("en"))
@@ -222,8 +222,9 @@ def test_dashboard_help_exposes_public_named_layouts(
 
     assert caught.value.code == 0
     output = capsys.readouterr().out
-    assert "--layout" in output
-    assert "spotlight-wide2" in output
+    assert "--columns" in output
+    assert "--spotlight" in output
+    assert "--layout" not in output
     assert "spotlight-monitor" not in output
 
 
@@ -238,7 +239,7 @@ def test_dashboard_help_exposes_public_named_layouts(
         (
             ["--column-weight", "1", "--row-weight", "1"],
             "error.tui_layout_weight_count",
-            {"axis": "column", "expected": 2, "actual": 1, "layout": "1x2"},
+            {"axis": "column", "expected": 2, "actual": 1, "layout": "2 columns / 0 spotlight"},
         ),
     ],
 )
@@ -255,8 +256,8 @@ def test_dashboard_rejects_invalid_layout_weights(
                     "timeline",
                     "--pane",
                     "stack",
-                    "--grid",
-                    "1x2",
+                    "--columns",
+                    "2",
                     *arguments,
                 ]
             )

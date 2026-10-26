@@ -3,7 +3,9 @@ from __future__ import annotations
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from datetime import datetime
+from typing import Literal
 
 from ccusage_viz.adjustment_timeout import AdjustmentIdleTimer
 from ccusage_viz.bootstrap import build_query_runtime
@@ -34,6 +36,13 @@ from ccusage_viz.tui_input import InputDecoder
 from ccusage_viz.tui_preset_manager import PresetManagerState
 
 
+@dataclass(slots=True)
+class LayoutDraft:
+    columns: int
+    spotlight: int
+    selected: Literal["spotlight", "columns"] = "spotlight"
+
+
 class TuiSession:
     def __init__(self, options: DashboardLaunch, translator: Translator) -> None:
         from ccusage_viz.tui.history import capture_dashboard_state
@@ -61,16 +70,15 @@ class TuiSession:
         )
         self.executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix="ccusage-viz-tui")
         self.focused: int | None = None
-        self.active_grid = self.options.host.grid
-        self.active_layout = self.options.host.layout
+        self.columns = self.options.host.columns
+        self.spotlight = self.options.host.spotlight
         self.column_weights = self.options.host.column_weights
         self.row_weights = self.options.host.row_weights
         self.header_style = self.options.host.header_style
         self.dashboard_style = self.options.host.style
         self.dashboard_theme = self.options.host.theme
         self.divider_style, self.frame_style = _dashboard_structure(self.dashboard_style)
-        self.grid_draft: str | None = None
-        self.grid_error: str | None = None
+        self.layout_draft: LayoutDraft | None = None
         self.adjustment_mode: str | None = None
         self.adjustment_page = "quick"
         self.adjustment_timer: AdjustmentIdleTimer | None = None

@@ -16,15 +16,7 @@ from ccusage_viz.command_parsing.charts import (
 from ccusage_viz.command_parsing.errors import _invalid_choice_error
 from ccusage_viz.command_parsing.panes import _time_state_command, parse_pane_fragment
 from ccusage_viz.dashboard import DASHBOARD_PRESETS
-from ccusage_viz.dashboard_layout import (
-    NAMED_LAYOUTS,
-    fixed_shape,
-    layout_bands,
-    layout_for_pane_count,
-    parse_grid,
-    parse_layout,
-    reconcile_weights,
-)
+from ccusage_viz.dashboard_layout import layout_bands, reconcile_weights
 from ccusage_viz.dashboard_preset_store import (
     DashboardPresetStore,
     DashboardPresetStoreCorruptError,
@@ -52,6 +44,57 @@ from ccusage_viz.presets.values import DashboardPresetValidationError
 
 def _dashboard_preset_choices(user_names: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(dict.fromkeys((*DASHBOARD_PRESETS, *user_names)))
+
+
+def _validate_dashboard_topology(
+    launch: DashboardLaunch, namespace: argparse.Namespace, explicit: frozenset[str]
+) -> DashboardLaunch:
+    try:
+        bands = layout_bands(
+            columns=launch.host.columns,
+            spotlight=launch.host.spotlight,
+            pane_count=len(launch.panes),
+        )
+    except ValueError as exc:
+        raise UsageError("error.arguments", detail=str(exc)) from exc
+    explicit_columns = tuple(namespace.column_weights) or None
+    explicit_rows = tuple(namespace.row_weights) or None
+    columns = explicit_columns or launch.host.column_weights
+    rows = explicit_rows or launch.host.row_weights
+    if columns is not None and len(columns) != bands.columns:
+        if explicit_columns is not None:
+            raise UsageError(
+                "error.tui_layout_weight_count",
+                axis="column",
+                expected=bands.columns,
+                actual=len(columns),
+                layout=f"{launch.host.columns} columns / {launch.host.spotlight} spotlight",
+            )
+        columns = None
+    if rows is not None and len(rows) != bands.rows:
+        if explicit_rows is not None:
+            raise UsageError(
+                "error.tui_layout_weight_count",
+                axis="row",
+                expected=bands.rows,
+                actual=len(rows),
+                layout=f"{launch.host.columns} columns / {launch.host.spotlight} spotlight",
+            )
+        rows = None
+    for axis, weights in (("column", columns), ("row", rows)):
+        if weights is not None and any(weight < 1 for weight in weights):
+            raise UsageError("error.tui_layout_weight_positive", axis=axis)
+    return replace(
+        launch,
+        host=replace(
+            launch.host,
+            column_weights=(
+                reconcile_weights(columns, bands.columns) if columns is not None else None
+            ),
+            row_weights=reconcile_weights(rows, bands.rows) if rows is not None else None,
+        ),
+        explicit=explicit,
+    )
 
 
 def _demo_seed(namespace: argparse.Namespace) -> int | None:
@@ -154,15 +197,22 @@ def _to_options(
         preset_name = namespace.preset
         user_records = ()
         if preset_name is not None:
-            disallowed = explicit - {"demo", "lang", "empty", "ccusage_bin", "timezone"}
+            disallowed = explicit - {
+                "demo",
+                "lang",
+                "empty",
+                "ccusage_bin",
+                "timezone",
+                "columns",
+                "spotlight",
+                "column_weights",
+                "row_weights",
+            }
             if disallowed:
                 names = ", ".join(f"--{name.replace('_', '-')}" for name in sorted(disallowed))
                 raise UsageError(
                     "error.arguments",
-                    detail=(
-                        "a named dashboard preset only permits --demo, --lang, --empty, "
-                        f"--ccusage-bin, and --timezone; received {names}"
-                    ),
+                    detail=(f"a named dashboard preset received unsupported overrides: {names}"),
                 )
             try:
                 user_records = DashboardPresetStore(dashboard_preset_state_root()).list()
@@ -210,31 +260,40 @@ def _to_options(
                         named_launch,
                         host=replace(named_launch.host, timezone=timezone),
                     )
+                if "columns" in explicit or "spotlight" in explicit:
+                    named_launch = replace(
+                        named_launch,
+                        host=replace(
+                            named_launch.host,
+                            columns=(
+                                namespace.columns
+                                if "columns" in explicit
+                                else named_launch.host.columns
+                            ),
+                            spotlight=(
+                                namespace.spotlight
+                                if "spotlight" in explicit
+                                else named_launch.host.spotlight
+                            ),
+                        ),
+                    )
                 named_launch = replace(
                     named_launch,
                     explicit=explicit,
                     launcher=launcher,
                     language=namespace.lang if "lang" in explicit else named_launch.language,
                 )
-                return empty_preset_launch(named_launch) if namespace.empty else named_launch
+                if namespace.empty:
+                    named_launch = empty_preset_launch(named_launch)
+                return _validate_dashboard_topology(named_launch, namespace, explicit)
         if preset_name is None and not namespace.panes and not namespace.empty:
-            structural_options = {"grid", "layout", "column_weights", "row_weights"}
+            structural_options = {"columns", "spotlight", "column_weights", "row_weights"}
             if explicit & structural_options:
                 raise UsageError(
                     "error.arguments",
                     detail="dashboard layout options require a preset, --pane, or --empty",
                 )
             preset_name = "wide-clock"
-        if preset_name is not None and namespace.grid is not None:
-            raise UsageError(
-                "error.arguments",
-                detail="a dashboard preset cannot be combined with --grid",
-            )
-        if namespace.layout is not None and (preset_name is not None or namespace.grid is not None):
-            raise UsageError(
-                "error.arguments",
-                detail="--layout cannot be combined with a dashboard preset or --grid",
-            )
         preset = DASHBOARD_PRESETS.get(preset_name)
         if preset_name is not None and preset is None:
             raise _invalid_choice_error(
@@ -243,61 +302,53 @@ def _to_options(
                 _dashboard_preset_choices(tuple(record.name for record in user_records)),
                 kind="preset",
             )
-        layout = namespace.layout or (preset.layout if preset is not None else None)
         if namespace.empty and preset_name is None:
-            grid_text = layout or namespace.grid or "2x2"
-            if grid_text in NAMED_LAYOUTS:
-                empty_count = 1 if grid_text == "auto" else 2
-            else:
-                try:
-                    rows, columns = fixed_shape(grid_text)
-                except ValueError as exc:
-                    raise UsageError("error.tui_grid", value=grid_text) from exc
-                empty_count = rows * columns
             fragments = [
                 *namespace.panes,
-                *("empty" for _ in range(max(0, empty_count - len(namespace.panes)))),
+                *("empty" for _ in range(max(0, 4 - len(namespace.panes)))),
             ]
         else:
             fragments = [*(preset.panels if preset is not None else ()), *namespace.panes]
-        configured_layout = layout or (
-            preset.grid if preset is not None else namespace.grid or "2x2"
-        )
-        if (preset is not None and namespace.panes) or (namespace.empty and layout is None):
-            configured_layout = layout_for_pane_count(configured_layout, len(fragments))
-        if layout is not None:
-            layout = parse_layout(configured_layout, len(fragments))
-            if layout is None:
-                raise UsageError("error.tui_grid", value=configured_layout)
-            grid = preset.grid if preset is not None else "2x2"
-        else:
-            grid = parse_grid(configured_layout, len(fragments))
-            if grid is None:
-                raise UsageError("error.tui_grid", value=configured_layout)
-        bands = layout_bands(layout or grid, len(fragments))
-        column_weights = tuple(namespace.column_weights) or None
-        preset_row_weights = (
-            preset.row_weights
+        columns = (
+            namespace.columns
+            if namespace.columns is not None
+            else preset.columns
             if preset is not None
-            and "row_weights" not in explicit
-            and preset.row_weights is not None
-            and len(preset.row_weights) == bands.rows
+            else 2
+        )
+        spotlight = (
+            namespace.spotlight
+            if namespace.spotlight is not None
+            else preset.spotlight
+            if preset is not None
+            else 0
+        )
+        try:
+            bands = layout_bands(columns=columns, spotlight=spotlight, pane_count=len(fragments))
+        except ValueError as exc:
+            raise UsageError("error.arguments", detail=str(exc)) from exc
+        explicit_column_weights = tuple(namespace.column_weights) or None
+        explicit_row_weights = tuple(namespace.row_weights) or None
+        inherited_row_weights = preset.row_weights if preset is not None else None
+        column_weights = explicit_column_weights
+        row_weights = explicit_row_weights or (
+            inherited_row_weights
+            if inherited_row_weights is not None and len(inherited_row_weights) == bands.rows
             else None
         )
-        row_weights = tuple(namespace.row_weights) or preset_row_weights
-        for axis, weights, expected in (
-            ("column", column_weights, bands.columns),
-            ("row", row_weights, bands.rows),
+        for axis, weights, expected, supplied in (
+            ("column", column_weights, bands.columns, explicit_column_weights is not None),
+            ("row", row_weights, bands.rows, explicit_row_weights is not None),
         ):
             if weights is not None and any(weight < 1 for weight in weights):
                 raise UsageError("error.tui_layout_weight_positive", axis=axis)
-            if weights is not None and len(weights) != expected:
+            if supplied and weights is not None and len(weights) != expected:
                 raise UsageError(
                     "error.tui_layout_weight_count",
                     axis=axis,
                     expected=expected,
                     actual=len(weights),
-                    layout=grid,
+                    layout=f"{columns} columns / {spotlight} spotlight",
                 )
         if column_weights is not None:
             column_weights = reconcile_weights(column_weights, bands.columns)
@@ -315,8 +366,8 @@ def _to_options(
             demo_size=namespace.demo,
             demo_seed=demo_seed,
             timezone=timezone,
-            grid=grid,
-            layout=layout,
+            columns=columns,
+            spotlight=spotlight,
             column_weights=column_weights,
             row_weights=row_weights,
             refresh_interval=(

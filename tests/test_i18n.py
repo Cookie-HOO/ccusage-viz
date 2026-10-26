@@ -15,10 +15,10 @@ def test_catalogs_have_the_same_keys_and_placeholders() -> None:
     assert ZH_MESSAGES["status.empty_pane_hint"] == "双击选中，然后按 r 选择类型"
     assert ZH_MESSAGES["label.pane_empty"] == "空白 (Empty)"
     assert ZH_MESSAGES["label.pane_custom"] == "自定义 (Custom)"
-    assert EN_MESSAGES["help.grid"] == "Pane grid: ROWSxCOLUMNS"
-    assert ZH_MESSAGES["help.grid"] == "Pane 网格：ROWSxCOLUMNS"
-    assert "spotlight-wide2" in EN_MESSAGES["help.dashboard_preset"]
-    assert "spotlight-wide2" in ZH_MESSAGES["help.dashboard_preset"]
+    assert EN_MESSAGES["help.columns"] == "Number of Panes per ordinary row"
+    assert ZH_MESSAGES["help.columns"] == "普通区域每行的 Pane 数量"
+    assert "spotlight-wide2" not in EN_MESSAGES["help.dashboard_preset"]
+    assert "spotlight-wide2" not in ZH_MESSAGES["help.dashboard_preset"]
     assert "wide-clock" in EN_MESSAGES["help.dashboard_preset"]
     assert "wide-clock" in ZH_MESSAGES["help.dashboard_preset"]
     assert "single" in EN_MESSAGES["help.dashboard_preset"]
@@ -27,8 +27,8 @@ def test_catalogs_have_the_same_keys_and_placeholders() -> None:
     assert "spotlight-" + "tall" not in ZH_MESSAGES["help.dashboard_preset"]
     assert "spotlight-monitor" not in EN_MESSAGES["help.dashboard_preset"]
     assert "spotlight-monitor" not in ZH_MESSAGES["help.dashboard_preset"]
-    assert EN_MESSAGES["help.layout"] == "Named Pane topology: auto or a spotlight layout"
-    assert ZH_MESSAGES["help.layout"] == "具名 Pane 拓扑：auto 或 Spotlight 布局"
+    assert EN_MESSAGES["help.spotlight"] == "Number of leading full-width Panes"
+    assert ZH_MESSAGES["help.spotlight"] == "顶部全宽聚焦 Pane 数量"
     assert "Advanced" not in EN_MESSAGES["status.tui_global_quick_controls"]
     assert "高级" not in ZH_MESSAGES["status.tui_global_quick_controls"]
     assert "status.tui_global_advanced_controls" not in EN_MESSAGES

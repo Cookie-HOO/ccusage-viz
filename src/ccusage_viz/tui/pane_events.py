@@ -58,15 +58,12 @@ from ccusage_viz.tui.custom_rendering import _pane_copy_payload
 from ccusage_viz.tui.datasets.modal import (
     open_dataset_modal,
 )
-from ccusage_viz.tui.history import (
-    record_mutation,
-)
+from ccusage_viz.tui.history import reconcile_topology_after_pane_change, record_mutation
 from ccusage_viz.tui.input import (
     end_adjustment,
     raise_if_interrupt,
     read_adjustment_event,
 )
-from ccusage_viz.tui.layout import _grid_for_pane_count
 from ccusage_viz.tui.models import (
     CustomLogsState,
     OverlayEditorState,
@@ -693,9 +690,10 @@ def handle_pane_adjustment(session: TuiSession, event: object, key: object, *, n
     if key == "x" and len(session.panes) > 1:
 
         def delete(index: int = focused_index) -> None:
+            previous_count = len(session.panes)
             removed = session.panes.pop(index)
             _shutdown_pane(removed)
-            session.active_grid = _grid_for_pane_count(session.active_grid, len(session.panes))
+            reconcile_topology_after_pane_change(session, previous_count)
             session.focused = min(index, len(session.panes) - 1)
 
         record_mutation(session, ("pane", focused_index, "delete"), delete)

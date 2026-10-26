@@ -75,7 +75,7 @@ def test_bare_dashboard_is_equivalent_to_wide_clock_preset() -> None:
     wide_clock = _to_options(parser.parse_args(["dashboard", "wide-clock"]))
 
     assert bare == wide_clock
-    assert bare.host.grid == "2x2"
+    assert (bare.host.columns, bare.host.spotlight) == (2, 1)
     assert bare.host.refresh_interval == 60
     assert bare.host.sampling_interval == 15
     assert isinstance(bare.panes[0], AnimationPaneConfig)
@@ -92,26 +92,6 @@ def test_bare_dashboard_is_equivalent_to_wide_clock_preset() -> None:
     )
 
 
-@pytest.mark.parametrize(
-    ("preset", "kinds"),
-    [
-        ("spotlight-wide", ("timeline", "stack", "ranking")),
-        ("spotlight-wide2", ("timeline", "stack", "ranking", "monitor")),
-    ],
-)
-def test_dashboard_spotlight_presets_feature_the_first_pane(
-    preset: str, kinds: tuple[str, ...]
-) -> None:
-    parser = build_parser(load_translator("en"))
-
-    options = _to_options(parser.parse_args(["dashboard", preset]))
-
-    assert options.host.layout == preset
-    assert options.host.style == "framed"
-    assert tuple(pane.chart.kind for pane in options.panes) == kinds
-    assert {pane.chart.presentation.density for pane in options.panes} == {"compact"}
-
-
 def test_dashboard_allows_user_preset_names_but_rejects_unknown_ones(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -125,7 +105,7 @@ def test_dashboard_allows_user_preset_names_but_rejects_unknown_ones(
 
     with pytest.raises(UsageError) as caught:
         _to_options(namespace)
-    assert caught.value.key == "error.invalid_preset_suggestion"
+    assert caught.value.key == "error.invalid_preset"
 
     with pytest.raises(UsageError) as caught:
         parser.parse_args(["dashboard", "--pane", "timeline", "--layout", "spotlight-tall"])
@@ -138,7 +118,7 @@ def test_dashboard_allows_user_preset_names_but_rejects_unknown_ones(
         ["dashboard", "spotlight-wide", "--grid", "2x2"],
         ["dashboard", "wide-clock", "--layout", "auto"],
         ["dashboard", "spotlight-wide2", "--layout", "auto"],
-        ["dashboard", "--pane", "timeline", "--grid", "1x1", "--layout", "auto"],
+        ["dashboard", "--pane", "timeline", "--columns", "1", "--layout", "auto"],
     ],
 )
 def test_dashboard_rejects_conflicting_preset_grid_and_layout(
@@ -158,7 +138,7 @@ def test_dashboard_narrow_and_all_presets_expand_to_concrete_state() -> None:
     narrow = _to_options(parser.parse_args(["dashboard", "narrow"]))
     all_panes = _to_options(parser.parse_args(["dashboard", "all"]))
 
-    assert narrow.host.grid == "3x1"
+    assert (narrow.host.columns, narrow.host.spotlight) == (1, 0)
     assert tuple(pane.chart.kind for pane in narrow.panes) == (
         "timeline",
         "ranking",
@@ -175,7 +155,7 @@ def test_dashboard_narrow_and_all_presets_expand_to_concrete_state() -> None:
     assert all("--top" not in panel for panel in DASHBOARD_PRESETS["narrow"].panels)
 
     assert len(all_panes.panes) == 10
-    assert all_panes.host.grid == "5x2"
+    assert (all_panes.host.columns, all_panes.host.spotlight) == (2, 0)
     assert all_panes.host.style == "split"
     assert all("--top" not in panel for panel in DASHBOARD_PRESETS["all"].panels)
     assert {pane.chart.presentation.density for pane in all_panes.panes} == {"minimal"}
@@ -243,7 +223,7 @@ def test_dashboard_user_preset_empty_preserves_configuration(
     parser = build_parser(load_translator("en"))
     saved = DashboardLaunch(
         ProcessConfig(ccusage_bin="preset-ccusage", query_timeout=17),
-        DashboardHostConfig(grid="1x1", timezone="Asia/Shanghai", demo_size="50", demo_seed=3),
+        DashboardHostConfig(columns=1, timezone="Asia/Shanghai", demo_size="50", demo_seed=3),
         (EmptyPaneConfig(),),
     )
     DashboardPresetStore(tmp_path).save(preset_from_launch("my-dashboard", saved))
@@ -268,7 +248,7 @@ def test_dashboard_user_preset_allows_ccusage_bin_override(
     parser = build_parser(load_translator("en"))
     saved = DashboardLaunch(
         ProcessConfig(ccusage_bin="preset-ccusage", query_timeout=17),
-        DashboardHostConfig(grid="1x1", timezone="Asia/Shanghai", demo_size="50", demo_seed=3),
+        DashboardHostConfig(columns=1, timezone="Asia/Shanghai", demo_size="50", demo_seed=3),
         (EmptyPaneConfig(),),
     )
     DashboardPresetStore(tmp_path).save(preset_from_launch("my-dashboard", saved))
@@ -345,7 +325,7 @@ def test_unknown_dashboard_preset_lists_saved_names_after_builtins_and_suggests_
 ) -> None:
     saved = DashboardLaunch(
         ProcessConfig(),
-        DashboardHostConfig(grid="1x1"),
+        DashboardHostConfig(columns=1),
         (EmptyPaneConfig(),),
     )
     DashboardPresetStore(tmp_path).save(preset_from_launch("my-dashbord", saved))
@@ -368,7 +348,7 @@ def test_unknown_dashboard_preset_deduplicates_saved_builtin_name(
 ) -> None:
     saved = DashboardLaunch(
         ProcessConfig(),
-        DashboardHostConfig(grid="1x1"),
+        DashboardHostConfig(columns=1),
         (EmptyPaneConfig(),),
     )
     DashboardPresetStore(tmp_path).save(preset_from_launch("wide", saved))
@@ -421,7 +401,7 @@ def test_unknown_dashboard_preset_preserves_corrupt_store_error_and_builtin_acce
     assert caught.value.values["detail"] == "user dashboard preset storage is unavailable"
     builtin = _to_options(parser.parse_args(["dashboard", "wide"]))
     assert isinstance(builtin, DashboardLaunch)
-    assert builtin.host.grid == "2x2"
+    assert (builtin.host.columns, builtin.host.spotlight) == (2, 0)
 
 
 def test_dashboard_builtin_and_saved_preset_success_remain_unchanged(
@@ -434,7 +414,7 @@ def test_dashboard_builtin_and_saved_preset_success_remain_unchanged(
     expected_builtin = _to_options(parser.parse_args(["dashboard", "wide"]))
     saved = DashboardLaunch(
         ProcessConfig(ccusage_bin="saved-ccusage", query_timeout=17),
-        DashboardHostConfig(grid="1x1", timezone="UTC"),
+        DashboardHostConfig(columns=1, timezone="UTC"),
         (EmptyPaneConfig(),),
     )
     DashboardPresetStore(tmp_path).save(preset_from_launch("saved-dashboard", saved))

@@ -313,8 +313,8 @@ class DashboardHostConfig:
     demo_size: str | None = None
     demo_seed: int | None = None
     timezone: str | None = None
-    grid: str = "2x2"
-    layout: str | None = None
+    columns: int = 2
+    spotlight: int = 0
     column_weights: tuple[int, ...] | None = None
     row_weights: tuple[int, ...] | None = None
     refresh_interval: float = 15.0

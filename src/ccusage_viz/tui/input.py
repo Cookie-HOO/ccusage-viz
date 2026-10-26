@@ -29,8 +29,7 @@ def end_adjustment(session: TuiSession) -> None:
     session.adjustment_mode = None
     session.adjustment_timer = None
     session.focused = None
-    session.grid_draft = None
-    session.grid_error = None
+    session.layout_draft = None
 
 
 def read_adjustment_event(session: TuiSession, decoder: InputDecoder) -> object:

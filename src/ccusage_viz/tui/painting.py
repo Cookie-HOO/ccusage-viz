@@ -48,6 +48,13 @@ from ccusage_viz.tui.rendering import (
 from ccusage_viz.tui_preset_manager import render_preset_manager
 
 
+def effective_topology(session: TuiSession) -> tuple[int, int]:
+    draft = getattr(session, "layout_draft", None)
+    if draft is not None:
+        return draft.columns, draft.spotlight
+    return session.columns, session.spotlight
+
+
 def grid_geometry(
     session: TuiSession, size_columns: int, size_lines: int, header_rows: int, status_rows: int
 ) -> ResolvedPaneLayout:
@@ -56,11 +63,22 @@ def grid_geometry(
     grid_height = max(
         3, size_lines - len(controls(session)) - len(notices(session)) - header_rows - status_rows
     )
-    bands = layout_bands(session.active_layout or session.active_grid, len(session.panes))
-    resolved_column_weights = reconcile_weights(session.column_weights, bands.columns)
-    resolved_row_weights = reconcile_weights(session.row_weights, bands.rows)
+    columns, spotlight = effective_topology(session)
+    bands = layout_bands(columns=columns, spotlight=spotlight, pane_count=len(session.panes))
+    accepted_bands = layout_bands(
+        columns=session.columns, spotlight=session.spotlight, pane_count=len(session.panes)
+    )
+    resolved_column_weights = reconcile_weights(
+        session.column_weights if bands.columns == accepted_bands.columns else None,
+        bands.columns,
+    )
+    resolved_row_weights = reconcile_weights(
+        session.row_weights if bands.rows == accepted_bands.rows else None,
+        bands.rows,
+    )
     return resolve_pane_layout(
-        layout=session.active_layout or session.active_grid,
+        columns=columns,
+        spotlight=spotlight,
         pane_count=len(session.panes),
         width=size_columns,
         height=grid_height,
@@ -94,7 +112,8 @@ def adjust_pane_weight(session: TuiSession, pane_index: int, *, axis: str, delta
     ) -> tuple[bool, tuple[int, ...]]:
         candidate = adjust_weight(weights, index, delta)
         candidate_layout = resolve_pane_layout(
-            layout=session.active_layout or session.active_grid,
+            columns=session.columns,
+            spotlight=session.spotlight,
             pane_count=len(session.panes),
             width=layout.width,
             height=layout.height,

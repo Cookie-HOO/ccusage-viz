@@ -31,8 +31,8 @@ class DashboardState:
     """Dashboard presentation state without runtime resources."""
 
     panes: tuple[DashboardPaneState, ...]
-    grid: str
-    layout: str | None
+    columns: int
+    spotlight: int
     column_weights: tuple[int, ...] | None
     row_weights: tuple[int, ...] | None
     theme: str

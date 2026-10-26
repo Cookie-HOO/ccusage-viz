@@ -4,7 +4,6 @@ from datetime import timedelta
 
 import pytest
 
-import ccusage_viz.tui.adjustments as tui_adjustments
 import ccusage_viz.tui.dashboard_events as tui_dashboard_events
 import ccusage_viz.tui.datasets.blocking as tui_datasets_blocking
 import ccusage_viz.tui.datasets.catalog as tui_datasets_catalog
@@ -181,7 +180,7 @@ def test_dashboard_defaults_to_a_filled_four_pane_dashboard() -> None:
     assert options.panes[-1].chart.by == "model"
     assert options.host.refresh_interval == 60.0
     assert options.host.sampling_interval == 15.0
-    assert options.host.grid == "2x2"
+    assert (options.host.columns, options.host.spotlight) == (2, 1)
     assert options.host.header_style == "panel"
     assert options.host.header_summary == "day"
     assert options.host.header_interval == 60.0
@@ -253,11 +252,9 @@ def test_dashboard_resize_saturates_at_dashboard_minimum(
     events = iter((KeyEvent("m"), *(KeyEvent("}") for _ in range(8)), KeyEvent("\x03")))
     monkeypatch.setattr(tui_session, "build_query_runtime", Runtime)
     monkeypatch.setattr(tui_session, "FramePainter", Screen)
-    monkeypatch.setattr(tui_adjustments, "FramePainter", Screen)
     monkeypatch.setattr(tui_datasets_catalog, "FramePainter", Screen)
     monkeypatch.setattr(tui_datasets_chooser, "FramePainter", Screen)
     monkeypatch.setattr(tui_runtime, "tui_input_mode", nullcontext)
-    monkeypatch.setattr(tui_adjustments, "read_event", lambda _decoder, _timeout: next(events))
     monkeypatch.setattr(tui_input, "read_event", lambda _decoder, _timeout: next(events))
     monkeypatch.setattr(tui_datasets_catalog, "read_event", lambda _decoder, _timeout: next(events))
     monkeypatch.setattr(tui_datasets_chooser, "read_event", lambda _decoder, _timeout: next(events))
@@ -434,11 +431,9 @@ def test_error_only_custom_pane_keeps_scrolling_and_replace_management(
     monkeypatch.setattr(tui_session, "DashboardDatasetModalState", record_modal)
     monkeypatch.setattr(tui_datasets_modal, "DashboardDatasetModalState", record_modal)
     monkeypatch.setattr(tui_session, "FramePainter", Screen)
-    monkeypatch.setattr(tui_adjustments, "FramePainter", Screen)
     monkeypatch.setattr(tui_datasets_catalog, "FramePainter", Screen)
     monkeypatch.setattr(tui_datasets_chooser, "FramePainter", Screen)
     monkeypatch.setattr(tui_runtime, "tui_input_mode", nullcontext)
-    monkeypatch.setattr(tui_adjustments, "read_event", lambda _decoder, _timeout: next(events))
     monkeypatch.setattr(tui_input, "read_event", lambda _decoder, _timeout: next(events))
     monkeypatch.setattr(tui_datasets_catalog, "read_event", lambda _decoder, _timeout: next(events))
     monkeypatch.setattr(tui_datasets_chooser, "read_event", lambda _decoder, _timeout: next(events))

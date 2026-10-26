@@ -25,7 +25,6 @@ from ccusage_viz.options import (
     CustomCommandSource,
     DashboardHostConfig,
     DashboardLaunch,
-    EmptyPaneConfig,
     ProcessConfig,
     resolve_date_range,
 )
@@ -42,18 +41,6 @@ def test_dataset_cli_parses_manager_and_local_list() -> None:
     assert manager.command == "dataset"
     assert manager.dataset_command is None
     assert listing.dataset_command == "list"
-
-
-def test_empty_dashboard_populates_fixed_and_named_layouts() -> None:
-    parser = build_parser(load_translator("en"))
-
-    fixed = _to_options(parser.parse_args(["dashboard", "--empty", "--grid", "2x2"]))
-    named = _to_options(parser.parse_args(["dashboard", "--empty", "--layout", "spotlight-wide"]))
-
-    assert len(fixed.panes) == 4
-    assert all(isinstance(pane, EmptyPaneConfig) for pane in fixed.panes)
-    assert len(named.panes) == 2
-    assert all(isinstance(pane, EmptyPaneConfig) for pane in named.panes)
 
 
 def test_bare_custom_dataset_routes_through_installed_source(
@@ -417,66 +404,6 @@ def test_dashboard_rejects_non_positive_or_non_finite_timeout(timeout: str) -> N
     assert caught.value.key == "error.arguments"
 
 
-def test_dashboard_rejects_named_grid_for_arbitrary_panes() -> None:
-    parser = build_parser(load_translator("en"))
-
-    with pytest.raises(UsageError) as caught:
-        _to_options(
-            parser.parse_args(
-                [
-                    "dashboard",
-                    "--pane",
-                    "monitor --by model",
-                    "--pane",
-                    "calendar",
-                    "--grid",
-                    "not-a-grid",
-                ]
-            )
-        )
-
-    assert caught.value.key == "error.tui_grid"
-
-
-def test_dashboard_accepts_spotlight_wide2_as_a_layout_only() -> None:
-    parser = build_parser(load_translator("en"))
-    arguments = [
-        "dashboard",
-        "--pane",
-        "timeline",
-        "--pane",
-        "ranking",
-        "--pane",
-        "monitor --style list",
-        "--layout",
-        "spotlight-wide2",
-        "--column-weight",
-        "2",
-        "--column-weight",
-        "1",
-        "--row-weight",
-        "1",
-        "--row-weight",
-        "1",
-        "--row-weight",
-        "1",
-    ]
-
-    options = _to_options(parser.parse_args(arguments))
-
-    assert options.host.layout == "spotlight-wide2"
-    assert options.host.column_weights == (16, 8)
-    assert options.host.row_weights == (8, 8, 8)
-    for layout in (
-        "auto",
-        "spotlight-wide",
-        "spotlight-wide2",
-    ):
-        with pytest.raises(UsageError) as caught:
-            _to_options(parser.parse_args(["dashboard", "--pane", "timeline", "--grid", layout]))
-        assert caught.value.key == "error.tui_grid"
-
-
 def test_dashboard_accepts_layout_weights_and_tracks_explicit_aliases() -> None:
     parser = build_parser(load_translator("en"))
     arguments = [
@@ -485,8 +412,8 @@ def test_dashboard_accepts_layout_weights_and_tracks_explicit_aliases() -> None:
         "timeline",
         "--pane",
         "stack",
-        "--grid",
-        "1x2",
+        "--columns",
+        "2",
         "--column-weight",
         "2",
         "--column-weight",
@@ -516,7 +443,7 @@ def test_dashboard_narrow_clock_reuses_narrow_panes_with_short_clock_row() -> No
     )
     assert narrow_clock.panes[-1].attachment_style == "mole-cat"
     assert narrow.panes[-1].attachment_style == "mole-cat"
-    assert narrow_clock.host.grid == "4x1"
+    assert (narrow_clock.host.columns, narrow_clock.host.spotlight) == (1, 0)
     assert narrow_clock.host.row_weights == (6, 14, 14, 12)
     assert narrow_clock.host.style == "framed"
 
@@ -535,8 +462,7 @@ def test_dashboard_wide_clock_reuses_wide_panes_below_compact_digital_clock_row(
     )
     assert wide_clock.panes[-1].attachment_style == "mole-cat"
     assert wide.panes[-1].attachment_style == "mole-cat"
-    assert wide_clock.host.grid == "2x2"
-    assert wide_clock.host.layout == "spotlight-wide"
+    assert (wide_clock.host.columns, wide_clock.host.spotlight) == (2, 1)
     assert wide_clock.host.row_weights == (5, 15, 14)
     assert wide_clock.host.style == "framed"
 
@@ -552,8 +478,7 @@ def test_dashboard_single_keeps_only_the_wide_clock_analog_pane() -> None:
     assert single.panes[0].overlay.text is None
     assert single.panes[0].overlay.command is None
     assert wide_clock.panes[0].overlay.command is not None
-    assert single.host.grid == "1x1"
-    assert single.host.layout is None
+    assert (single.host.columns, single.host.spotlight) == (1, 0)
     assert single.host.row_weights is None
     assert single.host.style == "minimal"
     assert single.host.header_summary == "none"

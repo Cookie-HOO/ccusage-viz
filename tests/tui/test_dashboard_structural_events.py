@@ -102,17 +102,11 @@ def test_dashboard_layout_editor_is_visible_transactional_and_returns_to_global(
     keys = iter(
         (
             KeyEvent("d"),
-            KeyEvent("Z"),
-            *(KeyEvent(char) for char in "1x1"),
+            KeyEvent("z"),
+            KeyEvent("\x1b[C"),
+            KeyEvent("\x1b[B"),
+            KeyEvent("\x1b[C"),
             KeyEvent("\r"),
-            *(KeyEvent("\x7f") for _ in range(3)),
-            *(KeyEvent(char) for char in "axbhuU"),
-            KeyEvent("\r"),
-            *(KeyEvent("\x7f") for _ in range(6)),
-            *(KeyEvent(char) for char in "3x2"),
-            KeyEvent("\r"),
-            KeyEvent("Z"),
-            KeyEvent("\x1b"),
             KeyEvent("z"),
             KeyEvent("\x1b"),
             KeyEvent("\x03"),
@@ -152,7 +146,6 @@ def test_dashboard_layout_editor_is_visible_transactional_and_returns_to_global(
     monkeypatch.setattr(tui_pane_lifecycle, "MonitorComponent", Component)
     monkeypatch.setattr(tui_pane_lifecycle, "MonitorComponent", Component)
     monkeypatch.setattr(tui_session, "FramePainter", Screen)
-    monkeypatch.setattr(tui_adjustments, "FramePainter", Screen)
     monkeypatch.setattr(tui_datasets_catalog, "FramePainter", Screen)
     monkeypatch.setattr(tui_datasets_chooser, "FramePainter", Screen)
     monkeypatch.setattr(tui_runtime, "tui_input_mode", nullcontext)
@@ -231,20 +224,11 @@ def test_dashboard_layout_editor_is_visible_transactional_and_returns_to_global(
 
     assert tui_runtime.run_tui(options, load_translator("en")) == 0
     painted = ["\n".join(frame.rows) for frame in frames]
-    assert any("Set grid (ROWSxCOLUMNS): " in frame for frame in painted)
-    assert any(
-        "Set grid (ROWSxCOLUMNS): 1x1" in frame
-        and "Grid '1x1' cannot display all 5 panes." in frame
-        for frame in painted
-    )
-    assert any(
-        "Set grid (ROWSxCOLUMNS): axbhuU" in frame
-        and "Grid 'axbhuU' cannot display all 5 panes." in frame
-        for frame in painted
-    )
-    assert not any("Dashboard help" in frame for frame in painted)
-    assert any("Set grid (ROWSxCOLUMNS): 3x2" in frame for frame in painted)
-    assert any("Current status: running · 3x2" in frame for frame in painted)
+    assert any("Spotlight Panes" in frame and "Panes per row" in frame for frame in painted)
+    assert any("Spotlight Panes  2" in frame for frame in painted)
+    assert any("Panes per row  3" in frame for frame in painted)
+    assert not any("Set grid (ROWSxCOLUMNS)" in frame for frame in painted)
+    assert any("3 columns · 2 spotlight" in frame for frame in painted)
 
 
 def test_empty_dashboard_pane_double_click_enters_management_before_replacement(
@@ -255,9 +239,8 @@ def test_empty_dashboard_pane_double_click_enters_management_before_replacement(
         parser.parse_args(
             [
                 "dashboard",
-                "--empty",
-                "--grid",
-                "1x2",
+                "--columns",
+                "2",
                 "--pane",
                 "empty",
                 "--pane",
@@ -293,11 +276,9 @@ def test_empty_dashboard_pane_double_click_enters_management_before_replacement(
         )
     )
     monkeypatch.setattr(tui_session, "FramePainter", Screen)
-    monkeypatch.setattr(tui_adjustments, "FramePainter", Screen)
     monkeypatch.setattr(tui_datasets_catalog, "FramePainter", Screen)
     monkeypatch.setattr(tui_datasets_chooser, "FramePainter", Screen)
     monkeypatch.setattr(tui_runtime, "tui_input_mode", nullcontext)
-    monkeypatch.setattr(tui_adjustments, "read_event", lambda _decoder, _timeout: next(events))
     monkeypatch.setattr(tui_input, "read_event", lambda _decoder, _timeout: next(events))
     monkeypatch.setattr(tui_datasets_catalog, "read_event", lambda _decoder, _timeout: next(events))
     monkeypatch.setattr(tui_datasets_chooser, "read_event", lambda _decoder, _timeout: next(events))
@@ -511,7 +492,6 @@ def test_dashboard_pane_filter_editor_commits_once_or_discards_without_refresh(
     monkeypatch.setattr(tui_history, "HistoricalChartComponent", Component)
     monkeypatch.setattr(tui_pane_lifecycle, "HistoricalChartComponent", Component)
     monkeypatch.setattr(tui_session, "FramePainter", Screen)
-    monkeypatch.setattr(tui_adjustments, "FramePainter", Screen)
     monkeypatch.setattr(tui_datasets_catalog, "FramePainter", Screen)
     monkeypatch.setattr(tui_datasets_chooser, "FramePainter", Screen)
     monkeypatch.setattr(tui_runtime, "tui_input_mode", nullcontext)

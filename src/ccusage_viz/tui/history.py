@@ -19,6 +19,7 @@ from ccusage_viz.custom_component import (
     custom_summary_replacement_required,
 )
 from ccusage_viz.dashboard import DASHBOARD_PRESETS
+from ccusage_viz.dashboard_layout import layout_bands
 from ccusage_viz.dashboard_preset_store import DashboardPresetStore, DashboardPresetStoreError
 from ccusage_viz.dashboard_state import DashboardPaneState, DashboardState
 from ccusage_viz.datasets.paths import dashboard_preset_state_root
@@ -77,8 +78,8 @@ def active_dashboard_launch(session: TuiSession) -> DashboardLaunch:
         session.options.process,
         replace(
             session.options.host,
-            grid=state.grid,
-            layout=state.layout,
+            columns=state.columns,
+            spotlight=state.spotlight,
             column_weights=state.column_weights,
             row_weights=state.row_weights,
             theme=state.theme,
@@ -127,8 +128,8 @@ def preset_state_from_launch(session: TuiSession, launch: DashboardLaunch) -> Da
                 for index, pane in enumerate(launch.panes)
             )
         ),
-        launch.host.grid,
-        launch.host.layout,
+        launch.host.columns,
+        launch.host.spotlight,
         launch.host.column_weights,
         launch.host.row_weights,
         launch.host.theme,
@@ -147,8 +148,8 @@ def builtin_preset_launch(session: TuiSession, name: str) -> DashboardLaunch:
         session.options.process,
         replace(
             session.options.host,
-            grid=preset.grid,
-            layout=preset.layout,
+            columns=preset.columns,
+            spotlight=preset.spotlight,
             row_weights=preset.row_weights,
             refresh_interval=preset.refresh_interval,
             sampling_interval=preset.sampling_interval,
@@ -311,8 +312,8 @@ def capture_dashboard_state(session: TuiSession) -> DashboardState:
             )
     return DashboardState(
         tuple(pane_states),
-        session.active_grid,
-        session.active_layout,
+        session.columns,
+        session.spotlight,
         session.column_weights,
         session.row_weights,
         session.dashboard_theme,
@@ -435,8 +436,8 @@ def apply_dashboard_state(session: TuiSession, state: DashboardState) -> None:
     for pane in existing.values():
         _shutdown_pane(pane)
     session.panes = reconciled
-    session.active_grid = state.grid
-    session.active_layout = state.layout
+    session.columns = state.columns
+    session.spotlight = state.spotlight
     session.column_weights = state.column_weights
     session.row_weights = state.row_weights
     theme_changed = session.dashboard_theme != state.theme
@@ -467,6 +468,25 @@ def apply_dashboard_state(session: TuiSession, state: DashboardState) -> None:
     sync_custom_dashboard_summaries(session)
 
 
+def reconcile_topology_after_pane_change(session: TuiSession, previous_count: int) -> None:
+    """Clamp spotlight and clear only weights invalidated by a Pane-count change."""
+    old = layout_bands(
+        columns=session.columns,
+        spotlight=min(session.spotlight, previous_count),
+        pane_count=previous_count,
+    )
+    session.spotlight = min(session.spotlight, len(session.panes))
+    new = layout_bands(
+        columns=session.columns,
+        spotlight=session.spotlight,
+        pane_count=len(session.panes),
+    )
+    if old.columns != new.columns:
+        session.column_weights = None
+    if old.rows != new.rows:
+        session.row_weights = None
+
+
 def record_mutation(session: TuiSession, family: object, mutate: Callable[[], None]) -> bool:
     from ccusage_viz.tui.queries import sync_custom_dashboard_summaries
 
@@ -495,8 +515,8 @@ def full_dashboard_command(session: TuiSession) -> str:
             else AnimationPaneConfig(pane.session.spec, pane.overlay.config)
             for pane in session.panes
         ),
-        grid=session.active_grid,
-        layout=session.active_layout,
+        columns=session.columns,
+        spotlight=session.spotlight,
         column_weights=session.column_weights,
         row_weights=session.row_weights,
         header_style=session.header_style,

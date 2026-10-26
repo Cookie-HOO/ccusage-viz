@@ -230,8 +230,8 @@ def format_full_dashboard_command(
     options: DashboardLaunch,
     panes: tuple[PaneConfig, ...] | None = None,
     *,
-    grid: str | None = None,
-    layout: str | None = None,
+    columns: int | None = None,
+    spotlight: int | None = None,
     column_weights: tuple[int, ...] | None = None,
     row_weights: tuple[int, ...] | None = None,
     header_style: str | None = None,
@@ -308,14 +308,8 @@ def format_full_dashboard_command(
                 _chart_args(standalone_from_chart_pane(options, pane_config), full=True, pane=True)
             )
         args.extend(("--pane", fragment))
-    if layout is not None:
-        args.extend(("--layout", layout))
-    elif grid is not None:
-        args.extend(("--grid", grid))
-    elif host.layout is not None:
-        args.extend(("--layout", host.layout))
-    else:
-        args.extend(("--grid", host.grid))
+    args.extend(("--columns", str(columns if columns is not None else host.columns)))
+    args.extend(("--spotlight", str(spotlight if spotlight is not None else host.spotlight)))
     args.extend(
         (
             "--refresh-interval",
