@@ -84,17 +84,10 @@ replaced.
 
 ### Install from a GitHub repository
 
-You can also install a compatible Dataset from a specific GitHub repository.
-For example, use the
-[WeRead Dataset](https://github.com/Cookie-HOO/ccuv-dataset-weread):
+You can also install a compatible Dataset from a specific GitHub repository:
 
 1. Run `ccuv dataset`, press `+`, and choose **Install from GitHub**.
-2. Enter:
-
-   ```text
-   https://github.com/Cookie-HOO/ccuv-dataset-weread
-   ```
-
+2. Enter `OWNER/REPOSITORY` or `https://github.com/OWNER/REPOSITORY`.
 3. Review the discovered release and confirm installation.
 
 The repository must publish a compatible native archive, checksum, and Dataset
@@ -122,7 +115,7 @@ remains available to the draft.
 > To start without default ccusage panes or requests, use `ccuv dashboard --empty`.
 > It creates four temporary `empty` panes; `--columns` and `--spotlight` control only their
 > topology. Add an installed Dataset with only its chart type and Dataset ID:
-> `--pane 'chart timeline --dataset weread'`. Arbitrary commands add `--command`.
+> `--pane 'chart timeline --dataset example-activity'`. Arbitrary commands add `--command`.
 > See the [Dataset user guide](docs/dataset-user-guide.md) to install or register a
 > Dataset, and the [custom command protocol guide](docs/custom-command-protocol.md)
 > when you are building one.

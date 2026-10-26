@@ -62,16 +62,10 @@ ccuv dataset list
 
 ### 从指定 GitHub 仓库安装
 
-也可以从指定 GitHub 仓库安装兼容 Dataset。以
-[微信读书 Dataset](https://github.com/Cookie-HOO/ccuv-dataset-weread) 为例：
+也可以从指定 GitHub 仓库安装兼容 Dataset：
 
 1. 运行 `ccuv dataset`，按 `+`，选择 **Install from GitHub**。
-2. 输入：
-
-   ```text
-   https://github.com/Cookie-HOO/ccuv-dataset-weread
-   ```
-
+2. 输入 `OWNER/REPOSITORY` 或 `https://github.com/OWNER/REPOSITORY`。
 3. 检查发现的 Release，然后确认安装。
 
 仓库必须发布兼容的原生 archive、checksum 和 Dataset manifest。从任意 GitHub 仓库安装并不代表它是官方 Dataset；如果该仓库同时存在于官方目录中，ccuv 会改用经过验证的官方 artifact 路径。
