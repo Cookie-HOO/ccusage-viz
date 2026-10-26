@@ -120,7 +120,7 @@ remains available to the draft.
 
 > [!TIP]
 > To start without default ccusage panes or requests, use `ccuv dashboard --empty`.
-> It fills the selected default grid or explicit `--grid`/layout with temporary
+> It fills the selected default grid or explicit `--columns`/`--spotlight` topology with temporary
 > `empty` panes. Add an installed Dataset with only its chart type and Dataset ID:
 > `--pane 'chart timeline --dataset weread'`. Arbitrary commands add `--command`.
 > See the [Dataset user guide](docs/dataset-user-guide.md) to install or register a
@@ -139,8 +139,6 @@ ccuv dashboard
 | `wide` | `ccuv dashboard wide` | Best for a balanced data-only overview. Balanced 2×2. | <img src="docs/assets/readme/dashboard-wide.png" alt="Preview" width="180"> |
 | `narrow` | `ccuv dashboard narrow` | Best for a compact, narrow-terminal overview. Vertical focus. | <img src="docs/assets/readme/dashboard-narrow.png" alt="Preview" width="180"> |
 | `all` | `ccuv dashboard all` | Best for comparing many pane types at once. Broad gallery. | <img src="docs/assets/readme/dashboard-all.png" alt="Preview" width="180"> |
-| `spotlight-wide` | `ccuv dashboard spotlight-wide` | Best for prioritizing Timeline trends. Timeline-led. | <img src="docs/assets/readme/dashboard-spotlight-wide.png" alt="Preview" width="180"> |
-| `spotlight-wide2` | `ccuv dashboard spotlight-wide2` | Best for prioritizing Timeline and Stack together. Timeline + Stack-led. | <img src="docs/assets/readme/dashboard-spotlight-wide2.png" alt="Preview" width="180"> |
 
 ### Your Dashboard presets
 
@@ -218,7 +216,7 @@ it focused, replace the Pane, or expand it into a multi-Pane Dashboard.
 
 > [!TIP]
 > Need several focused charts together? Add Panes from a focused chart session or
-> compose a custom Dashboard and choose your own grid or named layout. See the
+> compose a custom Dashboard and choose your own column and spotlight counts. See the
 > [usage guide](docs/usage.md).
 
 A declared V2 Dataset can independently rank real models within each logical

@@ -437,12 +437,12 @@ ccuv dashboard narrow --demo large
 ```
 
 `--empty` instead suppresses default ccusage pane assembly, header work, and
-ccusage data dependencies. The resolved default grid or explicit `--grid`/layout
+ccusage data dependencies. The resolved default grid or explicit `--columns`/`--spotlight` topology
 is filled with temporary `empty` panes. It does not add a clock; clock presets
 retain their existing first clock pane.
 
 ```bash
-ccuv dashboard --empty --grid 2x2 \
+ccuv dashboard --empty --columns 2 --spotlight 0 \
   --pane 'empty' \
   --pane 'chart timeline --dataset weread --command "weread ccuv"' \
   --pane 'empty' \
@@ -481,27 +481,22 @@ deletes an empty pane and compacts the rest without adding a placeholder.
 
 ### Presets
 
-| Preset | Pane composition | Grid/layout | Dashboard style |
+| Preset | Pane composition | Columns / spotlight | Dashboard style |
 | --- | --- | --- | --- |
-| `single` | Analog Clock only, without a text overlay or Dashboard frame | `1x1` | `minimal` |
-| `wide` | Timeline, Stack, Ranking, Monitor grouped by model | `2x2` | `framed` |
-| `wide-clock` | Digital Clock, then the standard wide Timeline, Stack, Ranking, and model Monitor panes | `2x2` with `spotlight-wide` and a compact first row | `framed` |
-| `spotlight-wide` | Timeline, Stack, Ranking | `2x2` with `spotlight-wide` | `framed` |
-| `spotlight-wide2` | Timeline, Stack, Ranking, Monitor grouped by model | `2x2` with `spotlight-wide2` | `framed` |
-| `narrow` | 14-day Timeline, project Ranking, model Monitor | `3x1` | `framed` |
-| `narrow-clock` | Digital Clock, then narrow Timeline, project Ranking, and model Monitor panes | `4x1` with a short first row | `framed` |
-| `all` | Two Timelines, Calendar, Ranking, two Stacks, and four Monitor variants | `5x2` | `split` |
+| `single` | Analog Clock only, without a text overlay or Dashboard frame | `1 / 0` | `minimal` |
+| `wide` | Timeline, Stack, Ranking, Monitor grouped by model | `2 / 0` | `framed` |
+| `wide-clock` | Digital Clock, then the standard wide panes | `2 / 1` with a compact first row | `framed` |
+| `narrow` | 14-day Timeline, project Ranking, model Monitor | `1 / 0` | `framed` |
+| `narrow-clock` | Digital Clock, then narrow panes | `1 / 0` with a short first row | `framed` |
+| `all` | Two Timelines, Calendar, Ranking, two Stacks, and four Monitor variants | `2 / 0` | `split` |
 
 The default `wide` panes use compact density and deliberately use separate
 chart themes/styles. `single`, `wide-clock`, and `narrow-clock` are the clock
 presets: their clock is a complete animation Pane, not a Dashboard header.
 `single` uses Analog Clock; `wide-clock` and `narrow-clock` use Digital Clock.
-`spotlight-wide` gives its first pane the leading wide area; `spotlight-wide2`
-gives the first two panes consecutive wide rows.
 
-Built-in presets remain startup templates, not values for `--grid`. In ordinary
-unnamed startup composition, repeated `--pane` values append panes after a
-built-in template and the host expands its grid where required. Named built-in or
+Built-in presets remain startup templates, while topology is independently controlled by
+`--columns` and `--spotlight`. Named built-in or
 saved presets launched as `ccuv dashboard <name>` are deliberately closed: they
 reject `--pane` and every configuration override except `--demo`, `--lang`,
 `--empty`, and `--ccusage-bin`.
@@ -520,29 +515,17 @@ ccuv dashboard \
   --pane 'timeline --period 30d --by model --top 5 --style line-points' \
   --pane 'ranking --by project --top 10 --style dots' \
   --pane 'monitor --window 1h --by model --style ranking' \
-  --grid 2x2
+  --columns 2 --spotlight 0
 ```
 
-For a named layout, omit `--grid`:
-
-```bash
-ccuv dashboard \
-  --pane 'timeline --by model' \
-  --pane 'stack --cache split' \
-  --pane 'ranking --by project' \
-  --layout spotlight-wide
-```
-
-Supported `--layout` values are `auto`, `spotlight-wide`, and
-`spotlight-wide2`. A grid is `ROWSxCOLUMNS`; it must have enough cells for all
-panes.
+The first N spotlight Panes occupy full-width rows; remaining Panes flow into the configured columns.
 
 A custom pane defaults to `compact` density unless the fragment explicitly
 contains `--density`. For example, an installed WeRead Dataset needs no binary
 path or fixed dates:
 
 ```bash
-ccuv dashboard --empty --grid 1x1 \
+ccuv dashboard --empty --columns 1 --spotlight 0 \
   --pane 'chart timeline --dataset weread'
 ```
 
@@ -551,12 +534,12 @@ ccuv dashboard --empty --grid 1x1 \
 
 | Option | Values/default | Host-owned behavior |
 | --- | --- | --- |
-| `[PRESET]` (positional, optional) | `single`, `wide`, `wide-clock`, `narrow`, `narrow-clock`, `all`, `spotlight-wide`, `spotlight-wide2`; omitted defaults to `wide-clock` | Selects the startup template. It cannot be combined with `--grid` or `--layout`. |
+| `[PRESET]` (positional, optional) | `single`, `wide`, `wide-clock`, `narrow`, `narrow-clock`, `all`; omitted defaults to `wide-clock` | Selects the startup template. Topology flags may override its layout. |
 | `--demo [SIZE]`, `--lang`, `--ccusage-bin`, `--query-timeout` | Same semantics as standalone; all demo forms are live, invocation-varied asynchronous simulations, and bare demo is `medium`; timeout default `30` | Provider/process/input configuration for all panes. `--query-timeout` is hidden advanced configuration. |
 | `--ascii` | off | ASCII rendering for the host and panes. It conflicts with an explicit Pane `--theme`. |
 | `--theme THEME` | `classic` | Dashboard shell theme, distinct from each Pane chart theme. |
-| `--grid ROWSxCOLUMNS` | Custom construction only | Logical grid for the selected pane count. |
-| `--layout NAME` | Custom construction only | Named layout; cannot be combined with a preset or `--grid`. |
+| `--columns C` | Positive integer; preset/default supplies a value | Panes per ordinary row. |
+| `--spotlight N` | `0..Pane count`; preset/default supplies a value | Number of leading full-width Pane rows. |
 | `--column-weight WEIGHT` | Repeated positive integers | Hidden advanced startup-only logical column shares. Count must match layout columns. |
 | `--row-weight WEIGHT` | Repeated positive integers | Hidden advanced startup-only logical row shares. Count must match layout rows. |
 | `--refresh-interval SECONDS` | `15`; presets may supply their own default | Dashboard-wide historical refresh cadence; minimum `1`. |
@@ -797,3 +780,16 @@ Use `ccuv --help` for the route list and `ccuv <command> --help` for
 localized parser help, for example `ccuv --lang zh dashboard --help`. The
 normal help intentionally omits advanced `--query-timeout` and Dashboard weight
 options; this guide records them so their constraints are clear.
+
+
+## Flexible Dashboard topology (0.3.4)
+
+Dashboard presets (`single`, `wide`, `wide-clock`, `narrow`, `narrow-clock`, and `all`) are complete startup configurations. Spatial layout is independent and uses two integers:
+
+```bash
+ccuv dashboard wide --columns 3 --spotlight 2
+```
+
+The first `--spotlight N` Panes are full-width rows from top to bottom. Remaining Panes flow left-to-right into `--columns C` columns. `--column-weight` and `--row-weight` may be repeated to reproduce exact proportions. In global adjustment mode, press `z`; use Up/Down or `j`/`k` to select a field, Left/Right or `-`/`+` to change it, Enter to commit, and Escape to cancel. The live preview does not modify accepted state until commit. With a Pane selected, `{`/`}` resize its column and `J`/`K` resize its row.
+
+`--grid`, `--layout`, `spotlight-wide`, and `spotlight-wide2` are no longer supported. Saved Dashboard presets use schema `ccuv.dashboard-presets/v2`; v1 collections are intentionally not migrated. `dashboard --empty` creates four temporary empty Panes, while topology only controls their placement.

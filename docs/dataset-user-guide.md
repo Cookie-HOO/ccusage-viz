@@ -192,7 +192,7 @@ do not rewrite the Dataset or its registration.
 For an installed/registered Dataset, you can build a Dashboard from the CLI:
 
 ```bash
-ccuv dashboard --empty --grid 2x2 \
+ccuv dashboard --empty --columns 2 --spotlight 0 \
   --pane 'chart timeline --dataset example-activity --metric events' \
   --pane 'chart ranking --dataset example-activity --metric events --period 30d' \
   --pane 'empty' \

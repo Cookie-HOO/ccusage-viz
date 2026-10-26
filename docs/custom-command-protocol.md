@@ -458,7 +458,7 @@ panes require only chart kind and Dataset ID; arbitrary commands remain availabl
 for developer integrations.
 
 ```bash
-ccuv dashboard --empty --grid 2x2 \
+ccuv dashboard --empty --columns 2 --spotlight 0 \
   --pane 'empty' \
   --pane 'chart timeline --dataset weread' \
   --pane 'empty' \

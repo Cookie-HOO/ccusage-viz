@@ -88,7 +88,7 @@ Dashboard 提供与当前界面对应的帮助：按 `h` 查看当前可用控�
 
 > [!TIP]
 > 若要在不创建默认 ccusage Pane 或请求的情况下启动，请使用 `ccuv dashboard --empty`。
-> 它会以选定的默认网格或显式 `--grid`/layout 填充临时 `empty` Pane。可通过
+> 它会以选定的默认网格或显式 `--columns`/`--spotlight` topology 填充临时 `empty` Pane。可通过
 > `--pane 'chart timeline --dataset reading --command "my-reader ccuv"'` 加入命令驱动的自定义数据。
 > 安装、注册和使用 Dataset 请见 [Dataset 使用者指南](docs/dataset-user-guide.zh-CN.md)；
 > 开发 Dataset 请见[自定义命令协议指南](docs/custom-command-protocol.zh-CN.md)。
@@ -105,8 +105,6 @@ ccuv dashboard
 | `wide` | `ccuv dashboard wide` | 推荐用于只看数据的均衡总览。均衡 2×2。 | <img src="docs/assets/readme/dashboard-wide.png" alt="预览" width="180"> |
 | `narrow` | `ccuv dashboard narrow` | 推荐用于窄终端中的紧凑总览。纵向聚焦。 | <img src="docs/assets/readme/dashboard-narrow.png" alt="预览" width="180"> |
 | `all` | `ccuv dashboard all` | 推荐用于同时比较多种 Pane。宽广画廊。 | <img src="docs/assets/readme/dashboard-all.png" alt="预览" width="180"> |
-| `spotlight-wide` | `ccuv dashboard spotlight-wide` | 推荐用于优先关注 Timeline 趋势。Timeline 主导。 | <img src="docs/assets/readme/dashboard-spotlight-wide.png" alt="预览" width="180"> |
-| `spotlight-wide2` | `ccuv dashboard spotlight-wide2` | 推荐用于同时优先关注 Timeline 和 Stack。Timeline + Stack 主导。 | <img src="docs/assets/readme/dashboard-spotlight-wide2.png" alt="预览" width="180"> |
 
 ### 你的 Dashboard 预设
 

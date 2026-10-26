@@ -369,10 +369,10 @@ ccuv dashboard wide --demo medium
 ccuv dashboard narrow --demo large
 ```
 
-`--empty` 会关闭默认 ccusage Pane 组装、Header 工作和 ccusage 数据依赖。解析后的默认网格或显式 `--grid`/layout 会填入临时 `empty` Pane；它不会添加时钟，时钟预设仍保留原有的第一个时钟 Pane。
+`--empty` 会关闭默认 ccusage Pane 组装、Header 工作和 ccusage 数据依赖。解析后的默认网格或显式 `--columns`/`--spotlight` topology 会填入临时 `empty` Pane；它不会添加时钟，时钟预设仍保留原有的第一个时钟 Pane。
 
 ```bash
-ccuv dashboard --empty --grid 2x2 \
+ccuv dashboard --empty --columns 2 --spotlight 0 \
   --pane 'empty' \
   --pane 'chart timeline --dataset weread' \
   --pane 'empty' \
@@ -383,22 +383,19 @@ ccuv dashboard --empty --grid 2x2 \
 
 ### 预设
 
-| 预设 | Pane 组成 | 网格/布局 | Dashboard 样式 |
+| 预设 | Pane 组成 | 列数 / 聚焦数 | Dashboard 样式 |
 | --- | --- | --- | --- |
-| `single` | 仅模拟时钟，无文字叠层和 Dashboard 边框 | `1x1` | `minimal` |
-| `wide` | Timeline、Stack、Ranking、按模型分组的 Monitor | `2x2` | `framed` |
-| `wide-clock` | 数字时钟，然后是标准 wide 的 Timeline、Stack、Ranking 和模型 Monitor Pane | 带紧凑首行的 `spotlight-wide` `2x2` | `framed` |
-| `spotlight-wide` | Timeline、Stack、Ranking | 带 `spotlight-wide` 的 `2x2` | `framed` |
-| `spotlight-wide2` | Timeline、Stack、Ranking、按模型分组的 Monitor | 带 `spotlight-wide2` 的 `2x2` | `framed` |
-| `narrow` | 14 天 Timeline、项目 Ranking、模型 Monitor | `3x1` | `framed` |
-| `narrow-clock` | 数字时钟，然后是 narrow 的 Timeline、项目 Ranking 和模型 Monitor Pane | 带短首行的 `4x1` | `framed` |
-| `all` | 两个 Timeline、Calendar、Ranking、两个 Stack 与四个 Monitor 变体 | `5x2` | `split` |
+| `single` | 仅模拟时钟，无文字叠层和 Dashboard 边框 | `1 / 0` | `minimal` |
+| `wide` | Timeline、Stack、Ranking、按模型分组的 Monitor | `2 / 0` | `framed` |
+| `wide-clock` | 数字时钟，然后是标准 wide Pane | `2 / 1`，紧凑首行 | `framed` |
+| `narrow` | 14 天 Timeline、项目 Ranking、模型 Monitor | `1 / 0` | `framed` |
+| `narrow-clock` | 数字时钟，然后是 narrow Pane | `1 / 0`，短首行 | `framed` |
+| `all` | 两个 Timeline、Calendar、Ranking、两个 Stack 与四个 Monitor 变体 | `2 / 0` | `split` |
 
 默认 `wide` Pane 使用 `compact` 密度，并刻意采用不同图表主题/样式。`single`、`wide-clock` 与 `narrow-clock`
-是时钟预设：它们的时钟都是完整的动画 Pane，而不是 Dashboard Header；`single` 使用模拟时钟，`wide-clock` 与 `narrow-clock` 使用数字时钟。`spotlight-wide` 让第一个 Pane
-占据前导宽区域；`spotlight-wide2` 让前两个 Pane 占据连续的宽行。
+是时钟预设：它们的时钟都是完整的动画 Pane，而不是 Dashboard Header；`single` 使用模拟时钟，`wide-clock` 与 `narrow-clock` 使用数字时钟。
 
-内置预设仍是启动模板，不是 `--grid` 的取值。在普通未具名启动组合中，重复 `--pane` 会追加到内置模板 Pane 后；需要时 Host 会扩展其网格以容纳所有 Pane。以 `ccuv dashboard <name>` 启动的具名内置或用户预设则是封闭的：它们拒绝 `--pane` 以及除 `--demo`、`--lang`、`--empty` 和 `--ccusage-bin` 外的所有配置覆盖。
+内置预设是完整启动模板；拓扑可通过 `--columns` 和 `--spotlight` 独立覆盖。
 
 ### 构造自定义 Dashboard
 
@@ -409,26 +406,15 @@ ccuv dashboard \
   --pane 'timeline --period 30d --by model --top 5 --style line-points' \
   --pane 'ranking --by project --top 10 --style dots' \
   --pane 'monitor --window 1h --by model --style ranking' \
-  --grid 2x2
+  --columns 2 --spotlight 0
 ```
 
-使用命名布局时不要提供 `--grid`：
-
-```bash
-ccuv dashboard \
-  --pane 'timeline --by model' \
-  --pane 'stack --cache split' \
-  --pane 'ranking --by project' \
-  --layout spotlight-wide
-```
-
-支持的 `--layout` 值为 `auto`、`spotlight-wide`、`spotlight-wide2`。网格形式为
-`ROWSxCOLUMNS`，必须有足够单元格容纳所有 Pane。
+前 N 个聚焦 Pane 各占一整行，其余 Pane 按列数从左到右排列。
 
 自定义 Pane 若未在片段中显式提供 `--density`，则默认 `compact` 密度。已安装的 WeRead Dataset 不需要二进制路径或固定日期：
 
 ```bash
-ccuv dashboard --empty --grid 1x1 \
+ccuv dashboard --empty --columns 1 --spotlight 0 \
   --pane 'chart timeline --dataset weread'
 ```
 
@@ -437,12 +423,12 @@ ccuv dashboard --empty --grid 1x1 \
 
 | 参数 | 值/默认值 | Host 所有的行为 |
 | --- | --- | --- |
-| `[PRESET]`（可选位置参数） | `single`、`wide`、`wide-clock`、`narrow`、`narrow-clock`、`all`、`spotlight-wide`、`spotlight-wide2`；省略时默认 `wide-clock` | 选择启动模板；不能和 `--grid` 或 `--layout` 同用。 |
+| `[PRESET]`（可选位置参数） | `single`、`wide`、`wide-clock`、`narrow`、`narrow-clock`、`all`；省略时默认 `wide-clock` | 选择启动模板；拓扑参数可覆盖其布局。 |
 | `--demo [SIZE]`、`--lang`、`--ccusage-bin`、`--query-timeout` | 与聚焦图表语义相同；所有 Demo 形式都是实时、每次调用活动会变化的异步模拟，裸 Demo 为 `medium`；timeout 默认 `30` | 所有 Pane 的 Provider/进程/输入配置；`--query-timeout` 是隐藏高级配置。 |
 | `--ascii` | 关闭 | Host 和 Pane 的 ASCII 渲染；与显式 Pane `--theme` 冲突。 |
 | `--theme THEME` | `classic` | Dashboard 外壳主题，区别于每个 Pane 的图表主题。 |
-| `--grid ROWSxCOLUMNS` | 仅自定义构造 | 所选 Pane 数量的逻辑网格。 |
-| `--layout NAME` | 仅自定义构造 | 命名布局；不能和预设或 `--grid` 同用。 |
+| `--columns C` | 正整数，由预设/默认值提供 | 普通区域每行 Pane 数。 |
+| `--spotlight N` | `0..Pane 数`，由预设/默认值提供 | 顶部全宽聚焦 Pane 数。 |
 | `--column-weight WEIGHT` | 重复正整数 | 隐藏的仅启动时高级逻辑列份额；数量必须匹配布局列数。 |
 | `--row-weight WEIGHT` | 重复正整数 | 隐藏的仅启动时高级逻辑行份额；数量必须匹配布局行数。 |
 | `--refresh-interval SECONDS` | `15`；预设可能提供自己的默认值 | Dashboard 全局历史刷新节奏；最小 `1`。 |
@@ -627,3 +613,16 @@ Dashboard 有独立的导航和归属规则。浏览模式中：
 
 使用 `ccuv --help` 查看路由列表，使用 `ccuv <command> --help` 查看本地化解析器帮助，例如
 `ccuv --lang zh dashboard --help`。常规帮助刻意省略高级 `--query-timeout` 和 Dashboard 权重参数；本文记录它们以明确约束。
+
+
+## 灵活的 Dashboard 拓扑（0.3.4）
+
+Dashboard 预设（`single`、`wide`、`wide-clock`、`narrow`、`narrow-clock`、`all`）是完整的启动配置；空间布局独立使用两个整数：
+
+```bash
+ccuv dashboard wide --columns 3 --spotlight 2
+```
+
+前 `--spotlight N` 个 Pane 从上到下各占一整行，其余 Pane 从左到右按 `--columns C` 列排列。可重复传入 `--column-weight` 与 `--row-weight` 以精确复现比例。全局调整模式按 `z` 进入布局编辑器：上下方向键或 `j`/`k` 选择字段，左右方向键或 `-`/`+` 调整数值，Enter 提交，Escape 取消；提交前实时预览不会修改已接受状态。选中 Pane 后，`{`/`}` 调整所在列宽，`J`/`K` 调整所在行高。
+
+不再支持 `--grid`、`--layout`、`spotlight-wide`、`spotlight-wide2`。保存的 Dashboard 预设使用 `ccuv.dashboard-presets/v2`，不会迁移 v1。`dashboard --empty` 固定创建四个临时空 Pane，拓扑参数只控制排列。

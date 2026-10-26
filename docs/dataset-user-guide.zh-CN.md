@@ -113,7 +113,7 @@ Custom Dataset 使用 `--group-by`，不是内置图的 `--by`；只有 Dataset 
 ### CLI 声明 Pane
 
 ```bash
-ccuv dashboard --empty --grid 2x2 \
+ccuv dashboard --empty --columns 2 --spotlight 0 \
   --pane 'chart timeline --dataset example-activity --metric events' \
   --pane 'chart ranking --dataset example-activity --metric events --period 30d' \
   --pane 'empty' \
