@@ -727,16 +727,21 @@ def _controls(session: TuiSession) -> tuple[str, ...]:
     width = get_terminal_size().columns
     if session.help_overlay is not None:
         return ()
-    if session.grid_draft is not None:
-        rows = [
+    if session.layout_draft is not None:
+        draft = session.layout_draft
+        spotlight_mark = "›" if draft.selected == "spotlight" else " "
+        columns_mark = "›" if draft.selected == "columns" else " "
+        return (
             clip_width(
-                session.translator.text("status.tui_layout_prompt", value=session.grid_draft), width
-            )
-        ]
-        if session.grid_error is not None:
-            rows.append(clip_width(session.grid_error, width))
-        rows.append(clip_width(session.translator.text("status.tui_layout_controls"), width))
-        return tuple(rows)
+                f"{spotlight_mark} {session.translator.text('label.layout_spotlight')}  {draft.spotlight}",
+                width,
+            ),
+            clip_width(
+                f"{columns_mark} {session.translator.text('label.layout_columns')}  {draft.columns}",
+                width,
+            ),
+            clip_width(session.translator.text("status.tui_layout_editor_controls"), width),
+        )
     if session.adjustment_mode == "pane" and session.focused is not None:
         pane = session.panes[session.focused]
         if isinstance(pane, TuiAnimationPane):
@@ -790,9 +795,7 @@ def _controls(session: TuiSession) -> tuple[str, ...]:
                 ),
                 global_operations(session, width),
             )
-        state = session.grid_error or _pane_adjustment_state(
-            pane, session.adjustment_page, session.translator
-        )
+        state = _pane_adjustment_state(pane, session.adjustment_page, session.translator)
         return (
             *_adjustment_footer(
                 state,
@@ -814,12 +817,10 @@ def _controls(session: TuiSession) -> tuple[str, ...]:
         state = session.translator.text(
             "status.tui_current_state",
             runtime=session.translator.text("status.tui_running"),
-            settings=f"{session.active_layout or session.active_grid} · {session.dashboard_theme} · {session.dashboard_style} · {session.header_style} · {session.header.summary_period}",
+            settings=f"{session.columns} columns · {session.spotlight} spotlight · {session.dashboard_theme} · {session.dashboard_style} · {session.header_style} · {session.header.summary_period}",
         )
         return (
-            *_global_adjustment_footer(
-                state=session.grid_error or state, translator=session.translator, width=width
-            ),
+            *_global_adjustment_footer(state=state, translator=session.translator, width=width),
             global_operations(session, width),
         )
     if session.body_view != "chart":
@@ -835,9 +836,7 @@ def _controls(session: TuiSession) -> tuple[str, ...]:
         )
     if session.controls_hidden:
         return ()
-    context = session.grid_error or session.translator.text(
-        f"status.tui_{session.body_view.replace('-', '_')}_controls"
-    )
+    context = session.translator.text(f"status.tui_{session.body_view.replace('-', '_')}_controls")
     return (
         clip_width(context, width),
         preset_operations(session, width),

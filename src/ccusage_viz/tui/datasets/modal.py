@@ -47,7 +47,6 @@ from ccusage_viz.tui.header import (
     _custom_source_conflict_message,
     _header_lines,
 )
-from ccusage_viz.tui.layout import _grid_for_pane_count
 from ccusage_viz.tui.models import (
     CustomPaneDraft,
     DashboardDatasetModalState,
@@ -327,7 +326,7 @@ def _paint_dataset_modal(session: TuiSession) -> None:
 
 
 def finish_dataset_modal(session: TuiSession, choice: CustomChartPaneConfig | str | None) -> None:
-    from ccusage_viz.tui.history import record_mutation
+    from ccusage_viz.tui.history import reconcile_topology_after_pane_change, record_mutation
     from ccusage_viz.tui.queries import start_new_pane
     from ccusage_viz.tui.structure import create_pane
 
@@ -363,13 +362,14 @@ def finish_dataset_modal(session: TuiSession, choice: CustomChartPaneConfig | st
     insert_at = modal.pane_index if modal.action == "insert_before" else modal.pane_index + 1
 
     def insert(choice: CustomChartPaneConfig | str = choice, insert_at: int = insert_at) -> None:
-        session.active_grid = _grid_for_pane_count(session.active_grid, len(session.panes) + 1)
+        previous_count = len(session.panes)
         _insert_pane(
             session.panes,
             insert_at,
             create_pane(session, choice),
             start=partial(start_new_pane, session),
         )
+        reconcile_topology_after_pane_change(session, previous_count)
         session.focused = insert_at
 
     record_mutation(session, ("pane", modal.pane_index, modal.action), insert)

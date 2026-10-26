@@ -148,6 +148,14 @@ Metric unchanged and shows a short warning. A successful switch replaces the
 selected Metric; a failed target request leaves the prior chart or Monitor
 selected.
 
+In a Custom historical Pane, `p` / `P` cycles only through the selected Metric
+and chart kind's non-empty ordered `periods` declaration. If `periods` is omitted,
+ccuv uses its generic cycle and the Dataset may reject requests dynamically. A
+correct declaration prevents users from entering known-unsupported periods. If
+one chart's groupings have different source limits, the Dataset must declare the
+period intersection valid for every advertised grouping, or model them as
+separate capabilities.
+
 Dataset defaults can set an initial period, group, Top N, Other,
 style, theme, and Monitor display horizon. They are suggestions. Your explicit
 options override them:
@@ -192,7 +200,7 @@ do not rewrite the Dataset or its registration.
 For an installed/registered Dataset, you can build a Dashboard from the CLI:
 
 ```bash
-ccuv dashboard --empty --grid 2x2 \
+ccuv dashboard --empty --columns 2 --spotlight 0 \
   --pane 'chart timeline --dataset example-activity --metric events' \
   --pane 'chart ranking --dataset example-activity --metric events --period 30d' \
   --pane 'empty' \

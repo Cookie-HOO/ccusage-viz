@@ -6,7 +6,6 @@ import pytest
 import ccusage_viz.tui.adjustments as tui_adjustments
 import ccusage_viz.tui.completion as tui_completion
 import ccusage_viz.tui.custom_adjustments as tui_custom_adjustments
-import ccusage_viz.tui.dashboard_events as tui_dashboard_events
 import ccusage_viz.tui.datasets.blocking as tui_datasets_blocking
 import ccusage_viz.tui.datasets.catalog as tui_datasets_catalog
 import ccusage_viz.tui.datasets.chooser as tui_chooser
@@ -33,18 +32,14 @@ from ccusage_viz.deltas import RefreshRanks
 from ccusage_viz.formatting import display_width
 from ccusage_viz.i18n import load_translator
 from ccusage_viz.query.models import QueryTrigger
-from ccusage_viz.tui.adjustments import _adjustment_controls, _choose_layout_shortcut
+from ccusage_viz.tui.adjustments import _adjustment_controls
 from ccusage_viz.tui.datasets.chooser import _choose_pane_type
 from ccusage_viz.tui.layout import (
     _compose_resolved_panes,
     _frame,
-    _grid_for_pane_count,
-    _grid_shape,
-    _practical_grid,
     compose_panes,
     pane_at,
     pane_rects,
-    parse_grid,
     resolve_panel_layout,
 )
 from ccusage_viz.tui.pane_lifecycle import _insert_pane, _replace_pane
@@ -53,7 +48,7 @@ from ccusage_viz.tui_input import InputDecoder, KeyEvent
 
 
 def test_horizontal_pane_navigation_cycles_pane_order() -> None:
-    layout = resolve_pane_layout(layout="2x2", pane_count=4, width=80, height=24)
+    layout = resolve_pane_layout(columns=2, spotlight=0, pane_count=4, width=80, height=24)
 
     assert pane_in_direction(layout, 0, "\x1b[C") == 1
     assert pane_in_direction(layout, 1, "\x1b[C") == 2
@@ -64,7 +59,7 @@ def test_horizontal_pane_navigation_cycles_pane_order() -> None:
 
 
 def test_vertical_pane_navigation_uses_resolved_spatial_layout() -> None:
-    layout = resolve_pane_layout(layout="2x2", pane_count=4, width=80, height=24)
+    layout = resolve_pane_layout(columns=2, spotlight=0, pane_count=4, width=80, height=24)
 
     assert pane_in_direction(layout, 0, "\x1b[B") == 2
     assert pane_in_direction(layout, 3, "\x1b[A") == 1
@@ -72,7 +67,7 @@ def test_vertical_pane_navigation_uses_resolved_spatial_layout() -> None:
 
 
 def test_vertical_pane_navigation_prefers_alignment_in_spanning_layout() -> None:
-    layout = resolve_pane_layout(layout="spotlight-wide", pane_count=5, width=80, height=24)
+    layout = resolve_pane_layout(columns=2, spotlight=1, pane_count=5, width=80, height=24)
 
     assert pane_in_direction(layout, 0, "\x1b[B") == 1
     assert pane_in_direction(layout, 2, "\x1b[A") == 0
@@ -83,12 +78,12 @@ def test_tui_accepts_repeatable_pane_fragments_and_grid() -> None:
     parser = build_parser(load_translator("en"))
     options = _to_options(
         parser.parse_args(
-            ["dashboard", "--pane", "timeline --period 7d", "--pane", "ranking", "--grid", "1x2"]
+            ["dashboard", "--pane", "timeline --period 7d", "--pane", "ranking", "--columns", "2"]
         )
     )
     assert tuple(pane.chart.kind for pane in options.panes) == ("timeline", "ranking")
     assert options.panes[0].chart.date_range.period == "7d"
-    assert options.host.grid == "1x2"
+    assert (options.host.columns, options.host.spotlight) == (2, 0)
 
 
 def test_dashboard_pane_notices_are_local_and_bounded() -> None:
@@ -130,7 +125,7 @@ def test_tiny_frame_preserves_exact_zero_width_or_height_geometry() -> None:
 
 def test_resolved_pane_compositor_preserves_asymmetric_axis_gutters() -> None:
     layout = resolve_pane_layout(
-        layout="2x2", pane_count=4, width=9, height=2, divider_style="line"
+        columns=2, spotlight=0, pane_count=4, width=9, height=2, divider_style="line"
     )
 
     output = _compose_resolved_panes(["a", "b", "c", "d"], layout, ascii=True)
@@ -140,17 +135,6 @@ def test_resolved_pane_compositor_preserves_asymmetric_axis_gutters() -> None:
     assert [display_width(row) for row in output.splitlines()] == [9, 9]
     assert output.splitlines()[0][4] == "│"
     assert output.splitlines()[1][4] == "│"
-
-
-def test_tui_grid_auto_and_compositor() -> None:
-    assert _grid_shape("auto", 3) == (2, 2)
-    output = compose_panes(["a\nb", "c\nd"], 12, 4, 1, 2, focused=0)
-    lines = output.splitlines()
-    assert len(lines) == 4
-    assert "a" in lines[1]
-    assert "c" in lines[1]
-    assert lines[1].startswith("║a")
-    assert "│c" in lines[1]
 
 
 def test_tui_default_frame_has_no_browse_outline_and_adjustment_outline_is_external() -> None:
@@ -185,56 +169,6 @@ def test_refresh_ranks_tracks_movement_and_clear() -> None:
     assert ranks.previous == ranks.current == {}
 
 
-def test_layout_chooser_shows_unavailable_layouts_and_skips_them() -> None:
-    frames: list[object] = []
-
-    class Screen:
-        def paint(self, frame: object, **_kwargs: object) -> None:
-            frames.append(frame)
-
-    events = iter((KeyEvent("j"), KeyEvent("\r")))
-
-    assert (
-        _choose_layout_shortcut(
-            Screen(),
-            load_translator("en"),
-            InputDecoder(),
-            height=20,
-            current="wide",
-            pane_count=4,
-            read_input=lambda: next(events),
-        )
-        == "all"
-    )
-
-    initial = "\n".join(frames[0].rows)
-    selected = "\n".join(frames[1].rows)
-    assert "› wide" in initial
-    assert "narrow · unavailable: 3 cells for 4 panes" in initial
-    assert "› all" in selected
-
-
-def test_layout_chooser_preserves_current_fixed_grid_value() -> None:
-    class Screen:
-        def paint(self, _frame: object, **_kwargs: object) -> None:
-            pass
-
-    events = iter((KeyEvent("\r"),))
-
-    assert (
-        _choose_layout_shortcut(
-            Screen(),
-            load_translator("en"),
-            InputDecoder(),
-            height=20,
-            current="3x1",
-            pane_count=3,
-            read_input=lambda: next(events),
-        )
-        == "narrow"
-    )
-
-
 def test_pane_chooser_reuses_dashboard_decoder_and_ignores_mouse(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -244,7 +178,6 @@ def test_pane_chooser_reuses_dashboard_decoder_and_ignores_mouse(
 
     decoder = InputDecoder()
     decoder.feed("\x1b[<0;20;5M\x1b[B\r")
-    monkeypatch.setattr(tui_adjustments, "read_event", lambda active, timeout: active.next(now=1.0))
     monkeypatch.setattr(tui_input, "read_event", lambda active, timeout: active.next(now=1.0))
     monkeypatch.setattr(
         tui_datasets_catalog, "read_event", lambda active, timeout: active.next(now=1.0)
@@ -420,40 +353,6 @@ def test_pane_chooser_navigation_skips_group_headings() -> None:
     )
 
 
-def test_tui_parses_runtime_numeric_grid_with_capacity() -> None:
-    assert parse_grid("2X2", 3) == "2x2"
-    assert parse_grid("auto", 3) is None
-    assert parse_grid("spotlight-wide2", 3) is None
-    assert parse_grid("wide", 3) is None
-    assert parse_grid("1x2", 3) is None
-
-
-@pytest.mark.parametrize(
-    ("pane_count", "expected"),
-    ((1, "1x1"), (2, "1x2"), (3, "2x2"), (4, "2x2"), (5, "3x2")),
-)
-def test_runtime_numeric_grid_draft_uses_practical_two_column_shape(
-    pane_count: int, expected: str
-) -> None:
-    assert _practical_grid(pane_count) == expected
-
-
-@pytest.mark.parametrize(
-    ("grid", "pane_count", "expected"),
-    (
-        ("auto", 5, "auto"),
-        ("spotlight-wide2", 5, "spotlight-wide2"),
-        ("2x2", 4, "2x2"),
-        ("2x2", 5, "3x2"),
-        ("3x1", 4, "4x1"),
-    ),
-)
-def test_pane_insertion_expands_rows_while_preserving_columns(
-    grid: str, pane_count: int, expected: str
-) -> None:
-    assert _grid_for_pane_count(grid, pane_count) == expected
-
-
 def test_replace_pane_is_atomic_and_shuts_down_displaced_lifecycle() -> None:
     events: list[tuple[str, int | str]] = []
 
@@ -512,8 +411,8 @@ def test_dashboard_pane_height_keys_adjust_only_shared_row_weights(
             [
                 "dashboard",
                 "--demo",
-                "--grid",
-                "2x1",
+                "--columns",
+                "1",
                 "--header-style",
                 "hidden",
                 "--header-summary",
@@ -609,11 +508,9 @@ def test_dashboard_pane_height_keys_adjust_only_shared_row_weights(
     monkeypatch.setattr(tui_history, "HistoricalChartComponent", Component)
     monkeypatch.setattr(tui_pane_lifecycle, "HistoricalChartComponent", Component)
     monkeypatch.setattr(tui_session, "FramePainter", Screen)
-    monkeypatch.setattr(tui_adjustments, "FramePainter", Screen)
     monkeypatch.setattr(tui_datasets_catalog, "FramePainter", Screen)
     monkeypatch.setattr(tui_datasets_chooser, "FramePainter", Screen)
     monkeypatch.setattr(tui_runtime, "tui_input_mode", nullcontext)
-    monkeypatch.setattr(tui_adjustments, "read_event", lambda _decoder, _timeout: next(keys))
     monkeypatch.setattr(tui_input, "read_event", lambda _decoder, _timeout: next(keys))
     monkeypatch.setattr(tui_datasets_catalog, "read_event", lambda _decoder, _timeout: next(keys))
     monkeypatch.setattr(tui_datasets_chooser, "read_event", lambda _decoder, _timeout: next(keys))
@@ -643,9 +540,6 @@ def test_dashboard_pane_height_keys_adjust_only_shared_row_weights(
     )
     monkeypatch.setattr(
         tui_painting, "get_terminal_size", lambda: __import__("os").terminal_size((100, 30))
-    )
-    monkeypatch.setattr(
-        tui_dashboard_events, "get_terminal_size", lambda: __import__("os").terminal_size((100, 30))
     )
     monkeypatch.setattr(
         tui_pointer, "get_terminal_size", lambda: __import__("os").terminal_size((100, 30))
@@ -745,7 +639,6 @@ def test_pane_advanced_actions_exclude_dashboard_management() -> None:
     assert "r replace" not in controls
     assert "N insert before" not in controls
     assert "n insert after" not in controls
-    assert parse_grid("zero", 1) is None
 
 
 def test_tui_panel_layout_allocates_remainders_and_compositor_height() -> None:

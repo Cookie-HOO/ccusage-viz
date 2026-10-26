@@ -28,6 +28,10 @@ class DashboardPresetStoreCorruptError(DashboardPresetStoreError):
     """The existing user collection cannot safely be read or changed."""
 
 
+class DashboardPresetStoreLegacyError(DashboardPresetStoreError):
+    """The existing collection is a recognized, unsupported v1 document."""
+
+
 class DashboardPresetStoreNotFoundError(DashboardPresetStoreError):
     """A requested user preset does not exist in a valid collection."""
 
@@ -86,7 +90,11 @@ class DashboardPresetStore:
             wire = json.loads(text, object_pairs_hook=_reject_duplicate_keys)
             if not isinstance(wire, Mapping):
                 raise ValueError("preset collection must be a JSON object")
+            if wire.get("schema") == "ccuv.dashboard-presets/v1":
+                raise DashboardPresetStoreLegacyError("unsupported v1 preset collection")
             return DashboardPresetDocument.parse(wire)
+        except DashboardPresetStoreLegacyError:
+            raise
         except (UnicodeDecodeError, json.JSONDecodeError, _DuplicateKeyError, ValueError) as exc:
             raise DashboardPresetStoreCorruptError("invalid preset collection") from exc
 
@@ -115,6 +123,22 @@ class DashboardPresetStore:
         updated = document.with_saved(record, self.clock)
         self._write(updated)
         return next(item for item in updated.presets if item.name == record.name)
+
+    def save_replacing_legacy(
+        self, record: DashboardPresetRecord
+    ) -> tuple[DashboardPresetRecord, Path | None]:
+        """Save a v2 record, archiving only a recognized v1 collection first."""
+        try:
+            return self.save(record), None
+        except DashboardPresetStoreLegacyError:
+            backup = self.root / f"presets.v1.{uuid.uuid4().hex}.backup.json"
+            try:
+                os.replace(self.path, backup)
+                os.chmod(backup, 0o600)
+                self._fsync_directory()
+            except OSError as exc:
+                raise DashboardPresetStoreError("unable to archive v1 preset collection") from exc
+            return self.save(record), backup
 
     def delete(self, name: str) -> None:
         """Remove one user record, refusing writes when the collection is corrupt."""

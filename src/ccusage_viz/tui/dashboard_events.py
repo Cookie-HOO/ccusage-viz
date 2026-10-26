@@ -1,43 +1,67 @@
 from __future__ import annotations
 
-from shutil import get_terminal_size
+from shutil import get_terminal_size  # noqa: F401 - retained test injection seam
 
-from ccusage_viz.adjustment_timeout import AdjustmentTimeout
 from ccusage_viz.core.time import local_today
+from ccusage_viz.dashboard_layout import layout_bands
 from ccusage_viz.lifecycle import LifecycleTrigger
-from ccusage_viz.options import (
-    DASHBOARD_STYLES,
-)
+from ccusage_viz.options import DASHBOARD_STYLES
 from ccusage_viz.processing import required_summary_coverage
 from ccusage_viz.render.palette import COLOR_SCHEMES
-from ccusage_viz.tui.adjustments import (
-    _LAYOUT_SHORTCUT_VALUES,
-    _choose_layout_shortcut,
-)
 from ccusage_viz.tui.controls import _cycle
 from ccusage_viz.tui.header import (
     _cycle_header_summary,
     _invalidate_custom_dashboard_summaries,
     _set_header_theme,
 )
-from ccusage_viz.tui.history import (
-    record_mutation,
-)
-from ccusage_viz.tui.input import (
-    end_adjustment,
-    raise_if_interrupt,
-    read_adjustment_event,
-)
+from ccusage_viz.tui.history import record_mutation
+from ccusage_viz.tui.input import end_adjustment
 from ccusage_viz.tui.layout import _dashboard_structure
 from ccusage_viz.tui.painting import paint
-from ccusage_viz.tui.queries import (
-    refresh_custom_summaries,
-    refresh_header,
-)
-from ccusage_viz.tui.session import TuiSession
+from ccusage_viz.tui.queries import refresh_custom_summaries, refresh_header
+from ccusage_viz.tui.session import LayoutDraft, TuiSession
+
+
+def _commit_layout_draft(session: TuiSession) -> None:
+    draft = session.layout_draft
+    if draft is None:
+        return
+    old = layout_bands(
+        columns=session.columns, spotlight=session.spotlight, pane_count=len(session.panes)
+    )
+    new = layout_bands(
+        columns=draft.columns, spotlight=draft.spotlight, pane_count=len(session.panes)
+    )
+
+    def commit() -> None:
+        session.columns = draft.columns
+        session.spotlight = draft.spotlight
+        if old.columns != new.columns:
+            session.column_weights = None
+        if old.rows != new.rows:
+            session.row_weights = None
+
+    record_mutation(session, ("layout", "topology"), commit)
+    session.layout_draft = None
 
 
 def handle_dashboard_adjustment(session: TuiSession, event: object, key: object) -> None:
+    if session.layout_draft is not None:
+        draft = session.layout_draft
+        if key == "\x1b":
+            session.layout_draft = None
+        elif key in {"\r", "\n"}:
+            _commit_layout_draft(session)
+        elif key in {"\x1b[A", "\x1b[B", "j", "k", "\t"}:
+            draft.selected = "columns" if draft.selected == "spotlight" else "spotlight"
+        elif key in {"\x1b[D", "-", "\x1b[C", "+"}:
+            delta = -1 if key in {"\x1b[D", "-"} else 1
+            if draft.selected == "spotlight":
+                draft.spotlight = min(len(session.panes), max(0, draft.spotlight + delta))
+            else:
+                draft.columns = min(len(session.panes), max(1, draft.columns + delta))
+        paint(session)
+        return
     if key in {"\r", "\n", "\x1b"}:
         end_adjustment(session)
     elif key in {"t", "T"}:
@@ -95,40 +119,7 @@ def handle_dashboard_adjustment(session: TuiSession, event: object, key: object)
 
         record_mutation(session, ("header", "summary"), cycle_summary)
     elif key == "z":
-        try:
-            shortcut = _choose_layout_shortcut(
-                session.screen,
-                session.translator,
-                session.decoder,
-                height=get_terminal_size().lines,
-                current=session.active_layout or session.active_grid,
-                pane_count=len(session.panes),
-                read_input=lambda: raise_if_interrupt(
-                    session, read_adjustment_event(session, session.decoder)
-                ),
-            )
-        except AdjustmentTimeout:
-            end_adjustment(session)
-            paint(session)
-            return
-        if shortcut is not None:
-            resolved = _LAYOUT_SHORTCUT_VALUES[shortcut]
-
-            def choose_layout() -> None:
-                if shortcut in {"wide", "narrow", "all"}:
-                    session.active_grid = resolved
-                    session.active_layout = None
-                else:
-                    session.active_layout = resolved
-                session.column_weights = None
-                session.row_weights = None
-                session.grid_error = None
-
-            record_mutation(session, ("layout", "topology"), choose_layout)
-    elif key == "Z":
-        session.grid_draft = ""
-        session.grid_error = None
+        session.layout_draft = LayoutDraft(session.columns, session.spotlight)
     else:
         return
     paint(session)
-    return

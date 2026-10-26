@@ -4,7 +4,7 @@
 
 [![PyPI](https://img.shields.io/pypi/v/ccusage-viz.svg)](https://pypi.org/project/ccusage-viz/) [![Python](https://img.shields.io/pypi/pyversions/ccusage-viz.svg)](https://pypi.org/project/ccusage-viz/) [![License: GPL v3](https://img.shields.io/badge/License-GPL%20v3-blue.svg)](LICENSE) [![CI](https://github.com/Cookie-HOO/ccusage-viz/actions/workflows/ci.yml/badge.svg)](https://github.com/Cookie-HOO/ccusage-viz/actions/workflows/ci.yml)
 
-> **Alpha · 0.3.4** — 在 1.0 前接口仍可能变化。当前方向请见[路线图](docs/roadmap.zh-CN.md)。
+> **Alpha · 0.3.5** — 在 1.0 前接口仍可能变化。当前方向请见[路线图](docs/roadmap.zh-CN.md)。
 
 `ccusage-viz` 是面向 [`ccusage`](https://github.com/ryoppippi/ccusage) Token
 数据的独立、非官方终端可视化工具。它把 `ccusage` 命令输出转换为交互式终端图表，
@@ -33,80 +33,47 @@ ccusage-viz 可视化内置的 **Token 消耗** 与由其直接推导的指标�
 
 > 本项目与 `ccusage` 项目及其维护者没有隶属关系，也未获得其背书。
 
-## Dataset 与自定义命令扩展
-
-Dataset 让 ccuv 可视化由外部数据源拥有语义的指标，而无需把它们并入内置的 `ccusage` Token 采集。Dataset 是一个可执行命令：ccuv 向其 stdin 写入一份 JSON 请求，从 stdout 读取一份 JSON 响应，再把它声明的 Metric 渲染到聚焦图表或 Dashboard Pane 中。
-
-### 安装官方 Dataset
-
-官方 Dataset 收录在带签名的
-[`Cookie-HOO/ccuv-dataset-catalog`](https://github.com/Cookie-HOO/ccuv-dataset-catalog)
-仓库中。
-
-1. 运行 `ccuv dataset`。
-2. 按 `+`，选择 **Browse official datasets**。
-3. 选择条目，检查 Metric、环境变量要求、版本和来源，然后确认安装。
-
-官方目录会验证签名元数据；实际安装仍要求该 Dataset 为当前操作系统和架构发布了兼容 archive。
-
-### 注册本地命令
-
-使用命令的精确 argv，注册机器上已有的可执行程序：
-
-```bash
-ccuv dataset add-local /absolute/path/to/my-dataset --profile personal
-ccuv dataset list
-```
-
-注册时会立即运行该命令的 Probe。后续 `--dataset` 应使用 Probe 返回的 Dataset ID，而不是可执行文件名。ccuv 保存 argv 并直接启动程序，不经过 shell。修改 Probe 元数据后可重新运行 `add-local`；相同 Dataset ID 的本地注册会被替换。
-
-### 从指定 GitHub 仓库安装
-
-也可以从指定 GitHub 仓库安装兼容 Dataset。以
-[微信读书 Dataset](https://github.com/Cookie-HOO/ccuv-dataset-weread) 为例：
-
-1. 运行 `ccuv dataset`，按 `+`，选择 **Install from GitHub**。
-2. 输入：
-
-   ```text
-   https://github.com/Cookie-HOO/ccuv-dataset-weread
-   ```
-
-3. 检查发现的 Release，然后确认安装。
-
-仓库必须发布兼容的原生 archive、checksum 和 Dataset manifest。从任意 GitHub 仓库安装并不代表它是官方 Dataset；如果该仓库同时存在于官方目录中，ccuv 会改用经过验证的官方 artifact 路径。
-
-安装、管理、Dashboard 选择与排错请见 [Dataset 使用者指南](docs/dataset-user-guide.zh-CN.md)。实现并打包 Dataset 请从 [Dataset 开发者指南](docs/dataset-developer-guide.zh-CN.md)和[自定义命令协议](docs/custom-command-protocol.zh-CN.md)开始。
-
 ## 交互帮助
 
 Dashboard 提供与当前界面对应的帮助：按 `h` 查看当前可用控制；在图表浏览模式中按 `c` 显示或隐藏控制栏。编辑 Overlay 文本或命令时，请使用 `Ctrl-H`，这样字面量 `h` 仍可输入草稿。
 
-## Dashboard 预设
+## Dashboard
 
-`dashboard` 将彼此独立配置的图表组合在同一终端中。未提供位置预设时，`dashboard` 默认使用 `wide-clock`：
+`dashboard` 将彼此独立配置的图表组合在同一终端中。未提供位置预设时默认使用 `wide-clock`：
 
 > [!TIP]
 > 若要在不创建默认 ccusage Pane 或请求的情况下启动，请使用 `ccuv dashboard --empty`。
-> 它会以选定的默认网格或显式 `--grid`/layout 填充临时 `empty` Pane。可通过
-> `--pane 'chart timeline --dataset reading --command "my-reader ccuv"'` 加入命令驱动的自定义数据。
-> 安装、注册和使用 Dataset 请见 [Dataset 使用者指南](docs/dataset-user-guide.zh-CN.md)；
-> 开发 Dataset 请见[自定义命令协议指南](docs/custom-command-protocol.zh-CN.md)。
+> 它会创建四个临时 `empty` Pane；`--columns` 和 `--spotlight` 只控制它们的拓扑。
+> 可以交互替换临时 Pane，也可以显式提供 `--pane` 片段。
 
 ```bash
 ccuv dashboard
 ```
 
-| 预设 | 命令 | 布局 | 预览 |
+### 内置预设
+
+| 预设 | 命令 | 默认排列 | 预览 |
 | --- | --- | --- | --- |
 | `single` | `ccuv dashboard single` | 单个实时模拟时钟，无文字叠层和 Dashboard 边框。 | - |
-| 【推荐-宽终端】 `wide-clock` **（未指定预设时的默认值）** | `ccuv dashboard wide-clock` | 推荐用于带紧凑实时数字时钟的通用总览。数字时钟 + 均衡 2×2。 | <img src="docs/assets/readme/dashboard-wide-clock.png" alt="预览" width="180"> |
-| 【推荐-侧边栏】 `narrow-clock` | `ccuv dashboard narrow-clock` | 推荐用于带实时时钟的侧边栏。时钟 + 纵向 4×1。 | <img src="docs/assets/readme/dashboard-narrow-clock.png" alt="预览" width="180"> |
-| `wide` | `ccuv dashboard wide` | 推荐用于只看数据的均衡总览。均衡 2×2。 | <img src="docs/assets/readme/dashboard-wide.png" alt="预览" width="180"> |
+| 【推荐-宽终端】 `wide-clock` **（未指定预设时的默认值）** | `ccuv dashboard wide-clock` | 数字时钟占一行全宽聚焦区，其余数据 Pane 按两列排列。 | <img src="docs/assets/readme/dashboard-wide-clock.png" alt="预览" width="180"> |
+| 【推荐-侧边栏】 `narrow-clock` | `ccuv dashboard narrow-clock` | 数字时钟与数据 Pane 按单列排列。 | <img src="docs/assets/readme/dashboard-narrow-clock.png" alt="预览" width="180"> |
+| `wide` | `ccuv dashboard wide` | 均衡的双列纯数据总览。 | <img src="docs/assets/readme/dashboard-wide.png" alt="预览" width="180"> |
 | `narrow` | `ccuv dashboard narrow` | 推荐用于窄终端中的紧凑总览。纵向聚焦。 | <img src="docs/assets/readme/dashboard-narrow.png" alt="预览" width="180"> |
 | `all` | `ccuv dashboard all` | 推荐用于同时比较多种 Pane。宽广画廊。 | <img src="docs/assets/readme/dashboard-all.png" alt="预览" width="180"> |
-| `spotlight-wide` | `ccuv dashboard spotlight-wide` | 推荐用于优先关注 Timeline 趋势。Timeline 主导。 | <img src="docs/assets/readme/dashboard-spotlight-wide.png" alt="预览" width="180"> |
-| `spotlight-wide2` | `ccuv dashboard spotlight-wide2` | 推荐用于同时优先关注 Timeline 和 Stack。Timeline + Stack 主导。 | <img src="docs/assets/readme/dashboard-spotlight-wide2.png" alt="预览" width="180"> |
+
+### 灵活的 Dashboard 拓扑
+
+预设决定 Pane 内容与显示，拓扑独立决定当前有序 Pane 的空间排列。前 `--spotlight N` 个 Pane
+从上到下各占一整行，其余 Pane 从左到右按 `--columns C` 列排列：
+
+```bash
+ccuv dashboard wide --columns 3 --spotlight 1
+```
+
+在 Dashboard 全局调整模式按 `z` 即可实时预览和编辑两个值：上下方向键或 `j`/`k` 选择字段，
+左右方向键或 `-`/`+` 调整数值，Enter 整体提交，Escape 取消。选中 Pane 后，`{`/`}` 调整共享列宽，
+`J`/`K` 调整所在行高。不再支持旧的 `--grid`、`--layout`、`spotlight-wide` 和
+`spotlight-wide2` 接口。
 
 ### 你的 Dashboard 预设
 
@@ -123,7 +90,7 @@ ccuv dashboard weekly-review --ccusage-bin /opt/bin/ccusage
 
 具名预设的 `--empty` 会保留布局、权重、显示设置、刷新/采样节奏、时区、demo 和进程设置及其他安全的 ccuv 配置，但仅在内存中将每个 Pane 替换为空白 Pane；绝不会修改已保存的预设。原有未命名的 `ccuv dashboard --empty` 仍可用于临时组合新的 Dashboard。启用 demo 的预设加载后仍会启用 demo；Dashboard 目前没有运行时关闭 demo 的控制。
 
-预设会持久化声明式 Dashboard 配置，包括语言、时区、`ccusage-bin`、已安装 Dataset 的引用、本地命令 argv 和可执行 Overlay 命令，但不会保存查询结果、环境变量、凭据或 UI/运行时状态。显式传入的 `--lang` 会覆盖预设语言。预设属于可信的用户本地自动化配置：加载预设会执行其中包含的命令，因此只能加载你信任的预设。预设保存在 ccuv 的私有状态目录 `dashboard-presets/presets.json`：macOS 为 `~/Library/Application Support/ccuv`，Windows 为 `%LOCALAPPDATA%/ccuv`，其他系统为 `${XDG_STATE_HOME:-~/.local/state}/ccuv`。缺少已安装 Dataset 不会使预设不可加载，受影响 Pane 会报告不可用的数据源；只有预设存储不可读、格式错误或版本不支持时才显示为不可用，并阻止覆盖写入。
+预设会持久化声明式 Dashboard 配置，包括语言、时区、`ccusage-bin`、已安装 Dataset 的引用、本地命令 argv 和可执行 Overlay 命令，但不会保存查询结果、环境变量、凭据或 UI/运行时状态。显式传入的 `--lang` 会覆盖预设语言。预设属于可信的用户本地自动化配置：加载预设会执行其中包含的命令，因此只能加载你信任的预设。预设保存在 ccuv 的私有状态目录 `dashboard-presets/presets.json`：macOS 为 `~/Library/Application Support/ccuv`，Windows 为 `%LOCALAPPDATA%/ccuv`，其他系统为 `${XDG_STATE_HOME:-~/.local/state}/ccuv`。保存格式已升级为 `ccuv.dashboard-presets/v2`：旧 v1 不会迁移或加载；首次保存新预设时，ccuv 会把原 v1 文件归档为私有备份，再创建 v2 集合。损坏 JSON 与未知 schema 仍受保护、不会被覆盖。缺少已安装 Dataset 不会使有效 v2 预设不可加载，受影响 Pane 会报告不可用的数据源。
 
 > [!TIP]
 > Dashboard 会协调 Pane 查询：多个 Pane 刷新时，相同的进行中 Provider 请求会被共享，避免重复工作。
@@ -153,15 +120,9 @@ ccuv dashboard weekly-review --ccusage-bin /opt/bin/ccusage
 > 使用 `--project-aggregation exact` 可关闭跨 Agent 聚合。
 
 > [!TIP]
-> 想将多个聚焦图表一同查看？可以从聚焦图表会话添加 Pane，或直接组合自定义 Dashboard，并自行选择网格或命名布局。参阅[使用指南](docs/usage.zh-CN.md)。
+> 想将多个聚焦图表一同查看？可以从聚焦图表会话添加 Pane，或直接组合自定义 Dashboard，并自行选择列数和聚焦数量。参阅[使用指南](docs/usage.zh-CN.md)。
 
-已声明该能力的 V2 Dataset 可以在每个逻辑模型中独立排列真实模型：
-
-```bash
-ccuv chart ranking --dataset router --partition-by logical_model --group-by real_model
-```
-
-命令、筛选、控制、样式和数据语义请参阅[使用指南](docs/usage.zh-CN.md)。安装、注册和使用外部 Metric 请见[Dataset 使用者指南](docs/dataset-user-guide.zh-CN.md)；Dataset 作者请从[开发者指南](docs/dataset-developer-guide.zh-CN.md)开始。
+命令、筛选、控制、样式和数据语义请参阅[使用指南](docs/usage.zh-CN.md)。
 [架构文档](docs/architecture.zh-CN.md)面向维护者。
 
 ## 安装、更新与卸载
@@ -231,30 +192,50 @@ npm install -g ccusage
 都会取消。Demo、重定向/非交互运行以及自定义 `--ccusage-bin` 运行不会提示或自动安装。
 npm 不可用时，请手动安装 [`ccusage`](https://github.com/ryoppippi/ccusage)。
 
-> [!TIP]
-> ccuv 默认仍使用官方 `ccusage`。若还需要 DeepSeek Harness（DSH）与 WorkBuddy
-> 统计，可安装非官方的
-> [`Cookie-HOO/my-ccusage`](https://github.com/Cookie-HOO/my-ccusage)
-> 发行版，并通过 `--ccusage-bin` 显式选择它。
->
-> Windows x64（PowerShell）：
->
-> ```powershell
-> irm https://raw.githubusercontent.com/Cookie-HOO/my-ccusage/main/install.ps1 | iex
-> ccuv dashboard --ccusage-bin my-ccusage
-> ```
->
-> macOS 或 Linux：
->
-> ```bash
-> curl -fsSL https://raw.githubusercontent.com/Cookie-HOO/my-ccusage/main/install.sh | sh
-> ccuv dashboard --ccusage-bin my-ccusage
-> ```
->
-> 安装脚本会验证 Release 校验和；也可以从
-> [最新 Release](https://github.com/Cookie-HOO/my-ccusage/releases/latest)
-> 手动下载 archive 和校验和。`my-ccusage` 跟随上游 ccusage，并补充 DSH 与
-> WorkBuddy adapter；它仍是非官方发行版，ccuv 本身没有 DSH 或 WorkBuddy collector。
+## 扩展数据来源
+
+ccuv 的核心仍是由 `ccusage` 提供的 Token 统计。需要额外覆盖时，可以选择两条彼此独立的扩展路径。
+
+### 统计 DSH 与 WorkBuddy Token
+
+ccuv 默认使用官方 `ccusage`。若还需要 DeepSeek Harness（DSH）与 WorkBuddy
+统计，可安装非官方的
+[`Cookie-HOO/my-ccusage`](https://github.com/Cookie-HOO/my-ccusage)
+发行版，并显式选择：
+
+```bash
+# macOS 或 Linux
+curl -fsSL https://raw.githubusercontent.com/Cookie-HOO/my-ccusage/main/install.sh | sh
+ccuv dashboard --ccusage-bin my-ccusage
+```
+
+```powershell
+# Windows x64
+irm https://raw.githubusercontent.com/Cookie-HOO/my-ccusage/main/install.ps1 | iex
+ccuv dashboard --ccusage-bin my-ccusage
+```
+
+安装脚本会验证 Release 校验和。`my-ccusage` 跟随上游 ccusage，并补充 DSH 与
+WorkBuddy adapter；ccuv 自身仍不包含 DSH 或 WorkBuddy collector。
+
+### 使用 Dataset 监控任意指标
+
+Dataset 可以加入由外部来源拥有语义的指标，例如 CI、构建、金额、字节、阅读或本地服务活动，
+且不会改变 ccusage Token 采集。Dataset 是一个可执行命令：ccuv 向 stdin 发送 JSON 请求，
+从 stdout 读取经过验证的 JSON 响应，再把声明的 Metric 渲染为聚焦图表或 Dashboard Pane。
+
+可以在 `ccuv dataset` 中浏览带签名的官方目录、输入 `OWNER/REPOSITORY` 安装兼容的 GitHub
+Release，或注册本地可执行程序：
+
+```bash
+ccuv dataset add-local /absolute/path/to/my-dataset --profile personal
+ccuv dataset list
+ccuv chart timeline --dataset example-activity --metric events
+```
+
+安装、升级、Dashboard 选择与排错请见 [Dataset 使用者指南](docs/dataset-user-guide.zh-CN.md)。
+Dataset 作者请从 [Dataset 开发者指南](docs/dataset-developer-guide.zh-CN.md)和
+[自定义命令协议](docs/custom-command-protocol.zh-CN.md)开始。
 
 ## 延伸阅读
 

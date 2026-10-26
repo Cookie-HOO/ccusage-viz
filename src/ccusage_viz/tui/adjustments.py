@@ -1,11 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Callable
-
 from ccusage_viz.animation import animation_style_choices
 from ccusage_viz.animation_host.runtime import _format_overlay_interval
-from ccusage_viz.dashboard_layout import fixed_shape
-from ccusage_viz.dashboard_layout import parse_layout as parse_dashboard_layout
 from ccusage_viz.data_view import BodyView
 from ccusage_viz.formatting import clip_width
 from ccusage_viz.i18n import Translator
@@ -17,7 +13,7 @@ from ccusage_viz.options import (
     is_monitor_ranking_style,
 )
 from ccusage_viz.render.palette import COLOR_SCHEMES
-from ccusage_viz.terminal import FramePainter, compose_frame
+from ccusage_viz.terminal import FramePainter  # noqa: F401 - retained test injection seam
 from ccusage_viz.terminal_ui import AdjustmentAction, adjustment_rows
 from ccusage_viz.text_viewport import text_viewport_overflows
 from ccusage_viz.tui.controls import (
@@ -31,7 +27,7 @@ from ccusage_viz.tui.controls import (
     _pane_management_divider,
 )
 from ccusage_viz.tui.models import TuiAnimationPane, TuiChartPane, _pane_display_options
-from ccusage_viz.tui_input import InputDecoder, KeyEvent, read_event
+from ccusage_viz.tui_input import read_event  # noqa: F401 - retained test injection seam
 
 _PANE_QUICK_ACTIONS = {
     "timeline": (("p/P", "period"), ("g/G", "granularity"), ("b/B", "group"), ("+/-", "top")),
@@ -55,26 +51,7 @@ _GLOBAL_ACTIONS = (
     ("H", "header"),
     ("p/P", "summary"),
     ("z", "layout"),
-    ("Z", "grid"),
 )
-
-_LAYOUT_SHORTCUTS = (
-    "wide",
-    "narrow",
-    "all",
-    "auto",
-    "spotlight-wide",
-    "spotlight-wide2",
-)
-
-_LAYOUT_SHORTCUT_VALUES = {
-    "wide": "2x2",
-    "narrow": "3x1",
-    "all": "5x2",
-    "auto": "auto",
-    "spotlight-wide": "spotlight-wide",
-    "spotlight-wide2": "spotlight-wide2",
-}
 
 
 def _project_grouping_available(chart: object | None) -> bool:
@@ -555,80 +532,6 @@ def _adjustment_target(focused: int | None, key: str, pane_count: int) -> int | 
     if key == "\t":
         return (focused + 1) % pane_count
     return focused
-
-
-def _layout_shortcut_capacity(shortcut: str) -> int | None:
-    value = _LAYOUT_SHORTCUT_VALUES[shortcut]
-    if "x" not in value:
-        return None
-    rows, columns = fixed_shape(value)
-    return rows * columns
-
-
-def _layout_shortcut_available(shortcut: str, pane_count: int) -> bool:
-    return parse_dashboard_layout(_LAYOUT_SHORTCUT_VALUES[shortcut], pane_count) is not None
-
-
-def _next_available_layout_shortcut(index: int, available: tuple[int, ...], direction: int) -> int:
-    position = available.index(index)
-    return available[(position + direction) % len(available)]
-
-
-def _choose_layout_shortcut(
-    screen: FramePainter,
-    translator: Translator,
-    decoder: InputDecoder,
-    *,
-    height: int,
-    current: str,
-    pane_count: int,
-    read_input: Callable[[], object] | None = None,
-) -> str | None:
-    available = tuple(
-        index
-        for index, shortcut in enumerate(_LAYOUT_SHORTCUTS)
-        if _layout_shortcut_available(shortcut, pane_count)
-    )
-    if not available:
-        return None
-    current_index = next(
-        (
-            item_index
-            for item_index, shortcut in enumerate(_LAYOUT_SHORTCUTS)
-            if current in {shortcut, _LAYOUT_SHORTCUT_VALUES[shortcut]}
-        ),
-        None,
-    )
-    index = current_index if current_index in available else available[0]
-    while True:
-        choices = "\n".join(
-            (
-                f"{'›' if item_index == index else ' '} {shortcut}"
-                if item_index in available
-                else f"  {shortcut} · {translator.text('status.tui_layout_unavailable', capacity=_layout_shortcut_capacity(shortcut), count=pane_count)}"
-            )
-            for item_index, shortcut in enumerate(_LAYOUT_SHORTCUTS)
-        )
-        screen.paint(
-            compose_frame(
-                choices,
-                translator.text("label.adjust_layout"),
-                translator.text("status.tui_layout_shortcuts_controls"),
-                height=height,
-            )
-        )
-        event = read_input() if read_input is not None else read_event(decoder, 0.1)
-        if not isinstance(event, KeyEvent):
-            continue
-        key = event.value
-        if key in {"j", "\x1b[B"}:
-            index = _next_available_layout_shortcut(index, available, 1)
-        elif key in {"k", "\x1b[A"}:
-            index = _next_available_layout_shortcut(index, available, -1)
-        elif key in {"\r", "\n"}:
-            return _LAYOUT_SHORTCUTS[index]
-        elif key == "\x1b":
-            return None
 
 
 _CUSTOM_PANE_KINDS = ("timeline", "stack", "calendar", "ranking")

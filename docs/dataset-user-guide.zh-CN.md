@@ -88,6 +88,8 @@ ccuv chart monitor --dataset router --metric tokens
 
 在已选中的 Custom 图 Pane 内，`m` 和 `M` 会在当前 Group 中支持当前图表类型的 Metric 间前后循环。ccuv 会保留当前查询选择；如果下一个 Metric 的声明 capability 不接受当前 period、group 或 granularity，则保持当前 Metric 并显示短暂警告。成功切换后替换已选 Metric；目标请求失败时保持此前的图或 Monitor 选中。
 
+Custom 历史 Pane 的 `p` / `P` 只会在所选 Metric 与图表类型非空、有序的 `periods` 声明中循环。省略 `periods` 时，ccuv 使用通用周期序列，Dataset 可在运行时拒绝请求。准确的声明可以避免用户进入已知不支持的周期。如果同一图表的不同 grouping 受不同源端限制，Dataset 必须声明所有已公开 grouping 都有效的周期交集，或把它们建模为独立 capability。
+
 Dataset 可建议初始 period、group、Top N、Other、style、theme 和 Monitor 本地显示范围，但只是建议。显式参数优先：
 
 ```bash
@@ -113,7 +115,7 @@ Custom Dataset 使用 `--group-by`，不是内置图的 `--by`；只有 Dataset 
 ### CLI 声明 Pane
 
 ```bash
-ccuv dashboard --empty --grid 2x2 \
+ccuv dashboard --empty --columns 2 --spotlight 0 \
   --pane 'chart timeline --dataset example-activity --metric events' \
   --pane 'chart ranking --dataset example-activity --metric events --period 30d' \
   --pane 'empty' \

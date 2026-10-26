@@ -20,7 +20,7 @@ from ccusage_viz.presets.values import (
     validate_preset_name,
 )
 
-PRESET_SCHEMA = "ccuv.dashboard-presets/v1"
+PRESET_SCHEMA = "ccuv.dashboard-presets/v2"
 
 
 @dataclass(frozen=True, slots=True)

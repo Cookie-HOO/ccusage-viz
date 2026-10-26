@@ -9,7 +9,7 @@ from typing import TypeVar, cast
 from ccusage_viz.animation_overlay import OverlayConfig
 from ccusage_viz.core.custom_ranking_time import TimestampRange, parse_subday_period
 from ccusage_viz.core.time import DateRange, parse_period, validate_timezone
-from ccusage_viz.dashboard_layout import layout_bands, parse_layout
+from ccusage_viz.dashboard_layout import layout_bands
 from ccusage_viz.options import (
     COMMAND_STYLES,
     DASHBOARD_STYLES,
@@ -377,8 +377,8 @@ def _host_wire(value: DashboardHostConfig) -> dict[str, object]:
         "demo_size": value.demo_size,
         "demo_seed": value.demo_seed,
         "timezone": value.timezone,
-        "grid": value.grid,
-        "layout": value.layout,
+        "columns": value.columns,
+        "spotlight": value.spotlight,
         "column_weights": _weights_wire(value.column_weights),
         "row_weights": _weights_wire(value.row_weights),
         "refresh_interval": value.refresh_interval,
@@ -399,8 +399,8 @@ def _host_parse(value: object, pane_count: int) -> DashboardHostConfig:
             "demo_size",
             "demo_seed",
             "timezone",
-            "grid",
-            "layout",
+            "columns",
+            "spotlight",
             "column_weights",
             "row_weights",
             "refresh_interval",
@@ -423,12 +423,12 @@ def _host_parse(value: object, pane_count: int) -> DashboardHostConfig:
     demo_seed = wire["demo_seed"]
     if demo_seed is not None:
         demo_seed = _integer(demo_seed, "host.demo_seed")
-    grid = _string(wire["grid"], "host.grid")
-    layout = _optional_string(wire["layout"], "host.layout")
-    configured_layout = layout or grid
-    if parse_layout(configured_layout, pane_count) is None:
-        raise DashboardPresetValidationError("host grid/layout cannot display every pane")
-    bands = layout_bands(configured_layout, pane_count)
+    columns_value = _integer(wire["columns"], "host.columns", minimum=1)
+    spotlight = _integer(wire["spotlight"], "host.spotlight", minimum=0)
+    try:
+        bands = layout_bands(columns=columns_value, spotlight=spotlight, pane_count=pane_count)
+    except ValueError as exc:
+        raise DashboardPresetValidationError(str(exc)) from exc
     columns, rows = (
         _weights(wire["column_weights"], "host.column_weights"),
         _weights(wire["row_weights"], "host.row_weights"),
@@ -443,8 +443,8 @@ def _host_parse(value: object, pane_count: int) -> DashboardHostConfig:
         demo_size=_optional_string(wire["demo_size"], "host.demo_size"),
         demo_seed=demo_seed,
         timezone=timezone,
-        grid=grid,
-        layout=layout,
+        columns=columns_value,
+        spotlight=spotlight,
         column_weights=columns,
         row_weights=rows,
         refresh_interval=_number(wire["refresh_interval"], "host.refresh_interval", minimum=0.001),

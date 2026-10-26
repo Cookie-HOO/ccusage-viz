@@ -4,7 +4,7 @@
 
 [![PyPI](https://img.shields.io/pypi/v/ccusage-viz.svg)](https://pypi.org/project/ccusage-viz/) [![Python](https://img.shields.io/pypi/pyversions/ccusage-viz.svg)](https://pypi.org/project/ccusage-viz/) [![License: GPL v3](https://img.shields.io/badge/License-GPL%20v3-blue.svg)](LICENSE) [![CI](https://github.com/Cookie-HOO/ccusage-viz/actions/workflows/ci.yml/badge.svg)](https://github.com/Cookie-HOO/ccusage-viz/actions/workflows/ci.yml)
 
-> **Alpha · 0.3.4** — interfaces may change before 1.0. See the [roadmap](docs/roadmap.md) for current direction.
+> **Alpha · 0.3.5** — interfaces may change before 1.0. See the [roadmap](docs/roadmap.md) for current direction.
 
 `ccusage-viz` is an independent, unofficial terminal visualizer for
 [`ccusage`](https://github.com/ryoppippi/ccusage) token data. It turns
@@ -46,67 +46,6 @@ cannot apply the requested timezone.
 > This project is not affiliated with or endorsed by the `ccusage` project or
 > its maintainers.
 
-## Dataset and custom command extensions
-
-Datasets let ccuv visualize metrics owned by external sources without adding
-them to built-in `ccusage` token collection. A Dataset is an executable command:
-ccuv sends it one JSON request on stdin, reads one JSON response from stdout,
-and renders the declared Metrics in focused charts or Dashboard Panes.
-
-### Install an official Dataset
-
-Official Dataset entries are collected in the signed
-[`Cookie-HOO/ccuv-dataset-catalog`](https://github.com/Cookie-HOO/ccuv-dataset-catalog)
-repository.
-
-1. Run `ccuv dataset`.
-2. Press `+` and choose **Browse official datasets**.
-3. Select an entry, review its Metrics, environment requirements, version, and
-   source, then confirm installation.
-
-The official catalog verifies signed metadata. Installation still requires a
-compatible release archive for the current operating system and architecture.
-
-### Register a local command
-
-Register an executable already available on your machine with its exact argv:
-
-```bash
-ccuv dataset add-local /absolute/path/to/my-dataset --profile personal
-ccuv dataset list
-```
-
-Registration immediately runs the command's Probe. Use the Dataset ID returned
-by that Probe—not the executable filename—with `--dataset`. ccuv stores argv
-and starts the executable directly without a shell. Re-run `add-local` after
-changing its Probe metadata; a local registration with the same Dataset ID is
-replaced.
-
-### Install from a GitHub repository
-
-You can also install a compatible Dataset from a specific GitHub repository.
-For example, use the
-[WeRead Dataset](https://github.com/Cookie-HOO/ccuv-dataset-weread):
-
-1. Run `ccuv dataset`, press `+`, and choose **Install from GitHub**.
-2. Enter:
-
-   ```text
-   https://github.com/Cookie-HOO/ccuv-dataset-weread
-   ```
-
-3. Review the discovered release and confirm installation.
-
-The repository must publish a compatible native archive, checksum, and Dataset
-manifest. Installing from an arbitrary GitHub repository does not make it an
-official Dataset; if the repository is also present in the official catalog,
-ccuv uses its verified official artifact path.
-
-For installation, management, Dashboard selection, and troubleshooting, see the
-[Dataset user guide](docs/dataset-user-guide.md). To implement and package a
-Dataset, start with the [Dataset developer guide](docs/dataset-developer-guide.md)
-and [custom command protocol](docs/custom-command-protocol.md).
-
 ## Interactive Help
 
 Dashboard provides contextual Help: press `h` to see the controls for the
@@ -114,33 +53,45 @@ active surface, and press `c` in chart-browse mode to show or hide its footer.
 While editing Overlay text or a command, use `Ctrl-H` instead so the literal `h`
 remains available to the draft.
 
-## Dashboard presets
+## Dashboard
 
-`dashboard` composes independently configured charts in one terminal. Without a positional preset, `dashboard` defaults to `wide-clock`:
+`dashboard` composes independently configured charts in one terminal. Without a positional preset, it defaults to `wide-clock`:
 
 > [!TIP]
 > To start without default ccusage panes or requests, use `ccuv dashboard --empty`.
-> It fills the selected default grid or explicit `--grid`/layout with temporary
-> `empty` panes. Add an installed Dataset with only its chart type and Dataset ID:
-> `--pane 'chart timeline --dataset weread'`. Arbitrary commands add `--command`.
-> See the [Dataset user guide](docs/dataset-user-guide.md) to install or register a
-> Dataset, and the [custom command protocol guide](docs/custom-command-protocol.md)
-> when you are building one.
+> It creates four temporary `empty` panes; `--columns` and `--spotlight` control only their
+> topology. Replace the temporary Panes interactively or with explicit `--pane` fragments.
 
 ```bash
 ccuv dashboard
 ```
 
-| Preset | Command | Layout | Preview |
+### Built-in presets
+
+| Preset | Command | Default arrangement | Preview |
 | --- | --- | --- | --- |
 | `single` | `ccuv dashboard single` | A single live analog clock without a text overlay or Dashboard frame. | - |
-| 【Recommended—wide terminal】 `wide-clock` **(default without a preset)** | `ccuv dashboard wide-clock` | Best for an all-purpose overview with a compact live digital clock. Digital clock + balanced 2×2. | <img src="docs/assets/readme/dashboard-wide-clock.png" alt="Preview" width="180"> |
-| 【Recommended—sidebar】 `narrow-clock` | `ccuv dashboard narrow-clock` | Best for a sidebar with a live clock. Clock + vertical 4×1. | <img src="docs/assets/readme/dashboard-narrow-clock.png" alt="Preview" width="180"> |
-| `wide` | `ccuv dashboard wide` | Best for a balanced data-only overview. Balanced 2×2. | <img src="docs/assets/readme/dashboard-wide.png" alt="Preview" width="180"> |
+| 【Recommended—wide terminal】 `wide-clock` **(default without a preset)** | `ccuv dashboard wide-clock` | Compact digital clock in one full-width spotlight row, followed by two-column data panes. | <img src="docs/assets/readme/dashboard-wide-clock.png" alt="Preview" width="180"> |
+| 【Recommended—sidebar】 `narrow-clock` | `ccuv dashboard narrow-clock` | Digital clock and data panes in one column. | <img src="docs/assets/readme/dashboard-narrow-clock.png" alt="Preview" width="180"> |
+| `wide` | `ccuv dashboard wide` | Balanced two-column data-only overview. | <img src="docs/assets/readme/dashboard-wide.png" alt="Preview" width="180"> |
 | `narrow` | `ccuv dashboard narrow` | Best for a compact, narrow-terminal overview. Vertical focus. | <img src="docs/assets/readme/dashboard-narrow.png" alt="Preview" width="180"> |
 | `all` | `ccuv dashboard all` | Best for comparing many pane types at once. Broad gallery. | <img src="docs/assets/readme/dashboard-all.png" alt="Preview" width="180"> |
-| `spotlight-wide` | `ccuv dashboard spotlight-wide` | Best for prioritizing Timeline trends. Timeline-led. | <img src="docs/assets/readme/dashboard-spotlight-wide.png" alt="Preview" width="180"> |
-| `spotlight-wide2` | `ccuv dashboard spotlight-wide2` | Best for prioritizing Timeline and Stack together. Timeline + Stack-led. | <img src="docs/assets/readme/dashboard-spotlight-wide2.png" alt="Preview" width="180"> |
+
+### Flexible Dashboard topology
+
+Presets decide Pane content and presentation; topology independently decides where the current
+ordered Panes appear. The first `--spotlight N` Panes each occupy a full-width row, and the
+remaining Panes flow left-to-right into `--columns C` columns:
+
+```bash
+ccuv dashboard wide --columns 3 --spotlight 1
+```
+
+In Dashboard-global adjustment mode, press `z` to preview and edit both values. Use Up/Down or
+`j`/`k` to select a field, Left/Right or `-`/`+` to adjust it, Enter to commit the whole edit,
+and Escape to cancel. With a Pane selected, `{`/`}` resize its shared column and `J`/`K` resize
+its row. The former `--grid`, `--layout`, `spotlight-wide`, and `spotlight-wide2` interfaces are
+no longer supported.
 
 ### Your Dashboard presets
 
@@ -179,9 +130,11 @@ user-local automation: load only presets you trust, because loading one can run
 the commands it contains. Presets live in ccuv's private state directory under
 `dashboard-presets/presets.json` (`~/Library/Application Support/ccuv` on macOS,
 `%LOCALAPPDATA%/ccuv` on Windows, or `${XDG_STATE_HOME:-~/.local/state}/ccuv` on
-other systems). A missing installed Dataset leaves a preset loadable and its pane
-reports the unavailable source; only unreadable, malformed, or unsupported preset
-storage is shown as unavailable and protected from overwrites.
+other systems). Saved presets now use schema `ccuv.dashboard-presets/v2`. Existing v1 presets
+are not migrated or loaded; on the first new save, ccuv archives the original v1 file as a
+private backup and starts a v2 collection. Malformed JSON and unknown schemas remain protected
+from overwrite. A missing installed Dataset leaves a valid v2 preset loadable while its Pane
+reports the unavailable source.
 
 > [!TIP]
 > Dashboard coordinates pane queries: identical in-flight provider requests are
@@ -218,21 +171,12 @@ it focused, replace the Pane, or expand it into a multi-Pane Dashboard.
 
 > [!TIP]
 > Need several focused charts together? Add Panes from a focused chart session or
-> compose a custom Dashboard and choose your own grid or named layout. See the
+> compose a custom Dashboard and choose your own column and spotlight counts. See the
 > [usage guide](docs/usage.md).
 
-A declared V2 Dataset can independently rank real models within each logical
-model:
-
-```bash
-ccuv chart ranking --dataset router --partition-by logical_model --group-by real_model
-```
-
 For commands, filters, controls, styles, and data semantics, see the
-[usage guide](docs/usage.md). To install, register, or use external Metrics,
-read the [Dataset user guide](docs/dataset-user-guide.md); Dataset authors should
-start with the [developer guide](docs/dataset-developer-guide.md). The
-[architecture overview](docs/architecture.md) is intended for maintainers.
+[usage guide](docs/usage.md). The [architecture overview](docs/architecture.md)
+is intended for maintainers.
 
 ## Install, update, and remove
 
@@ -304,31 +248,56 @@ Ctrl-C, or EOF cancels it. Demo mode, redirected/noninteractive runs, and custom
 [`ccusage`](https://github.com/ryoppippi/ccusage) manually when npm is
 unavailable.
 
-> [!TIP]
-> The official `ccusage` command remains ccuv's default. To additionally include
-> DeepSeek Harness (DSH) and WorkBuddy usage, install the unofficial
-> [`Cookie-HOO/my-ccusage`](https://github.com/Cookie-HOO/my-ccusage)
-> distribution and select it explicitly with `--ccusage-bin`.
->
-> Windows x64 (PowerShell):
->
-> ```powershell
-> irm https://raw.githubusercontent.com/Cookie-HOO/my-ccusage/main/install.ps1 | iex
-> ccuv dashboard --ccusage-bin my-ccusage
-> ```
->
-> macOS or Linux:
->
-> ```bash
-> curl -fsSL https://raw.githubusercontent.com/Cookie-HOO/my-ccusage/main/install.sh | sh
-> ccuv dashboard --ccusage-bin my-ccusage
-> ```
->
-> The installers verify release checksums. Manual archives and checksums are on
-> the [latest release](https://github.com/Cookie-HOO/my-ccusage/releases/latest).
-> `my-ccusage` tracks upstream ccusage and supplements it with DSH and WorkBuddy
-> adapters. It remains an unofficial distribution; ccuv has no DSH or WorkBuddy
-> collector of its own.
+## Extend data sources
+
+ccuv remains centered on Token statistics supplied by `ccusage`. When you need
+additional coverage, there are two separate extension paths.
+
+### Count DSH and WorkBuddy Tokens
+
+The official `ccusage` command remains the default. To additionally include
+DeepSeek Harness (DSH) and WorkBuddy usage, install the unofficial
+[`Cookie-HOO/my-ccusage`](https://github.com/Cookie-HOO/my-ccusage) distribution
+and select it explicitly:
+
+```bash
+# macOS or Linux
+curl -fsSL https://raw.githubusercontent.com/Cookie-HOO/my-ccusage/main/install.sh | sh
+ccuv dashboard --ccusage-bin my-ccusage
+```
+
+```powershell
+# Windows x64
+irm https://raw.githubusercontent.com/Cookie-HOO/my-ccusage/main/install.ps1 | iex
+ccuv dashboard --ccusage-bin my-ccusage
+```
+
+The installers verify release checksums. `my-ccusage` tracks upstream ccusage
+and supplements it with DSH and WorkBuddy adapters; ccuv itself still has no
+DSH or WorkBuddy collector.
+
+### Monitor any metric with a Dataset
+
+Datasets add externally owned metrics—such as CI, builds, spend, bytes, reading,
+or local-service activity—without changing ccusage Token collection. A Dataset
+is an executable command: ccuv sends JSON requests on stdin, reads validated JSON
+responses from stdout, and renders the declared Metrics in focused charts or
+Dashboard Panes.
+
+Install from the signed official catalog with `ccuv dataset` and **Browse official
+datasets**, install a compatible GitHub release by entering `OWNER/REPOSITORY`,
+or register a local executable:
+
+```bash
+ccuv dataset add-local /absolute/path/to/my-dataset --profile personal
+ccuv dataset list
+ccuv chart timeline --dataset example-activity --metric events
+```
+
+For installation, upgrades, Dashboard selection, and troubleshooting, see the
+[Dataset user guide](docs/dataset-user-guide.md). Dataset authors should start
+with the [Dataset developer guide](docs/dataset-developer-guide.md) and
+[custom command protocol](docs/custom-command-protocol.md).
 
 ## Further reading
 

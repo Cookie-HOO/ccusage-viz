@@ -202,11 +202,11 @@
 
 1. **Layout 决定拓扑，Weights 只描述当前拓扑内的相对尺寸。**
 
-   `auto` 根据 Pane 数量推导稳定网格；正整数 `行x列` 固定列数并允许末行留空；`spotlight-wide` 让 Pane 0 占据顶部通栏；`spotlight-wide2` 让 Pane 0 和 Pane 1 连续占据各自的顶部通栏，剩余 Pane 在下方按两列排列。后续 Pane 追加到普通两列行中时，这些索引语义保持稳定。
+   `columns` 固定普通区域的列数并允许末行留空；前 `spotlight` 个 Pane 从上到下各占一整行，其余 Pane 在下方从左到右回流。Pane 顺序因此直接决定聚焦对象。
 
-   位置 Preset 是启动模板：它提供初始且有序的 Pane 列表、Dashboard 默认值和布局关联；重复的 `--pane` 片段追加到该列表。`--grid ROWSxCOLUMNS` 为显式 Pane 列表定义数值矩形布局。`--layout auto|spotlight-*` 为显式 Pane 列表定义仅影响几何的具名布局。位置 Preset、`--grid` 和 `--layout` 两两互斥，因此初始内容与几何的来源始终明确。`wide`、`narrow`、`all` 是矩形快捷方式，`auto` 是动态矩形快捷方式，Spotlight 布局是具名的非矩形拓扑。运行时 `z` 选择同一组几何而不替换存活的 Pane 对象，运行时 `Z` 创建显式数值网格草稿。两者都保留 Pane 身份、已接受状态、焦点、配置、Monitor 历史和生命周期状态；改变几何只会重置逻辑 Weights。
+   位置 Preset 是包含 Pane 顺序、显示、拓扑与可选 Weights 的完整启动模板；仍可用 `--columns C --spotlight N` 独立覆盖拓扑。运行时按 `z` 打开事务式编辑器并实时预览：上下选择字段，左右调整，Enter 一次提交，Escape 取消。它保留 Pane 身份、已接受数据、配置、Monitor 历史和生命周期；只有 band 数量变化的轴会清除不再兼容的 Weights。
 
-   完整命令复制会展开当前 Pane 列表，并输出 `--grid` 或公开的 `--layout`，永不输出其来源 Preset；因此它复现实际会话，而不是重新插入一个模板。切换已配置 Layout 会为新拓扑重建等权 Weights，不保留其他 Layout 的隐藏比例，也不从终端像素反推。命令只记录配置 Layout 适用的精确正整数 Weights，不记录终端绝对尺寸。
+   完整命令复制会展开当前 Pane 列表，并输出 `--columns` 与 `--spotlight`，永不输出来源 Preset，因此可复现实际会话。命令只记录当前拓扑适用的精确正整数 Weights，不记录终端绝对尺寸。
 
 2. **Pane 共享列比例与各行高度。**
 

@@ -6,7 +6,6 @@ from ccusage_viz import __version__
 from ccusage_viz.animation_overlay import OVERLAY_COLORS, OVERLAY_POSITIONS
 from ccusage_viz.command_parsing.common import _DATASET_COMMANDS, _TEXT_PRESETS, _TUI_COMMANDS
 from ccusage_viz.command_parsing.errors import LocalizedParser
-from ccusage_viz.dashboard_layout import NAMED_LAYOUTS
 from ccusage_viz.i18n import Translator
 from ccusage_viz.options import (
     CACHE_MODES,
@@ -102,10 +101,8 @@ def _add_tui(parser: argparse.ArgumentParser, tr: Translator) -> None:
     parser.add_argument(
         "--pane", dest="panes", action="append", default=[], help=tr.text("help.pane")
     )
-    parser.add_argument("--grid", help=tr.text("help.grid"))
-    parser.add_argument(
-        "--layout", choices=tuple(sorted(NAMED_LAYOUTS)), help=tr.text("help.layout")
-    )
+    parser.add_argument("--columns", type=int, help=tr.text("help.columns"))
+    parser.add_argument("--spotlight", type=int, help=tr.text("help.spotlight"))
     parser.add_argument(
         "--column-weight",
         dest="column_weights",

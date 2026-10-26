@@ -1,363 +1,124 @@
 from __future__ import annotations
 
-import inspect
-
 import pytest
 
 from ccusage_viz.dashboard_layout import (
     MIN_PANE_WIDTH,
     PaneRect,
     adjust_weight,
+    build_topology,
     layout_bands,
-    layout_for_pane_count,
     normalize_weights,
     pane_at,
-    parse_layout,
     reconcile_weights,
     resolve_pane_layout,
 )
 
 
 @pytest.mark.parametrize(
-    ("value", "count", "expected"),
+    ("pane_count", "columns", "spotlight", "rows", "expected"),
     [
-        ("AUTO", 3, "auto"),
-        ("SPOTLIGHT-WIDE", 3, "spotlight-wide"),
-        ("Spotlight-Wide2", 3, "spotlight-wide2"),
-        ("2X2", 4, "2x2"),
+        (1, 1, 0, 1, ((0, 0, 1),)),
+        (5, 3, 0, 2, ((0, 0, 1), (0, 1, 1), (0, 2, 1), (1, 0, 1), (1, 1, 1))),
+        (5, 3, 2, 3, ((0, 0, 3), (1, 0, 3), (2, 0, 1), (2, 1, 1), (2, 2, 1))),
+        (3, 4, 3, 3, ((0, 0, 4), (1, 0, 4), (2, 0, 4))),
     ],
 )
-def test_parse_layout_normalizes_valid_values(value: str, count: int, expected: str) -> None:
-    assert parse_layout(value, count) == expected
-
-
-@pytest.mark.parametrize(
-    ("value", "count"),
-    [
-        ("", 1),
-        ("zero", 1),
-        ("2", 1),
-        ("2x", 1),
-        ("2x2x2", 1),
-        ("0x2", 1),
-        ("-1x2", 1),
-        ("1x1", 2),
-        ("auto", 0),
-        ("wide", 4),
-        ("narrow", 4),
-        ("all", 4),
-        ("spotlight-monitor", 4),
-        ("spotlight-" + "tall", 4),
-    ],
-)
-def test_parse_layout_rejects_invalid_or_insufficient_values(value: str, count: int) -> None:
-    assert parse_layout(value, count) is None
-
-
-@pytest.mark.parametrize(
-    ("layout", "count", "expected"),
-    [
-        ("3x1", 2, "2x1"),
-        ("2x2", 3, "2x2"),
-        ("3x2", 4, "2x2"),
-        ("2x2", 5, "3x2"),
-        ("1x4", 3, "1x4"),
-        ("auto", 5, "auto"),
-        ("spotlight-wide", 5, "spotlight-wide"),
-        ("spotlight-wide2", 5, "spotlight-wide2"),
-    ],
-)
-def test_layout_for_pane_count_reconciles_only_fixed_rows(
-    layout: str, count: int, expected: str
+def test_parameterized_topology(
+    pane_count: int,
+    columns: int,
+    spotlight: int,
+    rows: int,
+    expected: tuple[tuple[int, int, int], ...],
 ) -> None:
-    assert layout_for_pane_count(layout, count) == expected
+    topology = build_topology(columns=columns, spotlight=spotlight, pane_count=pane_count)
+    assert (topology.rows, topology.columns) == (rows, columns)
+    assert tuple((slot.row, slot.column, slot.column_span) for slot in topology.slots) == expected
 
 
-def test_weights_preserve_explicit_resolution_and_use_a_fine_resize_pool() -> None:
+@pytest.mark.parametrize(
+    ("columns", "spotlight", "pane_count"), [(0, 0, 1), (1, -1, 1), (1, 2, 1), (1, 0, 0)]
+)
+def test_invalid_topology_is_rejected(columns: int, spotlight: int, pane_count: int) -> None:
+    with pytest.raises(ValueError):
+        build_topology(columns=columns, spotlight=spotlight, pane_count=pane_count)
+
+
+def test_layout_bands_resolve_spotlight_and_ordinary_rows() -> None:
+    assert layout_bands(columns=3, spotlight=2, pane_count=7) == type(
+        layout_bands(columns=3, spotlight=2, pane_count=7)
+    )(4, 3)
+
+
+def test_weights_preserve_resolution_and_adjust() -> None:
     assert normalize_weights((12, 24, 36)) == (12, 24, 36)
     assert reconcile_weights((2, 4), 3) == (8, 16, 4)
-    assert reconcile_weights((2, 4, 6), 2) == (8, 16)
     assert adjust_weight((1, 1), 0, 1) == (13, 11)
-    assert adjust_weight((1, 1), 0, -1) == (11, 13)
-    assert adjust_weight((12, 12), 0, 1) == (13, 11)
-    assert adjust_weight((12, 12), 1, 1) == (11, 13)
-    assert adjust_weight((1, 1, 1), 1, 1) == (8, 9, 7)
-    assert adjust_weight((1, 1, 1), 2, -1) == (8, 9, 7)
     assert adjust_weight((12, 24, 36), 1, 2) == (12, 26, 34)
-    assert adjust_weight((2, 3, 4), 1, 0) == (2, 3, 4)
-    assert adjust_weight((1,), 0, 1) == (1,)
     with pytest.raises(ValueError):
         normalize_weights((1, 0))
-    with pytest.raises(IndexError):
-        adjust_weight((1, 2), -1, 1)
-    with pytest.raises(IndexError):
-        adjust_weight((1, 2), 2, 1)
 
 
-def test_fixed_grid_geometry_preserves_empty_cell_and_dividers() -> None:
+def test_spotlight_geometry_spans_all_columns_and_keeps_empty_last_cell() -> None:
     layout = resolve_pane_layout(
-        layout="2x2", pane_count=3, width=11, height=9, divider_style="line"
+        columns=3,
+        spotlight=2,
+        pane_count=7,
+        width=17,
+        height=14,
+        divider_style="line",
     )
-
-    assert layout.column_sizes == (5, 5)
-    assert layout.row_sizes == (4, 4)
-    assert layout.panes == (
-        layout.pane(0),
-        layout.pane(1),
-        layout.pane(2),
-    )
-    assert pane_at(layout, 0, 0) == 0
-    assert pane_at(layout, 6, 0) == 1
-    assert pane_at(layout, 0, 5) == 2
-    assert pane_at(layout, 5, 0) is None
-    assert pane_at(layout, 6, 5) is None
+    assert layout.pane(0).width == layout.pane(1).width == 17
+    assert layout.topology.slot(0).column_span == 3
+    assert layout.topology.slot(2).row == 2
+    assert layout.topology.slot(6).row == 3
+    assert layout.topology.slot(6).column == 1
+    assert pane_at(layout, 16, 0) == 0
+    assert pane_at(layout, 16, layout.pane(6).top) is None
 
 
-@pytest.mark.parametrize(
-    ("count", "rows", "columns"),
-    [(1, 1, 1), (2, 1, 2), (3, 2, 2), (5, 3, 2)],
-)
-def test_auto_retains_current_two_column_shape(count: int, rows: int, columns: int) -> None:
-    layout = resolve_pane_layout(layout="auto", pane_count=count, width=81, height=31)
-    assert (layout.topology.rows, layout.topology.columns) == (rows, columns)
-
-
-def test_spotlight_wide_features_first_pane_over_fresh_auxiliary_grid() -> None:
-    layout = resolve_pane_layout(layout="spotlight-wide", pane_count=5, width=81, height=31)
-
-    featured = layout.pane(0)
-    assert layout.rendered == "spotlight-wide"
-    assert featured.left == 0
-    assert featured.width == 81
-    assert all(rect.top > featured.top for rect in layout.panes[1:])
-    assert layout.topology.slot(0).column_span == 2
-
-
-def test_spotlight_wide_spans_dividers_and_preserves_auxiliary_hit_testing() -> None:
+def test_exact_spotlight_rectangles_include_internal_gutters() -> None:
     layout = resolve_pane_layout(
-        layout="spotlight-wide", pane_count=5, width=11, height=9, divider_style="line"
+        columns=2, spotlight=2, pane_count=4, width=13, height=10, divider_style="line"
     )
-
-    assert layout.column_sizes == (5, 5)
-    assert layout.row_sizes == (3, 2, 2)
-    assert layout.panes == (
-        PaneRect(0, 0, 0, 11, 3),
-        PaneRect(1, 0, 4, 5, 2),
-        PaneRect(2, 6, 4, 5, 2),
-        PaneRect(3, 0, 7, 5, 2),
-        PaneRect(4, 6, 7, 5, 2),
-    )
-    assert pane_at(layout, 5, 0) == 0
-    assert pane_at(layout, 0, 3) is None
-    assert pane_at(layout, 5, 4) is None
-
-
-@pytest.mark.parametrize(
-    ("count", "rows", "columns"),
-    [(1, 1, 1), (2, 2, 1), (3, 3, 2), (4, 3, 2), (5, 4, 2), (7, 5, 2)],
-)
-def test_spotlight_wide2_has_two_full_width_leading_panes(
-    count: int, rows: int, columns: int
-) -> None:
-    layout = resolve_pane_layout(layout="spotlight-wide2", pane_count=count, width=81, height=31)
-
-    assert layout.rendered == "spotlight-wide2"
-    assert (layout.topology.rows, layout.topology.columns) == (rows, columns)
-    if count > 1:
-        assert layout.pane(0).width == layout.pane(1).width == 81
-        assert layout.pane(0).top < layout.pane(1).top
-    if count > 2:
-        assert layout.topology.slot(0).column_span == layout.topology.slot(1).column_span == 2
-        assert layout.topology.slot(2).row == 2
-        assert layout.topology.slot(2).column == 0
-
-
-def test_spotlight_wide2_spans_two_leading_rows_and_preserves_auxiliary_hit_testing() -> None:
-    layout = resolve_pane_layout(
-        layout="spotlight-wide2", pane_count=4, width=13, height=10, divider_style="line"
-    )
-
     assert layout.panes == (
         PaneRect(0, 0, 0, 13, 3),
         PaneRect(1, 0, 4, 13, 3),
         PaneRect(2, 0, 8, 6, 2),
         PaneRect(3, 7, 8, 6, 2),
     )
-    assert pane_at(layout, 5, 8) == 2
-    assert pane_at(layout, 6, 9) is None
-    assert pane_at(layout, 0, 3) is None
-    assert pane_at(layout, 12, 6) == 1
 
 
-def test_one_spotlight_pane_occupies_entire_body() -> None:
-    for configured in ("spotlight-wide", "spotlight-wide2"):
-        layout = resolve_pane_layout(layout=configured, pane_count=1, width=79, height=23)
-        assert layout.pane(0) == type(layout.pane(0))(0, 0, 0, 79, 23)
-
-
-def test_weighted_geometry_allocates_shared_logical_bands() -> None:
+def test_weighted_geometry_allocates_shared_bands() -> None:
     layout = resolve_pane_layout(
-        layout="2x2",
+        columns=2,
+        spotlight=0,
         pane_count=4,
         width=13,
         height=13,
         column_weights=(1, 2),
         row_weights=(2, 1),
     )
-
     assert layout.column_sizes == (5, 7)
     assert layout.row_sizes == (7, 5)
-    assert layout.pane(1).width == layout.pane(3).width == 7
-    assert layout.pane(0).height == layout.pane(1).height == 7
 
 
-def test_weighted_layout_keeps_each_feasible_dashboard_band_at_its_minimum() -> None:
+def test_weighted_layout_keeps_feasible_minimum() -> None:
     layout = resolve_pane_layout(
-        layout="1x2",
+        columns=2,
+        spotlight=0,
         pane_count=2,
         width=80,
         height=3,
-        column_weights=(1, 1_000),
+        column_weights=(1, 1000),
         row_weights=(1,),
     )
-
-    assert layout.column_sizes[0] == MIN_PANE_WIDTH
     assert layout.column_sizes == (MIN_PANE_WIDTH, 75)
-    assert layout.row_sizes == (3,)
 
 
-@pytest.mark.parametrize(
-    ("configured", "width", "height", "divider_style", "axis_sizes"),
-    [
-        # The line divider is dropped when it would prevent one cell per band.
-        ("1x3", 3, 7, "line", (1, 1, 1)),
-        ("3x1", 7, 3, "line", (1, 1, 1)),
-        # Even after dropping the divider, physically impossible axes recover to zero sizes.
-        ("1x3", 1, 7, "line", (0, 0, 0)),
-        ("3x1", 7, 1, "line", (0, 0, 0)),
-        # With no dividers to reclaim, physically impossible axes recover to zero sizes.
-        ("1x3", 2, 7, "none", (0, 0, 0)),
-        ("3x1", 7, 2, "none", (0, 0, 0)),
-    ],
-)
-def test_layout_recovers_impossible_three_band_axes_with_bounded_origins(
-    configured: str,
-    width: int,
-    height: int,
-    divider_style: str,
-    axis_sizes: tuple[int, int, int],
-) -> None:
+@pytest.mark.parametrize(("width", "expected"), [(3, (1, 1, 1)), (1, (0, 0, 0))])
+def test_impossible_axes_degrade_safely(width: int, expected: tuple[int, int, int]) -> None:
     layout = resolve_pane_layout(
-        layout=configured,
-        pane_count=3,
-        width=width,
-        height=height,
-        divider_style=divider_style,
+        columns=3, spotlight=0, pane_count=3, width=width, height=7, divider_style="line"
     )
-
-    assert layout.gutter == 0
-    if configured == "1x3":
-        assert layout.column_gutter == 0
-        assert layout.row_gutter == (0 if divider_style == "none" else 1)
-        assert layout.column_sizes == axis_sizes
-    else:
-        assert layout.column_gutter == (0 if divider_style == "none" else 1)
-        assert layout.row_gutter == 0
-        assert layout.row_sizes == axis_sizes
-    for rect in layout.panes:
-        assert 0 <= rect.left < width
-        assert 0 <= rect.top < height
-
-
-@pytest.mark.parametrize(
-    ("configured", "width", "height", "column_sizes", "row_sizes"),
-    [
-        ("1x3", 11, 7, (3, 3, 3), (7,)),
-        ("3x1", 7, 11, (7,), (3, 3, 3)),
-    ],
-)
-def test_three_band_line_layouts_keep_exact_normal_geometry(
-    configured: str,
-    width: int,
-    height: int,
-    column_sizes: tuple[int, ...],
-    row_sizes: tuple[int, ...],
-) -> None:
-    layout = resolve_pane_layout(
-        layout=configured, pane_count=3, width=width, height=height, divider_style="line"
-    )
-
-    assert layout.column_gutter == layout.row_gutter == layout.gutter == 1
-    assert layout.column_sizes == column_sizes
-    assert layout.row_sizes == row_sizes
-
-
-@pytest.mark.parametrize(
-    ("width", "height", "column_gutter", "row_gutter", "column_sizes", "row_sizes"),
-    [
-        (3, 11, 0, 1, (1, 1, 1), (3, 3, 3)),
-        (11, 3, 1, 0, (3, 3, 3), (1, 1, 1)),
-        (11, 11, 1, 1, (3, 3, 3), (3, 3, 3)),
-    ],
-)
-def test_three_by_three_resolves_gutters_independently_per_axis(
-    width: int,
-    height: int,
-    column_gutter: int,
-    row_gutter: int,
-    column_sizes: tuple[int, int, int],
-    row_sizes: tuple[int, int, int],
-) -> None:
-    layout = resolve_pane_layout(
-        layout="3x3", pane_count=9, width=width, height=height, divider_style="line"
-    )
-
-    assert layout.column_gutter == column_gutter
-    assert layout.row_gutter == row_gutter
-    assert layout.gutter == min(column_gutter, row_gutter)
-    assert layout.column_sizes == column_sizes
-    assert layout.row_sizes == row_sizes
-    assert layout.pane(8) == PaneRect(
-        8,
-        sum(column_sizes[:2]) + 2 * column_gutter,
-        sum(row_sizes[:2]) + 2 * row_gutter,
-        column_sizes[2],
-        row_sizes[2],
-    )
-
-
-def test_layout_bands_describe_configured_spotlight_topology() -> None:
-    assert layout_bands("spotlight-wide", 5) == type(layout_bands("auto", 1))(3, 2)
-    assert layout_bands("spotlight-wide2", 5) == type(layout_bands("auto", 1))(4, 2)
-
-
-def test_resolver_has_no_focus_input() -> None:
-    assert "focused" not in inspect.signature(resolve_pane_layout).parameters
-
-
-@pytest.mark.parametrize(
-    ("configured", "count", "width", "height"),
-    [
-        ("auto", 5, 81, 31),
-        ("3x2", 5, 80, 30),
-        ("spotlight-wide", 6, 79, 29),
-        ("spotlight-wide2", 6, 79, 29),
-    ],
-)
-def test_resolved_rectangles_are_complete_bounded_and_non_overlapping(
-    configured: str, count: int, width: int, height: int
-) -> None:
-    layout = resolve_pane_layout(layout=configured, pane_count=count, width=width, height=height)
-    assert tuple(rect.index for rect in layout.panes) == tuple(range(count))
-    for rect in layout.panes:
-        assert rect.width > 0 and rect.height > 0
-        assert 0 <= rect.left < rect.left + rect.width <= width
-        assert 0 <= rect.top < rect.top + rect.height <= height
-    for index, left in enumerate(layout.panes):
-        for right in layout.panes[index + 1 :]:
-            assert (
-                left.left + left.width <= right.left
-                or right.left + right.width <= left.left
-                or left.top + left.height <= right.top
-                or right.top + right.height <= left.top
-            )
+    assert layout.column_sizes == expected

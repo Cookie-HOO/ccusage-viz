@@ -242,7 +242,7 @@ ccuv chart timeline --dataset example --command "sh -lc 'collector | adapter'"
 使用普通的、有序 `--pane` 片段。同一数据集可出现在多个 Pane 中，但每次使用必须有相同的数据源配置。已安装 Dataset Pane 只需图表类型与 Dataset ID；任意命令仍可用于开发者集成。
 
 ```bash
-ccuv dashboard --empty --grid 2x2 \
+ccuv dashboard --empty --columns 2 --spotlight 0 \
   --pane 'empty' \
   --pane 'chart timeline --dataset weread' \
   --pane 'empty' \

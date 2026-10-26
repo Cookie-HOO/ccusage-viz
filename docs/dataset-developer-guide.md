@@ -288,7 +288,12 @@ see first, such as days since last update; use descending for Stars, growth,
 ratings, or counts. Ranking `periods` may contain positive-integer `Ns`, `Nm`,
 or `Nh` values. Preserve each spelling and declaration order (`90s` is not
 normalized); omission uses ccuv's fallback without adding subday defaults.
-`null` in `group_by` to permit an ungrouped total. For Monitor, declare fixed
+ccuv treats a non-empty ordered `periods` list as authoritative for `p` / `P`.
+Every declared period must therefore work with every grouping advertised by that
+chart capability. When source limits vary by grouping, declare their valid
+intersection or split the behavior into separate Metrics/capabilities; do not
+advertise a wider list and rely on `unsupported_query` to narrow it later.
+Use `null` in `group_by` to permit an ungrouped total. For Monitor, declare fixed
 positive `window_seconds`; this is the business semantics of every observation.
 `refresh_interval_seconds` is advisory and ccuv warns when its actual sampling
 cadence differs.

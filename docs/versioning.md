@@ -6,6 +6,27 @@
 - **Minor (`0.x.0`)**: substantial new user-facing capabilities or source integrations before 1.0.
 - Before `1.0`, public interfaces may still change between releases.
 
+## 0.3.5
+
+`0.3.5` separates Dashboard presets from flexible topology and improves upgrade
+behavior without changing ccuv's default official-ccusage dependency or built-in
+Token semantics:
+
+- Dashboard topology is now expressed by `--columns` plus a leading `--spotlight`
+  Pane count: spotlight Panes occupy consecutive full-width rows and the remainder
+  flow through the selected columns; the global `z` editor previews both values
+  transactionally, while `{`/`}` and `J`/`K` retain direct column/row sizing;
+- `wide`, `narrow`, `all`, clock variants, and `single` remain complete presets,
+  while the old `--grid`, `--layout`, `spotlight-wide`, and `spotlight-wide2`
+  interfaces are removed;
+- saved Dashboard presets use `ccuv.dashboard-presets/v2`; v1 presets are not
+  migrated or loaded, but the first new save archives the original v1 file before
+  creating a v2 collection. Malformed or unknown-schema files remain protected;
+- the README now leads with ccusage Token visualization and groups optional
+  DSH/WorkBuddy coverage and arbitrary Dataset metrics under later extension paths;
+- the official WeRead Dataset update no longer offers grouped Ranking ranges that
+  its source cannot serve.
+
 ## 0.3.4
 
 `0.3.4` improves Dataset maintenance and custom-filter editing without changing

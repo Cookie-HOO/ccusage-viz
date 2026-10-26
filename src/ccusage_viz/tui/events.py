@@ -34,7 +34,6 @@ from ccusage_viz.tui.history import (
     preset_catalog,
     record_mutation,
 )
-from ccusage_viz.tui.layout import parse_grid
 from ccusage_viz.tui.models import (
     TuiAnimationPane,
     TuiChartPane,
@@ -316,35 +315,6 @@ def dispatch_event(session: TuiSession, event: object, *, now: float) -> None:
     key = event.value if isinstance(event, KeyEvent) else None
     if key == "\x03":
         raise KeyboardInterrupt
-    if session.grid_draft is not None:
-        if key == "\x1b":
-            session.grid_draft = None
-            session.grid_error = None
-        elif key in {"\r", "\n"}:
-            parsed = parse_grid(session.grid_draft, len(session.panes))
-            if parsed is None:
-                session.grid_error = session.translator.text(
-                    "error.tui_grid_runtime", value=session.grid_draft, count=len(session.panes)
-                )
-            else:
-                changed_grid = parsed != session.active_grid or session.active_layout is not None
-                if changed_grid:
-
-                    def apply_grid() -> None:
-                        session.active_grid = parsed
-                        session.active_layout = None
-                        session.column_weights = None
-                        session.row_weights = None
-
-                    record_mutation(session, ("layout", "topology"), apply_grid)
-                session.grid_draft = None
-                session.grid_error = None
-        elif key in {"\x7f", "\x08"}:
-            session.grid_draft = session.grid_draft[:-1]
-        elif key and (key.isalnum() or key in {"x", "X", "-"}):
-            session.grid_draft += key
-        paint(session)
-        return
     if key in {"u", "U"}:
         restored = session.history.undo() if key == "u" else session.history.redo()
         if restored is session.history:

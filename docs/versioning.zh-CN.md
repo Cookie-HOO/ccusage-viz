@@ -6,6 +6,22 @@
 - **次版本（`0.x.0`）**：`1.0` 前重大的新面向用户能力或数据源集成。
 - 在 `1.0` 前，公开接口仍可能在各个版本之间变化。
 
+## 0.3.5
+
+`0.3.5` 将 Dashboard 预设与灵活拓扑明确分离，并改进升级体验；不改变 ccuv 默认依赖
+官方 ccusage 的行为，也不改变内置 Token 语义：
+
+- Dashboard 拓扑统一由 `--columns` 与前导 `--spotlight` Pane 数量表达：聚焦 Pane
+  从上到下各占一整行，其余 Pane 按指定列数排列；全局 `z` 编辑器会事务式实时预览两个值，
+  `{`/`}` 与 `J`/`K` 继续直接调整列宽和行高；
+- `wide`、`narrow`、`all`、时钟变体与 `single` 继续作为完整预设；删除旧的
+  `--grid`、`--layout`、`spotlight-wide` 与 `spotlight-wide2` 接口；
+- 保存的 Dashboard 预设升级为 `ccuv.dashboard-presets/v2`；v1 不迁移、不加载，
+  但首次保存新预设时会先归档原 v1 文件，再创建 v2 集合；损坏文件和未知 schema 仍禁止覆盖；
+- README 现在优先介绍 ccusage Token 可视化，并把可选 DSH/WorkBuddy 覆盖与任意 Dataset
+  指标统一放到后面的扩展数据来源章节；
+- 官方 WeRead Dataset 更新不再提供其分组数据源无法处理的 Ranking 时间范围。
+
 ## 0.3.4
 
 `0.3.4` 改进 Dataset 维护与自定义筛选编辑，不改变 ccuv 默认依赖官方 ccusage

@@ -2,14 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from math import ceil
-from typing import Literal
 
-NAMED_LAYOUTS = frozenset(("auto", "spotlight-wide", "spotlight-wide2"))
 MIN_WEIGHT_SHARES = 24
 MIN_PANE_WIDTH = 4
 MIN_PANE_HEIGHT = 3
-
-RenderedLayout = Literal["grid", "spotlight-wide", "spotlight-wide2"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,8 +44,6 @@ class PaneRect:
 class PaneLayout:
     """The exact geometry shared by rendering and pointer hit testing."""
 
-    configured: str
-    rendered: RenderedLayout
     width: int
     height: int
     column_gutter: int
@@ -61,7 +55,6 @@ class PaneLayout:
 
     @property
     def gutter(self) -> int:
-        """Return the legacy shared gutter only when both axes retain it."""
         return min(self.column_gutter, self.row_gutter)
 
     def pane(self, index: int) -> PaneRect:
@@ -74,62 +67,35 @@ class LayoutBands:
     columns: int
 
 
-def parse_grid(value: str, pane_count: int) -> str | None:
-    """Normalize a rectangular grid only when it can display every Pane."""
-    if pane_count < 1:
-        return None
-    try:
-        rows_text, columns_text = value.casefold().split("x")
-        rows, columns = int(rows_text), int(columns_text)
-    except (AttributeError, TypeError, ValueError):
-        return None
-    if rows < 1 or columns < 1 or rows * columns < pane_count:
-        return None
-    return f"{rows}x{columns}"
-
-
-def parse_layout(value: str, pane_count: int) -> str | None:
-    """Normalize a named topology or rectangular grid when it fits every Pane."""
-    if pane_count < 1:
-        return None
-    normalized = value.casefold()
-    if normalized in NAMED_LAYOUTS:
-        return normalized
-    return parse_grid(normalized, pane_count)
-
-
-def fixed_shape(layout: str) -> tuple[int, int]:
-    """Return a validated fixed-grid shape."""
-    try:
-        rows_text, columns_text = layout.casefold().split("x")
-        rows, columns = int(rows_text), int(columns_text)
-    except (AttributeError, TypeError, ValueError) as error:
-        raise ValueError(f"not a fixed Dashboard layout: {layout!r}") from error
-    if rows < 1 or columns < 1:
-        raise ValueError(f"not a fixed Dashboard layout: {layout!r}")
-    return rows, columns
-
-
-def layout_for_pane_count(layout: str, pane_count: int) -> str:
-    """Reconcile fixed rows while preserving columns; named layouts are dynamic."""
+def _validate_topology(columns: int, spotlight: int, pane_count: int) -> None:
     if pane_count < 1:
         raise ValueError("a Dashboard requires at least one Pane")
-    normalized = layout.casefold()
-    if normalized in NAMED_LAYOUTS:
-        return normalized
-    _, columns = fixed_shape(normalized)
-    return f"{max(1, ceil(pane_count / columns))}x{columns}"
+    if columns < 1:
+        raise ValueError("Dashboard columns must be positive")
+    if not 0 <= spotlight <= pane_count:
+        raise ValueError("Dashboard spotlight must be between zero and the Pane count")
+
+
+def build_topology(*, columns: int, spotlight: int, pane_count: int) -> PaneTopology:
+    """Place leading spotlight Panes above a fixed-column ordinary grid."""
+    _validate_topology(columns, spotlight, pane_count)
+    ordinary_count = pane_count - spotlight
+    rows = spotlight + (ceil(ordinary_count / columns) if ordinary_count else 0)
+    slots = [PaneSlot(index, index, 0, column_span=columns) for index in range(spotlight)]
+    slots.extend(
+        PaneSlot(index, spotlight + (index - spotlight) // columns, (index - spotlight) % columns)
+        for index in range(spotlight, pane_count)
+    )
+    return PaneTopology(rows, columns, tuple(slots))
 
 
 def normalize_weights(weights: tuple[int, ...]) -> tuple[int, ...]:
-    """Validate positive integer shares without discarding their resolution."""
     if not weights or any(weight < 1 for weight in weights):
         raise ValueError("layout weights must be positive integers")
     return weights
 
 
 def reconcile_weights(weights: tuple[int, ...] | None, count: int) -> tuple[int, ...]:
-    """Preserve bands while maintaining the minimum logical share pool."""
     if count < 1:
         raise ValueError("a layout requires at least one band")
     current = normalize_weights(weights) if weights else ()
@@ -139,13 +105,10 @@ def reconcile_weights(weights: tuple[int, ...] | None, count: int) -> tuple[int,
 
 def _expand_weight_pool(weights: tuple[int, ...]) -> tuple[int, ...]:
     multiplier = ceil(MIN_WEIGHT_SHARES / sum(weights))
-    if multiplier == 1:
-        return weights
-    return tuple(weight * multiplier for weight in weights)
+    return weights if multiplier == 1 else tuple(weight * multiplier for weight in weights)
 
 
 def adjust_weight(weights: tuple[int, ...], index: int, delta: int) -> tuple[int, ...]:
-    """Transfer shares between a selected band and its deterministic neighbor."""
     current = normalize_weights(weights)
     if not 0 <= index < len(current):
         raise IndexError(index)
@@ -164,12 +127,8 @@ def adjust_weight(weights: tuple[int, ...], index: int, delta: int) -> tuple[int
     return adjusted
 
 
-def layout_bands(layout: str, pane_count: int) -> LayoutBands:
-    """Return the configured topology's logical band counts."""
-    normalized = parse_layout(layout, pane_count)
-    if normalized is None:
-        raise ValueError(f"invalid Dashboard layout: {layout!r}")
-    topology, _ = _build_topology(normalized, pane_count)
+def layout_bands(*, columns: int, spotlight: int, pane_count: int) -> LayoutBands:
+    topology = build_topology(columns=columns, spotlight=spotlight, pane_count=pane_count)
     return LayoutBands(topology.rows, topology.columns)
 
 
@@ -181,16 +140,11 @@ def pane_at(layout: PaneLayout, x: int, y: int) -> int | None:
 
 
 def pane_in_direction(layout: PaneLayout, current: int, key: str) -> int:
-    """Return the nearest Pane in one spatial direction, or retain focus."""
-
     if key == "\x1b[D":
         return (current - 1) % len(layout.panes)
     if key == "\x1b[C":
         return (current + 1) % len(layout.panes)
-    directions = {
-        "\x1b[A": (0, -1),
-        "\x1b[B": (0, 1),
-    }
+    directions = {"\x1b[A": (0, -1), "\x1b[B": (0, 1)}
     if key not in directions:
         return current
     source = layout.pane(current)
@@ -213,7 +167,8 @@ def pane_in_direction(layout: PaneLayout, current: int, key: str) -> int:
 
 def resolve_pane_layout(
     *,
-    layout: str,
+    columns: int,
+    spotlight: int,
     pane_count: int,
     width: int,
     height: int,
@@ -221,15 +176,10 @@ def resolve_pane_layout(
     column_weights: tuple[int, ...] | None = None,
     row_weights: tuple[int, ...] | None = None,
 ) -> PaneLayout:
-    """Resolve configured topology, weights, and viewport into exact Pane rectangles."""
-    configured = parse_layout(layout, pane_count)
-    if configured is None:
-        raise ValueError(f"invalid Dashboard layout: {layout!r}")
     if width < 1 or height < 1:
         raise ValueError("layout dimensions must be positive")
-
+    topology = build_topology(columns=columns, spotlight=spotlight, pane_count=pane_count)
     requested_gutter = 0 if divider_style == "none" else 1
-    topology, rendered = _build_topology(configured, pane_count)
     column_gutter = _resolve_gutter(requested_gutter, width, topology.columns)
     row_gutter = _resolve_gutter(requested_gutter, height, topology.rows)
     resolved_columns = _resolve_weights(column_weights, topology.columns)
@@ -238,24 +188,12 @@ def resolve_pane_layout(
     row_sizes = _allocate_axis(height, resolved_rows, row_gutter, minimum=MIN_PANE_HEIGHT)
     panes = _pane_rectangles(topology, column_sizes, row_sizes, column_gutter, row_gutter)
     return PaneLayout(
-        configured=configured,
-        rendered=rendered,
-        width=width,
-        height=height,
-        column_gutter=column_gutter,
-        row_gutter=row_gutter,
-        topology=topology,
-        column_sizes=column_sizes,
-        row_sizes=row_sizes,
-        panes=panes,
+        width, height, column_gutter, row_gutter, topology, column_sizes, row_sizes, panes
     )
 
 
 def _resolve_gutter(requested: int, length: int, bands: int) -> int:
-    """Drop an axis divider before it consumes a logical band's last cell."""
-    if requested and length - (bands - 1) < bands:
-        return 0
-    return requested
+    return 0 if requested and length - (bands - 1) < bands else requested
 
 
 def _resolve_weights(weights: tuple[int, ...] | None, count: int) -> tuple[int, ...]:
@@ -267,49 +205,6 @@ def _resolve_weights(weights: tuple[int, ...] | None, count: int) -> tuple[int, 
     return normalized
 
 
-def _auto_shape(count: int) -> tuple[int, int]:
-    columns = 1 if count == 1 else 2
-    return ceil(count / columns), columns
-
-
-def _build_topology(configured: str, pane_count: int) -> tuple[PaneTopology, RenderedLayout]:
-    if pane_count == 1:
-        return PaneTopology(1, 1, (PaneSlot(0, 0, 0),)), _rendered_name(configured)
-    if configured == "spotlight-wide":
-        aux_rows, columns = _auto_shape(pane_count - 1)
-        slots = [PaneSlot(0, 0, 0, column_span=columns)]
-        slots.extend(
-            PaneSlot(index, 1 + (index - 1) // columns, (index - 1) % columns)
-            for index in range(1, pane_count)
-        )
-        return PaneTopology(1 + aux_rows, columns, tuple(slots)), "spotlight-wide"
-    if configured == "spotlight-wide2":
-        if pane_count == 2:
-            return PaneTopology(2, 1, (PaneSlot(0, 0, 0), PaneSlot(1, 1, 0))), "spotlight-wide2"
-        slots = [
-            PaneSlot(0, 0, 0, column_span=2),
-            PaneSlot(1, 1, 0, column_span=2),
-        ]
-        slots.extend(
-            PaneSlot(index, 2 + (index - 2) // 2, (index - 2) % 2) for index in range(2, pane_count)
-        )
-        return PaneTopology(2 + ceil((pane_count - 2) / 2), 2, tuple(slots)), "spotlight-wide2"
-    if configured == "auto":
-        rows, columns = _auto_shape(pane_count)
-    else:
-        rows, columns = fixed_shape(configured)
-    slots = tuple(PaneSlot(index, index // columns, index % columns) for index in range(pane_count))
-    return PaneTopology(rows, columns, slots), "grid"
-
-
-def _rendered_name(configured: str) -> RenderedLayout:
-    if configured == "spotlight-wide":
-        return "spotlight-wide"
-    if configured == "spotlight-wide2":
-        return "spotlight-wide2"
-    return "grid"
-
-
 def _allocate_axis(
     total: int, weights: tuple[int, ...], gutter: int, *, minimum: int
 ) -> tuple[int, ...]:
@@ -319,8 +214,6 @@ def _allocate_axis(
     elif available >= len(weights):
         base = 1
     else:
-        # There is not enough physical space to display every logical band.
-        # Keep exact geometry and let Dashboard rendering skip zero rectangles.
         return tuple(0 for _ in weights)
     distributable = available - base * len(weights)
     weight_total = sum(weights)
@@ -354,7 +247,6 @@ def _pane_rectangles(
     for size in row_sizes:
         tops.append(position)
         position += size + row_gutter
-
     panes = []
     for slot in topology.slots:
         pane_width = sum(column_sizes[slot.column : slot.column + slot.column_span])
