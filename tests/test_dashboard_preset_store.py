@@ -11,6 +11,7 @@ from ccusage_viz.dashboard_preset_store import (
     DashboardPresetStore,
     DashboardPresetStoreCorruptError,
     DashboardPresetStoreError,
+    DashboardPresetStoreLegacyError,
     DashboardPresetStoreNotFoundError,
 )
 from ccusage_viz.options import (
@@ -87,7 +88,6 @@ def test_store_overwrite_preserves_created_at_and_refreshes_updated_at(tmp_path:
         b"\xff\xfe",
         b"{",
         b'{"schema":"ccuv.dashboard-presets/v1","schema":"ccuv.dashboard-presets/v1","presets":[]}',
-        b'{"schema":"ccuv.dashboard-presets/v1","presets":[{"name":"bad"}]}',
     ),
 )
 def test_corrupt_store_is_reported_and_never_mutated(tmp_path: Path, payload: bytes) -> None:
@@ -102,6 +102,39 @@ def test_corrupt_store_is_reported_and_never_mutated(tmp_path: Path, payload: by
     with pytest.raises(DashboardPresetStoreCorruptError):
         store.delete("review")
 
+    assert store.path.read_bytes() == payload
+
+
+def test_v1_store_is_unavailable_but_first_v2_save_archives_and_replaces_it(
+    tmp_path: Path,
+) -> None:
+    store = DashboardPresetStore(tmp_path / "dashboard-presets", clock=lambda: NOW)
+    store.root.mkdir()
+    original = b'{"schema":"ccuv.dashboard-presets/v1","presets":[{"name":"old"}]}\n'
+    store.path.write_bytes(original)
+
+    with pytest.raises(DashboardPresetStoreLegacyError):
+        store.load()
+
+    saved, backup = store.save_replacing_legacy(_record("new"))
+
+    assert saved.name == "new"
+    assert backup is not None
+    assert backup.read_bytes() == original
+    assert store.list() == (saved,)
+    assert DashboardPresetDocument.parse(
+        __import__("json").loads(store.path.read_text())
+    ).schema.endswith("/v2")
+
+
+def test_unknown_schema_still_cannot_be_replaced(tmp_path: Path) -> None:
+    store = DashboardPresetStore(tmp_path / "dashboard-presets")
+    store.root.mkdir()
+    payload = b'{"schema":"ccuv.dashboard-presets/v999","presets":[]}\n'
+    store.path.write_bytes(payload)
+
+    with pytest.raises(DashboardPresetStoreCorruptError):
+        store.save_replacing_legacy(_record("new"))
     assert store.path.read_bytes() == payload
 
 

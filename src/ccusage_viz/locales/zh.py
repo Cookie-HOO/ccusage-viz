@@ -491,6 +491,7 @@ MESSAGES = {
     "status.tui_preset_store_unavailable": "你的已保存预设存储不可用；内置预设仍可使用。",
     "status.tui_preset_save_blocked": "当前 Dashboard 包含命令 Pane 或 Overlay，无法保存。",
     "status.tui_preset_save_failed": "无法保存预设。",
+    "status.tui_preset_v1_archived": "已按 v2 保存；不兼容的 v1 预设文件已归档为备份。",
     "status.tui_preset_source_conflict": "未保存预设：数据集 {dataset_id} 存在冲突的命令配置：",
     "status.tui_preset_delete_failed": "无法删除预设。",
     "status.tui_preset_load_failed": "无法加载预设。",

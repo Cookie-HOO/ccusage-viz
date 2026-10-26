@@ -491,6 +491,7 @@ MESSAGES = {
     "status.tui_preset_store_unavailable": "Your saved preset store is unavailable; built-in presets remain available.",
     "status.tui_preset_save_blocked": "This Dashboard contains command-backed panes or overlays and cannot be saved.",
     "status.tui_preset_save_failed": "The preset could not be saved.",
+    "status.tui_preset_v1_archived": "Saved in v2. The unsupported v1 preset file was archived as a backup.",
     "status.tui_preset_source_conflict": "Preset not saved: Dataset {dataset_id} has conflicting command configurations:",
     "status.tui_preset_delete_failed": "The preset could not be deleted.",
     "status.tui_preset_load_failed": "The preset could not be loaded.",

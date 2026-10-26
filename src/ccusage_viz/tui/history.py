@@ -195,11 +195,18 @@ def execute_preset_command(session: TuiSession, command: object) -> None:
             return
         try:
             record = preset_from_launch(command.name, active_dashboard_launch(session))
-            DashboardPresetStore(dashboard_preset_state_root()).save(record)
+            _, backup = DashboardPresetStore(dashboard_preset_state_root()).save_replacing_legacy(
+                record
+            )
         except (DashboardPresetStoreError, DashboardPresetValidationError, ValueError):
             session.preset_manager = replace(session.preset_manager, notice="preset-save-failed")  # ty: ignore[invalid-argument-type]
         else:
             session.current_preset_key = f"user:{command.name}"
+            if backup is not None:
+                assert session.preset_manager is not None
+                session.preset_manager = replace(
+                    session.preset_manager, notice="preset-v1-archived"
+                )
         return
     if isinstance(command, DeletePreset):
         try:

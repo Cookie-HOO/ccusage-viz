@@ -21,6 +21,7 @@ from ccusage_viz.dashboard_preset_store import (
     DashboardPresetStore,
     DashboardPresetStoreCorruptError,
     DashboardPresetStoreError,
+    DashboardPresetStoreLegacyError,
 )
 from ccusage_viz.datasets.paths import dashboard_preset_state_root
 from ccusage_viz.errors import UsageError
@@ -216,7 +217,7 @@ def _to_options(
                 )
             try:
                 user_records = DashboardPresetStore(dashboard_preset_state_root()).list()
-            except DashboardPresetStoreCorruptError:
+            except (DashboardPresetStoreCorruptError, DashboardPresetStoreLegacyError):
                 # A damaged user collection must never make a valid built-in unavailable.
                 if preset_name not in DASHBOARD_PRESETS:
                     raise UsageError(
