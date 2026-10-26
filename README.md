@@ -46,60 +46,6 @@ cannot apply the requested timezone.
 > This project is not affiliated with or endorsed by the `ccusage` project or
 > its maintainers.
 
-## Dataset and custom command extensions
-
-Datasets let ccuv visualize metrics owned by external sources without adding
-them to built-in `ccusage` token collection. A Dataset is an executable command:
-ccuv sends it one JSON request on stdin, reads one JSON response from stdout,
-and renders the declared Metrics in focused charts or Dashboard Panes.
-
-### Install an official Dataset
-
-Official Dataset entries are collected in the signed
-[`Cookie-HOO/ccuv-dataset-catalog`](https://github.com/Cookie-HOO/ccuv-dataset-catalog)
-repository.
-
-1. Run `ccuv dataset`.
-2. Press `+` and choose **Browse official datasets**.
-3. Select an entry, review its Metrics, environment requirements, version, and
-   source, then confirm installation.
-
-The official catalog verifies signed metadata. Installation still requires a
-compatible release archive for the current operating system and architecture.
-
-### Register a local command
-
-Register an executable already available on your machine with its exact argv:
-
-```bash
-ccuv dataset add-local /absolute/path/to/my-dataset --profile personal
-ccuv dataset list
-```
-
-Registration immediately runs the command's Probe. Use the Dataset ID returned
-by that Probe—not the executable filename—with `--dataset`. ccuv stores argv
-and starts the executable directly without a shell. Re-run `add-local` after
-changing its Probe metadata; a local registration with the same Dataset ID is
-replaced.
-
-### Install from a GitHub repository
-
-You can also install a compatible Dataset from a specific GitHub repository:
-
-1. Run `ccuv dataset`, press `+`, and choose **Install from GitHub**.
-2. Enter `OWNER/REPOSITORY` or `https://github.com/OWNER/REPOSITORY`.
-3. Review the discovered release and confirm installation.
-
-The repository must publish a compatible native archive, checksum, and Dataset
-manifest. Installing from an arbitrary GitHub repository does not make it an
-official Dataset; if the repository is also present in the official catalog,
-ccuv uses its verified official artifact path.
-
-For installation, management, Dashboard selection, and troubleshooting, see the
-[Dataset user guide](docs/dataset-user-guide.md). To implement and package a
-Dataset, start with the [Dataset developer guide](docs/dataset-developer-guide.md)
-and [custom command protocol](docs/custom-command-protocol.md).
-
 ## Interactive Help
 
 Dashboard provides contextual Help: press `h` to see the controls for the
@@ -114,11 +60,7 @@ remains available to the draft.
 > [!TIP]
 > To start without default ccusage panes or requests, use `ccuv dashboard --empty`.
 > It creates four temporary `empty` panes; `--columns` and `--spotlight` control only their
-> topology. Add an installed Dataset with only its chart type and Dataset ID:
-> `--pane 'chart timeline --dataset example-activity'`. Arbitrary commands add `--command`.
-> See the [Dataset user guide](docs/dataset-user-guide.md) to install or register a
-> Dataset, and the [custom command protocol guide](docs/custom-command-protocol.md)
-> when you are building one.
+> topology. Replace the temporary Panes interactively or with explicit `--pane` fragments.
 
 ```bash
 ccuv dashboard
@@ -232,18 +174,9 @@ it focused, replace the Pane, or expand it into a multi-Pane Dashboard.
 > compose a custom Dashboard and choose your own column and spotlight counts. See the
 > [usage guide](docs/usage.md).
 
-A declared V2 Dataset can independently rank real models within each logical
-model:
-
-```bash
-ccuv chart ranking --dataset router --partition-by logical_model --group-by real_model
-```
-
 For commands, filters, controls, styles, and data semantics, see the
-[usage guide](docs/usage.md). To install, register, or use external Metrics,
-read the [Dataset user guide](docs/dataset-user-guide.md); Dataset authors should
-start with the [developer guide](docs/dataset-developer-guide.md). The
-[architecture overview](docs/architecture.md) is intended for maintainers.
+[usage guide](docs/usage.md). The [architecture overview](docs/architecture.md)
+is intended for maintainers.
 
 ## Install, update, and remove
 
@@ -315,31 +248,56 @@ Ctrl-C, or EOF cancels it. Demo mode, redirected/noninteractive runs, and custom
 [`ccusage`](https://github.com/ryoppippi/ccusage) manually when npm is
 unavailable.
 
-> [!TIP]
-> The official `ccusage` command remains ccuv's default. To additionally include
-> DeepSeek Harness (DSH) and WorkBuddy usage, install the unofficial
-> [`Cookie-HOO/my-ccusage`](https://github.com/Cookie-HOO/my-ccusage)
-> distribution and select it explicitly with `--ccusage-bin`.
->
-> Windows x64 (PowerShell):
->
-> ```powershell
-> irm https://raw.githubusercontent.com/Cookie-HOO/my-ccusage/main/install.ps1 | iex
-> ccuv dashboard --ccusage-bin my-ccusage
-> ```
->
-> macOS or Linux:
->
-> ```bash
-> curl -fsSL https://raw.githubusercontent.com/Cookie-HOO/my-ccusage/main/install.sh | sh
-> ccuv dashboard --ccusage-bin my-ccusage
-> ```
->
-> The installers verify release checksums. Manual archives and checksums are on
-> the [latest release](https://github.com/Cookie-HOO/my-ccusage/releases/latest).
-> `my-ccusage` tracks upstream ccusage and supplements it with DSH and WorkBuddy
-> adapters. It remains an unofficial distribution; ccuv has no DSH or WorkBuddy
-> collector of its own.
+## Extend data sources
+
+ccuv remains centered on Token statistics supplied by `ccusage`. When you need
+additional coverage, there are two separate extension paths.
+
+### Count DSH and WorkBuddy Tokens
+
+The official `ccusage` command remains the default. To additionally include
+DeepSeek Harness (DSH) and WorkBuddy usage, install the unofficial
+[`Cookie-HOO/my-ccusage`](https://github.com/Cookie-HOO/my-ccusage) distribution
+and select it explicitly:
+
+```bash
+# macOS or Linux
+curl -fsSL https://raw.githubusercontent.com/Cookie-HOO/my-ccusage/main/install.sh | sh
+ccuv dashboard --ccusage-bin my-ccusage
+```
+
+```powershell
+# Windows x64
+irm https://raw.githubusercontent.com/Cookie-HOO/my-ccusage/main/install.ps1 | iex
+ccuv dashboard --ccusage-bin my-ccusage
+```
+
+The installers verify release checksums. `my-ccusage` tracks upstream ccusage
+and supplements it with DSH and WorkBuddy adapters; ccuv itself still has no
+DSH or WorkBuddy collector.
+
+### Monitor any metric with a Dataset
+
+Datasets add externally owned metrics—such as CI, builds, spend, bytes, reading,
+or local-service activity—without changing ccusage Token collection. A Dataset
+is an executable command: ccuv sends JSON requests on stdin, reads validated JSON
+responses from stdout, and renders the declared Metrics in focused charts or
+Dashboard Panes.
+
+Install from the signed official catalog with `ccuv dataset` and **Browse official
+datasets**, install a compatible GitHub release by entering `OWNER/REPOSITORY`,
+or register a local executable:
+
+```bash
+ccuv dataset add-local /absolute/path/to/my-dataset --profile personal
+ccuv dataset list
+ccuv chart timeline --dataset example-activity --metric events
+```
+
+For installation, upgrades, Dashboard selection, and troubleshooting, see the
+[Dataset user guide](docs/dataset-user-guide.md). Dataset authors should start
+with the [Dataset developer guide](docs/dataset-developer-guide.md) and
+[custom command protocol](docs/custom-command-protocol.md).
 
 ## Further reading
 
