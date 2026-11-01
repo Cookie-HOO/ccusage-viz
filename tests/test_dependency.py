@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import date
-from subprocess import CompletedProcess
 
 import pytest
 
+from ccusage_viz.backend_store import BackendChoice, save_choice
 from ccusage_viz.bootstrap import build_provider_registry
 from ccusage_viz.core.time import DateRange
 from ccusage_viz.dependency import ensure_ccusage, ensure_provider_dependencies
@@ -37,35 +37,34 @@ def options(**changes: object) -> StandaloneLaunch:
     )
 
 
-def test_dependency_preflight_skips_demo_and_custom_binary(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("ccusage_viz.dependency.shutil.which", lambda name: pytest.fail(name))
+@pytest.fixture(autouse=True)
+def isolated(monkeypatch, tmp_path):
+    monkeypatch.setattr("ccusage_viz.backend_store.ccuv_state_root", lambda: tmp_path)
+    monkeypatch.setattr("ccusage_viz.backend_store.shutil.which", lambda name: None)
 
+
+def test_skips_demo_and_custom(monkeypatch):
+    monkeypatch.setattr(
+        "ccusage_viz.backend_store.load_choice", lambda: pytest.fail("no state reads")
+    )
     ensure_ccusage(options(demo="small"), load_translator("en"))
     ensure_ccusage(options(ccusage_bin="/custom/ccusage"), load_translator("en"))
     ensure_ccusage(options(explicit=frozenset({"ccusage_bin"})), load_translator("en"))
 
 
-def test_provider_dependency_preflight_uses_effective_provider(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    calls: list[StandaloneLaunch] = []
+def test_provider_preflight(monkeypatch):
+    calls = []
     monkeypatch.setattr(
-        "ccusage_viz.dependency.ensure_ccusage",
-        lambda current, _translator: calls.append(current),
+        "ccusage_viz.dependency.ensure_ccusage", lambda current, tr: calls.append(current)
     )
     registry = build_provider_registry()
-
-    demo = options(demo="small")
-    ccusage = options()
+    demo, real = options(demo="small"), options()
     ensure_provider_dependencies(demo, registry, load_translator("en"))
-    ensure_provider_dependencies(ccusage, registry, load_translator("en"))
+    ensure_provider_dependencies(real, registry, load_translator("en"))
+    assert calls == [real]
 
-    assert calls == [ccusage]
 
-
-def test_custom_standalone_skips_ccusage_dependency_preflight(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_custom_standalone_skips(monkeypatch):
     custom = replace(
         options(),
         chart=CustomChartConfig(
@@ -75,114 +74,47 @@ def test_custom_standalone_skips_ccusage_dependency_preflight(
         ),
     )
     monkeypatch.setattr(
-        "ccusage_viz.dependency.ensure_ccusage",
-        lambda *_args: pytest.fail("custom standalone must not require ccusage"),
+        "ccusage_viz.dependency.ensure_ccusage", lambda *args: pytest.fail("custom")
     )
-
     ensure_provider_dependencies(custom, build_provider_registry(), load_translator("en"))
 
 
-def test_dependency_preflight_skips_existing_ccusage(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("ccusage_viz.dependency.shutil.which", lambda name: "/bin/ccusage")
-
+@pytest.mark.parametrize("commands", [{"ccusage"}, {"my-ccusage"}])
+def test_one_discovered_never_prompts(monkeypatch, commands):
+    monkeypatch.setattr(
+        "ccusage_viz.backend_store.shutil.which",
+        lambda name: f"/bin/{name}" if name in commands else None,
+    )
+    monkeypatch.setattr("ccusage_viz.backend.setup", lambda *args: pytest.fail("setup"))
     ensure_ccusage(options(), load_translator("en"))
 
 
-def test_dependency_preflight_noninteractive_never_installs(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr("ccusage_viz.dependency.shutil.which", lambda name: None)
+def test_missing_noninteractive(monkeypatch):
     monkeypatch.setattr("ccusage_viz.dependency.sys.stdin.isatty", lambda: False)
-    monkeypatch.setattr("ccusage_viz.dependency.sys.stdout.isatty", lambda: True)
-
-    def unexpected_install(*args: object, **kwargs: object) -> None:
-        raise AssertionError("must not install")
-
-    monkeypatch.setattr("ccusage_viz.dependency.subprocess.run", unexpected_install)
-
-    with pytest.raises(QueryError) as caught:
+    monkeypatch.setattr("ccusage_viz.backend.setup", lambda *args: pytest.fail("setup"))
+    with pytest.raises(QueryError, match="error.ccusage_missing"):
         ensure_ccusage(options(), load_translator("en"))
 
-    assert caught.value.key == "error.ccusage_missing"
 
-
-@pytest.mark.parametrize("response", ["", "y", "Y"])
-def test_dependency_preflight_affirmative_input_installs_and_verifies_path(
-    monkeypatch: pytest.MonkeyPatch, response: str
-) -> None:
-    lookups = iter((None, "/usr/local/bin/npm", "/usr/local/bin/ccusage"))
-    calls: list[tuple[list[str], bool, bool]] = []
-    monkeypatch.setattr("ccusage_viz.dependency.shutil.which", lambda name: next(lookups))
+@pytest.mark.parametrize("commands", [set(), {"ccusage", "my-ccusage"}])
+def test_missing_or_two_interactive_uses_setup(monkeypatch, commands):
+    calls = []
+    monkeypatch.setattr(
+        "ccusage_viz.backend_store.shutil.which",
+        lambda name: f"/bin/{name}" if name in commands else None,
+    )
     monkeypatch.setattr("ccusage_viz.dependency.sys.stdin.isatty", lambda: True)
     monkeypatch.setattr("ccusage_viz.dependency.sys.stdout.isatty", lambda: True)
-    monkeypatch.setattr("builtins.input", lambda prompt: response)
-
-    def run(command: list[str], *, shell: bool, check: bool) -> CompletedProcess[str]:
-        calls.append((command, shell, check))
-        return CompletedProcess(command, 0)
-
-    monkeypatch.setattr("ccusage_viz.dependency.subprocess.run", run)
-
+    monkeypatch.setattr("ccusage_viz.backend.setup", lambda tr: calls.append(tr))
     ensure_ccusage(options(), load_translator("en"))
+    assert len(calls) == 1
 
-    assert calls == [(["/usr/local/bin/npm", "install", "-g", "ccusage"], False, False)]
 
-
-@pytest.mark.parametrize("response", ["n", "N", "no", " ", "anything"])
-def test_dependency_preflight_nonaffirmative_input_cancels(
-    monkeypatch: pytest.MonkeyPatch, response: str
-) -> None:
-    monkeypatch.setattr("ccusage_viz.dependency.shutil.which", lambda name: None)
-    monkeypatch.setattr("ccusage_viz.dependency.sys.stdin.isatty", lambda: True)
-    monkeypatch.setattr("ccusage_viz.dependency.sys.stdout.isatty", lambda: True)
-    monkeypatch.setattr("builtins.input", lambda prompt: response)
+def test_saved_missing_no_fallback(monkeypatch):
+    save_choice(BackendChoice("enhanced", "/missing/my-ccusage"))
     monkeypatch.setattr(
-        "ccusage_viz.dependency.subprocess.run",
-        lambda *args, **kwargs: pytest.fail("must not install"),
+        "ccusage_viz.backend_store.shutil.which",
+        lambda name: "/bin/ccusage" if name == "ccusage" else None,
     )
-
-    with pytest.raises(QueryError) as caught:
+    with pytest.raises(QueryError, match="error.backend_unavailable"):
         ensure_ccusage(options(), load_translator("en"))
-
-    assert caught.value.key == "error.ccusage_missing"
-
-
-def test_dependency_preflight_reports_missing_npm(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("ccusage_viz.dependency.shutil.which", lambda name: None)
-    monkeypatch.setattr("ccusage_viz.dependency.sys.stdin.isatty", lambda: True)
-    monkeypatch.setattr("ccusage_viz.dependency.sys.stdout.isatty", lambda: True)
-    monkeypatch.setattr("builtins.input", lambda prompt: "")
-
-    with pytest.raises(QueryError) as caught:
-        ensure_ccusage(options(), load_translator("en"))
-
-    assert caught.value.key == "error.npm_missing"
-
-
-def test_dependency_preflight_reports_install_and_path_failures(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr("ccusage_viz.dependency.sys.stdin.isatty", lambda: True)
-    monkeypatch.setattr("ccusage_viz.dependency.sys.stdout.isatty", lambda: True)
-    monkeypatch.setattr("builtins.input", lambda prompt: "")
-
-    lookups = iter((None, "/bin/npm"))
-    monkeypatch.setattr("ccusage_viz.dependency.shutil.which", lambda name: next(lookups))
-    monkeypatch.setattr(
-        "ccusage_viz.dependency.subprocess.run",
-        lambda *args, **kwargs: CompletedProcess(args[0], 7),
-    )
-    with pytest.raises(QueryError) as caught:
-        ensure_ccusage(options(), load_translator("en"))
-    assert caught.value.key == "error.ccusage_install_failed"
-    assert caught.value.values == {"code": 7}
-
-    lookups = iter((None, "/bin/npm", None))
-    monkeypatch.setattr("ccusage_viz.dependency.shutil.which", lambda name: next(lookups))
-    monkeypatch.setattr(
-        "ccusage_viz.dependency.subprocess.run",
-        lambda *args, **kwargs: CompletedProcess(args[0], 0),
-    )
-    with pytest.raises(QueryError) as caught:
-        ensure_ccusage(options(), load_translator("en"))
-    assert caught.value.key == "error.ccusage_install_path"

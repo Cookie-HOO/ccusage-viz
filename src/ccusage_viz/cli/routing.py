@@ -32,6 +32,8 @@ def probe_short_circuit(argv: list[str]) -> ShortCircuitRoute | None:
         chart_kind = next((argument for argument in argv if argument in _TUI_COMMANDS), None)
         if chart_kind is not None:
             command = f"chart {chart_kind}"
+    if command == "backend" and "setup" in argv:
+        command = "backend setup"
     language = None
     for index, argument in enumerate(argv[:-1]):
         if argument == "--lang" and argv[index + 1] in {"en", "zh"}:

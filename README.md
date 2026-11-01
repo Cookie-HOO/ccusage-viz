@@ -19,6 +19,46 @@ uv tool install ccusage-viz
 ccuv dashboard
 ```
 
+## Install with your AI Agent
+
+Give your Agent this request:
+
+> Help me install https://github.com/Cookie-HOO/ccusage-viz. First ask whether I
+> need DeepSeek Harness (DSH) or WorkBuddy token statistics, then configure the
+> appropriate backend so I can run `ccuv dashboard` without extra flags.
+
+**Instructions for installation Agents:**
+
+1. Check the platform, Python 3.11–3.13, and existing ccuv/backend installations.
+   Prepare missing prerequisites as needed for the chosen installation path, using
+   an appropriate method for the user's platform and obtaining consent before
+   changing their environment. Python is required; uv is the preferred installer,
+   not a runtime requirement. npm is only needed to install official ccusage if it
+   is missing; do not install npm for an existing usable backend or a prebuilt
+   enhanced release. Agents handle prerequisite setup; no fixed uv/npm bootstrap
+   commands are prescribed here.
+2. **Always ask whether the user needs DSH or WorkBuddy**, even if official ccusage
+   is already installed. If either is needed, recommend `enhanced`; otherwise use
+   `official`. If unsure, default to official, or preserve an existing saved choice
+   shown by `ccuv backend`. Do not infer a choice from language, region, or log folders.
+3. Explain that enhanced is an unofficial distribution, not endorsed by ccusage,
+   and synchronizes upstream after verification rather than immediately. Obtain
+   consent before installing or changing the backend. Preserve existing installs.
+4. Install with `uv tool install ccusage-viz` (or the documented pip alternative).
+   After consent, execute exactly one of:
+   ```bash
+   ccuv backend setup --backend official --yes
+   ccuv backend setup --backend enhanced --yes
+   ```
+   `--yes` authorizes installation and saving the explicit choice; it does not
+   replace asking the user. Do not silently change backend on installation failure.
+5. Verify `ccuv --version`, `ccuv backend`, and `ccuv chart timeline --help`.
+   Report unavailable backends as failures even though the status command succeeds.
+   Do not assume usage logs exist or launch an unattended interactive Dashboard.
+6. Tell the user to run `ccuv dashboard`; switching later uses `ccuv backend setup`.
+
+Prefer to install yourself? Run `ccuv backend setup`; it asks the same question.
+
 ## Supported agents
 
 Agent coverage follows `ccusage`. Its current supported agents include Claude
@@ -235,18 +275,33 @@ uv tool uninstall ccusage-viz
 
 ### Missing `ccusage`?
 
-Real-data commands need `ccusage` on `PATH` (or an explicit `--ccusage-bin`).
-If the default command is missing in an interactive terminal, `ccuv` offers:
+Use the backend manager:
 
 ```bash
-npm install -g ccusage
+ccuv backend        # Read-only status, executable location, and version
+ccuv backend setup  # Choose, install if needed, and save your default backend
 ```
 
-An empty **Enter** or `y`/`Y` confirms that installation. Any other input,
-Ctrl-C, or EOF cancels it. Demo mode, redirected/noninteractive runs, and custom
-`--ccusage-bin` runs never prompt or install automatically. Install
-[`ccusage`](https://github.com/ryoppippi/ccusage) manually when npm is
-unavailable.
+The setup asks whether you need DSH or WorkBuddy. Enter/unsure keeps an existing
+saved choice or defaults to official; installation/configuration requires a
+separate `y` confirmation. Ctrl-C or EOF cancels without changing the choice.
+Official installation uses `npm install -g ccusage` and needs npm. Enhanced
+installation uses a verified GitHub Release in ccuv's private tool directory,
+without overwriting official ccusage or editing PATH. GitHub access is required.
+
+When no backend exists, an interactive real-data launch offers the same setup.
+With both distributions on PATH and no saved choice, interactive launches ask;
+noninteractive resolution defaults to official. A missing saved backend never
+silently falls back: use setup to repair or switch. Demo, empty/Dataset-only
+Dashboards, help, and explicit `--ccusage-bin` runs do not trigger setup.
+Noninteractive setup requires `--backend official|enhanced --yes`.
+
+The choice is stored in `backend.json` under ccuv's private state root (the same
+platform-native root as Dashboard presets). Official uses `ccusage` on the active
+PATH; enhanced is saved by absolute path. Ordinary presets/copyable chart commands
+follow the global selection. Custom executable paths remain pinned. For historical
+preset compatibility, a saved `ccusage-bin` value of `ccusage` means follow global
+selection, even if that default name was originally specified explicitly.
 
 ## Extend data sources
 
@@ -255,26 +310,27 @@ additional coverage, there are two separate extension paths.
 
 ### Count DSH and WorkBuddy Tokens
 
-The official `ccusage` command remains the default. To additionally include
-DeepSeek Harness (DSH) and WorkBuddy usage, install the unofficial
-[`Cookie-HOO/my-ccusage`](https://github.com/Cookie-HOO/my-ccusage) distribution
-and select it explicitly:
+Official `ccusage` remains the default. Official v20.0.46 has no dedicated DSH or
+WorkBuddy adapters. To include these sources, run:
 
 ```bash
-# macOS or Linux
-curl -fsSL https://raw.githubusercontent.com/Cookie-HOO/my-ccusage/main/install.sh | sh
-ccuv dashboard --ccusage-bin my-ccusage
+ccuv backend setup  # Answer yes to DSH / WorkBuddy
+ccuv dashboard      # No --ccusage-bin needed afterward
 ```
 
-```powershell
-# Windows x64
-irm https://raw.githubusercontent.com/Cookie-HOO/my-ccusage/main/install.ps1 | iex
-ccuv dashboard --ccusage-bin my-ccusage
-```
+This selects the unofficial [`Cookie-HOO/my-ccusage`](https://github.com/Cookie-HOO/my-ccusage)
+distribution. Its upstream updates are deliberately synchronized after compatibility
+verification and can lag official releases. WorkBuddy coverage includes unified
+daily statistics and project/session attribution, not every focused report command.
+ccuv itself contains neither collector.
 
-The installers verify release checksums. `my-ccusage` tracks upstream ccusage
-and supplements it with DSH and WorkBuddy adapters; ccuv itself still has no
-DSH or WorkBuddy collector.
+Managed enhanced releases support macOS/Linux x64 and ARM64, and Windows x64.
+Downloads and probes are bounded; release SHA-256 checksums detect corruption but
+are not independent publisher authentication. ccuv never executes remote installer
+scripts. Existing `my-ccusage` on PATH can also be reused. Updating/uninstalling
+backends is not yet managed by this command; official updates use npm, and enhanced
+manual releases remain available on GitHub. Explicit `--ccusage-bin PATH` is still
+supported for advanced one-off overrides.
 
 ### Monitor any metric with a Dataset
 

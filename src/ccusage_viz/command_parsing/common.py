@@ -7,6 +7,7 @@ _COMMANDS = (
     "dashboard",
     "animate",
     "dataset",
+    "backend",
     "text",
 )
 

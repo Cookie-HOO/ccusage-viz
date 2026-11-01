@@ -17,6 +17,40 @@ uv tool install ccusage-viz
 ccuv dashboard
 ```
 
+## 让 AI Agent 帮你安装
+
+把下面这句话交给你的 Agent 即可：
+
+> 帮我安装 https://github.com/Cookie-HOO/ccusage-viz。先询问我是否需要统计
+> DeepSeek Harness（DSH）或 WorkBuddy 的 Token 用量，再配置对应后端，
+> 让我以后直接运行 `ccuv dashboard`，无需额外参数。
+
+**给安装 Agent 的操作指引：**
+
+1. 检查平台、Python 3.11–3.13，以及已有 ccuv / 后端安装。
+   根据最终选择的安装路径按需准备缺失环境，使用适合用户平台的方式，修改环境前取得同意。
+   Python 是运行依赖；uv 是推荐安装工具，并非运行必需。
+   只有缺少官方 ccusage、需要安装它时才需要 npm；已有可用后端或选择预编译增强版时，
+   不要为此额外安装 npm。前置工具由 Agent 处理，这里不限定 uv / npm 自身的安装命令。
+2. **必须询问用户是否需要 DSH 或 WorkBuddy，即使已安装官方 ccusage。**
+   需要任意一个就推荐 `enhanced`；不需要就用 `official`。不确定时默认官方，
+   已有保存的选择则保留现状（可通过 `ccuv backend` 查看）。不根据语言、地区或日志目录推断。
+3. 说明增强版是未获官方背书的非官方发行版，上游更新经过验证后同步，可能晚于官方。
+   安装或切换前取得用户同意，不覆盖、不卸载已有官方版。
+4. 优先用 `uv tool install ccusage-viz` 安装（或使用下文的 pip 方式）。
+   **用户确认后**，执行其中一条命令：
+   ```bash
+   ccuv backend setup --backend official --yes
+   ccuv backend setup --backend enhanced --yes
+   ```
+   `--yes` 授权安装并保存明确指定的后端，不能代替对用户的询问；失败时不能静默换版。
+5. 用 `ccuv --version`、`ccuv backend` 和 `ccuv chart timeline --help` 验证。
+   状态命令本身成功不代表后端可用，显示不可用时应报告失败。
+   不假设用户已有用量日志，不无人值守启动交互 Dashboard。
+6. 告诉用户以后直接运行 `ccuv dashboard`；需要切换时使用 `ccuv backend setup`。
+
+自己安装也可以：运行 `ccuv backend setup`，会询问同样的问题。
+
 ## 支持的 Agent
 
 Agent 覆盖范围跟随 `ccusage`。其当前支持的 Agent 包括 Claude Code、Codex、OpenCode、Amp、
@@ -181,16 +215,27 @@ uv tool uninstall ccusage-viz
 
 ### 缺少 `ccusage`？
 
-真实数据命令需要 `PATH` 中的 `ccusage`（或显式指定 `--ccusage-bin`）。在交互式终端中
-缺少默认命令时，`ccuv` 会提供：
+使用后端管理入口：
 
 ```bash
-npm install -g ccusage
+ccuv backend        # 只读查看当前后端、位置和版本
+ccuv backend setup  # 选择、按需安装，并保存默认后端
 ```
 
-直接按空白的 **Enter** 或输入 `y`/`Y` 都会确认安装。输入其他文字、按 Ctrl-C 或发送 EOF
-都会取消。Demo、重定向/非交互运行以及自定义 `--ccusage-bin` 运行不会提示或自动安装。
-npm 不可用时，请手动安装 [`ccusage`](https://github.com/ryoppippi/ccusage)。
+配置时先询问是否需要 DSH 或 WorkBuddy。Enter / 不确定会保留已有选择，否则默认官方；
+安装和保存还需单独输入 `y` 确认。Ctrl-C 或 EOF 取消，不改变已有选择。
+官方版通过 `npm install -g ccusage` 安装，需要 npm；增强版下载并校验 GitHub Release，
+安装在 ccuv 私有工具目录，不覆盖官方命令、不修改 PATH，需要能访问 GitHub。
+
+没有后端时，交互式真实数据启动会复用上述配置流程。两版都在 PATH 且未保存选择时，
+交互运行会询问，非交互解析默认官方。已选择的后端失效时不会静默换版，请用 setup 修复或切换。
+Demo、空或仅 Dataset 的 Dashboard、帮助以及显式 `--ccusage-bin` 不触发安装配置。
+非交互配置必须同时提供 `--backend official|enhanced --yes`。
+
+选择保存在 ccuv 私有状态根目录的 `backend.json`（与 Dashboard 预设使用相同的平台根目录）。
+官方使用当前 PATH 上的 `ccusage`，增强版保存绝对路径。普通预设与复制的图表命令跟随全局选择，
+自定义可执行路径仍固定。为兼容历史预设，保存的 `ccusage-bin` 为 `ccusage` 时表示跟随全局，
+即使当时曾显式指定这个默认名称。
 
 ## 扩展数据来源
 
@@ -198,25 +243,23 @@ ccuv 的核心仍是由 `ccusage` 提供的 Token 统计。需要额外覆盖时
 
 ### 统计 DSH 与 WorkBuddy Token
 
-ccuv 默认使用官方 `ccusage`。若还需要 DeepSeek Harness（DSH）与 WorkBuddy
-统计，可安装非官方的
-[`Cookie-HOO/my-ccusage`](https://github.com/Cookie-HOO/my-ccusage)
-发行版，并显式选择：
+ccuv 默认使用官方 `ccusage`。官方 v20.0.46 尚无 DSH / WorkBuddy 专用 adapter。
+需要覆盖这两个来源时：
 
 ```bash
-# macOS 或 Linux
-curl -fsSL https://raw.githubusercontent.com/Cookie-HOO/my-ccusage/main/install.sh | sh
-ccuv dashboard --ccusage-bin my-ccusage
+ccuv backend setup  # 回答需要 DSH / WorkBuddy
+ccuv dashboard      # 后续无需 --ccusage-bin
 ```
 
-```powershell
-# Windows x64
-irm https://raw.githubusercontent.com/Cookie-HOO/my-ccusage/main/install.ps1 | iex
-ccuv dashboard --ccusage-bin my-ccusage
-```
+这会选择非官方 [`Cookie-HOO/my-ccusage`](https://github.com/Cookie-HOO/my-ccusage)
+发行版；上游更新经过兼容性验证后主动同步，可能晚于官方。WorkBuddy 支持统一日统计和
+项目/会话归属，不覆盖全部专用报表命令。ccuv 本身仍不包含这两个 collector。
 
-安装脚本会验证 Release 校验和。`my-ccusage` 跟随上游 ccusage，并补充 DSH 与
-WorkBuddy adapter；ccuv 自身仍不包含 DSH 或 WorkBuddy collector。
+托管增强版支持 macOS / Linux x64、ARM64，以及 Windows x64。
+下载和验证设置了限制；Release SHA-256 校验用于检测损坏，并非独立的发布者身份认证。
+ccuv 不会执行远程安装脚本，也可复用 PATH 中已有的 `my-ccusage`。
+本轮不管理后端更新与卸载；官方版更新仍用 npm，增强版可从 GitHub 获取手动发行版。
+高级场景仍可通过 `--ccusage-bin PATH` 临时覆盖。
 
 ### 使用 Dataset 监控任意指标
 

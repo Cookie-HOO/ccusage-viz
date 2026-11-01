@@ -357,4 +357,4 @@ def standalone_from_chart_pane(
     chart = pane.chart
     if dashboard.host.ascii:
         chart = replace(chart, presentation=replace(chart.presentation, theme="classic"))
-    return StandaloneLaunch(dashboard.process, host, chart)
+    return StandaloneLaunch(dashboard.process, host, chart, dashboard.explicit & {"ccusage_bin"})
