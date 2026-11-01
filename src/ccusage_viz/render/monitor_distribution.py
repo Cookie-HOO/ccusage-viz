@@ -208,8 +208,8 @@ def render_monitor_distribution(model: TimeOfDayDistributionModel, context: Rend
         ),
         context.width,
     )
-    multi_series = len(model.series) > 1
-    legend_mode = context.legend_position if multi_series else "hidden"
+    # A sole series still needs a legend to identify the model/group it represents.
+    legend_mode = context.legend_position
     legend_line = ""
     if context.height >= 13 and legend_mode == "below-title":
         legend_line = _series_legend(model, context, include_coverage=True)
