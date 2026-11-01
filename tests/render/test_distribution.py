@@ -76,6 +76,45 @@ def test_distribution_renderer_honors_every_monitor_legend_mode(
         assert missing not in output
 
 
+@pytest.mark.parametrize(
+    ("legend", "expected"),
+    [
+        ("below-title", "Alpha"),
+        ("inside", "Alpha"),
+        ("values", "Alpha 60"),
+        ("hidden", None),
+    ],
+)
+def test_distribution_renderer_respects_legend_mode_for_single_series(
+    legend: str, expected: str | None
+) -> None:
+    model = _distribution_model()
+    key = model.series[0].key
+    model = replace(
+        model,
+        series=model.series[:1],
+        buckets=tuple(
+            replace(
+                bucket,
+                values={key: bucket.values[key]} if key in bucket.values else {},
+            )
+            for bucket in model.buckets
+        ),
+    )
+    output = render_monitor_distribution(
+        model,
+        RenderContext(
+            80, 16, load_translator("en"), color=False, ascii=True, legend_position=legend
+        ),
+    )
+
+    if expected is None:
+        assert "Alpha" not in output
+    else:
+        assert expected in output
+    assert len(output.splitlines()) == 16
+
+
 def test_distribution_renderer_ascii_no_color_is_safe_and_width_bounded() -> None:
     output = render_monitor_distribution(
         _distribution_model(),
