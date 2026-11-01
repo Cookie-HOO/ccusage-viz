@@ -71,6 +71,14 @@ def main(argv: list[str] | None = None) -> int:
             raise enriched from error
         if hasattr(namespace, "lang") and namespace.lang is None:
             namespace.lang = language
+        if namespace.command == "backend":
+            from ccusage_viz.backend import setup, status
+
+            if namespace.backend_command == "setup":
+                setup(tr, namespace.backend, yes=namespace.yes)
+            else:
+                status(tr)
+            return 0
         if namespace.command == "dataset":
             from ccusage_viz.datasets.manager_rendering import format_dataset_list
             from ccusage_viz.datasets.manager_runtime import run_dataset_manager

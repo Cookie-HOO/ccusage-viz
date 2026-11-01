@@ -4,6 +4,7 @@ import time
 from datetime import UTC, date, datetime, timedelta
 from typing import cast
 
+from ccusage_viz.backend_store import resolve_executable
 from ccusage_viz.core.time import local_today
 from ccusage_viz.coverage import DateCoverage, DateInterval
 from ccusage_viz.custom_protocol.requests import (
@@ -78,7 +79,9 @@ def monitor_query_intent(
         None
         if provider.capabilities.in_process
         else ExecutionContext(
-            options.process.ccusage_bin,
+            resolve_executable(
+                options.process.ccusage_bin, explicit=options.was_explicit("ccusage_bin")
+            ),
             options.process.query_timeout,
             options.process.output_limit,
             options.process.environment,
@@ -135,7 +138,9 @@ def historical_query_intent(
         None
         if provider.capabilities.in_process
         else ExecutionContext(
-            options.process.ccusage_bin,
+            resolve_executable(
+                options.process.ccusage_bin, explicit=options.was_explicit("ccusage_bin")
+            ),
             options.process.query_timeout,
             options.process.output_limit,
             options.process.environment,
@@ -189,7 +194,9 @@ def builtin_summary_query_intent(
         None
         if provider.capabilities.in_process
         else ExecutionContext(
-            options.process.ccusage_bin,
+            resolve_executable(
+                options.process.ccusage_bin, explicit=options.was_explicit("ccusage_bin")
+            ),
             options.process.query_timeout,
             options.process.output_limit,
             options.process.environment,

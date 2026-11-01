@@ -145,7 +145,7 @@ def test_main_top_level_typo_lists_commands_and_suggests_dashboard(
 
     error = capsys.readouterr().err
     assert "unrecognized arguments: dashbaord" in error
-    assert "Supported commands: chart, dashboard, animate, dataset, text" in error
+    assert "Supported commands: chart, dashboard, animate, dataset, backend, text" in error
     assert "Did you mean 'dashboard'?" in error
 
 
@@ -155,7 +155,7 @@ def test_main_top_level_typo_honors_leading_language_option(
     assert main(["--lang", "zh", "dashbaord"]) == 2
 
     error = capsys.readouterr().err
-    assert "支持的命令：chart, dashboard, animate, dataset, text" in error
+    assert "支持的命令：chart, dashboard, animate, dataset, backend, text" in error
     assert "你是不是想输入 'dashboard'？" in error
 
 

@@ -291,6 +291,23 @@ def build_parser(tr: Translator) -> argparse.ArgumentParser:
     tui.add_argument("--empty", action="store_true", help=argparse.SUPPRESS)
     _add_tui(tui, tr)
 
+    backend = subparsers.add_parser(
+        "backend", help=tr.text("help.backend"), description=tr.text("help.backend")
+    )
+    backend.add_argument("--lang", choices=("en", "zh"), help=tr.text("help.lang"))
+    backend_subparsers = backend.add_subparsers(dest="backend_command", metavar="COMMAND")
+    backend.set_subcommand_choices(("setup",))
+    setup = backend_subparsers.add_parser(
+        "setup", help=tr.text("help.backend_setup"), description=tr.text("help.backend_setup")
+    )
+    setup.add_argument(
+        "--backend", choices=("official", "enhanced"), help=tr.text("help.backend_choice")
+    )
+    setup.add_argument("--yes", action="store_true", help=tr.text("help.backend_yes"))
+    setup.add_argument(
+        "--lang", choices=("en", "zh"), default=argparse.SUPPRESS, help=tr.text("help.lang")
+    )
+
     dataset = subparsers.add_parser(
         "dataset", help=tr.text("help.dataset"), description=tr.text("help.dataset")
     )

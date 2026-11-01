@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import shutil
-import subprocess
 import sys
 
 from ccusage_viz.errors import QueryError
@@ -16,7 +14,6 @@ from ccusage_viz.options import (
 from ccusage_viz.query.registry import ProviderRegistry
 
 _DEFAULT_CCUSAGE = "ccusage"
-_INSTALL_COMMAND = "npm install -g ccusage"
 
 
 def ensure_provider_dependencies(
@@ -50,27 +47,17 @@ def ensure_ccusage(options: LaunchConfig, translator: Translator) -> None:
         or options.process.ccusage_bin != _DEFAULT_CCUSAGE
     ):
         return
-    if shutil.which(_DEFAULT_CCUSAGE) is not None:
+    from ccusage_viz.backend import setup
+    from ccusage_viz.backend_store import discover_choices, executable_path, load_choice
+
+    if saved := load_choice():
+        if executable_path(saved) is None:
+            raise QueryError("error.backend_unavailable", binary=saved.executable)
         return
-    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+    choices = discover_choices()
+    is_interactive = sys.stdin.isatty() and sys.stdout.isatty()
+    if len(choices) == 1 or (choices and not is_interactive):
+        return
+    if not is_interactive:
         raise QueryError("error.ccusage_missing", binary=_DEFAULT_CCUSAGE)
-
-    print(translator.text("prompt.ccusage_install", command=_INSTALL_COMMAND))
-    try:
-        response = input(translator.text("prompt.ccusage_install_confirm"))
-    except (EOFError, KeyboardInterrupt):
-        raise QueryError("error.ccusage_missing", binary=_DEFAULT_CCUSAGE) from None
-    if response not in ("", "y", "Y"):
-        raise QueryError("error.ccusage_missing", binary=_DEFAULT_CCUSAGE)
-
-    npm = shutil.which("npm")
-    if npm is None:
-        raise QueryError("error.npm_missing")
-    try:
-        completed = subprocess.run([npm, "install", "-g", "ccusage"], shell=False, check=False)
-    except OSError as exc:
-        raise QueryError("error.ccusage_install_start", detail=str(exc)) from exc
-    if completed.returncode != 0:
-        raise QueryError("error.ccusage_install_failed", code=completed.returncode)
-    if shutil.which(_DEFAULT_CCUSAGE) is None:
-        raise QueryError("error.ccusage_install_path")
+    setup(translator)

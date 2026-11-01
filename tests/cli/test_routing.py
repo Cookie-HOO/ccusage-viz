@@ -20,7 +20,7 @@ def test_distant_top_level_failure_lists_commands_without_suggestion(
     assert main(["nonsense", "--lang", "en"]) == 2
 
     error = capsys.readouterr().err
-    assert "Supported commands: chart, dashboard, animate, dataset, text" in error
+    assert "Supported commands: chart, dashboard, animate, dataset, backend, text" in error
     assert "Did you mean" not in error
 
 
