@@ -11,7 +11,7 @@ dependencies = [
   "cryptography>=44,<46",
   "plotext>=6.1,<7",
   "rfc8785>=0.1,<0.2",
-  "term-animate>=0.1.1,<0.2.0",
+  "term-animate>=0.1.2,<0.2.0",
   "tzlocal>=5,<6",
 ]
 

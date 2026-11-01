@@ -296,7 +296,7 @@ def test_renderer_passes_idle_activity_label(monkeypatch, translator) -> None:
 
 def test_monitor_attachment_cycle_reaches_none_then_wraps_in_both_directions() -> None:
     session = new_animation_session(
-        animation_spec("digital-clock", target="monitor"), theme="classic"
+        animation_spec(animation_style_choices("monitor")[-1], target="monitor"), theme="classic"
     )
     session.set_visible(True, 0.0)
 
