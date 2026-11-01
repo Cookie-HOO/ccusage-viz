@@ -6,6 +6,45 @@
 - **Minor (`0.x.0`)**: substantial new user-facing capabilities or source integrations before 1.0.
 - Before `1.0`, public interfaces may still change between releases.
 
+## 0.4.0
+
+`0.4.0` makes choosing and installing the Token statistics tool a first-class
+workflow. Official ccusage remains the default; ccuv still bundles no collector
+and does not change built-in Token semantics.
+
+- `ccuv backend` shows the current statistics tool, selection origin, executable
+  path, version, and availability without installing or changing settings;
+- `ccuv backend setup` asks whether DSH or WorkBuddy usage is needed, reuses a
+  working installation or installs the chosen distribution, and saves it as the
+  default. Enter/unsure uses official ccusage for a new setup or preserves an
+  existing saved choice; installation and saving require confirmation;
+- the unofficial `my-ccusage` distribution can be installed from a checksum-verified
+  GitHub Release into private ccuv storage on macOS/Linux x64 or ARM64 and Windows
+  x64. Official ccusage remains separate and is installed through npm when needed;
+- routine launches no longer need `--ccusage-bin my-ccusage`. Ordinary presets
+  follow the global selection; custom paths remain pinned, and explicit
+  `--ccusage-bin` still overrides the current invocation. For historical preset
+  compatibility, a saved `ccusage` command name means follow the global choice;
+- a missing saved tool reports repair/switch guidance instead of silently
+  switching distributions. Demo, help, and empty/Dataset-only launches do not
+  trigger setup; noninteractive setup requires `--backend official|enhanced --yes`;
+- English and Chinese terminal messages use readable tool names and explicit
+  defaults. The README gives installation Agents a shareable project URL and
+  requires them to ask about DSH/WorkBuddy, obtain consent, prepare prerequisites
+  only as needed, and verify the result;
+- Monitor distribution views now honor the selected legend mode even with only
+  one series;
+- `term-animate` now requires at least 0.1.2, removing the previous default
+  Pillow/CairoSVG dependency chain from the lockfile.
+
+DSH/WorkBuddy collection itself was already available through the separate
+`my-ccusage` distribution; this release simplifies its setup rather than adding a
+ccuv-native collector. That distribution synchronizes upstream after verification
+and may lag official releases. WorkBuddy coverage is unified daily statistics and
+project/session attribution, not every focused report. Automatic backend updates
+and uninstall are not included. Release checksums detect corruption, not independent
+publisher authentication; no remote installation scripts are executed by ccuv.
+
 ## 0.3.5
 
 `0.3.5` separates Dashboard presets from flexible topology and improves upgrade
