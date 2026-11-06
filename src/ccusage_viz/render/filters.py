@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ccusage_viz.custom_models import CustomPresentationDescriptor
+from ccusage_viz.custom_models import CustomPresentationDescriptor, LocalizedText
 from ccusage_viz.formatting import display_width
 from ccusage_viz.i18n import Translator
 from ccusage_viz.options import CustomFilters, Filters
@@ -49,7 +49,7 @@ def custom_filter_summaries(
     return _summaries(selections, translator)
 
 
-def _localized(value: object, fallback: str, translator: Translator) -> str:
+def _localized(value: LocalizedText | None, fallback: str, translator: Translator) -> str:
     if value is None:
         return fallback
     return value.zh_cn if translator.language == "zh" else value.en

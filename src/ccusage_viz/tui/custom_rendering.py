@@ -148,7 +148,7 @@ def _custom_render_context(
     """Adapt Custom semantics to the selected kind-specific product surface."""
     assert config.kind != "monitor"
     is_ungrouped_timeline = config.kind == "timeline" and config.group_by is None
-    presentation = SurfacePresentation(
+    surface_presentation = SurfacePresentation(
         config.kind,
         config.presentation.theme,
         config.presentation.style,
@@ -170,7 +170,7 @@ def _custom_render_context(
     return surface.context(
         terminal,
         translator,
-        presentation,
+        surface_presentation,
         controls=controls,
         reserved_summary_rows=reserved_summary_rows,
     )
