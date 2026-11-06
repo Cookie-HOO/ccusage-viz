@@ -17,6 +17,7 @@ from ccusage_viz.render.ranking_columns import measure_ranking_columns, render_r
 from ccusage_viz.render.ranking_description import copyable_description_text
 from ccusage_viz.render.ranking_entries import RankingPresentationEntry, filter_ranking_entries
 from ccusage_viz.render.ranking_historical import render_historical_ranking
+from ccusage_viz.render.ranking_labels import group_label_deltas, ranking_band_legend
 from ccusage_viz.render.ranking_viewport import RankingColumns, ranking_separator
 from ccusage_viz.render.summary import format_custom_value
 from ccusage_viz.scrollbar import Scrollbar
@@ -24,7 +25,7 @@ from ccusage_viz.trends import trend_glyph
 
 GroupedIdentity = tuple[Literal["group"], str] | tuple[Literal["series"], str, str]
 GroupedRowKind = Literal[
-    "group", "description", "separator", "series", "series_description", "empty"
+    "group", "legend", "description", "separator", "series", "series_description", "empty"
 ]
 
 
@@ -336,6 +337,7 @@ def render_grouped_custom_ranking_viewport(
     gutter = scrollbar and context.width > 1
     if gutter:
         context = replace(context, width=context.width - 1)
+    context = replace(context, ranking_bands=getattr(projection, "bands", ()))
     config = projection.config
     reset_key = (
         (
@@ -361,6 +363,7 @@ def render_grouped_custom_ranking_viewport(
         context.period,
         context.pending,
         projection.comparison_available,
+        context.ranking_bands,
     )
     data_key = search_query
     rebuild_prepared = (
@@ -370,6 +373,10 @@ def render_grouped_custom_ranking_viewport(
     comparison = config.ranking_comparison if config else "full"
     geometry_key = (
         context.width,
+        context.height,
+        context.label_color_mode,
+        context.legend_position,
+        context.ascii,
         context.style,
         context.density,
         context.period,
@@ -443,21 +450,33 @@ def render_grouped_custom_ranking_viewport(
         and context.density == "detailed"
         and context.width >= 75
     )
-    viewport.percentage_visible = projection.show_percentage and context.style != "list"
+    viewport.percentage_visible = projection.show_percentage
     viewport.entry_percentage_visible = viewport.percentage_visible and not context.pending
     viewport.entry_pending = context.pending
     total_entry_count = max((len(group.entries) for group in prepared), default=0)
 
     def value(number: int | Decimal) -> str:
         return format_custom_value(
-            Decimal(number), projection.unit, language=context.translator.language
+            Decimal(number),
+            projection.unit,
+            language=context.translator.language,
+            sum_format=projection.sum_format,
         )
 
+    legends: dict[str, tuple[str, ...]] = {}
+
+    def group_legend(group: GroupedRankingPresentationGroup) -> tuple[str, ...]:
+        if group.id not in legends:
+            legends[group.id] = ranking_band_legend(group.entries, context)
+        return legends[group.id]
+
     def heading_lines(
-        group: GroupedRankingPresentationGroup, *, measure: bool = False
+        group: GroupedRankingPresentationGroup,
+        *,
+        measure: bool = False,
     ) -> list[str]:
         marker = "⊞" if measure or copied_entry_id != ("group", group.id) else "✓"
-        return list(
+        rows = list(
             render_ranking_heading_row(
                 label=f"{group.label} | {marker}",
                 value=group.display,
@@ -476,8 +495,11 @@ def render_grouped_custom_ranking_viewport(
                 show_percentage=projection.show_percentage,
                 total_entry_count=total_entry_count,
                 columns=viewport.columns,
+                value_can_use_prefix_space=True,
             )
         )
+
+        return [*rows[:1], *group_legend(group), *rows[1:]]
 
     def entry_lines(
         group: GroupedRankingPresentationGroup,
@@ -500,7 +522,10 @@ def render_grouped_custom_ranking_viewport(
             heading="",
             value_formatter=value,
             delta_formatter=lambda number: f"{'+' if number > 0 else '-'}{value(abs(number))}",
-            context=context,
+            context=replace(
+                context,
+                deltas=group_label_deltas(group.id, (entry,), context),
+            ),
             pending=context.pending,
             total=group.total,
             maximum=group.maximum,
@@ -595,7 +620,11 @@ def render_grouped_custom_ranking_viewport(
                 for line_index, _ in enumerate(heading_lines(group, measure=True)):
                     records.append(
                         GroupedRankingRow(
-                            "group" if line_index == 0 else "description",
+                            "group"
+                            if line_index == 0
+                            else "legend"
+                            if line_index <= len(group_legend(group))
+                            else "description",
                             group.id,
                             None,
                             line_index,

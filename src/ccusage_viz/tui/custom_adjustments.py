@@ -16,6 +16,7 @@ from ccusage_viz.i18n import Translator
 from ccusage_viz.options import (
     CustomChartConfig,
     adjust_custom_chart,
+    adjust_ranking_label_color,
     compatible_styles,
     is_monitor_ranking_style,
 )
@@ -302,6 +303,37 @@ def _custom_runtime_filters(
     return runtime.filters if runtime is not None else ()
 
 
+def _adjust_custom_ranking_label_color(pane: TuiCustomPane) -> CustomChartConfig:
+    """Offer bands from accepted V2 facts only, never a pending response."""
+    from ccusage_viz.custom_protocol.responses import V2ChartResponse
+
+    response = getattr(pane.component, "accepted_response", None)
+    available = isinstance(response, V2ChartResponse) and bool(getattr(response.data, "bands", ()))
+    return adjust_ranking_label_color(pane.component.candidate, bands_available=available)  # ty: ignore[invalid-return-type]
+
+
+def _custom_ranking_legend_available(pane: TuiCustomPane) -> bool:
+    """Offer legend controls only for named bands represented in accepted projection."""
+    chart = pane.component.candidate
+    if chart.kind != "ranking" or chart.presentation.label_color_mode != "band":
+        return False
+    projection = getattr(pane.component, "model", None)
+    if projection is None:
+        return False
+    named = {band.id for band in getattr(projection, "bands", ()) if band.label is not None}
+    groups = getattr(projection, "groups", None)
+    collections = (
+        tuple(group.series for group in groups)
+        if groups is not None
+        else (getattr(projection, "series", ()),)
+    )
+    return any(
+        not getattr(entry, "is_other", False) and getattr(entry, "band_id", None) in named
+        for entries in collections
+        for entry in entries
+    )
+
+
 def _custom_pane_adjustment_bindings(pane: TuiCustomPane, page: str) -> tuple[tuple[str, str], ...]:
     """Return the active custom actions for one Dashboard adjustment page."""
 
@@ -356,7 +388,9 @@ def _custom_pane_adjustment_bindings(pane: TuiCustomPane, page: str) -> tuple[tu
 
     actions = []
     if chart.kind == "ranking":
-        actions.append(("s/S", "spacing"))
+        actions.extend((("s/S", "spacing"), ("%", "percentage"), ("C", "label_color")))
+    if _custom_ranking_legend_available(pane):
+        actions.append(("l", "legend"))
     if _custom_runtime_filters(pane.component):
         actions.append(("f", "filters"))
     if chart.group_by is not None:
@@ -386,7 +420,7 @@ def _adjust_custom_monitor_chart(
                 ),
             ),
         )
-    if key in {"d", "D", "t", "T", "l"}:
+    if key in {"d", "D", "t", "T", "l", "+", "=", "-", "_", "o"}:
         return adjust_custom_chart(chart, key)
     return chart
 
@@ -398,12 +432,13 @@ def _custom_pane_adjustment_actions(
 
 
 def _custom_pane_adjustment_keys(pane: TuiCustomPane, page: str) -> frozenset[str]:
-    return frozenset(
+    keys = frozenset(
         character
         for binding, _label in _custom_pane_adjustment_bindings(pane, page)
         for character in binding
         if character not in {"/", " "}
     )
+    return keys | ({"=", "_"} if "+" in keys else set())
 
 
 def _custom_pane_adjustment_state(pane: TuiCustomPane, page: str, translator: Translator) -> str:
@@ -423,6 +458,30 @@ def _custom_pane_adjustment_state(pane: TuiCustomPane, page: str, translator: Tr
         settings = " · ".join(values)
     else:
         settings = []
+        if chart.kind == "ranking":
+            settings.extend(
+                (
+                    translator.text(
+                        "status.ranking_label_color",
+                        value=translator.text(
+                            f"label.label_color_{chart.presentation.label_color_mode}"
+                        ),
+                    ),
+                )
+            )
+            if _custom_ranking_legend_available(pane):
+                settings.append(f"Legend {chart.presentation.legend}")
+            capability = _custom_capability(pane)
+            visible = (
+                chart.presentation.show_percentage
+                if chart.presentation.show_percentage is not None
+                else capability.show_percentage
+                if isinstance(capability, CustomChartCapability)
+                else True
+            )
+            settings.append(
+                translator.text("status.ranking_percentage", value="on" if visible else "off")
+            )
         if chart.group_by is not None:
             settings.append(f"Other {chart.other}")
         if chart.kind in {"timeline", "stack"}:

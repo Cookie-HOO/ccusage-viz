@@ -122,7 +122,23 @@ term-animate 声明的所有效果，最后进入 ccuv 本地的`无`。
 | `--theme THEME` | `classic`、`vivid`、`contrast`、`dracula`、`catppuccin`、`solarized`、`gruvbox`、`nord`、`github`、`mono`、`no-color` | `classic` | 全部 | 图表配色；`no-color` 关闭图表颜色。 |
 | `--density DENSITY` | `minimal`、`compact`、`full`、`detailed` | `detailed`（Ranking 为 `full`） | 全部聚焦图表 | 图表细节与装饰的数量。 |
 | `--style STYLE` | 命令专属，见图表表格 | 命令专属 | 全部 | 所选图表的渲染样式。 |
-| `--legend POSITION` | Timeline：`below-title`、`inside`、`hidden`；Stack：`below-title`、`hidden`；Monitor：`below-title`、`inside`、`hidden`、`values` | `below-title` | Timeline、Stack、Monitor | 图例位置/内容。 |
+| `--legend POSITION` | Timeline：`below-title`、`inside`、`hidden`；Stack/Ranking：`below-title`、`hidden`；Monitor：`below-title`、`inside`、`hidden`、`values` | `below-title` | Timeline、Stack、Ranking、Monitor | 图例位置/内容。 |
+| `--label-color MODE` | `change`、`increase`、`decrease`、`direction`、`band`、`none` | `change` | Ranking（内置与 Dataset） | 只影响标签的着色策略，见下文。 |
+
+Ranking Advanced 页新增 `%` 占比开关；所有样式（包括 `list` 和分区标题）共用该设置。变化图标使用固定槽位：首次响应为空，增长/下降显示 `↑`/`↓`，连续相同值显示中性 `-`；Dataset Ranking 按原始 Decimal 值判断，即使 `display` 不变或禁用周期比较也有效。仅在尚无刷新差值时回退到周期比较；切换指标、分组、筛选或周期会重建基线。
+
+#### Ranking 标签颜色与分段图例
+
+`--label-color change|increase|decrease|direction|band|none` 控制标签颜色：默认 `change` 高亮任意非零变化，`increase` / `decrease` 只着色对应方向，`direction` 区分两个方向，`band` 使用 Dataset 分类，`none` 不着色。Advanced 页用 `C` 切换；仅在 `band` 模式且当前有实际使用的具名分段时提供 `l`，在 `below-title`（默认，独立图例行）/ `hidden` 间切换，隐藏时仍保留操作入口；这些纯展示设置支持撤销、重做和 preset，不影响查询、排序、数值、箭头或搜索高亮。
+
+Dataset V2 Ranking 可通过响应级 `bands` 和条目 `band_id` 提供分类事实。`band` 模式按声明顺序为当前条目着色，并只为实际出现且具名的分段生成图例；无名分段可着色，未分类和 Other 保持普通样式。隐藏图例不关闭着色。完整协议见 [Dataset 开发者指南](dataset-developer-guide.zh-CN.md#ranking-分类事实)。
+
+```bash
+ccuv chart ranking --label-color increase
+ccuv chart ranking --dataset example-activity --metric events --label-color band --legend below-title
+```
+
+交互式 Top 调整按当前数量工作：`All -` 减少一项，增加到完整数量后恢复 All。Dataset fallback 数值遵循 Metric 的 `sum_format`：普通数值使用十进制 K/M/B 并保留单位，分钟/秒时长使用自然的本地化时间文本；Dataset 自带的 `display` 不变。Timeline、Stack、Monitor 的系列图例统一为宽度感知布局，最多两行，溢出显示 `…(+N)`。
 
 `--ascii --theme classic` 与 `--ascii --theme no-color` 都无效：冲突由**显式**指定主题导致。
 不指定 `--theme` 时使用 `--ascii` 是有效的。
@@ -514,7 +530,7 @@ Timeline、Calendar、Stack 和 Ranking 在图表视图按 `m` 打开调整器�
 | Timeline | `p/P` 范围；`g/G` 粒度；`b/B` 分组；`+/-` Top；`d` 密度；`t/T` 主题；`s/S` 样式 | `f` 筛选；`o` Other；`l` 图例；`k` 星期标签 |
 | Calendar | `p/P` 范围；`d` 密度；`t/T` 主题；`s/S` 样式 | `f` 筛选 |
 | Stack | `p/P` 范围；`g/G` 粒度；`b/B` 分组；`+/-` Top；`d` 密度；`t/T` 主题；`s/S` 样式 | `f` 筛选；`o` Other；`c` 缓存模式；`l` 图例；`k` 星期标签 |
-| Ranking | `p/P` 范围；`b/B` 分组；`+/-` Top；`d` 密度；`t/T` 主题；`s/S` 样式 | `f` 筛选；`o` Other |
+| Ranking | `p/P` 范围；`b/B` 分组；`+/-` Top；`d` 密度；`t/T` 主题；`s/S` 样式 | `f` 筛选；`o` Other；`%` 占比；`C` 标签颜色；`l` 分段图例 |
 | Monitor | 时间线样式：`w` 窗口；`i` 采样间隔；`b/B` 分组；`+/-` Top；`d` 密度；`t/T` 主题；`s/S` 样式。`cumulative-bars`：`w` 今天/昨天；`g` 每小时/30 分钟；`b/B` 分组；`+/-` Top；`d` 密度；`t/T` 主题；`s/S` 样式。ranking/list 不显示 `w`。 | `f` 筛选；`l` 图例 |
 
 `p` 向前、`P` 向后遍历共享历史序列

@@ -37,6 +37,7 @@ class RankingPresentationEntry:
     # Absolute position in the complete current ranking. Search and viewport
     # windows may hide rows but must not renumber the survivors.
     rank: int | None = None
+    band_id: str | None = None
 
 
 def _refresh_markers(
@@ -71,7 +72,7 @@ def _refresh_markers(
             else scheme.trend_neutral
         )
         value_marker = styled_text(
-            trend_glyph(value_change, ascii=context.ascii),
+            "-" if value_change == 0 else trend_glyph(value_change, ascii=context.ascii),
             value_color,
             context,
             bold=value_change != 0,

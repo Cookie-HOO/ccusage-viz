@@ -4,6 +4,7 @@ from ccusage_viz.custom_models import (
     CustomComparison,
     CustomData,
     CustomPoint,
+    CustomRankingBand,
     CustomRankingEntry,
     CustomRankingGroup,
     CustomSeries,
@@ -97,6 +98,24 @@ def _parse_v2_ranking_data(
     source = _mapping(value, "data")
     if "series" in source and "groups" in source:
         raise CustomProtocolError("data series and groups are mutually exclusive")
+    bands = (
+        tuple(
+            _parse_v2_ranking_band(item, name=f"data.bands[{index}]")
+            for index, item in enumerate(_sequence(source["bands"], "data bands"))
+        )
+        if source.get("bands") is not None
+        else ()
+    )
+    _unique_ids(bands, "data bands")
+    band_ids = {band.id for band in bands}
+
+    def validate_membership(entries: tuple[CustomRankingEntry, ...], name: str) -> None:
+        for index, entry in enumerate(entries):
+            if entry.band_id is not None and entry.band_id not in band_ids:
+                raise CustomProtocolError(
+                    f"{name}[{index}].band_id references unknown band ID: {entry.band_id}"
+                )
+
     if partitioned:
         groups = tuple(
             _parse_v2_ranking_group(item, index=index)
@@ -106,7 +125,9 @@ def _parse_v2_ranking_data(
         count = sum(len(group.series) for group in groups)
         if max_items is not None and count > max_items:
             raise CustomProtocolError(f"data must not contain more than {max_items} series")
-        return V2RankingData(groups=groups)
+        for index, group in enumerate(groups):
+            validate_membership(group.series, f"data.groups[{index}].series")
+        return V2RankingData(groups=groups, bands=bands)
     series = tuple(
         _parse_v2_ranking_entry(item, name=f"data.series[{index}]")
         for index, item in enumerate(_sequence(source.get("series"), "data series"))
@@ -114,7 +135,18 @@ def _parse_v2_ranking_data(
     _unique_ids(series, "data series")
     if max_items is not None and len(series) > max_items:
         raise CustomProtocolError(f"data must not contain more than {max_items} series")
-    return V2RankingData(series=series)
+    validate_membership(series, "data.series")
+    return V2RankingData(series=series, bands=bands)
+
+
+def _parse_v2_ranking_band(value: object, *, name: str) -> CustomRankingBand:
+    source = _mapping(value, name)
+    return CustomRankingBand(
+        _string(source.get("id"), f"{name}.id"),
+        _parse_localized(source["label"], f"{name}.label")
+        if source.get("label") is not None
+        else None,
+    )
 
 
 def _parse_v2_ranking_group(value: object, *, index: int) -> V2RankingGroup:
@@ -156,6 +188,9 @@ def _parse_v2_ranking_entry(value: object, *, name: str) -> CustomRankingEntry:
         if "comparison_display" in source
         else None,
         _parse_https_url(source["link"], f"{name}.link") if "link" in source else None,
+        _string(source["band_id"], f"{name}.band_id")
+        if source.get("band_id") is not None
+        else None,
     )
 
 

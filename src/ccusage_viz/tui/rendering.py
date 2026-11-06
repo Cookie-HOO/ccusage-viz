@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from dataclasses import replace
 from datetime import datetime
 from decimal import Decimal
 from typing import cast
@@ -35,7 +36,7 @@ from ccusage_viz.options import (
 )
 from ccusage_viz.render.base import RenderAudit, RenderContext, audit_row_visible, render_audit
 from ccusage_viz.render.custom import render_custom_pending
-from ccusage_viz.render.filters import active_filter_summary
+from ccusage_viz.render.filters import active_filter_summaries, active_filter_summary
 from ccusage_viz.render.surfaces import SurfaceControls, dashboard_pane_surface
 from ccusage_viz.terminal import Terminal
 from ccusage_viz.text_viewport import render_text_viewport, wrap_text_rows
@@ -103,6 +104,11 @@ def _pane_render(
             if isinstance(component, CustomHistoricalComponent)
             else None
         )
+        if display_config is not None and display_config.kind == component.candidate.kind:
+            # Retained facts keep their accepted query semantics, but local
+            # presentation edits apply immediately, even during a refresh. The
+            # uncommitted switch target is not the accepted pane's preference.
+            display_config = replace(display_config, presentation=component.candidate.presentation)
         pane.ranking_viewport.active = False
         pane.grouped_ranking_viewport.active = False
         for viewport in (pane.ranking_viewport, pane.grouped_ranking_viewport):
@@ -243,6 +249,7 @@ def _pane_render(
             ),
             copied_all=pane.copied_ranking_all_until > time.monotonic(),
             item_spacing=pane.ranking_item_spacing,
+            deltas=pane.deltas,
             entry_offset=ranking_entry_offset,
             entry_limit=ranking_entry_limit,
             ranking_viewport=(
@@ -367,6 +374,7 @@ def _pane_render(
                 component,
                 translator,
                 terminal,
+                ranking_label_deltas=pane.label_deltas if active.chart.kind == "ranking" else None,
                 controls=SurfaceControls(),
                 surface=dashboard_pane_surface(cast("HistoricalChartConfig", active.chart).kind),
                 ranking_deltas=pane.deltas if active.chart.kind == "ranking" else None,
@@ -423,9 +431,11 @@ def _pane_render(
                 color_scheme=active.chart.presentation.theme,
                 style=active.chart.presentation.style,
                 legend_position=active.chart.presentation.legend,
+                label_color_mode=active.chart.presentation.label_color_mode,
                 title_content=translator.text(f"label.{title_chart.by or 'total'}"),
                 hide_upper_right_axes=True,
                 deltas=component.deltas,
+                label_deltas=component.label_deltas,
                 rank_deltas=component.rank_deltas,
                 filter_summary=active_filter_summary(
                     active.chart.filters
@@ -433,6 +443,12 @@ def _pane_render(
                     else Filters(),
                     translator,
                     width=terminal.width,
+                ),
+                filter_summaries=active_filter_summaries(
+                    active.chart.filters
+                    if isinstance(active.chart.filters, Filters)
+                    else Filters(),
+                    translator,
                 ),
                 density=active.chart.presentation.density,
                 pending=display_query_pending,
@@ -454,6 +470,7 @@ def _pane_render(
                 component,
                 translator,
                 terminal,
+                ranking_label_deltas=pane.label_deltas if active.chart.kind == "ranking" else None,
                 controls=SurfaceControls(),
                 surface=dashboard_pane_surface(cast("HistoricalChartConfig", active.chart).kind),
                 ranking_deltas=pane.deltas if active.chart.kind == "ranking" else None,

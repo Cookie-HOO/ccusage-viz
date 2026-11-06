@@ -4,6 +4,7 @@ import time
 from collections.abc import Callable, Hashable
 from dataclasses import replace
 from datetime import datetime
+from decimal import Decimal
 from threading import Event
 from typing import Literal
 from zoneinfo import ZoneInfo
@@ -17,6 +18,7 @@ from ccusage_viz.animation import (
 from ccusage_viz.animation_overlay import AnimationOverlayRuntime
 from ccusage_viz.bootstrap import build_chart_registry
 from ccusage_viz.custom_component import CustomHistoricalComponent
+from ccusage_viz.custom_models import CustomRankingEntry
 from ccusage_viz.custom_monitor_component import CustomMonitorComponent
 from ccusage_viz.deltas import RefreshDeltas, RefreshRanks
 from ccusage_viz.historical_component import (
@@ -342,7 +344,74 @@ def _await_monitor_warmup(
         return MonitorWarmupOutcome(generation, tuple(completions), exc)
 
 
-def _refresh_deltas(pane: TuiChartPane, values: dict[Hashable, float]) -> None:
+def _refresh_custom_ranking_values(pane: TuiCustomPane) -> None:
+    """Track directions between accepted primary responses, never display text.
+
+    Raw Decimal values (including entries excluded by Top/search) form the
+    baseline. Group IDs scope repeated entry IDs. A selection change starts a
+    fresh baseline, while presentation adjustments and rolling endpoints do not.
+    """
+    component = pane.component
+    if not isinstance(component, CustomHistoricalComponent):
+        return
+    config = component.accepted_config
+    response = component.accepted_response
+    if config is None or response is None or config.kind != "ranking":
+        return
+    identity = (
+        config.source,
+        config.metric_id,
+        config.kind,
+        config.filters,
+        config.partition_by,
+        config.group_by,
+        config.date_range.period if config.date_range.relative_until else config.date_range,
+    )
+    values: dict[Hashable, Decimal] = {}
+    data = response.data
+    collections = (
+        tuple((group.id, group.series) for group in data.groups)
+        if data.groups is not None
+        else ((None, data.series),)
+    )
+    for group_id, entries in collections:
+        for entry in entries:
+            key = (group_id, entry.id) if group_id is not None else entry.id
+            # V2 scalar rankings and legacy V1 dated rankings share this path.
+            values[key] = (
+                entry.value
+                if isinstance(entry, CustomRankingEntry)
+                else sum((point.value for point in entry.points), start=Decimal())
+            )
+    pane.deltas = (
+        {
+            key: (
+                1.0
+                if value > pane.ranking_refresh_values[key]
+                else -1.0
+                if value < pane.ranking_refresh_values[key]
+                else 0.0
+            )
+            for key, value in values.items()
+            if key in pane.ranking_refresh_values
+        }
+        if pane.ranking_refresh_identity == identity
+        else {}
+    )
+    pane.ranking_refresh_identity = identity
+    pane.ranking_refresh_values = values
+
+
+def _refresh_deltas(
+    pane: TuiChartPane, values: dict[Hashable, float], *, primary: bool = True
+) -> None:
+    if primary:
+        pane.label_deltas = {
+            key: value - pane.previous_label_values[key]
+            for key, value in values.items()
+            if key in pane.previous_label_values
+        }
+        pane.previous_label_values = dict(values)
     tracker = RefreshDeltas(
         pane.previous_values,
         pane.deltas,
@@ -365,6 +434,8 @@ def _clear_changes(pane: TuiChartPane) -> None:
     pane.previous_values.clear()
     pane.deltas.clear()
     pane.values_initialized = False
+    pane.previous_label_values.clear()
+    pane.label_deltas.clear()
     pane.previous_ranks.clear()
     pane.rank_deltas.clear()
 

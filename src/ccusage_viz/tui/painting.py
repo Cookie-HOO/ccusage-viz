@@ -21,6 +21,7 @@ from ccusage_viz.dashboard_layout import (
     resolve_pane_layout,
 )
 from ccusage_viz.dashboard_layout import PaneLayout as ResolvedPaneLayout
+from ccusage_viz.errors import UsageError
 from ccusage_viz.formatting import clip_width
 from ccusage_viz.history_selection import reconcile_history_selection
 from ccusage_viz.render.base import RenderContext
@@ -33,6 +34,7 @@ from ccusage_viz.tui.header import _header_lines
 from ccusage_viz.tui.layout import _compose_dashboard_overlays, _compose_resolved_panes
 from ccusage_viz.tui.models import (
     DashboardOverlayPlacement,
+    PaneRender,
     TuiAnimationPane,
     TuiChartPane,
     TuiCustomPane,
@@ -105,6 +107,7 @@ def adjust_pane_weight(session: TuiSession, pane_index: int, *, axis: str, delta
         )
     )
     layout = grid_geometry(session, size.columns, size.lines, header_rows, 0)
+    columns, spotlight = effective_topology(session)
     slot = layout.topology.slot(pane_index)
 
     def can_adjust_axis(
@@ -112,8 +115,8 @@ def adjust_pane_weight(session: TuiSession, pane_index: int, *, axis: str, delta
     ) -> tuple[bool, tuple[int, ...]]:
         candidate = adjust_weight(weights, index, delta)
         candidate_layout = resolve_pane_layout(
-            columns=session.columns,
-            spotlight=session.spotlight,
+            columns=columns,
+            spotlight=spotlight,
             pane_count=len(session.panes),
             width=layout.width,
             height=layout.height,
@@ -428,13 +431,22 @@ def paint(session: TuiSession, *, force: bool = False, animation_only: bool = Fa
                         raise
                     rendered = _pane_render(pane, session.translator, terminal)
             elif isinstance(pane, TuiCustomPane):
-                rendered = _pane_render(
-                    pane,
-                    session.translator,
-                    terminal,
-                    dashboard=session.options,
-                    scrollbar_hovered=scrollbar_expanded,
-                )
+                try:
+                    rendered = _pane_render(
+                        pane,
+                        session.translator,
+                        terminal,
+                        dashboard=session.options,
+                        scrollbar_hovered=scrollbar_expanded,
+                    )
+                except UsageError as error:
+                    if error.key != "error.stack_stacked_width":
+                        raise
+                    rendered = PaneRender(
+                        clip_width(
+                            session.translator.text("status.tui_pane_too_small"), terminal.width
+                        )
+                    )
             else:
                 rendered = _pane_render(pane, session.translator, terminal)
             if isinstance(pane, TuiAnimationPane):

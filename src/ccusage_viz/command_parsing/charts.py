@@ -57,6 +57,7 @@ def _chart_from_namespace(namespace: argparse.Namespace, *, timezone: str | None
         theme=namespace.color_scheme,
         style=style,
         legend=getattr(namespace, "legend", "below-title"),
+        label_color_mode=getattr(namespace, "label_color_mode", "change"),
         density=cast(
             Density,
             getattr(namespace, "density", "full" if command == "ranking" else "detailed"),
@@ -208,6 +209,7 @@ def _custom_chart_from_namespace(
             theme=namespace.color_scheme,
             style=style,
             legend=getattr(namespace, "legend", "below-title"),
+            label_color_mode=getattr(namespace, "label_color_mode", "change"),
             density=cast(
                 Density, namespace.density or ("full" if kind == "ranking" else "detailed")
             ),

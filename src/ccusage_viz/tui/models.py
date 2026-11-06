@@ -4,6 +4,7 @@ from collections.abc import Hashable
 from concurrent.futures import Future
 from dataclasses import dataclass, field
 from datetime import date, datetime
+from decimal import Decimal
 from typing import Literal
 
 from ccusage_viz.adjustment_timeout import AdjustmentIdleTimer
@@ -155,6 +156,9 @@ class TuiCustomPane:
     copied_ranking_all_until: float = 0.0
     ranking_search: RankingSearchState = field(default_factory=RankingSearchState)
     ranking_item_spacing: str = "compact"
+    ranking_refresh_identity: object | None = None
+    ranking_refresh_values: dict[Hashable, Decimal] = field(default_factory=dict)
+    deltas: dict[Hashable, float] = field(default_factory=dict)
     ranking_viewport: RankingViewport = field(default_factory=RankingViewport)
     grouped_ranking_viewport: GroupedRankingViewport = field(default_factory=GroupedRankingViewport)
 
@@ -192,6 +196,8 @@ class TuiChartPane:
     previous_values: dict[Hashable, float] = field(default_factory=dict)
     deltas: dict[Hashable, float] = field(default_factory=dict)
     values_initialized: bool = False
+    previous_label_values: dict[Hashable, float] = field(default_factory=dict)
+    label_deltas: dict[Hashable, float] = field(default_factory=dict)
     previous_ranks: dict[Hashable, int] = field(default_factory=dict)
     rank_deltas: dict[Hashable, int] = field(default_factory=dict)
     attachment: AnimationSessionState | None = None

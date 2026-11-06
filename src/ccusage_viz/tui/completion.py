@@ -37,7 +37,11 @@ from ccusage_viz.tui.models import (
     TuiChartPane,
     TuiCustomPane,
 )
-from ccusage_viz.tui.pane_lifecycle import _refresh_deltas, _refresh_ranks
+from ccusage_viz.tui.pane_lifecycle import (
+    _refresh_custom_ranking_values,
+    _refresh_deltas,
+    _refresh_ranks,
+)
 from ccusage_viz.tui.rendering import (
     _update_custom_monitor_attachment_activity,
     _update_monitor_attachment_activity,
@@ -473,6 +477,8 @@ def collect(session: TuiSession) -> bool:
                     purpose=outcome.purpose,
                     comparison_request_config=outcome.comparison_request_config,
                 ):
+                    if outcome.purpose == "primary":
+                        _refresh_custom_ranking_values(pane)
                     record_custom_warnings(
                         session, pane.component.candidate.source, outcome.result.custom_response
                     )
@@ -589,7 +595,11 @@ def collect(session: TuiSession) -> bool:
                     assert loaded.completion is not None
                     accepted = component.accept(loaded.completion)
                     if accepted and component.candidate.chart.kind == "ranking":
-                        _refresh_deltas(pane, component.ranking_values())
+                        _refresh_deltas(
+                            pane,
+                            component.ranking_values(),
+                            primary=loaded.purpose is HistoricalPurpose.PRIMARY,
+                        )
                         _refresh_ranks(pane, component.ranking_keys())
                 if accepted:
                     if pane.attachment is not None and isinstance(component, MonitorComponent):

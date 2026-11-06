@@ -11,6 +11,7 @@ from typing import Literal, Protocol
 
 import plotext as plt
 
+from ccusage_viz.custom_models import CustomRankingBand
 from ccusage_viz.formatting import display_width, format_tokens, strip_ansi
 from ccusage_viz.i18n import Translator
 from ccusage_viz.options import Density, has_complete_content
@@ -63,9 +64,15 @@ class RenderContext:
     period: str | None = None
     title_content: str | None = None
     filter_summary: str | None = None
+    filter_summaries: tuple[str, ...] = ()
     density: Density = "detailed"
     pending: bool = False
     audit: RenderAudit | None = None
+    show_percentage: bool | None = None
+    label_color_mode: str = "change"
+    ranking_bands: tuple[CustomRankingBand, ...] = ()
+    # None retains custom/legacy deltas; a mapping is the native valid-baseline channel.
+    label_deltas: Mapping[Hashable, float] | None = None
 
 
 _PLOT_LOCK = RLock()
@@ -158,23 +165,11 @@ def render_audit(context: RenderContext) -> str:
 
 
 def title_with_querying(title: str, context: RenderContext) -> str:
-    """Annotate a title with its active scope and live query state."""
-    if context.filter_summary:
-        title = f"{title} · {context.filter_summary}"
-    if context.audit is None:
-        return title
-    markers = []
-    if context.audit.querying:
-        markers.append(context.translator.text("status.querying"))
-    if not markers:
-        return title
-    marker = styled_text(
-        " · ".join(markers),
-        get_color_scheme(context.color_scheme).muted,
-        context,
-        dim=True,
-    )
-    return f"{title} · {marker}"
+    """Annotate legacy non-semantic titles with the standard title chrome."""
+    # Imported lazily to keep the base rendering module independent at import time.
+    from ccusage_viz.render.headings import heading_with_querying
+
+    return heading_with_querying(title, context)
 
 
 def date_range_heading(name: str, since: date, until: date, context: RenderContext) -> str:

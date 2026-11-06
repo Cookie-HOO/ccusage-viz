@@ -59,11 +59,15 @@ class SurfacePresentation:
     accepted_at: datetime | None
     query_elapsed: float | None
     interval: float | None
+    filter_summaries: tuple[str, ...] = ()
     refreshing: bool = False
     querying: bool = False
     pending: bool = False
     deltas: Mapping[Hashable, float] | None = None
     rank_deltas: Mapping[Hashable, int] | None = None
+    show_percentage: bool | None = None
+    label_color_mode: str = "change"
+    label_deltas: Mapping[Hashable, float] | None = None
 
     @property
     def audit(self) -> RenderAudit:
@@ -114,14 +118,18 @@ def _context(
         legend_position=presentation.legend_position,
         hide_upper_right_axes=hide_upper_right_axes,
         deltas=presentation.deltas,
+        label_deltas=presentation.label_deltas,
         rank_deltas=presentation.rank_deltas,
         weekday_mode=presentation.weekday_mode,
         period=presentation.period,
         title_content=presentation.title_content,
         filter_summary=presentation.filter_summary,
+        filter_summaries=presentation.filter_summaries,
         density=presentation.density,
         pending=presentation.pending,
         audit=presentation.audit,
+        show_percentage=presentation.show_percentage,
+        label_color_mode=presentation.label_color_mode,
     )
 
 

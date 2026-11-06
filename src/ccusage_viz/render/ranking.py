@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from decimal import Decimal
+
 from ccusage_viz.chart_models import RankingEntry, RankingModel, ScalarRankingEntry
 from ccusage_viz.formatting import (
     center_text,
@@ -25,6 +27,7 @@ from ccusage_viz.render.palette import get_color_scheme
 from ccusage_viz.render.ranking_description import description_visible_text
 from ccusage_viz.render.ranking_entries import RankingPresentationEntry
 from ccusage_viz.render.ranking_historical import render_historical_ranking
+from ccusage_viz.render.ranking_labels import ranking_label
 from ccusage_viz.render.summary import render_summary, render_summary_placeholder
 from ccusage_viz.trends import trend_glyph
 
@@ -218,6 +221,7 @@ def render_ranking(
             search_query=search_query,
             search_editing=search_editing,
             show_visible_count=show_visible_count,
+            show_percentage=context.show_percentage is not False,
         )
 
     total = None if model.is_observed or pending else model.percentage_total.total
@@ -310,15 +314,11 @@ def render_ranking(
             value_marker = styled_text(
                 trend_glyph(change, ascii=context.ascii), color, context, bold=change != 0
             )
-            if change:
-                activity = styled_text(
-                    "*" if context.ascii else "●", scheme.highlight, context, bold=True
-                )
         percentage = f" {format_percent(round(value), total):>6}" if total is not None else ""
         rank_marker = " " if pending else rank_marker
         activity = " " if pending else activity
         value_marker = " " if pending else value_marker
-        prefix = f"{rank:>2} {rank_marker} {activity} "
+        prefix = f"{rank:>2} {rank_marker} "
         if separate_fields:
             agent_text = "" if entry.is_other or agent is None else agent
             label_text = (
@@ -327,12 +327,26 @@ def render_ranking(
             )
         else:
             label_text = pad_width(truncate_width(label, label_width), label_width)
+        label_text = ranking_label(
+            label_text,
+            RankingPresentationEntry(
+                entry.key,
+                entry.label,
+                Decimal(str(value)),
+                None,
+                False,
+                entry.is_other,
+            ),
+            context,
+            pending=pending,
+            comparison_available=False,
+        )
         if model.is_observed and context.style == "list":
             row = (
-                f"{rank_marker} {activity} {label_text} "
+                f"{rank_marker} {label_text} "
                 f"{pad_width(formatted, value_width, align='right')} {value_marker}"
             )
-            lines.append(center_text(row, context.width))
+            lines.append(" " * max(0, (context.width - display_width(row)) // 2) + row)
         else:
             lines.append(
                 f"{prefix}{label_text} {mark} "

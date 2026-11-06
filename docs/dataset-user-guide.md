@@ -176,6 +176,42 @@ When the Dataset cannot supply an accepted request, ccuv preserves its current
 view and shows its localized error. If a Dataset default itself is invalid, ccuv
 ignores just that field and opens the chart with the normal standalone default.
 
+### Ranking label colors and V2 bands (ccuv 0.4.1+)
+
+```bash
+ccuv chart ranking --dataset example-activity --metric events \
+  --label-color band --legend below-title
+```
+
+`--label-color` accepts `change` (default), `increase`, `decrease`, `direction`,
+`band`, and `none`. The first four use numeric change, `band` uses the current
+V2 Ranking response's `data.bands` / entry `band_id`, and `none` disables label
+coloring. Refresh deltas—including zero—take precedence over prior-period
+comparison; equal consecutive values show a neutral `-` without change-based
+label highlighting. Band coloring remains active regardless of numeric change. Sorting, values, arrows, and search highlighting are unaffected.
+
+Bands are optional response facts, not Dataset color settings. Only represented,
+named bands get legends; unnamed bands may still color labels, while
+unclassified and Other remain ordinary. Ranking accepts only
+`--legend below-title|hidden`: `below-title` is the default and uses separate
+legend rows; `hidden` hides the legend but keeps coloring. Advanced `C` cycles available modes and `l` toggles the legend;
+these local choices do not query, support undo/redo, and are saved in presets.
+Advanced `%` toggles both group and item shares, including in `list`; the
+Dataset's default remains active until you explicitly override it. `C` offers
+`band` only when the accepted response has bands, but an explicit/saved `band`
+preference is retained without them, displaying ordinary labels and no legend.
+Legends occupy separate rows below group headings or the flat chart title
+and remain stable through search and scrolling. `l` is offered only in `band`
+mode when the accepted projection contains a represented named band; it remains
+available while the legend is hidden so it can be shown again. Colors follow the theme and repeat as needed;
+legends use at most two rows when height permits.
+
+Without a Dataset-owned `display`, fallback values (including Other) follow the
+Metric's `sum_format`. The default `number` uses decimal K/M/B and retains the
+unit; `duration-minute` / `duration-second` produce localized hour/minute/second
+text. Dataset-owned displays remain unchanged. Older ccuv versions may show the Ranking normally without band coloring.
+Dataset authors should follow the [developer guide](dataset-developer-guide.md#ranking-classification-facts).
+
 ## Use A Dataset In Dashboard
 
 ### Interactive workflow

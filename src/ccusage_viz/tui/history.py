@@ -18,6 +18,7 @@ from ccusage_viz.custom_component import (
     custom_replacement_required,
     custom_summary_replacement_required,
 )
+from ccusage_viz.custom_monitor_component import CustomMonitorComponent
 from ccusage_viz.dashboard import DASHBOARD_PRESETS
 from ccusage_viz.dashboard_layout import layout_bands
 from ccusage_viz.dashboard_preset_store import DashboardPresetStore, DashboardPresetStoreError
@@ -285,6 +286,12 @@ def capture_dashboard_state(session: TuiSession) -> DashboardState:
                     attachment.spec.style if attachment is not None else None,
                     attachment.theme if attachment is not None else None,
                     pane.attachment_enabled,
+                    custom_monitor_window_seconds=pane.component.display_window_seconds
+                    if isinstance(pane.component, CustomMonitorComponent)
+                    else None,
+                    custom_monitor_day_window=pane.component.distribution_day_window
+                    if isinstance(pane.component, CustomMonitorComponent)
+                    else None,
                 )
             )
         elif isinstance(pane, TuiAnimationPane):
@@ -385,6 +392,17 @@ def apply_dashboard_state(session: TuiSession, state: DashboardState) -> None:
         elif isinstance(pane, TuiCustomPane):
             assert isinstance(pane_state.config, CustomChartPaneConfig)
             pane.ranking_item_spacing = pane_state.config.ranking_item_spacing
+            if isinstance(pane.component, CustomMonitorComponent):
+                if pane_state.custom_monitor_window_seconds is not None:
+                    pane.component.configure_display_window(
+                        pane_state.custom_monitor_window_seconds
+                    )
+                if (
+                    pane_state.custom_monitor_day_window is not None
+                    and pane.component.distribution_day_window
+                    != pane_state.custom_monitor_day_window
+                ):
+                    pane.component.toggle_distribution_day_window()
             if pane.component.candidate != pane_state.config.chart:
                 current = pane.component.candidate
                 data_affecting = custom_replacement_required(current, pane_state.config.chart)
@@ -420,7 +438,8 @@ def apply_dashboard_state(session: TuiSession, state: DashboardState) -> None:
                         or current.chart.filters != candidate.chart.filters
                     )
                 )
-                _clear_changes(pane)
+                if data_affecting:
+                    _clear_changes(pane)
                 component.configure(candidate, data_affecting=data_affecting)
                 if candidate.host.interval != current.host.interval:
                     pane.scheduler.rebuild(candidate.host.interval, now=now)
@@ -428,6 +447,14 @@ def apply_dashboard_state(session: TuiSession, state: DashboardState) -> None:
                     refresh_indexes.append((len(reconciled), True, False))
                 elif (
                     isinstance(component, HistoricalChartComponent)
+                    and replace(
+                        candidate,
+                        chart=replace(
+                            candidate.chart,
+                            presentation=current.chart.presentation,
+                        ),
+                    )
+                    != current
                     and component.missing_comparison_coverage().intervals
                 ):
                     refresh_indexes.append((len(reconciled), False, False))

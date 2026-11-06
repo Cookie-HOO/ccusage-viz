@@ -22,7 +22,28 @@ then a chart kind. A command may set `default_metric_id`; ccuv uses it only when
 `--metric` is omitted. Without a declared default, omission is allowed only when
 the Dataset has exactly one metric.
 
-Each metric declares `aggregation: "sum"` or `aggregation: "value"`.
+Each metric declares `aggregation: "sum"` or `aggregation: "value"`. A `sum`
+Metric may also declare optional `sum_format: "number" | "duration-minute" |
+"duration-second"`; omission means `number`. Duration formats are invalid with
+`aggregation: "value"`.
+
+```json
+{
+  "id": "reading_time",
+  "aggregation": "sum",
+  "sum_format": "duration-minute",
+  "unit": {
+    "id": "minute",
+    "label": {"en": "minutes", "zh-CN": "分钟"},
+    "placement": "suffix",
+    "decimal_places": 2
+  }
+}
+```
+
+`sum_format` is Metric metadata, not a Unit field and not an Other capability.
+It changes only ccuv-generated fallback text; sorting, arithmetic, shares, and
+raw Decimal values are unchanged.
 
 Every Metric's existing required bilingual `description` is localized explanatory metadata for that Metric. Hosts may show it beneath the Metric title during Metric selection and in help for the currently selected Pane. It does not alter request shape, metric ID, aggregation, or data semantics.
 
@@ -250,6 +271,52 @@ series to return in each group and may return fewer than, exactly, or more than
 N; ccuv never treats omitted source entries as zero or infers an omitted
 remainder.
 
+#### Semantic bands (V2 Ranking only)
+
+Added in ccuv 0.4.1 as an optional extension of `ccuv.custom/v2`; the
+protocol identifier and request shape do not change. Band definitions belong
+to chart responses, not Probe descriptors or capabilities.
+
+A Ranking response may add one ordered `data.bands` list. Each band has a
+stable, unique, non-empty string `id` and an optional bilingual `label`.
+Entries in flat `data.series` or any `data.groups[].series` may reference it
+with `band_id`; all groups share the response-level definitions.
+
+```json
+{
+  "data": {
+    "bands": [
+      {"id": "qualified", "label": {"en": "Qualified", "zh-CN": "已晋级"}},
+      {"id": "remaining"}
+    ],
+    "series": [
+      {"id": "team-a", "label": {"en": "Team A", "zh-CN": "球队 A"}, "value": "18", "band_id": "qualified"}
+    ]
+  }
+}
+```
+
+Omitted or null `bands` means no definitions; omitted or null `band_id`
+means unclassified. A missing/null band label is valid and produces no legend
+entry. A present label must satisfy the usual `LocalizedText` validation.
+Duplicate band IDs or references to unknown IDs reject the whole response.
+Band order does not sort entries: decimal `value` and the Metric's sort
+direction remain authoritative. Current-response definitions and membership
+control current labels, even if a comparison response classifies them differently.
+`Other` is unclassified.
+
+Datasets supply only classification facts (`bands` / `band_id`), not colors,
+threshold rules, label modes, or change arrows. ccuv owns those presentation
+choices; declaring bands does not change the default `change` mode. In
+`--label-color band`, ccuv assigns theme colors in declaration order (repeating
+when the palette is exhausted). Only named bands represented in the accepted
+projected entries get a legend, before local search/scroll filtering: below
+each group heading, or below the main title for flat Ranking. Unnamed bands
+still color labels but never create unnamed legend entries. `--legend hidden`
+hides the legend without disabling coloring; `below-title` shows it. Legends
+are bounded to at most two rows when height permits. These additive V2 fields
+are not available for V1 or Monitor, and older readers may not display them.
+
 #### Flat and grouped response shapes
 
 A flat request, including a declared explicit-null partition, requires the
@@ -434,12 +501,29 @@ For a grouped-capable Ranking, Quick `g/G` cycles declared outer partitions and
 `b/B` cycles inner grouping dimensions; both directions skip the other active
 dimension, and an unavailable alternative keeps the valid query with a short
 notice. Quick `s/S` changes style. Advanced `s/S` changes Ranking spacing, `o`
-changes Other, and `f` edits filters; filters are Advanced for all Dashboard
+changes Other, `C` cycles label coloring, `l` toggles the Ranking band legend
+only in `band` mode when the accepted projection contains a named band,
+and `f` edits filters; filters are Advanced for all Dashboard
 chart panes. Focused Dataset charts use the same Quick/Advanced Pane controls as Dashboard.
 Data-affecting partition, grouping, and filter adjustments start a new command
-query; spacing is presentation-only. Source editing
+query; spacing, label coloring, and legend visibility are presentation-only
+(no command request or refresh-baseline advancement), with undo/redo and preset persistence. Source editing
 (`e`) and diagnostic Logs (`L`) are also available. Lowercase `l` cycles the
-custom Timeline/Stack legend; uppercase `L` is reserved for Logs.
+custom Timeline/Stack legend; Ranking uses `below-title` / `hidden`.
+Uppercase `L` is reserved for Logs. Ranking `--label-color` accepts `change`
+(default: highlight any nonzero numeric change), `increase` (theme trend-increase
+color for positive change only), `decrease` (theme trend-decrease color for negative
+change only), `direction` (both trend colors),
+`band` (Dataset classification), and `none` (ordinary labels). Accepted refresh
+deltas, including zero, take precedence over period comparisons; a comparison
+is used only when no refresh delta exists. The first accepted primary response
+has no refresh marker; equal values in consecutive accepted primary responses
+show a neutral `-` without change-based label highlighting. Refresh directions
+are derived from raw decimal values even when `display` is unchanged or
+`comparison: "none"` disables prior-period requests. Modes change labels only, not arrows,
+sorting, values, or search highlighting. Advanced `C` offers `band` only when
+accepted bands exist; an explicit/saved `band` preference remains valid without
+bands and renders ordinary labels with no legend.
 
 A focused Dataset chart continuously refreshes by issuing the selected
 Dataset protocol's chart or monitor requests to its configured command. It does
@@ -565,7 +649,15 @@ absolute-change text shown in the prior-period comparison column when ccuv has
 calculated a non-zero comparison. In V1, numeric `points[].value` facts remain the source for those calculations.
 In V2 Ranking, the scalar `value` is authoritative for ranking, shares,
 comparisons, colours, and rank movement. When either
-display field is omitted, ccuv formats that value from the declared unit. A description may contain `[label](https://URL)` links,
+display field is omitted, ccuv uses the Metric's `sum_format`. The default
+`number` applies decimal K/M/B abbreviations and the declared unit: values below
+1K keep the declared precision, while scaled values use at least two decimal
+places and omit trailing zeros. `duration-minute` and `duration-second` interpret
+the Decimal in that base unit and render a localized natural duration, using
+hours as the maximum unit and at most two adjacent nonzero units (for example,
+`1988` minutes becomes `33 hours 8 minutes`). Locally synthesized Other entries
+use the same fallback. Dataset-owned `display` and `comparison_display` remain
+authoritative. A description may contain `[label](https://URL)` links,
 `**bold text**`, and `*italic text*`; ccuv renders only `label` as a clickable
 terminal hyperlink. Star emphasis is also allowed inside a link label. Underscore
 emphasis and other Markdown,

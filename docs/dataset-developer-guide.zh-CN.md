@@ -176,6 +176,7 @@ Probe 只能返回元数据：不能获取收费业务数据、校验 secret、�
 | `metrics` | 彼此独立的度量；每项可通过 `group_id` 引用一个 Group | 让用户选 Metric，并限制可选图表。 |
 | `unit` | 稳定 ID、双语标签、前/后缀、精度 | 格式化图、表格和 summary 数值。 |
 | `aggregation` | `sum` 或 `value` | 决定 ccuv 是否能做本地历史投影、Top/Other。 |
+| `sum_format` | `sum` Metric 可选 `number`（默认）、`duration-minute` 或 `duration-second` | 格式化 Other 等 ccuv 生成的 fallback 数值；Dataset 自带显示文本仍优先。 |
 | `capabilities` | 维度与支持图类型 | 生成静态控制，并限制 ccuv 发出的请求。若历史 Ranking 的源端原始行数有固定上限，也可声明 `max_items`。 |
 | `runtime.filters` | 当前查询上下文的 filter 维度、option，以及 `multi_select` / `single_select` 模式 | 仅随每次成功 chart/Monitor 响应返回；为该 accepted snapshot 启用 `f` filter 编辑器。 |
 | `defaults` | 可选首屏建议 | 仅应用兼容字段；错误字段会忽略。 |
@@ -198,9 +199,32 @@ Probe 只能返回元数据：不能获取收费业务数据、校验 secret、�
 
 请求显式给出 `chart_kind`、时区、范围、可选 `period`，以及 `query.filters/group_by/top`；非 Ranking 还会有 `query.granularity`。日期范围权威且包含两端；`period` 仅是滚动范围上下文。`query.top` 可选，它统一表示用户希望显示的 Top N 与请求的原始排行覆盖量；若为诚实计算 `Other` 需要更多原始项目，Dataset 可以返回更多。`null` 表示不限制 Top。只接受自己 capability 声明过的选择。
 
-成功响应包含完整 `descriptor`、`runtime:{"filters":[...]}` 和 `data.series`。Timeline、Stack、Calendar 的每个 point 仍使用 `YYYY-MM-DD` 日期和十进制字符串 `value`。Ranking 则为每个条目返回且只返回一个十进制字符串标量 `value`，绝不能返回 `points`、日期或时间戳，也不能混合两种数值来源。Dataset 负责计算完整请求范围的权威排行值，ccuv 不再汇总排行时序 point。Ranking series 还可使用与 `label` 相同的双语结构提供可选 `description` 与 `display`；ccuv 在 `full` 和 `detailed` 密度下将前者展示为最多两行、弱化颜色并带缩进的说明。description 支持 `[label](https://URL)`、`**粗体文字**` 与 `*斜体文字*`；链接显示为可点击的 `label`，其文字内也可使用星号格式。下划线格式、其他 Markdown 和不安全终端内容均按纯文本处理。`display` 是显示在数值列、由 Dataset 决定的总量文本；ccuv 仍根据十进制标量 value 计算排序、占比和比较。每个具体 Ranking 项还可提供一个可选 `link`，它必须是绝对 `https://` URL；ccuv 会在项目名后的操作区显示可点击的 `↗`（`项目 | ⊞ ↗`），并在复制该项目时附带 URL。对于非固定范围的 `full` / `detailed` Ranking，ccuv 会额外发起一次紧邻且等长的上一范围普通 chart 请求。平铺结果保持 item ID 稳定；分区结果按 `(group.id, series.id)` 匹配。上一周期缺失即为新增，不补零。ccuv 根据匹配的标量 value 自行计算绝对增长与排名变化；不要返回 delta 或前值字段。Timeline、Stack、Calendar 不得返回 `description`、`display` 或 `link`。有效范围没有事实时返回空 series，不要把未知事实伪造成零。
+成功响应包含完整 `descriptor`、`runtime:{"filters":[...]}` 和 `data.series`。Timeline、Stack、Calendar 的每个 point 仍使用 `YYYY-MM-DD` 日期和十进制字符串 `value`。Ranking 则为每个条目返回且只返回一个十进制字符串标量 `value`，绝不能返回 `points`、日期或时间戳，也不能混合两种数值来源。Dataset 负责计算完整请求范围的权威排行值，ccuv 不再汇总排行时序 point。Ranking series 还可使用与 `label` 相同的双语结构提供可选 `description` 与 `display`；ccuv 在 `full` 和 `detailed` 密度下将前者展示为最多两行、弱化颜色并带缩进的说明。description 支持 `[label](https://URL)`、`**粗体文字**` 与 `*斜体文字*`；链接显示为可点击的 `label`，其文字内也可使用星号格式。下划线格式、其他 Markdown 和不安全终端内容均按纯文本处理。`display` 是显示在数值列、由 Dataset 决定的总量文本，不会被重新格式化。省略时 ccuv 使用 Metric 的可选 `sum_format`：默认 `number` 使用十进制 K/M/B 缩写并保留声明单位，小于 1K 保留声明精度，缩写后至少使用两位小数精度并去掉尾随零；可加时长声明 `duration-minute` 或 `duration-second`，ccuv 会自动选择本地化的小时/分钟/秒，最多显示两个相邻单位。合成 Other 使用相同 fallback。ccuv 仍根据十进制标量 value 计算排序、占比和比较。每个具体 Ranking 项还可提供一个可选 `link`，它必须是绝对 `https://` URL；ccuv 会在项目名后的操作区显示可点击的 `↗`（`项目 | ⊞ ↗`），并在复制该项目时附带 URL。对于非固定范围的 `full` / `detailed` Ranking，ccuv 会额外发起一次紧邻且等长的上一范围普通 chart 请求。平铺结果保持 item ID 稳定；分区结果按 `(group.id, series.id)` 匹配。上一周期缺失即为新增，不补零。ccuv 根据匹配的标量 value 自行计算绝对增长与排名变化；不要返回 delta 或前值字段。Timeline、Stack、Calendar 不得返回 `description`、`display` 或 `link`。有效范围没有事实时返回空 series，不要把未知事实伪造成零。
 
 只有 V2 Ranking 可以使用声明过的正整数 `Ns`、`Nm`、`Nh` 周期，例如 `15s`、`10m`、`6h` 或 `48h`。每一种此类周期都改用互斥的 aware 时间戳；`{"start_at":"...","end_at":"...","period":"15s"}` 精确表示左闭右开 `[start_at, end_at)`。不得自行重新计算“当前时间”。刷新会获得新的 aware 锚点；前期比较必须使用同一锚点之前紧邻的等长范围，不能有间隙或重叠。时间戳型 Ranking 没有日期 summary；日期型 `d`、`w`、`mo`、`q`、`y` 请求原有的含首尾范围和 summary 保持不变。
+
+### Ranking 分类事实
+
+ccuv 0.4.1 新增的语义分段是 `ccuv.custom/v2` 的可选扩展：不要修改协议标识，也不要在 Probe 中声明。V2 Ranking 的 chart 响应可增加响应级 `data.bands`；平铺或分区的标量条目可用 `band_id` 引用其中一项：
+
+```json
+{
+  "data": {
+    "bands": [
+      {"id": "qualified", "label": {"en": "Qualified", "zh-CN": "已晋级"}},
+      {"id": "remaining"}
+    ],
+    "series": [
+      {"id": "team-a", "label": {"en": "Team A", "zh-CN": "球队 A"},
+       "value": "18", "band_id": "qualified"}
+    ]
+  }
+}
+```
+
+分区响应把 `bands` 与 `groups` 并列，各 Group 共享定义。ID 必须稳定、唯一且非空，每个 `band_id` 都必须在同一响应中解析。省略/null `bands` 表示没有定义；省略/null `band_id` 表示未分类。标签可省略/null（可着色但无图例），提供时必须是双语结构。重复 ID 或悬空引用会拒绝整个响应。
+
+分段表达源端业务分类，不是颜色或阈值配置。声明顺序决定主题颜色分配，但不改变数值排序；分区图例独立放在标题下，不与 value 同行；即使比较响应不同，ccuv 也使用当前响应的归属，合成 Other 不分类。不要返回颜色、标签模式或箭头/刷新策略。旧版 ccuv 可能忽略该可选呈现，因此标量 `value`、排序和标签在没有分段时也必须完整可用。校验规则见[协议参考](custom-command-protocol.zh-CN.md#语义分段仅-v2-ranking)，控制见[使用指南](usage.zh-CN.md#ranking-标签颜色与分段图例)。V1、Timeline、Stack、Calendar 和 Monitor 不得使用分段。
 
 ### `summary`
 
@@ -273,6 +297,7 @@ manifest 包含 `schema:"ccuv.dataset/v1"`、`protocol:"ccuv.custom/v2"`、`entr
 - [ ] Probe 纯元数据，所有显示文本双语。
 - [ ] Dataset/Metric/unit/filter/option ID 稳定。
 - [ ] 响应严格回显请求身份，数值均为十进制字符串。
+- [ ] 可选 Ranking 分段的 ID 唯一、引用有效，具名标签双语；已测试平铺/分区和未分类条目。
 - [ ] capability 只声明真正可回答的配置。
 - [ ] 不支持请求返回结构化 error；Monitor 无法回答时返回 `range_not_available`。
 - [ ] 已测试本地注册、standalone、Dashboard Pane 和 GitHub Release 安装。

@@ -64,6 +64,7 @@ def custom_projection_replacement_required(
         current.top != updated.top
         or current.other != updated.other
         or current.ranking_comparison != updated.ranking_comparison
+        or current.presentation.show_percentage != updated.presentation.show_percentage
     )
 
 
@@ -497,7 +498,7 @@ class CustomHistoricalComponent:
                 if item.id == completion.response.metric_id
             )
             self.presentation = CustomPresentationDescriptor(
-                CustomDataset(metric.title, metric.description, metric.unit),
+                CustomDataset(metric.title, metric.description, metric.unit, metric.sum_format),
                 {dimension.id: dimension.label for dimension in metric.capabilities.group_by},
                 {filter.id: filter.label for filter in completion.response.runtime.filters},
                 {
@@ -640,7 +641,7 @@ class CustomHistoricalComponent:
                     self.runtime = runtime
                 return accepted
             payload = CustomChartResponse(
-                CustomDataset(metric.title, metric.description, metric.unit),
+                CustomDataset(metric.title, metric.description, metric.unit, metric.sum_format),
                 CustomCapabilities(
                     metric.capabilities.group_by,
                     payload.runtime.filters,

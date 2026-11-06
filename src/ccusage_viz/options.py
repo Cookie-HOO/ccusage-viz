@@ -51,6 +51,7 @@ COMMAND_DEFAULT_PERIODS = {"timeline": "14d", "calendar": "365d", "stack": "14d"
 WEEKDAY_MODES = ("show", "hide")
 OTHER_MODES = ("show", "hide")
 CACHE_MODES = ("combined", "split")
+LABEL_COLOR_MODES = ("change", "increase", "decrease", "direction", "band", "none")
 COMMAND_STYLES = {
     "timeline": ("linear", "step", "no-line", "points", "line-points", "stem", "area"),
     "calendar": ("relative", "grid"),
@@ -114,6 +115,8 @@ class ChartPresentation:
     style: str = "linear"
     legend: str = "below-title"
     density: Density = "detailed"
+    show_percentage: bool | None = None
+    label_color_mode: str = "change"
 
 
 @dataclass(frozen=True, slots=True)
@@ -516,10 +519,14 @@ def adjust_chart(chart: ChartConfig, key: str, *, demo: bool = False) -> ChartCo
         return _with_granularity_period(chart, key)
     if key == "k" and isinstance(chart, (TimelineConfig, StackConfig)):
         return replace(chart, weekdays=_cycle(WEEKDAY_MODES, chart.weekdays, 1))
-    if key == "l" and isinstance(chart, (TimelineConfig, StackConfig, MonitorConfig)):
+    if key == "C" and isinstance(chart, RankingConfig):
+        return adjust_ranking_label_color(chart)
+    if key == "l" and isinstance(
+        chart, (TimelineConfig, StackConfig, MonitorConfig, RankingConfig)
+    ):
         values = (
             ("below-title", "hidden")
-            if isinstance(chart, StackConfig)
+            if isinstance(chart, (StackConfig, RankingConfig))
             else ("below-title", "inside", "values", "hidden")
             if isinstance(chart, MonitorConfig) and chart.presentation.style == "cumulative-bars"
             else ("below-title", "inside", "hidden")
@@ -527,7 +534,12 @@ def adjust_chart(chart: ChartConfig, key: str, *, demo: bool = False) -> ChartCo
         return replace(
             chart,
             presentation=replace(
-                chart.presentation, legend=_cycle(values, chart.presentation.legend, 1)
+                chart.presentation,
+                legend=_cycle(
+                    values,
+                    chart.presentation.legend if chart.presentation.legend in values else values[0],
+                    1,
+                ),
             ),
         )
     if key == "c" and isinstance(chart, StackConfig) and chart.by == "composition":
@@ -563,6 +575,14 @@ def adjust_chart(chart: ChartConfig, key: str, *, demo: bool = False) -> ChartCo
         and chart.by is not None
     ):
         return replace(chart, top=max(1, (chart.top or 1) - 1))
+    if key == "%" and isinstance(chart, RankingConfig):
+        return replace(
+            chart,
+            presentation=replace(
+                chart.presentation,
+                show_percentage=not (chart.presentation.show_percentage is not False),
+            ),
+        )
     if key == "o" and isinstance(chart, (TimelineConfig, StackConfig, RankingConfig)):
         return replace(chart, other=_cycle(OTHER_MODES, chart.other, 1))
     if key == "w" and isinstance(chart, MonitorConfig):
@@ -581,6 +601,16 @@ def adjust_chart(chart: ChartConfig, key: str, *, demo: bool = False) -> ChartCo
             distribution_granularity=_cycle(values, chart.distribution_granularity, 1),
         )
     return chart
+
+
+def adjust_ranking_label_color(
+    chart: RankingConfig | CustomChartConfig, *, bands_available: bool = False
+) -> RankingConfig | CustomChartConfig:
+    """Cycle label policy while retaining an absent-band preference until explicitly edited."""
+    values = tuple(mode for mode in LABEL_COLOR_MODES if mode != "band" or bands_available)
+    current = chart.presentation.label_color_mode
+    mode = "none" if current == "band" and not bands_available else _cycle(values, current, 1)
+    return replace(chart, presentation=replace(chart.presentation, label_color_mode=mode))
 
 
 def validate_custom_partition_selection(
@@ -654,12 +684,30 @@ def adjust_custom_chart(
         )
     if key == "k" and chart.kind in {"timeline", "stack"}:
         return replace(chart, weekdays=_cycle(WEEKDAY_MODES, chart.weekdays, 1))
-    if key == "l" and chart.kind in {"timeline", "stack"}:
+    if key == "C" and chart.kind == "ranking":
+        return adjust_ranking_label_color(chart)  # ty: ignore[invalid-return-type]
+    if key == "l" and chart.kind in {"timeline", "stack", "monitor", "ranking"}:
+        legends = (
+            ("below-title", "hidden")
+            if chart.kind == "ranking"
+            else ("below-title", "inside", "values", "hidden")
+            if chart.kind == "monitor" and chart.presentation.style == "cumulative-bars"
+            else ("below-title", "inside", "hidden")
+        )
+        current = chart.presentation.legend
         return replace(
             chart,
             presentation=replace(
                 chart.presentation,
-                legend=_cycle(("below-title", "inside", "hidden"), chart.presentation.legend, 1),
+                legend=_cycle(legends, current if current in legends else legends[0], 1),
+            ),
+        )
+    if key == "%" and chart.kind == "ranking":
+        return replace(
+            chart,
+            presentation=replace(
+                chart.presentation,
+                show_percentage=not (chart.presentation.show_percentage is not False),
             ),
         )
     if key == "o" and chart.group_by is not None:

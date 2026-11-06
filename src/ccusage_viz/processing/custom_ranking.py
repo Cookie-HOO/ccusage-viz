@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
+from typing import Literal
 
 from ccusage_viz.custom_models import (
     CustomDataset,
     CustomPresentationDescriptor,
+    CustomRankingBand,
     CustomRankingEntry,
     CustomUnit,
     LocalizedText,
@@ -33,6 +35,7 @@ class CustomProjectedRankingEntry:
     comparison_display: LocalizedText | None = None
     link: str | None = None
     rank: int | None = None
+    band_id: str | None = None
 
     @property
     def total(self) -> Decimal:
@@ -65,6 +68,8 @@ class CustomRankingProjection:
     comparison_available: bool = False
     show_percentage: bool = True
     groups: tuple[CustomProjectedScalarRankingGroup, ...] | None = None
+    bands: tuple[CustomRankingBand, ...] = ()
+    sum_format: Literal["number", "duration-minute", "duration-second"] = "number"
 
     @property
     def total(self) -> Decimal:
@@ -124,8 +129,12 @@ def process_custom_ranking(
             config,
             presentation,
             comparison_response is not None,
-            capability.show_percentage,  # ty: ignore[unresolved-attribute]
+            config.presentation.show_percentage
+            if config.presentation.show_percentage is not None
+            else capability.show_percentage,  # ty: ignore[unresolved-attribute]
             groups,
+            bands=response.data.bands,
+            sum_format=metric.sum_format,
         )
     series, _, _ = _project_entries(
         response.data.series,
@@ -141,7 +150,11 @@ def process_custom_ranking(
         config,
         presentation,
         comparison_response is not None,
-        capability.show_percentage,  # ty: ignore[unresolved-attribute]
+        config.presentation.show_percentage
+        if config.presentation.show_percentage is not None
+        else capability.show_percentage,  # ty: ignore[unresolved-attribute]
+        bands=response.data.bands,
+        sum_format=metric.sum_format,
     )
 
 
@@ -178,6 +191,7 @@ def _project_entries(
             comparison_display=item.comparison_display,
             link=item.link,
             rank=rank if include_rank else None,
+            band_id=item.band_id,
         )
         for rank, item in enumerate(ordered, 1)
     ]

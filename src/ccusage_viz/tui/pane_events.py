@@ -23,6 +23,7 @@ from ccusage_viz.historical_component import (
 from ccusage_viz.lifecycle import LifecycleTrigger
 from ccusage_viz.monitor_component import MonitorComponent
 from ccusage_viz.options import (
+    ChartConfig,
     CustomChartConfig,
     MonitorConfig,
     StandaloneLaunch,
@@ -44,6 +45,7 @@ from ccusage_viz.tui.adjustments import (
 from ccusage_viz.tui.controls import _cycle
 from ccusage_viz.tui.custom_adjustments import (
     _adjust_custom_monitor_chart,
+    _adjust_custom_ranking_label_color,
     _custom_capability,
     _custom_pane_adjustment_keys,
     _custom_period_adjustment_chart,
@@ -86,6 +88,80 @@ from ccusage_viz.tui_input import (
     MouseEvent,
     PasteEvent,
 )
+
+
+def _projected_top_extent(component: object) -> tuple[int | None, bool]:
+    """Return the largest visible group and whether a synthetic Other remains."""
+    if isinstance(component, CustomMonitorComponent):
+        if not component.history:
+            return None, False
+        extent = component.top_extent()
+        top = component.candidate.top
+        return extent, top is not None and extent > top
+    if isinstance(component, CustomHistoricalComponent) and component.accepted_response is not None:
+        data = component.accepted_response.data
+        groups = getattr(data, "groups", None)
+        collections = (
+            tuple(getattr(group, "series", ()) for group in groups)
+            if groups is not None
+            else (getattr(data, "series", ()),)
+        )
+        extent = max((len(collection) for collection in collections), default=0)
+        top = component.candidate.top
+        if top is None:
+            return extent, False
+        maximum = component.capability.max_items if component.capability is not None else None
+        # A response that exactly fills the requested retrieval horizon is not
+        # proof that the source is exhausted. Let `+` widen the request; only a
+        # short response or a declared maximum proves that Top has reached All.
+        retrieval_top = component.retrieval_top
+        may_have_more = (
+            extent > top
+            or (maximum is not None and top < maximum)
+            or (
+                maximum is None
+                and retrieval_top is not None
+                and top <= retrieval_top
+                and extent >= retrieval_top
+            )
+        )
+        return extent, may_have_more
+    model = getattr(component, "model", None)
+    if callable(model) or model is None:
+        return None, False
+    groups = getattr(model, "groups", None)
+    collections = (
+        tuple(getattr(group, "series", getattr(group, "entries", ())) for group in groups)
+        if groups is not None
+        else (
+            getattr(model, "series", None)
+            or getattr(model, "entries", None)
+            or getattr(model, "components", None)
+            or (),
+        )
+    )
+    concrete_counts = []
+    has_other = False
+    for collection in collections:
+        items = tuple(collection)
+        has_other = has_other or any(getattr(item, "is_other", False) for item in items)
+        concrete_counts.append(sum(not getattr(item, "is_other", False) for item in items))
+    return max(concrete_counts, default=0), has_other
+
+
+def _adjust_top_by_extent(config: ChartConfig, key: str, component: object) -> ChartConfig:
+    """Apply monotonic Top semantics using currently projected source coverage."""
+    top = getattr(config, "top", None)
+    extent, has_other = _projected_top_extent(component)
+    if key in {"-", "_"}:
+        if top is None:
+            return replace(config, top=max(1, extent - 1)) if extent and extent > 1 else config
+        return replace(config, top=max(1, top - 1))
+    if key in {"+", "="}:
+        if top is None:
+            return config
+        return replace(config, top=top + 1 if has_other else None)
+    return config
 
 
 def handle_pane_adjustment(session: TuiSession, event: object, key: object, *, now: float) -> None:
@@ -353,7 +429,11 @@ def handle_pane_adjustment(session: TuiSession, event: object, key: object, *, n
             "_",
             "o",
         }:
-            updated = _adjust_custom_monitor_chart(base, key, aggregation=component.aggregation)
+            updated = (
+                _adjust_top_by_extent(base, key, component)
+                if key in {"+", "=", "-", "_"}
+                else _adjust_custom_monitor_chart(base, key, aggregation=component.aggregation)
+            )
             if updated != base:
                 record_mutation(
                     session,
@@ -436,7 +516,12 @@ def handle_pane_adjustment(session: TuiSession, event: object, key: object, *, n
         ):
             modes = ("compact", "space", "line", "dashed")
             position = modes.index(pane.ranking_item_spacing)
-            pane.ranking_item_spacing = modes[(position + (1 if key == "s" else -1)) % len(modes)]
+            spacing = modes[(position + (1 if key == "s" else -1)) % len(modes)]
+            record_mutation(
+                session,
+                ("pane", focused_index, "custom-ranking-spacing"),
+                lambda pane=pane, spacing=spacing: setattr(pane, "ranking_item_spacing", spacing),
+            )
         elif (
             key in {"g", "G"}
             and base.kind == "ranking"
@@ -538,18 +623,35 @@ def handle_pane_adjustment(session: TuiSession, event: object, key: object, *, n
                 )
         elif key == "f":
             session.copy_feedback.show(session.translator.text("status.custom_filter_unavailable"))
-        elif key in {"d", "D", "t", "T", "s", "S", "k", "l", "o", "+", "=", "-", "_"}:
-            updated = adjust_custom_chart(base, key)
+        elif key in {"d", "D", "t", "T", "s", "S", "k", "l", "o", "+", "=", "-", "_", "%", "C"}:
+            if key == "C" and base.kind == "ranking":
+                updated = _adjust_custom_ranking_label_color(pane)
+            elif key in {"+", "=", "-", "_"}:
+                updated = _adjust_top_by_extent(base, key, component)
+            elif key == "%" and base.presentation.show_percentage is None:
+                visible = (
+                    capability.show_percentage
+                    if isinstance(capability, CustomChartCapability)
+                    else True
+                )
+                updated = replace(
+                    base, presentation=replace(base.presentation, show_percentage=not visible)
+                )
+            else:
+                updated = adjust_custom_chart(base, key)
             if updated != base:
+                assert isinstance(updated, CustomChartConfig)
 
                 def apply_custom_presentation(
                     pane: TuiCustomPane = pane,
                     config: CustomChartConfig = updated,
                     previous: CustomChartConfig = base,
                 ) -> None:
-                    if isinstance(
-                        pane.component, CustomHistoricalComponent
-                    ) and _custom_top_refresh_required(pane.component, config):
+                    if (
+                        isinstance(pane.component, CustomHistoricalComponent)
+                        and config.top != previous.top
+                        and _custom_top_refresh_required(pane.component, config)
+                    ):
                         apply_custom_query(config, mutation="top")
                     else:
                         pane.component.configure(config, data_affecting=False)
@@ -836,7 +938,11 @@ def handle_pane_adjustment(session: TuiSession, event: object, key: object, *, n
             )
             paint(session)
             return
-        updated = adjust_standalone(base, key)
+        updated = (
+            replace(base, chart=_adjust_top_by_extent(base.chart, key, component))
+            if key in {"+", "=", "-", "_"}
+            else adjust_standalone(base, key)
+        )
         if updated != base:
             data_affecting = (
                 historical_replacement_required(base, updated)
@@ -856,7 +962,8 @@ def handle_pane_adjustment(session: TuiSession, event: object, key: object, *, n
                 data_affecting: bool = data_affecting,
                 pane_index: int = session.focused,
             ) -> None:
-                _clear_changes(pane)
+                if data_affecting:
+                    _clear_changes(pane)
                 component.configure(updated, data_affecting=data_affecting)
                 if updated.host.interval != base.host.interval:
                     pane.scheduler.rebuild(updated.host.interval, now=time.monotonic())
@@ -875,6 +982,7 @@ def handle_pane_adjustment(session: TuiSession, event: object, key: object, *, n
                     refresh(session, pane_index, trigger=LifecycleTrigger.CONFIGURATION)
                 elif (
                     isinstance(component, HistoricalChartComponent)
+                    and replace(updated.chart, presentation=base.chart.presentation) != base.chart
                     and component.missing_comparison_coverage().intervals
                 ):
                     refresh(

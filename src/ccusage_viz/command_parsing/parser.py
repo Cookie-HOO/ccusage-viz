@@ -15,6 +15,7 @@ from ccusage_viz.options import (
     DENSITIES,
     GRANULARITIES,
     HEADER_SUMMARIES,
+    LABEL_COLOR_MODES,
     OTHER_MODES,
     WEEKDAY_MODES,
 )
@@ -54,11 +55,19 @@ def _add_presentation(parser: argparse.ArgumentParser, tr: Translator, command: 
         default="full" if command == "ranking" else "detailed",
         help=tr.text("help.density"),
     )
-    if command in {"timeline", "monitor", "stack"}:
+    if command == "ranking":
+        parser.add_argument(
+            "--label-color",
+            dest="label_color_mode",
+            choices=LABEL_COLOR_MODES,
+            default="change",
+            help=tr.text("help.label_color"),
+        )
+    if command in {"timeline", "monitor", "stack", "ranking"}:
         parser.add_argument(
             "--legend",
             choices=("below-title", "hidden")
-            if command == "stack"
+            if command in {"stack", "ranking"}
             else ("below-title", "inside", "hidden", "values")
             if command == "monitor"
             else ("below-title", "inside", "hidden"),

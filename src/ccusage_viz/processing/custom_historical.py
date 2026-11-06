@@ -107,6 +107,7 @@ class CustomChartProjection:
     comparison_available: bool = False
     show_percentage: bool = True
     groups: tuple[CustomProjectedRankingGroup, ...] | None = None
+    sum_format: Literal["number", "duration-minute", "duration-second"] = "number"
 
     @property
     def total(self) -> Decimal:
@@ -181,9 +182,14 @@ def process_custom_historical(
         config,
         _presentation_descriptor(response),
         comparison_response is not None,
-        response.capabilities.charts[config.kind].show_percentage
+        (
+            config.presentation.show_percentage
+            if config.presentation.show_percentage is not None
+            else response.capabilities.charts[config.kind].show_percentage
+        )
         if config.kind == "ranking"
         else True,
+        sum_format=response.dataset.sum_format,
     )
 
 
@@ -215,8 +221,11 @@ def _process_grouped_ranking(
         config,
         _presentation_descriptor(response),
         comparison_response is not None,
-        response.capabilities.charts["ranking"].show_percentage,
+        config.presentation.show_percentage
+        if config.presentation.show_percentage is not None
+        else response.capabilities.charts["ranking"].show_percentage,
         groups,
+        response.dataset.sum_format,
     )
 
 

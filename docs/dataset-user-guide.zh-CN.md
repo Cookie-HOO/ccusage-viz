@@ -100,6 +100,19 @@ ccuv chart timeline --dataset example-activity --metric events \
 
 Custom Dataset 使用 `--group-by`，不是内置图的 `--by`；只有 Dataset 已返回对应运行时 option 时才可使用可重复的 `--filter ID=OPTION`。带 `--dataset` 时不能同时用内置 `--agent`、`--model`、`--project`、`--cache`。无效 Dataset default 只会忽略对应字段，不会阻止图表打开。
 
+### Ranking 标签颜色与 V2 分段（ccuv 0.4.1+）
+
+```bash
+ccuv chart ranking --dataset example-activity --metric events \
+  --label-color band --legend below-title
+```
+
+`--label-color` 接受 `change`（默认）、`increase`、`decrease`、`direction`、`band`、`none`。前四种依据数值变化，`band` 使用当前 V2 Ranking 响应的 `data.bands` / 条目 `band_id`，`none` 不额外着色。刷新差值（包括零）优先于上一周期比较；连续相同值显示中性 `-`，不触发变化高亮，但仍保留 Band 着色。排序、数值、箭头和搜索高亮不受影响。
+
+分段是可选响应事实，不是 Dataset 配色。只有当前实际出现且具名的分段生成图例；无名分段仍可着色，未分类和 Other 保持普通样式。Ranking 的 `--legend` 只接受 `below-title` / `hidden`：默认 `below-title` 使用独立图例行，`hidden` 只隐藏图例，不关闭着色。Advanced 页用 `C` 切换可用模式、`l` 切换图例；这些本地设置不查询，支持撤销/重做并随 preset 保存。Advanced 页 `%` 同时控制组和条目占比，包括 `list`；显式切换前保留 Dataset 的默认值。`C` 只在已接受响应包含分段时提供 `band`，但显式指定或已保存的 `band` 在分段缺失时仍保留，显示普通标签且无图例。图例独立放在各组标题下或平铺图主标题下，搜索和滚动不会改变它。`l` 仅在 `band` 模式且已接受投影有实际使用的具名分段时提供；隐藏时仍可用，方便重新显示。主题颜色耗尽后重复，高度允许时最多两行。
+
+没有 Dataset 自带的 `display` 时，fallback 数值（包括 Other）遵循 Metric 的 `sum_format`：默认 `number` 使用十进制 K/M/B 并保留单位，`duration-minute` / `duration-second` 生成本地化的小时/分钟/秒文本；Dataset 自带显示文本保持不变。旧版 ccuv 可以正常显示 Ranking，但可能忽略分段着色。Dataset 作者应遵循[开发者指南](dataset-developer-guide.zh-CN.md#ranking-分类事实)。
+
 ## 在 Dashboard 中使用
 
 ### 交互方式

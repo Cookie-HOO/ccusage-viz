@@ -15,6 +15,7 @@ from ccusage_viz.options import (
     DASHBOARD_STYLES,
     DENSITIES,
     HEADER_SUMMARIES,
+    LABEL_COLOR_MODES,
     ChartPresentation,
     CustomFilters,
     DashboardHostConfig,
@@ -188,23 +189,36 @@ def _filters_parse(value: object) -> Filters:
     )
 
 
-def _presentation_wire(value: ChartPresentation) -> dict[str, str]:
+def _presentation_wire(value: ChartPresentation) -> dict[str, object]:
     return {
         "theme": value.theme,
         "style": value.style,
         "legend": value.legend,
         "density": value.density,
+        "label_color_mode": value.label_color_mode,
+        **({"show_percentage": value.show_percentage} if value.show_percentage is not None else {}),
     }
 
 
 def _presentation_parse(value: object, kind: str) -> ChartPresentation:
-    wire = _exact(value, frozenset(("theme", "style", "legend", "density")), "presentation")
+    source = dict(_expect_mapping(value, "presentation"))
+    label_color_mode = _choice(
+        source.pop("label_color_mode", "change"),
+        LABEL_COLOR_MODES,
+        "presentation.label_color_mode",
+    )
+    show_percentage = source.pop("show_percentage", None)
+    if show_percentage is not None:
+        show_percentage = _boolean(show_percentage, "presentation.show_percentage")
+    wire = _exact(source, frozenset(("theme", "style", "legend", "density")), "presentation")
     style = _choice(wire["style"], COMMAND_STYLES[kind], "presentation.style")
     return ChartPresentation(
         theme=_string(wire["theme"], "presentation.theme"),
         style=style,
         legend=_string(wire["legend"], "presentation.legend"),
         density=_choice(wire["density"], DENSITIES, "presentation.density"),  # type: ignore[arg-type]
+        show_percentage=show_percentage,
+        label_color_mode=label_color_mode,
     )
 
 

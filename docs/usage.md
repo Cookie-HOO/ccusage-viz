@@ -143,7 +143,26 @@ later tables.
 | `--theme THEME` | `classic`, `vivid`, `contrast`, `dracula`, `catppuccin`, `solarized`, `gruvbox`, `nord`, `github`, `mono`, `no-color` | `classic` | All | Chart color scheme; `no-color` disables chart color. |
 | `--density DENSITY` | `minimal`, `compact`, `full`, `detailed` | `detailed` (`full` for Ranking) | All focused charts | Amount of chart detail and decoration. |
 | `--style STYLE` | Route-specific; see chart tables | Route-specific | All | Rendering style for the selected chart. |
-| `--legend POSITION` | Timeline: `below-title`, `inside`, `hidden`; Stack: `below-title`, `hidden`; Monitor: `below-title`, `inside`, `hidden`, `values` | `below-title` | Timeline, Stack, Monitor | Legend placement/content. |
+| `--legend POSITION` | Timeline: `below-title`, `inside`, `hidden`; Stack/Ranking: `below-title`, `hidden`; Monitor: `below-title`, `inside`, `hidden`, `values` | `below-title` | Timeline, Stack, Ranking, Monitor | Legend placement/content. |
+| `--label-color MODE` | `change`, `increase`, `decrease`, `direction`, `band`, `none` | `change` | Ranking (built-in and Dataset) | Label-only color policy; see below. |
+
+Ranking Advanced adds `%` to toggle shares across every style, including `list` and grouped headings. A fixed marker slot keeps values aligned: the first response is blank, increases/decreases show `↑`/`↓`, and equal consecutive values show a neutral `-`. Dataset Ranking compares raw Decimal values even when `display` is unchanged or period comparison is disabled. Period comparison is used only before a refresh delta exists; metric, grouping, filter, or period changes reset the baseline.
+
+#### Ranking label colors and band legends
+
+`--label-color change|increase|decrease|direction|band|none` controls label color. The default `change` highlights any nonzero change; `increase` / `decrease` color one direction, `direction` colors both, `band` uses Dataset classification, and `none` leaves labels ordinary. Advanced `C` cycles modes. In `band` mode with a represented named band,
+`l` toggles `below-title` (default, separate legend rows) / `hidden`; otherwise
+the legend control is not offered. Hidden legends retain the control so they
+can be shown again. These presentation-only settings support undo/redo and presets without affecting queries, sorting, values, arrows, or search highlighting.
+
+A V2 Dataset Ranking can return response-level `bands` and entry `band_id` classification facts. In `band` mode, current entries are colored in declaration order and only represented named bands get legends; unnamed bands may still color labels, while unclassified and Other remain ordinary. Hiding the legend does not disable coloring. See the [Dataset developer guide](dataset-developer-guide.md#ranking-classification-facts) for the protocol.
+
+```bash
+ccuv chart ranking --label-color increase
+ccuv chart ranking --dataset example-activity --metric events --label-color band --legend below-title
+```
+
+Interactive Top controls follow the current extent: `All -` removes one item, and increasing back to full coverage restores All. Dataset fallback values use the Metric's `sum_format`: ordinary numbers keep decimal K/M/B plus units, while minute/second durations use natural localized time text; Dataset-owned `display` remains unchanged. Timeline, Stack, and Monitor legends now use the same width-aware layout, with at most two rows and `…(+N)` overflow.
 
 `--ascii --theme classic` is invalid just as `--ascii --theme no-color` is:
 the conflict is caused by explicitly specifying a theme. `--ascii` without a
@@ -654,7 +673,7 @@ to browse mode.
 | Timeline | `p/P` period; `g/G` granularity; `b/B` grouping; `+/-` Top; `d` density; `t/T` theme; `s/S` style | `f` filters; `o` Other; `l` legend; `k` weekday labels |
 | Calendar | `p/P` period; `d` density; `t/T` theme; `s/S` style | `f` filters |
 | Stack | `p/P` period; `g/G` granularity; `b/B` grouping; `+/-` Top; `d` density; `t/T` theme; `s/S` style | `f` filters; `o` Other; `c` cache mode; `l` legend; `k` weekday labels |
-| Ranking | `p/P` period; `b/B` grouping; `+/-` Top; `d` density; `t/T` theme; `s/S` style | `f` filters; `o` Other |
+| Ranking | `p/P` period; `b/B` grouping; `+/-` Top; `d` density; `t/T` theme; `s/S` style | `f` filters; `o` Other; `%` shares; `C` label colors; `l` band legend |
 | Monitor | Timeline styles: `w` window; `i` sampling interval; `b/B` grouping; `+/-` Top; `d` density; `t/T` theme; `s/S` style. `cumulative-bars`: `w` Today/Yesterday; `g` hour/30 min; `b/B` grouping; `+/-` Top; `d` density; `t/T` theme; `s/S` style. Ranking/list omit `w`. | `f` filters; `l` legend |
 
 `p` advances and `P` reverses through the shared historical sequence

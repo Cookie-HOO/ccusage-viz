@@ -30,6 +30,27 @@ def test_flat_and_grouped_dash_rendering_share_muted_separator() -> None:
     assert "\x1b[38;5;245m" in grouped and "\x1b[2m" in grouped
 
 
+def test_compact_all_group_heading_value_is_not_limited_by_cached_item_width() -> None:
+    model = grouped_projection()
+    assert model.groups is not None
+    display = "满载 19/19"
+    first = replace(model.groups[0], display=LocalizedText(display, display))
+    model = replace(model, groups=(first, *model.groups[1:]))
+    viewport = GroupedRankingViewport()
+
+    output = strip_ansi(
+        render_grouped(
+            model,
+            viewport,
+            context(height=8, width=175, density="compact", period="all"),
+            scrollbar=True,
+        )
+    )
+    heading = next(line for line in output.splitlines() if "Coding Model" in line)
+
+    assert display in heading
+
+
 def test_grouped_search_matches_only_inner_fields_and_preserves_full_facts() -> None:
     viewport = GroupedRankingViewport()
     output = strip_ansi(render_grouped(grouped_projection(), viewport, search="sonnet"))
@@ -68,6 +89,40 @@ def test_grouped_scrolling_does_not_insert_a_sticky_heading() -> None:
     first_body_row = output.splitlines()[viewport.body_top]
     assert first_body_row.lstrip().startswith("1 ")
     assert "Coding Model" not in first_body_row
+
+
+def test_compact_all_group_heading_value_can_outgrow_cached_item_column() -> None:
+    model = grouped_projection()
+    groups = tuple(
+        replace(
+            group,
+            display=LocalizedText("满载 9/19", "满载 9/19"),
+            series=tuple(
+                replace(entry, display=LocalizedText("200%", "200%")) for entry in group.series
+            ),
+        )
+        for group in model.groups or ()
+    )
+    model = replace(model, groups=groups, show_percentage=False)
+    viewport = GroupedRankingViewport()
+    ctx = replace(context(width=174, height=5, density="compact", period="all"), style="dot")
+
+    cold = strip_ansi(render_grouped(model, viewport, ctx, scrollbar=True))
+    cold_heading = next(line for line in cold.splitlines() if "Coding Model" in line)
+    measured_right = viewport.columns.widths["right"]
+    assert viewport.scrollbar is not None
+    assert viewport.geometry_key[0] == 173
+    assert measured_right == 7
+    assert "满载 9/19" in cold_heading
+
+    # Cover warm rendering and restoration of the cached wide geometry after
+    # a resize; borrowing heading space must not mutate the item grid.
+    for width in (174, 100, 174):
+        warm_context = replace(ctx, width=width)
+        warm = strip_ansi(render_grouped(model, viewport, warm_context, scrollbar=True))
+        warm_heading = next(line for line in warm.splitlines() if "Coding Model" in line)
+        assert viewport.columns.widths["right"] == measured_right
+        assert "满载 9/19" in warm_heading
 
 
 def test_grouped_identity_scrollbar_and_copy_payloads() -> None:
@@ -120,6 +175,8 @@ def test_grouped_copy_payloads_include_rendered_numeric_fields() -> None:
     list_context = replace(context(width=90, density="detailed", period="7d"), style="list")
     render_grouped(model, viewport, list_context)
     assert "+10 items" not in viewport.clipboard_all_text()
+    assert "70.0%" in viewport.clipboard_all_text()
+    render_grouped(replace(model, show_percentage=False), viewport, list_context)
     assert "%" not in viewport.clipboard_all_text()
 
     rank_config = replace(model.config, ranking_comparison="rank")
@@ -351,6 +408,55 @@ def test_grouped_warm_scroll_and_repaint_reuse_preparation_and_geometry(monkeypa
     rendered.clear()
     render_grouped(model, viewport, ctx)
     assert len(rendered) <= viewport.visible_rows
+
+
+def test_grouped_delta_remapping_is_entry_local_on_cold_and_warm_render(monkeypatch) -> None:
+    import ccusage_viz.render.grouped_ranking_viewport as module
+
+    model = grouped_projection_with_visible_comparisons()
+    viewport = GroupedRankingViewport()
+    ctx = replace(
+        context(height=30, period="7d"),
+        deltas={("coding", "shared"): 0.0, ("general", "shared"): -2.0},
+    )
+    original = module.group_label_deltas
+    remapped = []
+
+    def remap(group_id, entries, context):
+        assert len(entries) == 1, "each row must not scan its complete group"
+        result = original(group_id, entries, context)
+        remapped.append((group_id, entries[0].key, result))
+        return result
+
+    monkeypatch.setattr(module, "group_label_deltas", remap)
+    for _ in range(2):
+        remapped.clear()
+        render_grouped(model, viewport, ctx)
+        assert ("coding", "shared", {"shared": 0.0}) in remapped
+        assert ("coding", "sonnet", {}) in remapped
+        assert ("general", "shared", {"shared": -2.0}) in remapped
+
+
+def test_grouped_legend_scans_each_group_once_per_render(monkeypatch) -> None:
+    import ccusage_viz.render.grouped_ranking_viewport as module
+
+    model = grouped_projection()
+    ctx = replace(context(height=30, density="detailed"), label_color_mode="band")
+    viewport = GroupedRankingViewport()
+    calls = []
+
+    def legend(entries, context):
+        # Several wrapped legend rows used to rescan the whole group for
+        # every row's geometry, then again when drawing the heading.
+        calls.append(entries)
+        return ("Band one", "Band two", "Band three")
+
+    monkeypatch.setattr(module, "ranking_band_legend", legend)
+    for width in (100, 100, 80, 100):
+        calls.clear()
+        rendered = render_grouped(model, viewport, replace(ctx, width=width))
+        assert "Band" in rendered
+        assert len(calls) == len(model.groups)
 
 
 def test_grouped_cold_preparation_filters_each_group_only_once(monkeypatch) -> None:

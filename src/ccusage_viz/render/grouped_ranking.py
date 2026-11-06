@@ -21,6 +21,7 @@ from ccusage_viz.render.custom_ranking_preparation import prepare_custom_ranking
 from ccusage_viz.render.ranking_columns import measure_ranking_columns, render_ranking_heading_row
 from ccusage_viz.render.ranking_entries import RankingPresentationEntry
 from ccusage_viz.render.ranking_historical import render_historical_ranking
+from ccusage_viz.render.ranking_labels import group_label_deltas, ranking_band_legend
 from ccusage_viz.render.ranking_viewport import RankingColumns
 from ccusage_viz.render.summary import format_custom_value
 
@@ -49,7 +50,12 @@ def _localized(value: LocalizedText, context: RenderContext) -> str:
 
 
 def _value(value: Decimal, projection: RankingProjection, context: RenderContext) -> str:
-    return format_custom_value(value, projection.unit, language=context.translator.language)
+    return format_custom_value(
+        value,
+        projection.unit,
+        language=context.translator.language,
+        sum_format=projection.sum_format,
+    )
 
 
 def _prepare_group(
@@ -105,6 +111,7 @@ def render_grouped_custom_ranking(
     descriptions_visible: bool = False,
 ) -> str:
     """Render Dataset-ordered groups with independent rank, share, and bar facts."""
+    context = replace(context, ranking_bands=getattr(projection, "bands", ()))
     groups = projection.groups or ()
     global_total = sum((group.total for group in groups), start=Decimal())
     prepared = tuple(
@@ -186,7 +193,7 @@ def render_grouped_custom_ranking(
     for index, group in enumerate(prepared):
         if index and lines and lines[-1]:
             lines.append("")
-        lines.extend(
+        group_heading = list(
             render_ranking_heading_row(
                 label=group.label,
                 value=group.display,
@@ -205,8 +212,12 @@ def render_grouped_custom_ranking(
                 show_percentage=projection.show_percentage,
                 total_entry_count=total_entry_count,
                 columns=columns,
+                value_can_use_prefix_space=True,
             )
         )
+        lines.extend(group_heading[:1])
+        lines.extend(ranking_band_legend(group.entries, context))
+        lines.extend(group_heading[1:])
         if not group.entries:
             lines.append(context.translator.text("message.grouped_ranking_no_data"))
             continue
@@ -217,7 +228,10 @@ def render_grouped_custom_ranking(
             delta_formatter=lambda value: (
                 f"{'+' if value > 0 else '-'}{_value(abs(cast(Decimal, value)), projection, context)}"
             ),
-            context=context,
+            context=replace(
+                context,
+                deltas=group_label_deltas(group.id, group.entries, context),
+            ),
             pending=context.pending,
             descriptions_visible=descriptions_visible,
             comparison_mode=comparison_mode,

@@ -58,22 +58,40 @@ def measure_ranking_columns(
             1,
             display_width(context.translator.text("label.ranking_column_current")),
             *(
-                entry.display_width
-                if entry.display_width is not None
-                else display_width(entry.display or "")
+                (
+                    entry.display_width
+                    if entry.display_width is not None
+                    else display_width(entry.display or "")
+                )
+                + 2
                 for entry in entries
             ),
         )
         # Reserve a readable label and both separators before assigning the
         # value column. Dataset-owned display strings must not consume label
         # space.
-        label_minimum = min(8, max(1, context.width - rank_width - 3))
+        share_width = (
+            max(
+                display_width(context.translator.text("label.ranking_column_share")),
+                0,
+                *(display_width(f"{entry.current / total:>5.1%}") for entry in entries if total),
+            )
+            if show_percentage
+            else 0
+        )
+        share_width = min(share_width, max(1, context.width // 4))
+        columns.width("share", share_width)
+        share_space = share_width + 1 if show_percentage else 0
+        label_minimum = min(8, max(1, context.width - rank_width - share_space - 3))
         value_width = min(
-            desired_value_width, max(1, context.width - rank_width - label_minimum - 2)
+            desired_value_width,
+            max(1, context.width - rank_width - label_minimum - share_space - 2),
         )
         columns.width("current", value_width)
         columns.width("right", value_width)
-        columns.description_width = max(1, context.width - rank_width - value_width - 2)
+        columns.description_width = max(
+            1, context.width - rank_width - value_width - share_space - 2
+        )
         return
     comparison_visible = (
         context.density in {"full", "detailed"}
@@ -99,7 +117,7 @@ def measure_ranking_columns(
                 + 3,
             )
         columns.width("right", desired_right_width)
-        columns.description_width = max(1, context.width - min(context.width, rank_width + 5))
+        columns.description_width = max(1, context.width - min(context.width, rank_width + 3))
         return
 
     growth_visible = comparison_mode == "full"
@@ -178,7 +196,7 @@ def measure_ranking_columns(
     columns.width("share", share_width)
     columns.width("rank_change", rank_change_width)
     rank_column_width = max(
-        rank_width + 4, display_width(context.translator.text("label.ranking_column_rank"))
+        rank_width + 2, display_width(context.translator.text("label.ranking_column_rank"))
     )
     columns.description_width = max(1, context.width - min(context.width, rank_column_width + 1))
 
@@ -234,6 +252,7 @@ def render_ranking_heading_row(
     show_percentage: bool = True,
     total_entry_count: int = 0,
     columns: RankingColumns | None = None,
+    value_can_use_prefix_space: bool = False,
 ) -> tuple[str, ...]:
     """Render a secondary Ranking heading on the shared Ranking column grid."""
     scheme = get_color_scheme(context.color_scheme)
@@ -248,11 +267,19 @@ def render_ranking_heading_row(
         # Fit the scalar while retaining a readable supplied label.
         label_minimum = min(8, max(1, context.width - 2))
         value_width = min(desired_value_width, max(1, context.width - label_minimum - 1))
-        label_width = max(1, context.width - value_width - 1)
+        share_width = (
+            columns.widths.get("share", display_width(share)) if columns else display_width(share)
+        )
+        share_width = min(share_width, max(1, context.width // 4)) if show_percentage else 0
+        label_width = max(
+            1, context.width - value_width - (share_width + 1 if show_percentage else 0) - 1
+        )
         row = (
             f"{pad_width(truncate_width(plain_label, label_width), label_width)} "
             f"{pad_width(truncate_width(value, value_width), value_width, align='right')}"
         )
+        if show_percentage:
+            row += " " + pad_width(truncate_width(share, share_width), share_width, align="right")
         rows = [styled_text(clip_width(row, context.width), scheme.muted, context, bold=True)]
         if descriptions_visible and context.density != "minimal" and description:
             visible = description_visible_text(description)
@@ -275,7 +302,7 @@ def render_ranking_heading_row(
     if comparison_visible and columns is not None:
         rank_width = max(2, display_width(str(total_entry_count)))
         rank_column_width = max(
-            rank_width + 4,
+            rank_width + 2,
             display_width(context.translator.text("label.ranking_column_rank")),
         )
         current_width = columns.widths.get("current", max(1, display_width(value)))
@@ -300,14 +327,33 @@ def render_ranking_heading_row(
             label_width = min(48, max(1, context.width - fixed_width))
             prefix_width = rank_column_width + 1 + label_width
         else:
-            fixed_width = rank_column_width + current_width + optional_width + 4 + optional_count
+            fixed_width = rank_column_width + current_width + optional_width + 2 + optional_count
             available = max(2, context.width - fixed_width)
             label_width = min(48, max(1, available - 2))
             bar_width = max(1, available - label_width - 1)
             prefix_width = rank_column_width + 1 + label_width + 1 + bar_width
+        value_width = max(1, current_width - 2)
+        borrowed_width = 0
+        if value_can_use_prefix_space:
+            # Group headings do not render the rank/bar portion of the shared
+            # prefix. Let an unusually long source-owned value occupy that
+            # otherwise blank space, while keeping its right edge aligned
+            # with ordinary entry values.
+            borrowed_width = min(
+                max(0, display_width(value) - value_width),
+                max(0, prefix_width - display_width(heading_label) - 1),
+            )
         fields = [
-            pad_width(truncate_width(heading_label, prefix_width), prefix_width),
-            pad_width(truncate_width(value, current_width), current_width, align="right"),
+            pad_width(
+                truncate_width(heading_label, prefix_width - borrowed_width),
+                prefix_width - borrowed_width,
+            ),
+            pad_width(
+                truncate_width(value, value_width + borrowed_width),
+                value_width + borrowed_width,
+                align="right",
+            )
+            + "  ",
         ]
         if growth_visible:
             fields.append(pad_width(truncate_width(delta, delta_width), delta_width, align="right"))
@@ -326,7 +372,18 @@ def render_ranking_heading_row(
         measured_right = (
             columns.widths.get("right", display_width(right)) if columns else display_width(right)
         )
-        right_width = min(measured_right, max(1, context.width // 2))
+        if value_can_use_prefix_space and right:
+            # Without comparison columns, the ordinary layout caps the right
+            # side at half the row to protect item labels and bars. A group
+            # heading has neither, so retain only its actual label and let the
+            # value use the remaining width. The shared item grid may already
+            # have cached a narrower ``right`` width; do not let that item-only
+            # measurement truncate the group value.
+            right_limit = max(1, context.width - display_width(heading_label) - 1)
+            measured_right = max(measured_right, display_width(right))
+        else:
+            right_limit = max(1, context.width // 2)
+        right_width = min(measured_right, right_limit)
         label_width = max(1, context.width - right_width - int(bool(right)))
         visible_label = truncate_width(heading_label, label_width)
         row = pad_width(visible_label, label_width)

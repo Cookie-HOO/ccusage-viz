@@ -6,6 +6,27 @@
 - **次版本（`0.x.0`）**：`1.0` 前重大的新面向用户能力或数据源集成。
 - 在 `1.0` 前，公开接口仍可能在各个版本之间变化。
 
+## 0.4.1
+
+`0.4.1` 改进 Ranking 展示、统一图例与 Dataset 交互，不改变内置 Token 语义，
+也不增加 collector：
+
+- Ranking 新增六种 `--label-color` 模式、占比（`%`）交互控制，以及 V2 Dataset
+  可选语义分段（`data.bands` / 条目 `band_id`）。图例默认独立放在标题下；仅在
+  `band` 模式且当前有实际使用的具名分段时提供 `l` 显示/隐藏控制。改进刷新提示、
+  列表、分区对齐和窄子图布局；连续相同值显示中性 `-`；
+- Timeline、Stack、Monitor 与 Dataset 图表共用宽度感知图例，最多两行，
+  并明确标注溢出数量；
+- 可加 Dataset Metric 可用 `sum_format` 声明普通数值或自然的分钟/秒时长 fallback；
+  默认仍使用十进制 K/M/B，且不改写 Dataset 自定义 `display`。改善本地化筛选摘要
+  与标题宽度适配；
+- Top 调整遵循可用条目数量：Custom Monitor 时间图按显示范围内的系列统计，
+  累计柱图按选中的今天/昨天统计，ranking/list 按最新采样统计，不再混用范围。
+  本地展示调整支持撤销/重做，不产生多余查询或重置刷新基线。
+
+语义分段与 `sum_format` 都是 `ccuv.custom/v2` 的可选扩展，并非新协议版本；现有 Dataset 无需修改，省略 `sum_format` 时保持原有 K/M/B fallback。
+Dataset 开发、使用与协议指南已补充新字段和控制规则。
+
 ## 0.4.0
 
 `0.4.0` 将 Token 统计工具的选择和安装整合进 ccuv。官方 ccusage 仍是默认选择；

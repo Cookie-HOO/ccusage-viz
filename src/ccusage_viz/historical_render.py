@@ -19,7 +19,7 @@ from ccusage_viz.options import (
 )
 from ccusage_viz.render import RenderContext
 from ccusage_viz.render.base import render_audit
-from ccusage_viz.render.filters import active_filter_summary
+from ccusage_viz.render.filters import active_filter_summaries, active_filter_summary
 from ccusage_viz.render.headings import (
     HeadingSpec,
     chart_name,
@@ -127,6 +127,7 @@ def _context(
     controls: SurfaceControls,
     surface: HistoricalPresentationSurface,
     ranking_deltas: Mapping[Hashable, float] | None,
+    ranking_label_deltas: Mapping[Hashable, float] | None,
     ranking_rank_deltas: Mapping[Hashable, int] | None,
     normalize_titles: bool,
     interval: float | None,
@@ -147,11 +148,15 @@ def _context(
         component.accepted_at,
         component.snapshot.elapsed if component.snapshot is not None else None,
         interval,
+        filter_summaries=active_filter_summaries(chart.filters, translator),
         refreshing=refreshing,
         querying=component.has_pending_unknowns,
         pending=component.is_pending,
         deltas=ranking_deltas,
+        label_deltas=ranking_label_deltas,
         rank_deltas=ranking_rank_deltas,
+        show_percentage=chart.presentation.show_percentage,
+        label_color_mode=chart.presentation.label_color_mode,
     )
     return surface.context(
         terminal,
@@ -171,6 +176,7 @@ def render_historical_component(
     surface: HistoricalPresentationSurface | None = None,
     normalize_titles: bool = False,
     ranking_deltas: Mapping[Hashable, float] | None = None,
+    ranking_label_deltas: Mapping[Hashable, float] | None = None,
     ranking_rank_deltas: Mapping[Hashable, int] | None = None,
     interval: float | None = None,
     refreshing: bool = False,
@@ -192,6 +198,7 @@ def render_historical_component(
             controls=controls,
             surface=selected_surface,
             ranking_deltas=None,
+            ranking_label_deltas=None,
             ranking_rank_deltas=None,
             normalize_titles=normalize_titles,
             interval=interval,
@@ -215,6 +222,7 @@ def render_historical_component(
         controls=controls,
         surface=selected_surface,
         ranking_deltas=ranking_deltas,
+        ranking_label_deltas=ranking_label_deltas,
         ranking_rank_deltas=ranking_rank_deltas,
         normalize_titles=normalize_titles,
         interval=interval,

@@ -41,7 +41,7 @@ _PANE_ADVANCED_ACTIONS = {
     "timeline": (("o", "other"), ("l", "legend"), ("k", "weekdays")),
     "calendar": (),
     "stack": (("o", "other"), ("c", "cache"), ("l", "legend"), ("k", "weekdays")),
-    "ranking": (("o", "other"),),
+    "ranking": (("o", "other"), ("%", "percentage"), ("C", "label_color"), ("l", "legend")),
     "monitor": (("l", "legend"),),
 }
 
@@ -84,6 +84,7 @@ def _pane_adjustment_bindings(
             and key == "w"
         )
         and not (isinstance(chart, StackConfig) and chart.by != "composition" and key == "c")
+        and not (command == "ranking" and key == "l")
     )
     if (
         isinstance(chart, MonitorConfig)
@@ -259,6 +260,7 @@ def _pane_help_action_text(page: str, action: AdjustmentAction, translator: Tran
         "style",
         "other",
         "legend",
+        "label_color",
         "weekdays",
         "cache",
         "filters",
@@ -481,6 +483,23 @@ def _pane_adjustment_state(pane: TuiChartPane, page: str, translator: Translator
         advanced: list[str] = []
         if isinstance(chart, (TimelineConfig, StackConfig, RankingConfig)):
             advanced.append(f"Other {chart.other}")
+        if isinstance(chart, RankingConfig):
+            advanced.extend(
+                (
+                    translator.text(
+                        "status.ranking_label_color",
+                        value=translator.text(
+                            f"label.label_color_{chart.presentation.label_color_mode}"
+                        ),
+                    ),
+                )
+            )
+            advanced.append(
+                translator.text(
+                    "status.ranking_percentage",
+                    value="on" if chart.presentation.show_percentage is not False else "off",
+                )
+            )
         if isinstance(chart, (TimelineConfig, StackConfig)):
             advanced.extend((f"Legend {chart.presentation.legend}", f"Weekdays {chart.weekdays}"))
         if isinstance(chart, StackConfig) and chart.by == "composition":

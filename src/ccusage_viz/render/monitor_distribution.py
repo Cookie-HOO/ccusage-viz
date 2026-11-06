@@ -7,7 +7,7 @@ from ccusage_viz.chart_models import (
     TimeOfDayDistributionModel,
 )
 from ccusage_viz.errors import UsageError
-from ccusage_viz.formatting import center_text, clip_width, display_width, format_tokens, pad_width
+from ccusage_viz.formatting import center_text, display_width, format_tokens, pad_width
 from ccusage_viz.render.base import RenderContext, colored_mark, styled_text, y_tick_spec
 from ccusage_viz.render.headings import (
     HeadingSpec,
@@ -15,6 +15,7 @@ from ccusage_viz.render.headings import (
     heading_with_querying,
     monitor_view_name,
 )
+from ccusage_viz.render.legend import legend_rows
 from ccusage_viz.render.palette import categorical_colors, get_color_scheme
 
 
@@ -162,8 +163,8 @@ def _series_legend(
     *,
     values: bool = False,
     include_coverage: bool = False,
-) -> str:
-    """Render one compact, width-bounded series identity row."""
+) -> tuple[str, ...]:
+    """Render at most two width-bounded series identity rows."""
     colors = _series_colors(model, context)
     marks = ("#", "=", "+", ":", "%", "@") if context.ascii else ("█", "■", "●", "◆", "✚", "•")
     entries = []
@@ -181,7 +182,7 @@ def _series_legend(
             f"{styled_text('#' if context.ascii else '█', scheme.muted, context, dim=True)} "
             f"{context.translator.text('label.monitor_distribution_unobserved')}"
         )
-    return clip_width(" · ".join(entries), context.width)
+    return legend_rows(entries, context)
 
 
 def render_monitor_distribution(model: TimeOfDayDistributionModel, context: RenderContext) -> str:
@@ -210,24 +211,25 @@ def render_monitor_distribution(model: TimeOfDayDistributionModel, context: Rend
     )
     # A sole series still needs a legend to identify the model/group it represents.
     legend_mode = context.legend_position
-    legend_line = ""
+    legend_lines: tuple[str, ...] = ()
     if context.height >= 13 and legend_mode == "below-title":
-        legend_line = _series_legend(model, context, include_coverage=True)
+        legend_lines = _series_legend(model, context, include_coverage=True)
     elif context.height >= 12 and legend_mode == "inside":
-        legend_line = _series_legend(model, context)
+        legend_lines = _series_legend(model, context)
     elif context.height >= 13 and legend_mode == "values":
-        legend_line = _series_legend(model, context, values=True)
+        legend_lines = _series_legend(model, context, values=True)
 
     # The terminal renderer has no overlay layer.  An inside legend is therefore
     # intentionally the first plot row: it remains in the chart's own area while
     # preserving the same total row budget as hidden mode.
-    if legend_mode == "inside" and legend_line:
+    if legend_mode == "inside" and legend_lines:
         grid = _distribution_grid(model, context, header_rows=1)
         grid_lines = grid.splitlines()
-        grid_lines[0] = center_text(legend_line, context.width)
+        for index, row in enumerate(legend_lines):
+            grid_lines[index] = center_text(row, context.width)
         return "\n".join((heading, *grid_lines))
 
-    legend_lines = [center_text(legend_line, context.width)] if legend_line else []
+    legend_lines = tuple(center_text(row, context.width) for row in legend_lines)
     return "\n".join(
         (
             heading,

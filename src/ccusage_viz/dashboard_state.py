@@ -24,6 +24,8 @@ class DashboardPaneState:
     attachment_theme: str | None = None
     attachment_enabled: bool = False
     animation_theme: str | None = None
+    custom_monitor_window_seconds: int | None = None
+    custom_monitor_day_window: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -22,6 +22,7 @@ from ccusage_viz.options import (
     COMMAND_STYLES,
     DENSITIES,
     GRANULARITIES,
+    LABEL_COLOR_MODES,
     OTHER_MODES,
     WEEKDAY_MODES,
     CalendarConfig,
@@ -84,11 +85,19 @@ def add_presentation(parser: argparse.ArgumentParser, tr: Translator, command: s
         default="full" if command == "ranking" else "detailed",
         help=tr.text("help.density"),
     )
-    if command in {"timeline", "monitor", "stack"}:
+    if command == "ranking":
+        parser.add_argument(
+            "--label-color",
+            dest="label_color_mode",
+            choices=LABEL_COLOR_MODES,
+            default="change",
+            help=tr.text("help.label_color"),
+        )
+    if command in {"timeline", "monitor", "stack", "ranking"}:
         parser.add_argument(
             "--legend",
             choices=("below-title", "hidden")
-            if command == "stack"
+            if command in {"stack", "ranking"}
             else ("below-title", "inside", "hidden", "values")
             if command == "monitor"
             else ("below-title", "inside", "hidden"),
@@ -227,6 +236,7 @@ def chart_from_namespace(namespace: argparse.Namespace, *, timezone: str | None 
         theme=namespace.color_scheme,
         style=style,
         legend=getattr(namespace, "legend", "below-title"),
+        label_color_mode=getattr(namespace, "label_color_mode", "change"),
         density=cast(
             Density,
             getattr(namespace, "density", "full" if command == "ranking" else "detailed"),
@@ -405,6 +415,7 @@ def custom_chart_from_namespace(
             theme=namespace.color_scheme,
             style=style,
             legend=getattr(namespace, "legend", "below-title"),
+            label_color_mode=getattr(namespace, "label_color_mode", "change"),
             density=cast(Density, namespace.density),
         ),
         group_by=group_by,

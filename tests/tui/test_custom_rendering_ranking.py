@@ -55,8 +55,35 @@ from ccusage_viz.tui.custom_rendering import _custom_ranking_clipboard_text
 from ccusage_viz.tui.pane_lifecycle import _new_pane
 from ccusage_viz.tui.rendering import _local_pane_content, _pane_render
 from ccusage_viz.tui_input import KeyEvent
+from tests.custom_component.helpers import response
 
 from .custom_helpers import custom_summary_response
+
+
+def test_custom_ranking_title_displays_selected_dataset_filters() -> None:
+    chart = CustomChartConfig(
+        "ranking",
+        CustomCommandSource("reading", ("reader", "ccuv")),
+        DateRange(date(2026, 9, 1), date(2026, 9, 2)),
+        filters=(("genre", ("fiction",)),),
+        group_by="book",
+    )
+    component = CustomHistoricalComponent(chart)
+    source = response((("book", "10"),))
+    assert component.accept_response(source)
+
+    rendered = tui_custom_rendering._render_custom_projection(
+        component.model,
+        chart,
+        load_translator("en"),
+        Terminal(100, 24, color=False, ascii=True),
+        accepted_at=None,
+        interval=None,
+        pending=False,
+        surface=dashboard_pane_surface("ranking"),
+    )
+
+    assert "Filters: Genre Fiction" in rendered.chart.splitlines()[0]
 
 
 def test_custom_ranking_project_copy_appends_the_project_link() -> None:
@@ -154,6 +181,35 @@ def test_custom_ranking_pane_restores_preset_item_spacing() -> None:
 
     assert isinstance(pane, tui_models.TuiCustomPane)
     assert pane.ranking_item_spacing == "dashed"
+
+
+def test_custom_ranking_refresh_tracks_unchanged_entries() -> None:
+    from ccusage_viz.tui.pane_lifecycle import _refresh_custom_ranking_values
+    from tests.custom_component.helpers import response
+
+    chart = CustomChartConfig(
+        "ranking",
+        CustomCommandSource("reading", ("reader", "ccuv")),
+        DateRange(date(2026, 9, 1), date(2026, 9, 2), period="7d", relative_until=True),
+        group_by="book",
+        presentation=ChartPresentation(style="list"),
+    )
+    component = CustomHistoricalComponent(chart)
+    assert component.accept_response(response((("up", "10"), ("same", "5"))))
+    pane = tui_models.TuiCustomPane(
+        component,
+        FixedIntervalScheduler(60, now=0),
+        LifecycleOperation("ranking-refresh-deltas"),
+        SimpleNamespace(),
+        probe_complete=True,
+    )
+
+    _refresh_custom_ranking_values(pane)
+    assert pane.deltas == {}
+    assert component.accept_response(response((("up", "12"), ("same", "5"))))
+    _refresh_custom_ranking_values(pane)
+
+    assert pane.deltas == {"up": 1.0, "same": 0.0}
 
 
 def test_custom_dashboard_refresh_retains_accepted_ranking_with_visible_audit() -> None:

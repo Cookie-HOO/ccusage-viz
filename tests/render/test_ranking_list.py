@@ -16,6 +16,7 @@ def test_historical_ranking_list_keeps_label_and_value_columns_aligned() -> None
         value_formatter=str,
         context=context,
         summary="Today Units 15",
+        show_percentage=False,
     )
     summary, heading, header, *rows = output.splitlines()
 
@@ -26,15 +27,15 @@ def test_historical_ranking_list_keeps_label_and_value_columns_aligned() -> None
     project_start = header.index("Project")
     current_start = header.index("Current")
     assert rows[0].index("A") == project_start
-    assert rows[0].index("10") + len("10") == current_start + len("Current")
+    assert rows[0].index("10") + len("10") == current_start + len("Current") - 2
     assert "A" in rows[0]
     assert "A much longer" in rows[1]
-    assert rows[0].endswith("10")
-    assert rows[1].endswith("five units")
+    assert rows[0].endswith("10  ")
+    assert rows[1].endswith("five units  ")
     assert display_width(rows[0]) == display_width(rows[1])
 
 
-def test_historical_ranking_list_prioritizes_labels_and_omits_auxiliary_indicators() -> None:
+def test_historical_ranking_list_prioritizes_labels_and_keeps_only_value_change() -> None:
     context = RenderContext(
         80,
         24,
@@ -64,13 +65,15 @@ def test_historical_ranking_list_prioritizes_labels_and_omits_auxiliary_indicato
         delta_formatter=lambda value: f"{value:+}",
         context=context,
         total=10,
+        show_percentage=False,
     )
     header, row = output.splitlines()[1:]
 
     assert row.startswith(" 1 ")
     assert "a deliberately long project label" in row
     assert "⊞" not in output and "→" not in output
-    assert "^" not in output and "*" not in output
+    assert row.endswith("10 ^")
+    assert "*" not in output
     assert "vs prior" not in output and "Rank Δ" not in output and "%" not in output
     assert "Current" in header and "Scale" not in header
 

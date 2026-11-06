@@ -14,6 +14,7 @@ from ccusage_viz.render.palette import get_color_scheme
 from ccusage_viz.render.ranking_columns import measure_ranking_columns
 from ccusage_viz.render.ranking_entries import RankingPresentationEntry
 from ccusage_viz.render.ranking_historical import render_historical_ranking
+from ccusage_viz.render.ranking_labels import ranking_band_legend
 from ccusage_viz.render.ranking_viewport import RankingColumns, RankingViewport
 from ccusage_viz.render.summary import format_custom_value
 from ccusage_viz.scrollbar import Scrollbar
@@ -41,6 +42,7 @@ def render_custom_ranking_viewport(
     gutter = scrollbar and context.width > 1
     if gutter:
         context = replace(context, width=context.width - 1)
+    context = replace(context, ranking_bands=getattr(projection, "bands", ()))
     config = projection.config
     reset_key = (
         (config.source, config.metric_id, config.group_by, config.filters, config.date_range)
@@ -61,18 +63,22 @@ def render_custom_ranking_viewport(
         and projection.comparison_available
         and comparison == "full"
     )
-    viewport.percentage_visible = (
-        projection.show_percentage and context.style != "list" and not context.pending
-    )
+    viewport.percentage_visible = projection.show_percentage and not context.pending
     # Entry facts are stable across presentation changes. The source identity
     # plus locale and query define the localized, filtered entry projection.
-    data_key = (context.translator.language, projection.unit, search_query)
+    data_key = (context.translator.language, projection.unit, search_query, context.ranking_bands)
     rebuild_data = viewport.source is not projection.series or viewport.data_key != data_key
     # These facts can alter column widths, chrome height, wrapping, or row
     # spacing. List style has its own label-prioritized row layout; themes only
     # change marks.
     geometry_key = (
         context.width,
+        (context.height >= 11)
+        if context.label_color_mode == "band" and context.ranking_bands
+        else None,
+        context.label_color_mode,
+        context.legend_position,
+        context.ascii,
         context.style,
         context.density,
         context.period,
@@ -102,7 +108,10 @@ def render_custom_ranking_viewport(
 
     def value(number: int | Decimal) -> str:
         return format_custom_value(
-            Decimal(number), projection.unit, language=context.translator.language
+            Decimal(number),
+            projection.unit,
+            language=context.translator.language,
+            sum_format=projection.sum_format,
         )
 
     def render(
@@ -138,6 +147,7 @@ def render_custom_ranking_viewport(
             columns=viewport.columns,
             measure_only=measure,
             entries_matched=True,
+            band_legend=ranking_band_legend(viewport.full_entries, context),
         )
 
     if rebuild_data:
@@ -221,7 +231,11 @@ def render_custom_ranking_viewport(
         # Historical Ranking chrome is heading, optional search prompt, then
         # the visible-count row. Keep copy-all attached to that count rather
         # than to the heading or the scrollable table.
-        row = 1 + int(bool(search_query or search_editing))
+        row = (
+            1
+            + len(ranking_band_legend(viewport.full_entries, context))
+            + int(bool(search_query or search_editing))
+        )
         if row < viewport.body_top and row < len(rows):
             prefix = clip_width(rows[row].rstrip(), max(0, context.width - 4))
             column = display_width(prefix) + 3

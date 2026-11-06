@@ -115,7 +115,9 @@ def _chart_args(config: StandaloneLaunch, *, full: bool, pane: bool = False) -> 
     default_density = "full" if chart.kind == "ranking" else "detailed"
     if full or chart.presentation.density != default_density:
         args.extend(("--density", chart.presentation.density))
-    if chart.kind in {"timeline", "stack", "monitor"} and (
+    if chart.kind == "ranking" and (full or chart.presentation.label_color_mode != "change"):
+        args.extend(("--label-color", chart.presentation.label_color_mode))
+    if chart.kind in {"timeline", "stack", "monitor", "ranking"} and (
         full or chart.presentation.legend != "below-title"
     ):
         args.extend(("--legend", chart.presentation.legend))
@@ -188,7 +190,11 @@ def _custom_chart_args(options: StandaloneLaunch, *, full: bool) -> list[str]:
     default_density = "full" if chart.kind == "ranking" else "detailed"
     if full or chart.presentation.density != default_density:
         args.extend(("--density", chart.presentation.density))
-    if chart.kind in {"timeline", "stack"} and (full or chart.presentation.legend != "below-title"):
+    if chart.kind == "ranking" and (full or chart.presentation.label_color_mode != "change"):
+        args.extend(("--label-color", chart.presentation.label_color_mode))
+    if chart.kind in {"timeline", "stack", "ranking"} and (
+        full or chart.presentation.legend != "below-title"
+    ):
         args.extend(("--legend", chart.presentation.legend))
     if options.host.ascii:
         args.append("--ascii")
@@ -275,7 +281,12 @@ def format_full_dashboard_command(
             default_density = "full" if chart.kind == "ranking" else "compact"
             if chart.presentation.density != default_density:
                 fragment_args.extend(("--density", chart.presentation.density))
-            if chart.kind in {"timeline", "stack"} and chart.presentation.legend != "below-title":
+            if chart.kind == "ranking" and chart.presentation.label_color_mode != "change":
+                fragment_args.extend(("--label-color", chart.presentation.label_color_mode))
+            if (
+                chart.kind in {"timeline", "stack", "ranking"}
+                and chart.presentation.legend != "below-title"
+            ):
                 fragment_args.extend(("--legend", chart.presentation.legend))
             if chart.presentation.theme != "classic":
                 fragment_args.extend(("--theme", chart.presentation.theme))
