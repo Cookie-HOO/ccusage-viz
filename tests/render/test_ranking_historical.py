@@ -381,9 +381,11 @@ def test_historical_ranking_shows_refresh_activity_and_rank_changes() -> None:
     assert "v" not in static.splitlines()[-1]
     app_line = next(line for line in live.splitlines() if "app" in line)
     api_line = next(line for line in live.splitlines() if "api" in line)
-    assert "1 ^ * app" in app_line
+    assert "1 ^ app" in app_line
+    assert "*" not in app_line
     assert "1.2K ^" in app_line
-    assert "2 v * api" in api_line
+    assert "2 v api" in api_line
+    assert "*" not in api_line
     assert "800 v" in api_line
 
 

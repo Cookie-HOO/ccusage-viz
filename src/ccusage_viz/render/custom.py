@@ -7,6 +7,7 @@ charts without adapting measurements into token-domain models.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from decimal import Decimal
 from typing import cast
 
@@ -39,8 +40,10 @@ from ccusage_viz.render.headings import (
     heading_period,
     heading_with_querying,
 )
+from ccusage_viz.render.legend import legend_rows
 from ccusage_viz.render.palette import categorical_colors, get_color_scheme
 from ccusage_viz.render.ranking_historical import render_historical_ranking
+from ccusage_viz.render.ranking_labels import ranking_band_legend
 from ccusage_viz.render.stack_presentation import (
     normalized_stack_values,
     render_grouped_stack_plot,
@@ -152,7 +155,12 @@ def _summary(projection: CustomProjection, context: RenderContext) -> str:
 
 
 def _value(value: Decimal, projection: CustomProjection, context: RenderContext) -> str:
-    return format_custom_value(value, projection.unit, language=context.translator.language)
+    return format_custom_value(
+        value,
+        projection.unit,
+        language=context.translator.language,
+        sum_format=projection.sum_format,
+    )
 
 
 def _custom_axis_value(value: Decimal, projection: CustomChartProjection) -> str:
@@ -301,6 +309,24 @@ def render_custom_stack(projection: CustomChartProjection, context: RenderContex
         colors = categorical_colors(
             (item.id for item in projection.series if not item.is_other), context.color_scheme
         )
+        summary = _summary(projection, context)
+        legend = (
+            legend_rows(
+                tuple(
+                    f"{colored_mark('#' if context.ascii else '█', scheme.other if series.is_other else colors[series.id], context)} {_label(series, context)}"
+                    for series in projection.series
+                ),
+                context,
+                reserved_rows=1 + len(summary.splitlines()),
+            )
+            if context.legend_position in {"below-title", "inside"}
+            else ()
+        )
+        text_rows = (
+            1
+            + len(summary.splitlines())
+            + (len(legend) if context.legend_position == "below-title" else 0)
+        )
         raw_values = [list(series.values) for series in projection.series]
         normalized = context.style == "normalized"
         values = (
@@ -330,7 +356,7 @@ def render_custom_stack(projection: CustomChartProjection, context: RenderContex
                 ],
                 context=context,
                 y_ticks=lambda: _configure_custom_y_ticks(totals, projection, context),
-                text_rows=2 + int(context.density != "minimal"),
+                text_rows=text_rows,
             )
         else:
             tick_positions, tick_labels = _custom_stack_ticks(values, projection, context)
@@ -355,21 +381,20 @@ def render_custom_stack(projection: CustomChartProjection, context: RenderContex
                     for series in projection.series
                 ],
                 context=context,
+                text_rows=text_rows,
             )
-        legend = (
-            " · ".join(
-                f"{colored_mark('#' if context.ascii else '█', scheme.other if series.is_other else colors[series.id], context)} {_label(series, context)}"
-                for series in projection.series
-            )
-            if context.legend_position == "below-title"
-            else ""
-        )
+        if context.legend_position == "inside" and legend:
+            chart_rows = chart.splitlines()
+            for index, row in enumerate(legend, start=1 if grouped else 0):
+                if index < len(chart_rows) - 2:
+                    chart_rows[index] = center_text(row, context.width)
+            chart = "\n".join(chart_rows)
         return "\n".join(
             line
             for line in (
-                _summary(projection, context),
+                summary,
                 _heading(projection, context),
-                legend,
+                "\n".join(legend) if context.legend_position == "below-title" else "",
                 chart,
             )
             if line
@@ -415,6 +440,7 @@ def render_custom_ranking(
     entry_offset: int = 0,
     entry_limit: int | None = None,
 ) -> str:
+    context = replace(context, ranking_bands=getattr(projection, "bands", ()))
     if projection.groups is not None:
         return render_grouped_custom_ranking(
             projection,
@@ -463,6 +489,7 @@ def render_custom_ranking(
         entry_limit=entry_limit,
         total_entry_count=len(prepared.full_entries),
         matched_entry_count=len(prepared.matched_entries),
+        band_legend=ranking_band_legend(prepared.full_entries, context),
         total=prepared.full_total,
         maximum=prepared.full_maximum,
         show_percentage=projection.show_percentage,

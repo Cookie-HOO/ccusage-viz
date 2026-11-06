@@ -240,6 +240,13 @@ def _parse_v2_metric(value: object) -> V2MetricDescriptor:
     summary = source.get("summary", "comparisons")
     if summary not in {"comparisons", "total", "none"}:
         raise CustomProtocolError("v2 metric summary must be comparisons, total, or none")
+    sum_format = source.get("sum_format", "number")
+    if sum_format not in {"number", "duration-minute", "duration-second"}:
+        raise CustomProtocolError(
+            "v2 metric sum_format must be number, duration-minute, or duration-second"
+        )
+    if aggregation != "sum" and sum_format != "number":
+        raise CustomProtocolError("v2 metric duration sum_format requires aggregation sum")
     group_id = source.get("group_id")
     if group_id is not None:
         group_id = _string(group_id, "v2 metric group_id")
@@ -257,6 +264,7 @@ def _parse_v2_metric(value: object) -> V2MetricDescriptor:
         _parse_v2_defaults(source.get("defaults"), capabilities),
         cast(Literal["comparisons", "total", "none"], summary),
         group_id,
+        cast(Literal["number", "duration-minute", "duration-second"], sum_format),
     )
 
 

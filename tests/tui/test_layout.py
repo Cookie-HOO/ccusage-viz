@@ -1,5 +1,6 @@
 import threading
 from contextlib import nullcontext
+from types import SimpleNamespace
 
 import pytest
 
@@ -45,6 +46,40 @@ from ccusage_viz.tui.layout import (
 from ccusage_viz.tui.pane_lifecycle import _insert_pane, _replace_pane
 from ccusage_viz.tui.rendering import _local_pane_content
 from ccusage_viz.tui_input import InputDecoder, KeyEvent
+
+
+def test_dashboard_height_adjustment_uses_draft_topology_for_candidate_layout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = SimpleNamespace(
+        columns=1,
+        spotlight=0,
+        layout_draft=SimpleNamespace(columns=2, spotlight=0),
+        panes=[object(), object(), object()],
+        column_weights=(24,),
+        row_weights=(8, 8, 8),
+        divider_style="line",
+        header=object(),
+        header_style="hidden",
+        translator=object(),
+        dashboard_theme="no-color",
+        options=SimpleNamespace(host=SimpleNamespace(ascii=True)),
+        last_successful_update=None,
+    )
+    monkeypatch.setattr(
+        tui_painting,
+        "get_terminal_size",
+        lambda: __import__("os").terminal_size((100, 100)),
+    )
+    monkeypatch.setattr(tui_painting, "_header_lines", lambda *_args: [])
+    monkeypatch.setattr(tui_help, "controls", lambda _session: ())
+    monkeypatch.setattr(tui_help, "notices", lambda _session: ())
+    monkeypatch.setattr(
+        tui_history, "record_mutation", lambda _session, _key, mutation: mutation() or True
+    )
+
+    assert tui_painting.adjust_pane_weight(session, 0, axis="row", delta=1)
+    assert session.row_weights == (17, 15)
 
 
 def test_horizontal_pane_navigation_cycles_pane_order() -> None:

@@ -187,6 +187,7 @@ def v2_probe_descriptor_to_wire(descriptor: V2ProbeDescriptor) -> dict[str, obje
                 "description": localized(metric.description),
                 "unit": unit(metric.unit),
                 "aggregation": metric.aggregation,
+                **({"sum_format": metric.sum_format} if metric.sum_format != "number" else {}),
                 "capabilities": {
                     "group_by": [
                         {"id": item.id, "label": localized(item.label)}

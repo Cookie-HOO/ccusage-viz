@@ -125,6 +125,30 @@ def test_custom_monitor_renders_source_owned_monitor_presentations_without_share
     assert "data window" not in bars
 
 
+@pytest.mark.parametrize(("key", "expected"), (("+", 4), ("=", 4), ("-", 2), ("_", 2)))
+def test_custom_monitor_cumulative_bars_adjusts_top(key: str, expected: int) -> None:
+    component = _custom_monitor_component()
+    chart = replace(
+        component.candidate,
+        top=3,
+        presentation=replace(component.candidate.presentation, style="cumulative-bars"),
+    )
+
+    updated = tui_custom_adjustments._adjust_custom_monitor_chart(chart, key)
+
+    assert updated.top == expected
+    assert updated.presentation.style == "cumulative-bars"
+
+
+def test_custom_monitor_adjustment_forwards_other_projection() -> None:
+    component = _custom_monitor_component()
+    chart = replace(component.candidate, other="show")
+
+    updated = tui_custom_adjustments._adjust_custom_monitor_chart(chart, "o")
+
+    assert updated.other != chart.other
+
+
 def test_custom_monitor_retains_accepted_values_only_for_refreshes() -> None:
     component = _custom_monitor_component()
     terminal = Terminal(80, 16, color=False, ascii=True)

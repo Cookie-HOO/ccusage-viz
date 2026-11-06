@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Hashable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime
 
 from ccusage_viz.acquisition import historical_provider_id, monitor_query_intent
@@ -136,6 +136,10 @@ class MonitorComponent:
     @property
     def deltas(self) -> dict[Hashable, float]:
         return self.value_changes.current
+
+    @property
+    def label_deltas(self) -> dict[Hashable, float]:
+        return self.value_changes.label_current
 
     @property
     def rank_deltas(self) -> dict[Hashable, int]:
@@ -278,6 +282,7 @@ class MonitorComponent:
             dict(self.value_changes.previous),
             dict(self.value_changes.current),
             self.value_changes.initialized,
+            dict(self.value_changes.label_current),
         )
         preview.rank_changes = RefreshRanks(
             dict(self.rank_changes.previous),
@@ -411,6 +416,7 @@ class MonitorComponent:
         wall: datetime | None = None,
     ) -> str:
         model = self.model(now=now, count=count, wall=wall)
+        context = replace(context, label_deltas=self.label_deltas)
         if isinstance(model, TimeOfDayDistributionModel):
             from ccusage_viz.render.monitor_distribution import render_monitor_distribution
 

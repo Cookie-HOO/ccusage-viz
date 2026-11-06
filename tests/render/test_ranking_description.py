@@ -127,7 +127,7 @@ def test_historical_ranking_descriptions_are_muted_wrapped_and_density_aware() -
     rows = output.splitlines()
     description_rows = rows[-2:]
     assert len(description_rows) == 2
-    assert all(row.startswith(" " * 7) for row in description_rows)
+    assert all(row.startswith(" " * 5) for row in description_rows)
     assert all(display_width(row) <= context.width for row in description_rows)
     assert description_rows[-1].endswith("…")
 
@@ -352,7 +352,7 @@ def test_ranking_heading_row_list_preserves_pipe_label_and_description() -> None
     assert len(rows) == 2
     assert "Group | native label" in rows[0] and "10" in rows[0]
     assert "→" not in rows[0]
-    assert "+2" not in rows[0] and "100.0%" not in rows[0]
+    assert "+2" not in rows[0] and "100.0%" in rows[0]
     assert (
         display_width(rows[0].split("Group | native label", maxsplit=1)[0])
         == display_width(rows[1].split("Visible heading description", maxsplit=1)[0])

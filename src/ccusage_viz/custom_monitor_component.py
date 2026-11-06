@@ -457,12 +457,27 @@ class CustomMonitorComponent:
             observed_scope=self._scope(),
         )
 
+    def top_extent(self) -> int:
+        """Count source series in the active view before Top/Other projection."""
+        config = self._display_config
+        if config.group_by is None:
+            return 1 if self.history else 0
+        if config.presentation.style == "cumulative-bars":
+            return len(self.distribution_model(apply_top=False).series)
+        observations = (
+            ((self.history[-1].observation,) if self.history else ())
+            if config.presentation.style in {"ranking", "list"}
+            else self._display_observations()
+        )
+        return len({group.id for observation in observations for group in observation.groups})
+
     def distribution_model(
         self,
         *,
         language: str = "en",
         metric_title: str | None = None,
         timezone: tzinfo | None = None,
+        apply_top: bool = True,
     ) -> TimeOfDayDistributionModel:
         """Build cumulative source-window buckets while exposing factual observation gaps."""
 
@@ -525,13 +540,13 @@ class CustomMonitorComponent:
         keys = tuple(dict.fromkeys(key for bucket in buckets for key in bucket.values))
         if self._display_config.group_by is None:
             keys = ("total",)
-        elif self._display_config.top is not None:
+        elif apply_top and self._display_config.top is not None:
             totals = {key: sum(bucket.values.get(key, 0.0) for bucket in buckets) for key in keys}
             kept = self._top_keys(totals)  # ty: ignore[invalid-argument-type]
             merged_buckets: list[TimeOfDayBucket] = []
             for bucket in buckets:
                 values = {key: value for key, value in bucket.values.items() if key in kept}  # ty: ignore[invalid-assignment]
-                if self.aggregation == "sum":
+                if self.aggregation == "sum" and self._display_config.other == "show":
                     other = sum(value for key, value in bucket.values.items() if key not in kept)
                     if other:
                         values["Other"] = other

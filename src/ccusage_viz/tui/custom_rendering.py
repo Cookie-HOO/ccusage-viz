@@ -8,7 +8,11 @@ from typing import Any
 
 from ccusage_viz.command_copy import format_command, format_full_command
 from ccusage_viz.custom_component import CustomHistoricalComponent, custom_date_summary_supported
-from ccusage_viz.custom_models import CustomProtocolFailure, V2MonitorCapability
+from ccusage_viz.custom_models import (
+    CustomPresentationDescriptor,
+    CustomProtocolFailure,
+    V2MonitorCapability,
+)
 from ccusage_viz.custom_monitor_component import CustomMonitorComponent
 from ccusage_viz.data_view import (
     body_view_copy_kind,
@@ -39,6 +43,7 @@ from ccusage_viz.render.custom import (
 )
 from ccusage_viz.render.custom_monitor import render_custom_monitor, render_custom_monitor_heading
 from ccusage_viz.render.custom_ranking_viewport import render_custom_ranking_viewport
+from ccusage_viz.render.filters import custom_filter_summaries
 from ccusage_viz.render.grouped_ranking_viewport import (
     GroupedRankingViewport,
     render_grouped_custom_ranking_viewport,
@@ -138,6 +143,7 @@ def _custom_render_context(
     refreshing: bool | None = None,
     controls: SurfaceControls = EMPTY_SURFACE_CONTROLS,
     reserved_summary_rows: int = 0,
+    presentation: CustomPresentationDescriptor | None = None,
 ) -> RenderContext:
     """Adapt Custom semantics to the selected kind-specific product surface."""
     assert config.kind != "monitor"
@@ -155,9 +161,11 @@ def _custom_render_context(
         accepted_at,
         None,
         interval,
+        filter_summaries=custom_filter_summaries(config.filters, presentation, translator),
         refreshing=pending if refreshing is None else refreshing,
         querying=pending,
         pending=pending,
+        label_color_mode=config.presentation.label_color_mode,
     )
     return surface.context(
         terminal,
@@ -265,6 +273,7 @@ def _render_custom_monitor(
             None,
             querying=(transient or refreshing) and component.error is None,
             pending=transient or refreshing,
+            label_color_mode=config.presentation.label_color_mode,
         ),
     )
     if transient:
@@ -360,6 +369,7 @@ def _render_custom_projection(
     ranking_viewport: RankingViewport | None = None,
     grouped_ranking_viewport: GroupedRankingViewport | None = None,
     scrollbar_hovered: bool = False,
+    deltas: dict[object, float] | None = None,
 ) -> PaneRender:
     context = _custom_render_context(
         config,
@@ -371,6 +381,7 @@ def _render_custom_projection(
         surface=surface,
         refreshing=refreshing,
         controls=controls,
+        presentation=projection.presentation,
     )
     summary_render = ""
     if (
@@ -409,7 +420,18 @@ def _render_custom_projection(
                 refreshing=refreshing,
                 controls=controls,
                 reserved_summary_rows=len(summary_render.splitlines()),
+                presentation=projection.presentation,
             )
+    context = replace(context, deltas=deltas)
+    current_projection = replace(
+        projection,
+        config=config,
+        show_percentage=(
+            config.presentation.show_percentage
+            if projection.kind == "ranking" and config.presentation.show_percentage is not None
+            else projection.show_percentage
+        ),
+    )
     grouped = projection.groups is not None
     active_viewport: RankingViewport | GroupedRankingViewport | None = (
         grouped_ranking_viewport if grouped else ranking_viewport
@@ -436,7 +458,6 @@ def _render_custom_projection(
         )
         heading = custom_heading(config, context, projection.presentation).strip()
         descriptions_visible = config.presentation.density in {"full", "detailed"}
-        current_projection = replace(projection, config=config)
         if grouped:
             assert isinstance(active_viewport, GroupedRankingViewport)
             rendered = render_grouped_custom_ranking_viewport(
@@ -485,7 +506,7 @@ def _render_custom_projection(
         rows.extend("" for _ in range(context.height - len(rows)))
         return PaneRender("\n".join((*summary_render.splitlines(), *rows, *audit.splitlines())))
     rendered = render_custom_projection(
-        replace(projection, config=config, presentation=projection.presentation),
+        current_projection,
         context,
         descriptions_visible=config.presentation.density in {"full", "detailed"},
         search_query=search_query,

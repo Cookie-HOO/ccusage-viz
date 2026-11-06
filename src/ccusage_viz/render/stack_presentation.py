@@ -110,6 +110,7 @@ def render_stack_grid(
     component_marks: Sequence[str],
     colors: Sequence[int],
     context: RenderContext,
+    text_rows: int = 1,
 ) -> str:
     """Render stacked columns from neutral numeric facts on a terminal-cell grid."""
     date_count = len(values[0])
@@ -125,7 +126,7 @@ def render_stack_grid(
     bar_starts = [
         slot_bounds[index] + (slot_widths[index] - bar_width) // 2 for index in range(date_count)
     ]
-    data_rows = max(4, plot_height(context, text_rows=1) - 4)
+    data_rows = max(4, plot_height(context, text_rows=text_rows) - 4)
     maximum = tick_positions[-1] if tick_positions else 0
     grid = [[" "] * plot_width for _ in range(data_rows)]
 

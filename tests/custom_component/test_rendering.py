@@ -690,7 +690,7 @@ def test_custom_ranking_renders_project_link_after_copy_marker() -> None:
     assert projection.series[0].link == "https://example.com/books/book"
 
 
-def test_custom_ranking_title_omits_selected_dataset_filters() -> None:
+def test_custom_ranking_title_omits_selected_dataset_filters_without_render_context() -> None:
     source = response((("book", "10"),))
     projection = process_custom_historical(
         source,
@@ -707,6 +707,22 @@ def test_custom_ranking_title_omits_selected_dataset_filters() -> None:
     )
 
     assert "Filters: Genre Fiction" not in output.splitlines()[0]
+
+
+def test_custom_filter_summaries_use_source_localized_labels() -> None:
+    from ccusage_viz.render.filters import custom_filter_summaries
+
+    projection = process_custom_historical(
+        response((("book", "10"),)),
+        replace(config(), filters=(("genre", ("fiction",)),)),
+    )
+
+    assert custom_filter_summaries(
+        projection.config.filters, projection.presentation, load_translator("en")
+    ) == ("Filters: Genre Fiction", "Filters: Genre 1")
+    assert custom_filter_summaries(
+        projection.config.filters, projection.presentation, load_translator("zh")
+    ) == ("筛选：类型 小说", "筛选：类型 1")
 
 
 def test_custom_timeline_title_omits_selected_dataset_filters() -> None:

@@ -12,6 +12,7 @@ from ccusage_viz.custom_models import (
     CustomDimension,
     CustomFilter,
     CustomProtocolFailure,
+    CustomRankingBand,
     CustomRankingEntry,
     CustomRankingGroup,
     CustomSeries,
@@ -180,6 +181,7 @@ def _unique_ids(
         | CustomSeries
         | CustomRankingGroup
         | CustomRankingEntry
+        | CustomRankingBand
         | V2RankingGroup,
         ...,
     ],

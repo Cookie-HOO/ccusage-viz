@@ -2,6 +2,8 @@ import re
 from dataclasses import replace
 from decimal import Decimal
 
+import pytest
+
 from ccusage_viz.custom_models import LocalizedText
 from ccusage_viz.formatting import display_width, strip_ansi
 from ccusage_viz.i18n import load_translator
@@ -86,6 +88,72 @@ def test_grouped_custom_ranking_sanitizes_scalar_metadata_and_keeps_trusted_grou
     assert "Entry display" in strip_ansi(output)
     assert "Delta display" in strip_ansi(output)
     assert "\x1b]8;;https://example.com/groups/safe\x1b\\" in output
+
+
+@pytest.mark.parametrize("period", (None, "all"))
+def test_grouped_heading_borrows_blank_prefix_space_for_its_value(period: str | None) -> None:
+    display = "source-owned grouped value that is too wide for the value column"
+    groups = (
+        CustomProjectedRankingGroup(
+            "group",
+            LocalizedText("Group", "分组"),
+            (CustomProjectedSeries("entry", LocalizedText("Entry", "项目"), (Decimal("1"),)),),
+            Decimal("1"),
+            None,
+            False,
+            Decimal("1"),
+            display=LocalizedText(display, display),
+        ),
+    )
+    context = RenderContext(
+        100,
+        20,
+        load_translator("en"),
+        color=False,
+        ascii=True,
+        density="detailed",
+        period=period,
+    )
+    projection = _grouped_ranking_projection(groups=groups)
+    if period == "all":
+        projection = replace(projection, date_range=replace(projection.date_range, period="all"))
+    output = strip_ansi(render_custom_projection(projection, context))
+    heading = next(line for line in output.splitlines() if "Group" in line)
+
+    assert display in heading
+    assert display_width(heading) == context.width
+
+
+def test_compact_all_grouped_dashboard_heading_keeps_full_display_value() -> None:
+    display = "满载 19/19"
+    groups = (
+        CustomProjectedRankingGroup(
+            "aime",
+            LocalizedText("AIME", "AIME"),
+            (CustomProjectedSeries("entry", LocalizedText("Entry", "项目"), (Decimal("200"),)),),
+            Decimal("200"),
+            None,
+            False,
+            Decimal("200"),
+            display=LocalizedText(display, display),
+        ),
+    )
+    context = RenderContext(
+        174,
+        20,
+        load_translator("zh"),
+        color=False,
+        style="dot",
+        density="compact",
+        period="all",
+    )
+    projection = _grouped_ranking_projection(groups=groups)
+    projection = replace(projection, date_range=replace(projection.date_range, period="all"))
+    output = strip_ansi(render_custom_projection(projection, context))
+    heading = next(line for line in output.splitlines() if "AIME" in line)
+
+    assert display in heading
+    assert display_width(heading) == context.width
 
 
 def test_grouped_custom_ranking_bounds_adversarial_scalar_columns() -> None:
@@ -198,8 +266,8 @@ def test_grouped_custom_ranking_centers_main_heading_and_aligns_shared_value_col
         "9 requests"
     ) + len("9 requests")
     assert second_heading.index("12.3K requests") + len("12.3K requests") == second_row.index(
-        "12345 requests"
-    ) + len("12345 requests")
+        "12.35K requests"
+    ) + len("12.35K requests")
 
 
 def test_grouped_custom_ranking_premeasures_extreme_inner_shares_with_each_group_total() -> None:

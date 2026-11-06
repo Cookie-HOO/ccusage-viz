@@ -19,6 +19,7 @@ from ccusage_viz.render.base import (
     plot_height,
     plot_text,
 )
+from ccusage_viz.render.legend import legend_rows
 from ccusage_viz.render.palette import categorical_colors, get_color_scheme
 
 
@@ -84,17 +85,21 @@ def render_timeline_plot(
             else marker_labels[index % len(marker_labels)]
         )
 
-    legend = (
-        clip_width(
-            " · ".join(
+    below_title = show_legend and context.legend_position == "below-title"
+    rows = (
+        legend_rows(
+            tuple(
                 f"{colored_mark(legend_mark(index, item), color_for(item), context)} {item.label}"
                 for index, item in enumerate(series)
             ),
-            context.width,
+            context,
+            reserved_rows=text_rows - int(below_title),
         )
-        if show_legend and context.legend_position == "below-title"
-        else ""
+        if show_legend
+        else ()
     )
+    legend = "\n".join(rows) if below_title else ""
+    text_rows += len(rows) - 1 if below_title else 0
 
     if any(
         0 < sum(value is not None and isfinite(value) for value in item.values) < 2
@@ -177,15 +182,24 @@ def render_timeline_plot(
                     if context.style in {"stem", "area"}:
                         signal.fillx()
                     signals.append(signal)
-            if show_legend and context.legend_position == "inside":
-                signals[0].label(item.label)
             for signal in signals:
                 plt.figure.draw(signal)
-        plt.figure.legend(active=context.legend_position == "inside")
+        plt.figure.legend(active=False)
         positions, labels = x_ticks
         plt.figure.ruler("x").ticks([float(position) for position in positions], labels)
         y_positions, y_labels = y_ticks
         if y_maximum is not None:
             plt.figure.ruler("y").lim(0, float(y_maximum))
         plt.figure.ruler("y").ticks([float(position) for position in y_positions], y_labels)
-        return TimelinePlot(plot_text(context), legend)
+        chart = plot_text(context)
+        if show_legend and context.legend_position == "inside" and rows:
+            from ccusage_viz.formatting import center_text
+
+            chart_rows = chart.splitlines()
+            # Keep the plot border and axes intact; identities occupy the first
+            # interior rows, without adding height to an inside legend.
+            for index, row in enumerate(rows, start=1):
+                if index < len(chart_rows) - 1:
+                    chart_rows[index] = center_text(row, context.width)
+            chart = "\n".join(chart_rows)
+        return TimelinePlot(chart, legend)

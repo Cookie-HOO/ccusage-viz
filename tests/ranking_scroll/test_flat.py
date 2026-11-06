@@ -47,6 +47,12 @@ def test_flat_ranking_clipboard_includes_visible_values_and_shares() -> None:
     )
 
     render(model, viewport, replace(context(width=80, density="detailed"), style="list"))
+    assert "66.7%" in viewport.clipboard_all_text()
+    render(
+        replace(model, show_percentage=False),
+        viewport,
+        replace(context(width=80, density="detailed"), style="list"),
+    )
     assert "%" not in viewport.clipboard_all_text()
 
 
@@ -134,11 +140,14 @@ def test_direct_search_preserves_rank_share_bar_count_and_link_matching() -> Non
     assert claude.lstrip().startswith("3 ")
     assert "20.0%" in claude
     assert "Showing 1/3 item(s)" in output
-    assert _track(claude, "█", "░").count("█") == 16
+    claude_track = _track(claude, "█", "░")
+    assert claude_track.count("█") == round(len(claude_track) * 20 / 50)
 
     full = strip_ansi(render_custom_ranking(model, ctx))
     alpha = next(line for line in full.splitlines() if "Alpha" in line)
-    assert _track(alpha, "█", "░").count("█") == 41
+    alpha_track = _track(alpha, "█", "░")
+    assert alpha_track.count("█") == len(alpha_track)
+    assert len(alpha_track) == len(claude_track)
 
 
 def test_search_reset_and_hit_identity_and_feedback():

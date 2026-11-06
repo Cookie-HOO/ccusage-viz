@@ -48,7 +48,10 @@ def prepare_custom_ranking(
 
     def value(number: int | Decimal) -> str:
         return format_custom_value(
-            Decimal(number), projection.unit, language=context.translator.language
+            Decimal(number),
+            projection.unit,
+            language=context.translator.language,
+            sum_format=projection.sum_format,
         )
 
     def prepare_entry(entry: RankingEntry, rank: int) -> RankingPresentationEntry:
@@ -89,6 +92,11 @@ def prepare_custom_ranking(
                 display_width(comparison_display) if comparison_display is not None else None
             ),
             rank=entry.rank or rank,
+            band_id=(
+                entry.band_id
+                if isinstance(entry, CustomProjectedRankingEntry) and not entry.is_other
+                else None
+            ),
         )
 
     full_entries = tuple(

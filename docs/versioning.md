@@ -6,6 +6,33 @@
 - **Minor (`0.x.0`)**: substantial new user-facing capabilities or source integrations before 1.0.
 - Before `1.0`, public interfaces may still change between releases.
 
+## 0.4.1
+
+`0.4.1` improves Ranking presentation, shared legends, and Dataset interactions
+without changing built-in Token semantics or adding a collector:
+
+- Ranking adds six `--label-color` modes, interactive shares (`%`), and optional
+  V2 Dataset semantic bands (`data.bands` / entry `band_id`). Legends default to
+  separate rows below titles; `l` toggles visibility only in `band` mode with a
+  represented named band. Refresh indicators, list rendering, grouped alignment,
+  and narrow-pane layouts are improved; equal consecutive values show a neutral `-`;
+- Timeline, Stack, Monitor, and Dataset charts share width-aware legends with
+  at most two rows and explicit overflow counts;
+- additive Dataset Metrics may declare `sum_format` for ordinary numeric or
+  natural minute/second duration fallbacks. The default keeps decimal K/M/B,
+  while Dataset-owned `display` text remains unchanged. Localized filter
+  summaries and title sizing are improved;
+- Top controls follow available item counts: Custom Monitor timelines count
+  series across the display horizon, cumulative bars use the selected day, and
+  ranking/list use the latest observation rather than mixing these scopes.
+  Local presentation adjustments support undo/redo without unnecessary queries
+  or refresh-baseline resets.
+
+Semantic bands and `sum_format` are optional extensions of `ccuv.custom/v2`, not
+a new protocol version. Existing Datasets need no changes; omitting `sum_format`
+keeps the numeric K/M/B fallback. Dataset development, usage, and
+protocol guides document the new fields and controls.
+
 ## 0.4.0
 
 `0.4.0` makes choosing and installing the Token statistics tool a first-class

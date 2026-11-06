@@ -27,6 +27,7 @@ class CustomDataset:
     title: LocalizedText
     description: LocalizedText
     unit: CustomUnit
+    sum_format: Literal["number", "duration-minute", "duration-second"] = "number"
 
 
 @dataclass(frozen=True, slots=True)
@@ -195,6 +196,7 @@ class V2MetricDescriptor:
     defaults: Mapping[str, CustomChartDefaults]
     summary: Literal["comparisons", "total", "none"] = "comparisons"
     group_id: str | None = None
+    sum_format: Literal["number", "duration-minute", "duration-second"] = "number"
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "defaults", MappingProxyType(dict(self.defaults)))
@@ -266,6 +268,14 @@ class CustomRankingGroup:
 
 
 @dataclass(frozen=True, slots=True)
+class CustomRankingBand:
+    """A response-owned semantic classification, in Dataset declaration order."""
+
+    id: str
+    label: LocalizedText | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class CustomRankingEntry:
     """One authoritative scalar fact returned by a V2 Ranking query."""
 
@@ -276,6 +286,7 @@ class CustomRankingEntry:
     display: LocalizedText | None = None
     comparison_display: LocalizedText | None = None
     link: str | None = None
+    band_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -293,6 +304,7 @@ class V2RankingGroup:
 class V2RankingData:
     series: tuple[CustomRankingEntry, ...] = ()
     groups: tuple[V2RankingGroup, ...] | None = None
+    bands: tuple[CustomRankingBand, ...] = ()
 
     def __post_init__(self) -> None:
         if self.groups is not None and self.series:

@@ -42,6 +42,7 @@ def test_v2_probe_descriptor_parses_multiple_metrics_and_monitor_capabilities() 
         "Average tokens per request",
     )
     assert descriptor.metrics[0].aggregation == "sum"
+    assert descriptor.metrics[0].sum_format == "number"
     assert descriptor.default_metric_id == "tokens"
     monitor = descriptor.metrics[0].capabilities.charts["monitor"]
     assert monitor.window_seconds == 60
@@ -50,6 +51,30 @@ def test_v2_probe_descriptor_parses_multiple_metrics_and_monitor_capabilities() 
     assert monitor.refresh_interval_seconds == 10
     assert descriptor.metrics[2].aggregation == "value"
     assert descriptor.metrics[2].capabilities.charts["monitor"].refresh_interval_seconds is None
+
+
+@pytest.mark.parametrize("sum_format", ("duration-minute", "duration-second"))
+def test_metric_accepts_duration_sum_format(sum_format) -> None:
+    raw = v2_probe_descriptor()
+    raw["metrics"][0]["sum_format"] = sum_format
+    descriptor = parse_v2_probe_descriptor(raw)
+    assert descriptor.metrics[0].sum_format == sum_format
+    assert v2_probe_descriptor_to_wire(descriptor)["metrics"][0]["sum_format"] == sum_format  # type: ignore[index]
+
+
+@pytest.mark.parametrize("sum_format", ("compact", "minute", ""))
+def test_metric_rejects_unknown_sum_format(sum_format) -> None:
+    raw = v2_probe_descriptor()
+    raw["metrics"][0]["sum_format"] = sum_format
+    with pytest.raises(CustomProtocolError, match="sum_format"):
+        parse_v2_probe_descriptor(raw)
+
+
+def test_duration_sum_format_requires_sum_aggregation() -> None:
+    raw = v2_probe_descriptor()
+    raw["metrics"][2]["sum_format"] = "duration-minute"
+    with pytest.raises(CustomProtocolError, match="requires aggregation sum"):
+        parse_v2_probe_descriptor(raw)
 
 
 def test_runtime_filter_defaults_to_multi_select_and_accepts_single_select() -> None:

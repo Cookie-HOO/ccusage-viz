@@ -243,6 +243,7 @@ and again before a live custom Monitor starts.
 | `metrics` | One or more independent measurements; each may reference one Group with `group_id` | Lets users choose a Metric and prevents unsupported chart choices. |
 | `unit` | Stable unit ID, bilingual label, prefix/suffix, precision | Formats chart, table, and summary values. |
 | `aggregation` | `sum` for additive facts; `value` for source-owned values | Controls whether ccuv can locally project Top/Other and history. |
+| `sum_format` | Optional `number` (default), `duration-minute`, or `duration-second` for a `sum` Metric | Formats ccuv-generated fallback values such as Other; Dataset-owned displays still win. |
 | `capabilities` | Dimensions and supported chart kinds | Gates static controls and validates requests ccuv sends. Historical Ranking may declare `max_items` when its source has a fixed raw-row limit. |
 | `runtime.filters` | Query-context filter dimensions, options, and `multi_select` / `single_select` mode | Returned only with each successful chart/Monitor response; enables the `f` filter editor for that accepted snapshot. |
 | `defaults` | Optional initial chart suggestions | Applies only compatible fields; a bad suggestion is ignored. |
@@ -338,7 +339,13 @@ clickable labels and may contain star emphasis. Underscore emphasis, all other
 Markdown, and unsafe terminal content stays plain text. A Ranking
 series may also provide optional localized `display`, which is the exact total
 string shown in its value column, and `comparison_display`, which is the exact
-absolute-change string shown in its prior-period comparison column. ccuv
+absolute-change string shown in its prior-period comparison column. Without `display`, ccuv uses the Metric's optional `sum_format`. Its default
+`number` uses decimal K/M/B abbreviations while retaining the declared unit;
+values below 1K keep the declared precision, and abbreviated values use at least
+two decimal places with trailing zeros removed. For additive durations, declare
+`duration-minute` or `duration-second`; ccuv then chooses localized hour/minute/
+second output with at most two adjacent units. Synthesized Other uses the same
+fallback. Custom `display` text is not reformatted. ccuv
 continues to calculate ordering, shares, comparison availability, colours, and
 rank movement from scalar values. At `full` and `detailed`, a non-fixed Ranking
 also receives a second ordinary chart request for the contiguous, equal-duration
@@ -359,6 +366,46 @@ Do not recompute now. A refresh gets a new aware anchor; the prior comparison
 uses the same anchor, immediately before the current range. Timestamp-form
 Ranking has no date summary. Inclusive date ranges and summaries for date-form
 `d`, `w`, `mo`, `q`, and `y` requests remain unchanged.
+
+### Ranking classification facts
+
+Added in ccuv 0.4.1, semantic bands are an optional extension of `ccuv.custom/v2`; do not change the
+protocol identifier or advertise them in Probe. A V2 Ranking chart response may
+add response-level `data.bands`, and each flat or grouped scalar entry may refer
+to one definition with `band_id`:
+
+```json
+{
+  "data": {
+    "bands": [
+      {"id": "qualified", "label": {"en": "Qualified", "zh-CN": "已晋级"}},
+      {"id": "remaining"}
+    ],
+    "series": [
+      {"id": "team-a", "label": {"en": "Team A", "zh-CN": "球队 A"},
+       "value": "18", "band_id": "qualified"}
+    ]
+  }
+}
+```
+
+For a partitioned response, keep `bands` beside `groups`; all groups share the
+same definitions. IDs must be stable, unique, and non-empty, and every
+`band_id` must resolve in that response. Omitted/null `bands` means no band
+definitions; omitted/null `band_id` means unclassified. A label may be
+omitted/null (color without a legend entry), but a present label must be
+bilingual. Duplicate IDs or dangling references reject the whole response.
+
+Bands describe source-owned business classification, not colors or thresholds.
+Their order assigns theme colors but never changes numeric sorting. Group
+legends occupy separate rows below the heading, never its value row. ccuv renders
+current-response membership even if the comparison response differs;
+synthesized Other is unclassified. Do not send color values, label modes, or
+arrow/refresh policy. Older ccuv versions may ignore this optional presentation,
+so keep scalar `value`, ordering, and labels meaningful without it. See the
+[protocol reference](custom-command-protocol.md#semantic-bands-v2-ranking-only)
+for validation and [usage](usage.md#ranking-label-colors-and-band-legends) for
+controls. Bands are invalid in V1, Timeline, Stack, Calendar, and Monitor.
 
 ### Summary request and response
 
@@ -531,6 +578,8 @@ official.
 - [ ] Dataset ID, Metric IDs, unit IDs, filter IDs, and option IDs are stable.
 - [ ] Every response echoes request/protocol identity exactly.
 - [ ] Every numeric measurement is a decimal string.
+- [ ] Optional Ranking bands have unique IDs, valid references, and bilingual
+  labels when named; test flat/grouped responses and unclassified entries.
 - [ ] Capabilities describe only configurations your adapter can answer.
 - [ ] Unsupported valid requests return a structured protocol error.
 - [ ] Monitor uses the declared fixed source window and returns

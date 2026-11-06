@@ -10,8 +10,15 @@ class RefreshDeltas:
     previous: dict[Hashable, float] = field(default_factory=dict)
     current: dict[Hashable, float] = field(default_factory=dict)
     initialized: bool = False
+    label_current: dict[Hashable, float] = field(default_factory=dict)
 
     def accept(self, values: Mapping[Any, float]) -> None:
+        # Labels require an actual per-key baseline; arrows retain new-key deltas.
+        self.label_current = {
+            key: value - self.previous[key]
+            for key, value in values.items()
+            if self.initialized and key in self.previous
+        }
         if not self.initialized:
             self.current = {}
             self.initialized = True
@@ -25,6 +32,7 @@ class RefreshDeltas:
     def clear(self) -> None:
         self.previous.clear()
         self.current.clear()
+        self.label_current.clear()
         self.initialized = False
 
 

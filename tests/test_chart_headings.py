@@ -189,21 +189,53 @@ def test_reduction_preserves_monitor_status_before_optional_window() -> None:
     assert heading == "TPM · 趋势（采样中）"
 
 
-def test_heading_with_querying_omits_filter_summary_and_mutes_marker() -> None:
+def test_heading_with_querying_includes_filter_summary_and_mutes_marker() -> None:
     render_context = RenderContext(
         80,
         20,
         load_translator("en"),
         color=True,
-        filter_summary="project = app",
+        filter_summary="Filters: Project app",
         audit=RenderAudit(querying=True),
     )
 
     heading = heading_with_querying("Tokens · Timeline", render_context)
 
-    assert strip_ansi(heading) == "Tokens · Timeline · querying"
-    assert "project = app" not in heading
+    assert strip_ansi(heading) == "Tokens · Timeline · Filters: Project app · querying"
     assert "\x1b[2m" in heading
+
+
+def test_compose_heading_selects_compact_filter_summary_that_fits() -> None:
+    render_context = RenderContext(
+        43,
+        20,
+        load_translator("en"),
+        color=False,
+        filter_summaries=(
+            "Filters: Model deepseek/chat, claude/opus",
+            "Filters: Model deepseek/chat +1",
+            "Filters: Model 2",
+        ),
+    )
+
+    heading = compose_heading(HeadingSpec("Tokens", "Ranking", period="all"), render_context)
+
+    assert heading == "Tokens · Ranking · all · Filters: Model 2"
+    assert display_width(heading) <= render_context.width
+
+
+def test_compose_heading_drops_filter_before_core_chart_identity() -> None:
+    render_context = RenderContext(
+        20,
+        20,
+        load_translator("en"),
+        color=False,
+        filter_summaries=("Filters: Model 2",),
+    )
+
+    heading = compose_heading(HeadingSpec("Tokens", "Ranking"), render_context)
+
+    assert heading == "Tokens · Ranking"
 
 
 def test_heading_with_querying_does_not_append_a_second_marker() -> None:

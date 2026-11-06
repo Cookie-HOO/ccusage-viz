@@ -140,10 +140,92 @@ def render_summary_placeholder(
     return _pack_summary_pieces(pieces, context)
 
 
-def format_custom_value(value: Decimal, unit: CustomUnit, *, language: str) -> str:
-    """Apply the protocol-declared precision and localized unit placement."""
-    quantum = Decimal(1).scaleb(-unit.decimal_places)
-    rendered = format(value.quantize(quantum, rounding=ROUND_HALF_UP), f".{unit.decimal_places}f")
+def _duration_part(value: int, singular: str, plural: str, *, language: str) -> str:
+    label = singular if language == "zh" or value == 1 else plural
+    return f"{value}{label}" if language == "zh" else f"{value} {label}"
+
+
+def _format_duration(value: Decimal, source: str, *, language: str) -> str:
+    """Render at most two adjacent duration units, using hours as the maximum."""
+    negative = value < 0
+    magnitude = abs(value)
+    total_seconds = magnitude * (Decimal(60) if source == "duration-minute" else Decimal(1))
+    rounded_seconds = int(total_seconds.quantize(Decimal(1), rounding=ROUND_HALF_UP))
+    if rounded_seconds == 0:
+        minute = source == "duration-minute"
+        unit = (
+            ("分钟" if minute else "秒") if language == "zh" else ("minute" if minute else "second")
+        )
+        plural = "minutes" if minute else "seconds"
+        parts = [_duration_part(0, unit, plural, language=language)]
+    elif rounded_seconds >= 3600:
+        total_minutes = int(
+            (total_seconds / Decimal(60)).quantize(Decimal(1), rounding=ROUND_HALF_UP)
+        )
+        hours, minutes = divmod(total_minutes, 60)
+        parts = [
+            _duration_part(
+                hours, "小时" if language == "zh" else "hour", "hours", language=language
+            )
+        ]
+        if minutes:
+            parts.append(
+                _duration_part(
+                    minutes, "分钟" if language == "zh" else "minute", "minutes", language=language
+                )
+            )
+    elif rounded_seconds >= 60:
+        minutes, seconds = divmod(rounded_seconds, 60)
+        parts = [
+            _duration_part(
+                minutes, "分钟" if language == "zh" else "minute", "minutes", language=language
+            )
+        ]
+        if seconds:
+            parts.append(
+                _duration_part(
+                    seconds, "秒" if language == "zh" else "second", "seconds", language=language
+                )
+            )
+    else:
+        seconds = rounded_seconds
+        parts = [
+            _duration_part(
+                seconds, "秒" if language == "zh" else "second", "seconds", language=language
+            )
+        ]
+    rendered = "".join(parts) if language == "zh" else " ".join(parts)
+    return f"-{rendered}" if negative else rendered
+
+
+def format_custom_value(
+    value: Decimal,
+    unit: CustomUnit,
+    *,
+    language: str,
+    sum_format: str = "number",
+) -> str:
+    """Format a Dataset fallback value according to its Metric sum policy.
+
+    Duration formats interpret the Decimal in the declared base unit and choose
+    natural hour/minute/second output. Dataset-owned display strings bypass this.
+    """
+    if sum_format in {"duration-minute", "duration-second"}:
+        return _format_duration(value, sum_format, language=language)
+
+    rendered = ""
+    for threshold, suffix in ((Decimal("1e9"), "B"), (Decimal("1e6"), "M"), (Decimal("1e3"), "K")):
+        if abs(value) >= threshold:
+            places = max(2, unit.decimal_places)
+            quantum = Decimal(1).scaleb(-places)
+            scaled = (value / threshold).quantize(quantum, rounding=ROUND_HALF_UP)
+            rendered = f"{scaled:.{places}f}".rstrip("0").rstrip(".") + suffix
+            break
+    else:
+        quantum = Decimal(1).scaleb(-unit.decimal_places)
+        rendered = format(
+            value.quantize(quantum, rounding=ROUND_HALF_UP), f".{unit.decimal_places}f"
+        )
     label = unit.label.zh_cn if language == "zh" else unit.label.en
     return f"{label}{rendered}" if unit.placement == "prefix" else f"{rendered} {label}"
 

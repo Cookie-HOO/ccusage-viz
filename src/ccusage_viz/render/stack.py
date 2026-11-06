@@ -17,6 +17,7 @@ from ccusage_viz.render.headings import (
     heading_period,
     heading_with_querying,
 )
+from ccusage_viz.render.legend import legend_rows
 from ccusage_viz.render.palette import categorical_colors, get_color_scheme
 from ccusage_viz.render.stack_presentation import (
     render_grouped_stack_plot,
@@ -54,7 +55,7 @@ def render_stack(model: StackModel, context: RenderContext) -> str:
             ),
             context.width,
         )
-        show_legend = context.legend_position == "below-title"
+        show_legend = context.legend_position in {"below-title", "inside"}
         raw_values: list[list[float]] = [
             [float(usage.total) for usage in component.values] for component in model.components
         ]
@@ -98,10 +99,33 @@ def render_stack(model: StackModel, context: RenderContext) -> str:
             marker_names = (
                 ("#",) * len(model.components) if context.ascii else ("█",) * len(model.components)
             )
-        component_marks = marker_names[: len(model.components)]
+        component_marks = tuple(
+            marker_names[index % len(marker_names)] for index in range(len(model.components))
+        )
         grouped = context.style in {"grouped", "grouped-thin"}
         positions, tick_labels = date_ticks(model.days, context, aggregation=model.aggregation)
         summary = render_summary(model.summary, context) if model.summary else ""
+        legend_marks = (
+            ("#", "=", "+", ":", "%", "@") if context.ascii else ("█", "■", "●", "◆", "✚", "•")
+        )
+        legend = (
+            legend_rows(
+                tuple(
+                    f"{colored_mark(legend_marks[index % len(legend_marks)], color, context)} {label}"
+                    for index, (label, color) in enumerate(zip(labels, colors, strict=True))
+                ),
+                context,
+                separator=" / " if context.ascii else " · ",
+                reserved_rows=1 + len(summary.splitlines()),
+            )
+            if show_legend
+            else ()
+        )
+        text_rows = (
+            1
+            + len(summary.splitlines())
+            + (len(legend) if context.legend_position == "below-title" else 0)
+        )
         if grouped:
             chart = render_grouped_stack_plot(
                 values,
@@ -115,7 +139,7 @@ def render_stack(model: StackModel, context: RenderContext) -> str:
                     sum(component.values[index].total for component in model.components)
                     for index in range(len(model.days))
                 ),
-                text_rows=1 + int(show_legend) + len(summary.splitlines()),
+                text_rows=text_rows,
             )
         else:
             tick_positions, y_labels = _stack_tick_spec(values, normalized=normalized)
@@ -128,17 +152,14 @@ def render_stack(model: StackModel, context: RenderContext) -> str:
                 component_marks=component_marks,
                 colors=colors,
                 context=context,
+                text_rows=text_rows,
             )
-        legend_marks = (
-            ("#", "=", "+", ":", "%", "@")[: len(model.components)]
-            if context.ascii
-            else ("█", "■", "●", "◆", "✚", "•")[: len(model.components)]
-        )
-        legend = [
-            f"{colored_mark(mark, color, context)} {label}"
-            for mark, label, color in zip(legend_marks, labels, colors, strict=True)
-        ]
-        separator = " / " if context.ascii else " · "
+        if context.legend_position == "inside" and legend:
+            chart_rows = chart.splitlines()
+            for index, row in enumerate(legend, start=1 if grouped else 0):
+                if index < len(chart_rows) - 2:
+                    chart_rows[index] = center_text(row, context.width)
+            chart = "\n".join(chart_rows)
         prefix = f"{summary}\n" if summary else ""
-        legend_line = separator.join(legend) if show_legend else ""
+        legend_line = "\n".join(legend) if context.legend_position == "below-title" else ""
         return "\n".join(line for line in (prefix.rstrip(), heading, legend_line, chart) if line)

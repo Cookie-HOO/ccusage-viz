@@ -19,7 +19,6 @@ from ccusage_viz.render.ranking_description import (
     _render_highlighted_description,
     _terminal_link,
     description_visible_text,
-    highlight_ranking_match,
 )
 from ccusage_viz.render.ranking_entries import (
     RankingNumber,
@@ -28,6 +27,7 @@ from ccusage_viz.render.ranking_entries import (
     _matches_search,
     _refresh_markers,
 )
+from ccusage_viz.render.ranking_labels import ranking_label
 from ccusage_viz.render.ranking_viewport import RankingColumns
 from ccusage_viz.trends import trend_glyph
 
@@ -62,6 +62,7 @@ def render_historical_ranking(
     measure_only: bool = False,
     entries_matched: bool = False,
     matched_entry_count: int | None = None,
+    band_legend: Sequence[str] = (),
 ) -> str:
     """Render rows and ccuv-owned comparison markers from raw values only."""
     total_entry_count = len(entries) if total_entry_count is None else total_entry_count
@@ -128,7 +129,15 @@ def render_historical_ranking(
         marker_width = display_width(marker)
         text_width = max(1, width - marker_width)
         text = truncate_width(
-            highlight_ranking_match(label, search_query, context=context), text_width
+            ranking_label(
+                label,
+                entry,
+                context,
+                query=search_query,
+                pending=pending,
+                comparison_available=comparison_available,
+            ),
+            text_width,
         )
         return pad_width(f"{text}{marker}", width)
 
@@ -150,6 +159,7 @@ def render_historical_ranking(
     # Summary facts remain a left-aligned preamble; the chart's title is centered
     # independently of it so both native and Custom Dataset rankings share chrome.
     lines = [line for line in (summary, center_text(heading, context.width)) if line]
+    lines.extend(band_legend)
     if search_query or search_editing:
         lines.append(
             context.translator.text(
@@ -192,7 +202,7 @@ def render_historical_ranking(
     for (rank, entry), label, value in zip(ranked_entries, labels, values, strict=True):
         rank_marker, activity, value_marker = (
             (" ", " ", " ")
-            if measure_only or list_style
+            if measure_only
             else _refresh_markers(
                 entry,
                 context=context,
@@ -200,17 +210,47 @@ def render_historical_ranking(
                 rank_deltas=rank_deltas,
             )
         )
+        activity = " "
+        if list_style:
+            # List stays intentionally sparse: retain only the value-change
+            # signal shared with other Ranking styles, not activity/rank hints.
+            rank_marker, activity = " ", " "
         value_delta = None
         rank_delta = None
         if (
-            comparison_visible
+            (comparison_visible or list_style)
+            and comparison_available
             and not pending
             and entry.comparison_ready
             and entry.previous is not None
             and not entry.is_other
         ):
             value_delta = entry.current - entry.previous
-            rank_delta = (entry.previous_rank or prior_rank.get(entry.key, rank)) - rank
+            if comparison_visible:
+                rank_delta = (entry.previous_rank or prior_rank.get(entry.key, rank)) - rank
+        if list_style:
+            # Prefer changes since the last primary refresh. A Dataset can
+            # disable period comparisons entirely while its live totals change.
+            # With no refresh sample, retain the period comparison direction.
+            change = deltas.get(entry.key) if entry.key in deltas else value_delta
+            value_marker = (
+                styled_text(
+                    "-" if change == 0 else trend_glyph(change, ascii=context.ascii),
+                    scheme.trend_increase
+                    if change > 0
+                    else scheme.trend_decrease
+                    if change < 0
+                    else scheme.trend_neutral,
+                    context,
+                    bold=change != 0,
+                )
+                if change is not None
+                and not pending
+                and not context.pending
+                and not entry.is_other
+                and not measure_only
+                else " "
+            )
         is_new_entry = (
             show_new_entries
             and comparison_visible
@@ -258,9 +298,7 @@ def render_historical_ranking(
                 )
             )
         share = (
-            f"{entry.current / total:>5.1%}"
-            if show_percentage and total and not pending and not list_style
-            else ""
+            f"{entry.current / total:>5.1%}" if show_percentage and total and not pending else ""
         )
         rows.append(
             (
@@ -283,42 +321,77 @@ def render_historical_ranking(
         current_heading = context.translator.text("label.ranking_column_current")
         rank_column_width = rank_width
         desired_current_width = max(
-            display_width(current_heading), *(display_width(row[3]) for row in rows)
+            display_width(current_heading),
+            *(display_width(row[3]) + 2 for row in rows),
         )
         if columns is not None:
             desired_current_width = columns.width("current", desired_current_width)
         # Keep a readable label available even when a Dataset supplies an
         # oversized value display. The rank and two separators are fixed list
         # geometry.
-        label_minimum = min(8, max(1, context.width - rank_column_width - 3))
+        share_width = (
+            max(
+                display_width(context.translator.text("label.ranking_column_share")),
+                *(display_width(row[9]) for row in rows),
+            )
+            if show_percentage
+            else 0
+        )
+        if columns is not None and show_percentage:
+            share_width = columns.width("share", share_width)
+        share_width = min(share_width, max(1, context.width // 4))
+        share_space = share_width + 1 if show_percentage else 0
+        label_minimum = min(8, max(1, context.width - rank_column_width - share_space - 3))
         current_width = min(
             desired_current_width,
-            max(1, context.width - rank_column_width - label_minimum - 2),
+            max(1, context.width - rank_column_width - label_minimum - share_space - 2),
         )
         if columns is not None:
             columns.width("current", current_width)
             columns.width("right", current_width)
-        label_width = max(1, context.width - rank_column_width - current_width - 2)
+        label_width = max(1, context.width - rank_column_width - current_width - share_space - 2)
         header = (
             f"{pad_width(truncate_width(rank_heading, rank_width), rank_width, align='right')} "
             f"{pad_width(truncate_width(project_heading, label_width), label_width)} "
             f"{pad_width(truncate_width(current_heading, current_width), current_width, align='right')}"
         )
+        if show_percentage:
+            header += " " + pad_width(
+                truncate_width(context.translator.text("label.ranking_column_share"), share_width),
+                share_width,
+                align="right",
+            )
         lines.append(clip_width(header, context.width))
         if columns is not None:
             columns.description_width = max(1, label_width)
         if measure_only:
             return "\n".join(lines)
-        for rank, entry, label, value, *_rest in rows:
+        for (
+            rank,
+            entry,
+            label,
+            value,
+            _rank_marker,
+            _activity,
+            value_marker,
+            _delta,
+            _rank_change,
+            share,
+        ) in rows:
             rank_prefix = f"{rank:>{rank_width}} "
             # A description belongs beneath the label, not beneath the rank.
             # Derive its indent from the rendered rank prefix's display width
             # so ANSI styling in the description cannot affect its column.
             label_indent = " " * display_width(rank_prefix)
+            current = f"{value} {value_marker}"
             row = (
                 f"{rank_prefix}{formatted_label(entry, label, label_width)} "
-                f"{pad_width(truncate_width(value, current_width), current_width, align='right')}"
+                f"{pad_width(truncate_width(current, current_width), current_width, align='right')}"
             )
+            if show_percentage:
+                row += " " + pad_width(
+                    truncate_width(share, share_width), share_width, align="right"
+                )
             lines.append(clip_width(row, context.width))
             if descriptions_visible and context.density != "minimal" and entry.description:
                 description = description_visible_text(entry.description)
@@ -340,7 +413,7 @@ def render_historical_ranking(
             context.translator.text("label.ranking_column_share") if show_percentage else ""
         )
         rank_change_heading = context.translator.text("label.ranking_column_rank_change")
-        rank_column_width = max(rank_width + 4, display_width(rank_heading))
+        rank_column_width = max(rank_width + 2, display_width(rank_heading))
         delta_width = (
             max(display_width(delta_heading), *(display_width(row[7]) for row in rows))
             if growth_visible
@@ -391,7 +464,7 @@ def render_historical_ranking(
                 ),
             ]
         else:
-            fixed_width = rank_column_width + current_width + optional_width + 4 + optional_count
+            fixed_width = rank_column_width + current_width + optional_width + 2 + optional_count
             available = max(2, context.width - fixed_width)
             label_width = min(label_width, max(1, available - 2))
             bar_width = max(1, available - label_width - 1)
@@ -432,7 +505,7 @@ def render_historical_ranking(
             label,
             value,
             rank_marker,
-            activity,
+            _activity,
             value_marker,
             delta,
             rank_comparison,
@@ -454,8 +527,8 @@ def render_historical_ranking(
             else:
                 mark = colored_mark(full * length, color, context) + empty * (bar_width - length)
             label = formatted_label(entry, label, label_width)
-            rank_value = f"{rank:>{rank_width}} {rank_marker} {activity}"
-            current = f"{value} {value_marker}" if value_marker.strip() else value
+            rank_value = f"{rank:>{rank_width}} {rank_marker}"
+            current = f"{value} {value_marker}"
             fields = [
                 pad_width(rank_value, rank_column_width, align="right"),
                 label,
@@ -507,25 +580,25 @@ def render_historical_ranking(
     )
     if columns is not None:
         desired_right_width = columns.width("right", desired_right_width)
-        columns.description_width = max(1, context.width - min(context.width, rank_width + 5))
+        columns.description_width = max(1, context.width - min(context.width, rank_width + 3))
     if measure_only:
         return "\n".join(lines)
     # Keep all three columns within even a narrow viewport. At practical widths
     # this retains the usual eight-cell label and track minimums; when space is
     # scarce it contracts the columns together instead of letting a long
     # Dataset-owned display string push the row beyond the terminal edge.
-    # The row has rank/status (``rank_width + 5``) plus two separators.
-    content_width = max(3, context.width - rank_width - 7)
+    # The row has rank plus one stable rank-change slot and two separators.
+    content_width = max(3, context.width - rank_width - 5)
     right_width = min(desired_right_width, max(1, content_width - 2))
     label_width = min(label_width, max(1, content_width - right_width - 1))
-    bar_width = max(1, content_width - label_width - right_width - 1)
+    bar_width = max(1, content_width - label_width - right_width)
     for (
         rank,
         entry,
         label,
         value,
         rank_marker,
-        activity,
+        _activity,
         value_marker,
         _delta,
         _rank_comparison,
@@ -549,30 +622,31 @@ def render_historical_ranking(
         else:
             mark = colored_mark(full * length, color, context) + empty * (bar_width - length)
         label = formatted_label(entry, label, label_width)
-        right = truncate_width(
-            f"{value} {value_marker}{share if show_percentage else ''}", right_width
-        )
+        right_text = f"{value} {value_marker}"
+        if show_percentage and share:
+            right_text += f" {share}"
+        right = truncate_width(right_text, right_width)
         if context.style == "list":
             # Center the fixed-width row as a column grid, rather than each
             # row's visible content, so labels and values retain one vertical
             # alignment across the list.
-            list_width = rank_width + 5 + label_width + 1 + right_width
+            list_width = rank_width + 3 + label_width + 1 + right_width
             list_row = (
-                f"{rank:>{rank_width}} {rank_marker} {activity} {label} "
+                f"{rank:>{rank_width}} {rank_marker} {label} "
                 f"{pad_width(right, right_width, align='right')}"
             )
             lines.append(" " * max(0, (context.width - list_width) // 2) + list_row)
         else:
             lines.append(
                 pad_width(
-                    f"{rank:>{rank_width}} {rank_marker} {activity} {label} {mark} "
+                    f"{rank:>{rank_width}} {rank_marker} {label} {mark} "
                     f"{pad_width(right, right_width, align='right')}",
                     context.width,
                 )
             )
         if descriptions_visible and context.density != "minimal" and entry.description:
             # Keep explanations aligned with the label column, not the chart track.
-            indent = " " * min(context.width, rank_width + 5)
+            indent = " " * min(context.width, rank_width + 3)
             available = max(1, context.width - display_width(indent))
             description = description_visible_text(entry.description)
             description_rows = wrap_width(description, available)
