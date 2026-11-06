@@ -235,7 +235,7 @@ def render_historical_ranking(
             change = deltas.get(entry.key) if entry.key in deltas else value_delta
             value_marker = (
                 styled_text(
-                    "-" if change == 0 else trend_glyph(change, ascii=context.ascii),
+                    "-" if change == 0 else trend_glyph(float(change), ascii=context.ascii),
                     scheme.trend_increase
                     if change > 0
                     else scheme.trend_decrease
