@@ -356,7 +356,13 @@ def apply_dashboard_state(session: TuiSession, state: DashboardState) -> None:
             isinstance(config, EmptyPaneConfig)
             and isinstance(pane, TuiEmptyPane)
             or (isinstance(config, AnimationPaneConfig) and isinstance(pane, TuiAnimationPane))
-            or (isinstance(config, CustomChartPaneConfig) and isinstance(pane, TuiCustomPane))
+            or (
+                isinstance(config, CustomChartPaneConfig)
+                and isinstance(pane, TuiCustomPane)
+                and config.chart.source == pane.component.candidate.source
+                and (config.chart.kind == "monitor")
+                == isinstance(pane.component, CustomMonitorComponent)
+            )
             or (
                 isinstance(config, ChartPaneConfig)
                 and isinstance(pane, TuiChartPane)
