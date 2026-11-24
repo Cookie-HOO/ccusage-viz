@@ -84,6 +84,8 @@ ccuv chart monitor --dataset router --metric tokens
 
 通过 `ccuv dataset` 的详情查看每个 Metric 支持哪些图。历史 Metric 可以支持 Timeline、Calendar、Stack、Ranking 的任意组合；只有声明 Monitor capability 的 Metric 才能运行 Monitor。
 
+Custom Timeline 与 Stack 的纵轴遵循 Ranking 相同的 Metric 格式策略：`sum_format: "number"` 默认使用 K/M/B 紧凑标签，不依赖单位 ID；`duration-minute` / `duration-second` 则显示自然时长。数值精度遵循 Unit 声明，轴标签不重复附加单位名称，以保留绘图空间。单条 total 序列使用主题的第一个分类色，不改变分组序列的稳定配色。Metric 标题仍由 Dataset 提供（例如 Router Token 数），不会替换成内置图身份。Pane 摘要以及按终端显示宽度换行的本地化警告会在绘图前预留高度，使日期轴保持在可用图表区域内。
+
 当 Dataset 声明 Metric Group 时，交互式 Dataset 选择器会显示本地化的 Group 标题，并把成员 Metric 缩进到标题下；空 Group 不显示。未加入 Group 的 Metric 仍在所有 Group 后平铺显示。未声明 Group 的 Dataset 保持原有平铺选择器。窄选择器中向上导航会先显示被裁掉的组标题，再让选择回绕，以保留当前 Metric 的上下文。
 
 在已选中的 Custom 图 Pane 内，`m` 和 `M` 会在当前 Group 中支持当前图表类型的 Metric 间前后循环。ccuv 会保留当前查询选择；如果下一个 Metric 的声明 capability 不接受当前 period、group 或 granularity，则保持当前 Metric 并显示短暂警告。成功切换后替换已选 Metric；目标请求失败时保持此前的图或 Monitor 选中。

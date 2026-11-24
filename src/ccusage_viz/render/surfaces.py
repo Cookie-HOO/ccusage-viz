@@ -150,7 +150,6 @@ class _StandaloneSurface:
         controls: SurfaceControls = EMPTY_SURFACE_CONTROLS,
         reserved_summary_rows: int = 0,
     ) -> RenderContext:
-        del reserved_summary_rows
         if presentation.kind != self.kind:
             raise ValueError(f"{self.kind} standalone surface cannot render {presentation.kind}")
         # Status/footer belongs to the standalone surface. Its operation bar and
@@ -162,6 +161,7 @@ class _StandaloneSurface:
             - controls.row_count
             - int(controls.reserves_prompt)
             - int(presentation.audit_row_visible)
+            - reserved_summary_rows
         )
         return _context(
             terminal,

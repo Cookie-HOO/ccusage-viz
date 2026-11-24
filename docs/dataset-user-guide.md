@@ -133,6 +133,16 @@ Use `ccuv dataset` details to see which chart kinds each Metric supports. A
 historical Metric may support Timeline, Calendar, Stack, and/or Ranking.
 Monitor is only available when that Metric declares Monitor capability.
 
+Custom Timeline and Stack axes follow the same Metric formatting policy as
+Ranking: `sum_format: "number"` defaults to compact K/M/B labels regardless of
+unit ID, while `duration-minute` and `duration-second` show natural durations.
+Numeric precision follows the declared Unit; axis labels omit the repeated Unit
+label to preserve plotting space. A sole total series uses the theme's first
+categorical color, without changing grouped-series color identities. Dataset
+Metric titles remain source-owned (for example, Router Token Count). Pane
+summaries and localized, display-width-wrapped warnings reserve space before the
+plot is sized, keeping the date axis inside the available chart area.
+
 When a Dataset declares Metric Groups, the interactive Dataset picker shows a
 localized Group heading and indents its Metrics below it. Empty Groups are not
 shown. Metrics without a Group remain flat entries after all Groups. A Dataset
