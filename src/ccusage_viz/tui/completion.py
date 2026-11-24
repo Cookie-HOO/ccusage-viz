@@ -386,6 +386,7 @@ def collect(session: TuiSession) -> bool:
                         if display_window is not None:
                             pane.component.configure_display_window(display_window)
                     elif isinstance(response, V2ProbeResponse):
+                        pane.component.v2_descriptor = response.descriptor
                         resolved = resolve_metric(pane.component.candidate, response.descriptor)
                         descriptor = v2_metric_probe_descriptor(
                             response.descriptor, resolved.metric_id
@@ -408,6 +409,7 @@ def collect(session: TuiSession) -> bool:
                     if isinstance(pane.component, CustomHistoricalComponent) and isinstance(
                         response, CustomProbeResponse
                     ):
+                        pane.component.v2_descriptor = None
                         pane.component.configure(
                             apply_custom_probe_defaults(
                                 pane.component.candidate,
