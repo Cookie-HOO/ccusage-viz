@@ -163,24 +163,37 @@ def _value(value: Decimal, projection: CustomProjection, context: RenderContext)
     )
 
 
-def _custom_axis_value(value: Decimal, projection: CustomChartProjection) -> str:
-    quantum = Decimal(1).scaleb(-projection.unit.decimal_places)
-    return format(value.quantize(quantum), f".{projection.unit.decimal_places}f")
+def _custom_axis_value(
+    value: Decimal, projection: CustomChartProjection, context: RenderContext
+) -> str:
+    return format_custom_value(
+        value,
+        projection.unit,
+        language=context.translator.language,
+        sum_format=projection.sum_format,
+        include_unit=False,
+    )
 
 
 def _custom_timeline_heading(projection: CustomChartProjection, context: RenderContext) -> str:
     return _heading(projection, context)
 
 
+def _custom_y_tick_spec(
+    values: list[Decimal], projection: CustomChartProjection, context: RenderContext
+) -> tuple[list[Decimal], list[str]]:
+    # Keep tick geometry in Decimal, independent of unit IDs and display policy.
+    # Only labels use the same Metric formatter as Ranking.
+    maximum = max(values, default=Decimal())
+    positions = [Decimal()] if maximum <= 0 else [maximum * index / 4 for index in range(5)]
+    return positions, [_custom_axis_value(position, projection, context) for position in positions]
+
+
 def _configure_custom_y_ticks(
     values: list[Decimal], projection: CustomChartProjection, context: RenderContext
 ) -> None:
-    maximum = max(values, default=Decimal())
-    positions = [Decimal()] if maximum <= 0 else [maximum * index / 4 for index in range(5)]
-    plt.figure.ruler("y").ticks(
-        [float(position) for position in positions],
-        [_custom_axis_value(position, projection) for position in positions],
-    )
+    positions, labels = _custom_y_tick_spec(values, projection, context)
+    plt.figure.ruler("y").ticks([float(position) for position in positions], labels)
 
 
 def render_custom_pending(
@@ -235,8 +248,6 @@ def render_custom_timeline(projection: CustomChartProjection, context: RenderCon
     )
     summary = _summary(projection, context)
     values = [value for series in projection.series for value in series.values]
-    maximum = max(values, default=Decimal())
-    y_positions = [Decimal()] if maximum <= 0 else [maximum * index / 4 for index in range(5)]
     plot = render_timeline_plot(
         tuple(
             TimelinePresentationSeries(
@@ -249,10 +260,7 @@ def render_custom_timeline(projection: CustomChartProjection, context: RenderCon
         ),
         x_values=tuple(range(len(projection.days))),
         x_ticks=date_ticks(projection.days, context, aggregation=projection.granularity),
-        y_ticks=(
-            y_positions,
-            [_custom_axis_value(position, projection) for position in y_positions],
-        ),
+        y_ticks=_custom_y_tick_spec(values, projection, context),
         context=context,
         text_rows=(
             len(summary.splitlines())
@@ -289,9 +297,7 @@ def _custom_stack_ticks(
         sum((component[index] for component in values), start=Decimal())
         for index in range(len(values[0]))
     ]
-    maximum = max(totals, default=Decimal())
-    positions = [Decimal()] if maximum <= 0 else [maximum * index / 4 for index in range(5)]
-    return positions, [_value(position, projection, context) for position in positions]
+    return _custom_y_tick_spec(totals, projection, context)
 
 
 def render_custom_stack(projection: CustomChartProjection, context: RenderContext) -> str:
@@ -309,6 +315,8 @@ def render_custom_stack(projection: CustomChartProjection, context: RenderContex
         colors = categorical_colors(
             (item.id for item in projection.series if not item.is_other), context.color_scheme
         )
+        if len(projection.series) == 1 and projection.series[0].id == "total":
+            colors["total"] = scheme.total
         summary = _summary(projection, context)
         legend = (
             legend_rows(

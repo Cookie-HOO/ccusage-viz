@@ -45,7 +45,6 @@ from ccusage_viz.processing.custom_ranking import process_custom_ranking
 from ccusage_viz.render import custom
 from ccusage_viz.render.base import RenderContext
 from ccusage_viz.render.custom import render_custom_projection
-from ccusage_viz.render.palette import categorical_color
 from ccusage_viz.render.ranking_description import copyable_description_text
 from ccusage_viz.render.timeline_presentation import TimelinePlot
 
@@ -589,7 +588,9 @@ def test_custom_timeline_matches_native_total_palette_identity() -> None:
 
     output = render_custom_projection(projection, context)
 
-    assert f"\x1b[38;5;{categorical_color('total')}m" in output
+    from ccusage_viz.render.palette import get_color_scheme
+
+    assert f"\x1b[38;5;{get_color_scheme('classic').total}m" in output
     assert "pages" not in strip_ansi(output).splitlines()[0]
 
 

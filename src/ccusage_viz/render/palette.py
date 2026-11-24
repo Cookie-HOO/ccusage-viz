@@ -21,6 +21,11 @@ class ColorScheme:
     highlight: Color
 
     @property
+    def total(self) -> Color:
+        """Canonical ungrouped total, independent of domain series key encoding."""
+        return self.categorical[0]
+
+    @property
     def summary_value(self) -> Color:
         return self.highlight
 

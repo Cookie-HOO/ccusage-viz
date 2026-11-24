@@ -72,7 +72,9 @@ def render_timeline_plot(
     )
 
     def color_for(item: TimelinePresentationSeries) -> int:
-        return scheme.other if item.is_other else colors[item.color_key]
+        if item.is_other:
+            return scheme.other
+        return scheme.total if sole_total else colors[item.color_key]
 
     def legend_mark(index: int, item: TimelinePresentationSeries) -> str:
         if uniform_points:
