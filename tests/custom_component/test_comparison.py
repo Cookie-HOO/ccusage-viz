@@ -238,7 +238,9 @@ def test_custom_ranking_hides_unavailable_comparison_columns_and_labels_new_entr
 
     assert "vs prior" not in unavailable
     assert "Rank Δ" not in unavailable
-    assert "vs prior 14d" in partial
+    assert "vs prior 14d" not in partial
+    assert "Rank Δ" not in partial
+    assert "+2.00 pages" in next(line for line in partial.splitlines() if "api" in line)
     assert "New" in next(line for line in partial.splitlines() if "app" in line)
     assert "New in ranking" in next(line for line in partial.splitlines() if "app" in line)
     assert "New" not in next(line for line in partial.splitlines() if "Other" in line)

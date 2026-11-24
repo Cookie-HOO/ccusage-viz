@@ -316,8 +316,6 @@ def render_historical_ranking(
         )
 
     if list_style:
-        rank_heading = context.translator.text("label.ranking_column_rank")
-        project_heading = context.translator.text("label.ranking_column_project")
         current_heading = context.translator.text("label.ranking_column_current")
         rank_column_width = rank_width
         desired_current_width = max(
@@ -350,18 +348,7 @@ def render_historical_ranking(
             columns.width("current", current_width)
             columns.width("right", current_width)
         label_width = max(1, context.width - rank_column_width - current_width - share_space - 2)
-        header = (
-            f"{pad_width(truncate_width(rank_heading, rank_width), rank_width, align='right')} "
-            f"{pad_width(truncate_width(project_heading, label_width), label_width)} "
-            f"{pad_width(truncate_width(current_heading, current_width), current_width, align='right')}"
-        )
-        if show_percentage:
-            header += " " + pad_width(
-                truncate_width(context.translator.text("label.ranking_column_share"), share_width),
-                share_width,
-                align="right",
-            )
-        lines.append(clip_width(header, context.width))
+
         if columns is not None:
             columns.description_width = max(1, label_width)
         if measure_only:
@@ -405,8 +392,6 @@ def render_historical_ranking(
 
     if comparison_visible:
         rank_heading = context.translator.text("label.ranking_column_rank")
-        project_heading = context.translator.text("label.ranking_column_project")
-        scale_heading = context.translator.text("label.ranking_column_scale")
         current_heading = context.translator.text("label.ranking_column_current")
         delta_heading = _comparison_heading(context)
         share_heading = (
@@ -456,43 +441,12 @@ def render_historical_ranking(
             fixed_width = rank_column_width + current_width + optional_width + 2 + optional_count
             label_width = min(label_width, max(1, context.width - fixed_width))
             bar_width = 0
-            header_fields = [
-                pad_width(rank_heading, rank_column_width, align="right"),
-                pad_width(truncate_width(project_heading, label_width), label_width),
-                pad_width(
-                    truncate_width(current_heading, current_width), current_width, align="right"
-                ),
-            ]
         else:
             fixed_width = rank_column_width + current_width + optional_width + 2 + optional_count
             available = max(2, context.width - fixed_width)
             label_width = min(label_width, max(1, available - 2))
             bar_width = max(1, available - label_width - 1)
-            header_fields = [
-                pad_width(rank_heading, rank_column_width, align="right"),
-                pad_width(truncate_width(project_heading, label_width), label_width),
-                pad_width(truncate_width(scale_heading, bar_width), bar_width),
-                pad_width(
-                    truncate_width(current_heading, current_width), current_width, align="right"
-                ),
-            ]
-        if growth_visible:
-            header_fields.append(
-                pad_width(truncate_width(delta_heading, delta_width), delta_width, align="right")
-            )
-        if rank_comparison_visible:
-            header_fields.append(
-                pad_width(
-                    truncate_width(rank_change_heading, rank_change_width),
-                    rank_change_width,
-                    align="right",
-                )
-            )
-        if show_percentage:
-            header_fields.append(
-                pad_width(truncate_width(share_heading, share_width), share_width, align="right")
-            )
-        lines.append(clip_width(" ".join(header_fields), context.width))
+
         if columns is not None:
             columns.description_width = max(
                 1, context.width - min(context.width, rank_column_width + 1)

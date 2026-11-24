@@ -430,7 +430,11 @@ def test_grouped_custom_ranking_rank_mode_suppresses_group_value_delta() -> None
     )
 
     assert "+2 requests" not in output
-    assert "Rank Δ" in output
+    assert "Rank Δ" not in output and "Current" not in output and "vs prior" not in output
+    coding_row = next(line for line in output.splitlines() if "coding-a" in line)
+    general_row = next(line for line in output.splitlines() if "general-a" in line)
+    assert "New in ranking" in coding_row
+    assert "New in ranking" in general_row
 
 
 def test_grouped_custom_ranking_handles_empty_zero_signed_and_hidden_shares() -> None:

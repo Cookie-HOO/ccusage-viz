@@ -373,7 +373,7 @@ def test_historical_ranking_description_starts_with_its_label_column() -> None:
         context=context,
         descriptions_visible=True,
     )
-    _heading, _columns, primary, description, *_rest = output.splitlines()
+    _heading, primary, description, *_rest = output.splitlines()
 
     label_start = primary.index("A")
     assert description.index("First item description.") == label_start

@@ -18,16 +18,14 @@ def test_historical_ranking_list_keeps_label_and_value_columns_aligned() -> None
         summary="Today Units 15",
         show_percentage=False,
     )
-    summary, heading, header, *rows = output.splitlines()
+    summary, heading, *rows = output.splitlines()
 
     assert summary == "Today Units 15"
     assert heading.strip() == "Ranking"
-    assert "Current" in header
-    assert "Scale" not in header
-    project_start = header.index("Project")
-    current_start = header.index("Current")
-    assert rows[0].index("A") == project_start
-    assert rows[0].index("10") + len("10") == current_start + len("Current") - 2
+    assert "Current" not in output and "Scale" not in output and "Project" not in output
+    assert len(rows) == 2
+    assert rows[0].index("A") == rows[1].index("A much longer")
+    assert rows[0].index("10") + len("10") == rows[1].index("five units") + len("five units")
     assert "A" in rows[0]
     assert "A much longer" in rows[1]
     assert rows[0].endswith("10  ")
@@ -67,7 +65,8 @@ def test_historical_ranking_list_prioritizes_labels_and_keeps_only_value_change(
         total=10,
         show_percentage=False,
     )
-    header, row = output.splitlines()[1:]
+    heading, row = output.splitlines()
+    assert heading.strip() == "Ranking"
 
     assert row.startswith(" 1 ")
     assert "a deliberately long project label" in row
@@ -75,7 +74,7 @@ def test_historical_ranking_list_prioritizes_labels_and_keeps_only_value_change(
     assert row.endswith("10 ^")
     assert "*" not in output
     assert "vs prior" not in output and "Rank Δ" not in output and "%" not in output
-    assert "Current" in header and "Scale" not in header
+    assert "Current" not in output and "Scale" not in output
 
 
 def test_historical_ranking_list_keeps_native_compactable_labels_and_fits_wide_value() -> None:
@@ -99,8 +98,9 @@ def test_historical_ranking_list_keeps_native_compactable_labels_and_fits_wide_v
         value_formatter=str,
         context=narrow_context,
     )
-    _heading, _header, *wide_rows = wide_output.splitlines()
-    _heading, _header, *narrow_rows = narrow_output.splitlines()
+    _heading, *wide_rows = wide_output.splitlines()
+    _heading, *narrow_rows = narrow_output.splitlines()
+    assert len(wide_rows) == len(narrow_rows) == 3
 
     assert all("…" not in row for row in wide_rows)
     assert all("prefix/shared-project-" in row and " | native" in row for row in wide_rows)
