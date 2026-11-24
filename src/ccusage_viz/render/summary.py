@@ -204,6 +204,7 @@ def format_custom_value(
     *,
     language: str,
     sum_format: str = "number",
+    include_unit: bool = True,
 ) -> str:
     """Format a Dataset fallback value according to its Metric sum policy.
 
@@ -226,6 +227,8 @@ def format_custom_value(
         rendered = format(
             value.quantize(quantum, rounding=ROUND_HALF_UP), f".{unit.decimal_places}f"
         )
+    if not include_unit:
+        return rendered
     label = unit.label.zh_cn if language == "zh" else unit.label.en
     return f"{label}{rendered}" if unit.placement == "prefix" else f"{rendered} {label}"
 
