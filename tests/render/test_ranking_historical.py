@@ -255,17 +255,17 @@ def test_historical_ranking_derives_comparison_markers_from_entry_facts() -> Non
 
     output = render_ranking(model, context(True))
 
-    header = next(line for line in output.splitlines() if "Rank Δ" in line)
+    assert "Rank Δ" not in output and "vs prior" not in output and "Current" not in output
+    assert len(output.splitlines()) == 3
     api_line = next(line for line in output.splitlines() if "api" in line)
     app_line = next(line for line in output.splitlines() if "app" in line)
-    assert "vs prior" in header
     assert "+200" in api_line
     assert "^" in api_line
     assert "-100" in app_line
     assert "v" in app_line
 
 
-def test_historical_ranking_full_uses_labeled_value_delta_without_rank_comparison() -> None:
+def test_historical_ranking_full_uses_value_delta_without_headers_or_rank_comparison() -> None:
     entries = (
         RankingPresentationEntry(
             "api", "api", 300, previous=100, comparison_ready=True, previous_rank=2
@@ -285,10 +285,10 @@ def test_historical_ranking_full_uses_labeled_value_delta_without_rank_compariso
         ),
         total=420,
     )
-    header, api, app, other = output.splitlines()[1:]
+    heading, api, app, other = output.splitlines()
 
-    assert "Rank" in header and "Current" in header and "vs prior" in header
-    assert "Rank Δ" not in header
+    assert heading.strip() == "Ranking"
+    assert "Current" not in output and "vs prior" not in output and "Rank Δ" not in output
     assert "+200" in api and "^" not in api
     assert "-100" in app and "v" not in app
     assert "—" in other
@@ -334,9 +334,9 @@ def test_historical_ranking_rank_comparison_hides_growth_but_retains_rank_delta(
         comparison_mode="rank",
     )
 
-    header, api, app = output.splitlines()[1:]
-    assert "vs prior" not in header
-    assert "Rank Δ" in header
+    heading, api, app = output.splitlines()
+    assert heading.strip() == "Ranking"
+    assert "vs prior" not in output and "Rank Δ" not in output and "Current" not in output
     assert "+200" not in api and "-100" not in app
     assert "^" in api and "v" in app
 
@@ -438,7 +438,8 @@ def test_ranking_dots_style_repeats_marks_to_the_scaled_value() -> None:
     )
 
     lines = output.splitlines()
-    rows = lines[2:]
+    rows = lines[1:]
+    assert len(rows) == 2
     assert rows[0].count("●") > 1
     assert rows[1].count("●") > 1
     assert "·" in rows[1]
@@ -457,14 +458,14 @@ def test_historical_ranking_aligns_tracks_and_right_value_column(style: str) -> 
         context=context,
         summary="Today Units 15",
     )
-    summary, heading, header, *rows = output.splitlines()
+    summary, heading, *rows = output.splitlines()
+    assert len(rows) == 2
 
     track_marks = {"dot": ("●", "·"), "dots": ("●", "·"), "bars": ("█", "░")}[style]
     track_starts = [min(row.index(mark) for mark in track_marks if mark in row) for row in rows]
     assert summary == "Today Units 15"
     assert heading.strip() == "Ranking"
-    assert "Current" in header
-    assert "vs prior" in header
+    assert "Current" not in output and "vs prior" not in output and "Rank Δ" not in output
     assert len(heading) - len(heading.lstrip()) == (context.width - display_width("Ranking")) // 2
     assert track_starts[0] == track_starts[1]
     assert "10" in rows[0] and "—" in rows[0] and rows[0].endswith("66.7%")
@@ -486,7 +487,8 @@ def test_historical_ranking_deemphasizes_fixed_project_buckets_like_other() -> N
         model, RenderContext(80, 24, load_translator("en"), color=True, style="dot")
     )
 
-    rows = output.splitlines()[2:]
+    rows = output.splitlines()[1:]
+    assert len(rows) == 3
     assert f"\x1b[38;5;{scheme.highlight}m●" in rows[0]
     assert f"\x1b[38;5;{scheme.other}m●" in rows[1]
     assert f"\x1b[38;5;{scheme.other}m●" in rows[2]
