@@ -6,6 +6,53 @@
 - **次版本（`0.x.0`）**：`1.0` 前重大的新面向用户能力或数据源集成。
 - 在 `1.0` 前，公开接口仍可能在各个版本之间变化。
 
+## 0.4.2
+
+`0.4.2` 是补丁版本，改进 Dataset 图表呈现，修复 Custom Pane 生命周期与查询行为。
+不增加 collector，不改变内置 Token 计算、数值排序或 Dataset 提供的 Metric 标题。
+
+### Dataset Ranking 默认值
+
+- V2 Metric 可用 `defaults.ranking.label_color_mode` 建议初始标签着色模式，接受
+  `change`、`increase`、`decrease`、`direction`、`band`、`none`。例如
+  `{"defaults": {"ranking": {"label_color_mode": "band"}}}` 建议使用语义分段着色，
+  但不提供 RGB 颜色或分类阈值；
+- 字段可选且仅用于 Ranking；无效值或其他图表类型中的声明会被忽略。
+  仅返回 `data.bands` 不会自动启用分段着色；
+- 显式 CLI 参数、已保存 preset 的模式及本地 Advanced `C` 选择优先。
+  同 Group Metric 成功切换时，仅继承模式跟随目标默认值，目标省略时回到 `change`。
+  切换失败保留旧模式；切换请求期间的用户修改也会保留。
+  替换图表类型会创建新 Pane 并应用对应启动默认值。
+
+### 渲染与布局
+
+- Custom Timeline 与 Stack 纵轴复用 Ranking 的 Metric fallback 格式：普通数值
+  使用十进制 K/M/B 和声明精度，`duration-minute` / `duration-second` 使用本地化
+  自然时长。轴标签不重复附加单位名称；Decimal 刻度位置独立于展示格式，
+  舍入统一使用 half-up；
+- 内置与 Custom Timeline、Custom Stack 的单条 total 序列统一使用主题的首个分类色，
+  非 total 和分组序列保持稳定分类配色；
+- 摘要、本地化换行警告和错误消息在绘图前预留空间，矮 Timeline 子图保留日期轴。
+  独立 Custom 图表也显示响应警告，audit 行前不再多出空白行；
+- 历史 Ranking 的 list 和比较视图移除列标题行，覆盖内置、Custom、平铺与分区图。
+  数值、变化量、排名箭头、占比、描述及对齐仍保留，视口不再预留不存在的表头行。
+  这是可见布局变化，不改变排序事实或比较语义。
+
+### Custom Pane 与查询修复
+
+- 历史恢复、preset 加载及撤销/重做在跨 Monitor / 历史图表或切换数据源时，
+  不再错误复用不兼容的 Custom 组件；未受影响的 Pane 保留原组件和稳定身份；
+- V2 运行时 Probe 完成后，在首次图表查询前发布 descriptor，使首次请求即可正确
+  声明 partition capability；V1 Probe 会清除遗留 V2 descriptor。
+
+### 兼容性
+
+`label_color_mode` 是 0.4.2 引入的 `ccuv.custom/v2` 可选扩展，协议标识及请求形状
+保持不变；语义分段事实与 `sum_format` 仍是 0.4.1 引入的可选扩展。
+现有 Dataset 无需修改；旧版读取器可能忽略新增默认值，因此标量数值和标签在没有
+分段着色时也必须完整可用。中英文协议、Dataset 开发者与使用指南已同步记录字段、
+优先级和版本要求。
+
 ## 0.4.1
 
 `0.4.1` 改进 Ranking 展示、统一图例与 Dataset 交互，不改变内置 Token 语义，

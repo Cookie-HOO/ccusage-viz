@@ -6,6 +6,66 @@
 - **Minor (`0.x.0`)**: substantial new user-facing capabilities or source integrations before 1.0.
 - Before `1.0`, public interfaces may still change between releases.
 
+## 0.4.2
+
+`0.4.2` is a patch release refining Dataset chart presentation and fixing Custom
+Pane lifecycle/query behavior. It adds no collector and does not change built-in
+Token calculations, numeric sorting, or Dataset-owned Metric titles.
+
+### Dataset Ranking defaults
+
+- V2 Metrics may suggest an initial label-color mode with
+  `defaults.ranking.label_color_mode`: `change`, `increase`, `decrease`,
+  `direction`, `band`, or `none`. For example,
+  `{"defaults": {"ranking": {"label_color_mode": "band"}}}` suggests semantic
+  band coloring without supplying RGB colors or classification thresholds;
+- the field is optional and Ranking-only. Invalid values and declarations on
+  other chart kinds are ignored. Returning `data.bands` alone never enables
+  band coloring;
+- explicit CLI options, saved preset modes, and local Advanced `C` choices take
+  priority. A successful related-Metric switch follows the target's default only
+  for an inherited mode, reverting to `change` if the target omits it. Failed
+  switches preserve the old mode, including user edits made while a switch is
+  pending. Chart-kind replacement creates a fresh Pane with startup defaults.
+
+### Rendering and layout
+
+- Custom Timeline and Stack axes now use the same Metric fallback formatter as
+  Ranking: ordinary numbers use decimal K/M/B and declared precision, while
+  `duration-minute` / `duration-second` use localized natural durations. Axis
+  labels omit repeated Unit text; Decimal tick positions remain independent of
+  display formatting, with consistent half-up rounding;
+- a sole total series uses the theme's first categorical color for both native
+  and Custom Timeline charts and Custom Stack charts. Non-total/grouped series
+  retain their stable categorical identities;
+- summaries, localized wrapped warnings, and errors reserve space before chart
+  sizing. Short Timeline panes retain their date axis; standalone Custom charts
+  also show response warnings. Audit rows no longer gain a stray blank line;
+- historical Ranking removes column-header rows in list and comparison views,
+  across built-in, Custom, flat, and grouped charts. Values, deltas, rank arrows,
+  shares, descriptions, and alignment remain available, and viewport slicing
+  no longer reserves phantom header rows. This is a visible layout change, not
+  a change to ranking facts or comparison semantics.
+
+### Custom Pane and query fixes
+
+- history restoration, preset loading, and undo/redo no longer reuse an
+  incompatible Custom component across Monitor/historical boundaries or changed
+  sources. Unaffected panes retain their components and stable Pane identities;
+- a completed V2 runtime Probe publishes its descriptor before the first chart
+  query, so partition-capability declarations are correct from the first
+  request. A V1 Probe clears a stale V2 descriptor.
+
+### Compatibility
+
+`label_color_mode` is an optional extension of `ccuv.custom/v2` introduced in
+0.4.2; the protocol identifier and request shapes are unchanged. Semantic band
+facts and `sum_format` remain the optional extensions introduced in 0.4.1.
+Existing Datasets need no changes. Older readers may ignore the new default;
+keep scalar values and labels usable without band coloring. Protocol,
+Dataset developer, and user guides document the field, precedence, and
+version requirements in English and Chinese.
+
 ## 0.4.1
 
 `0.4.1` improves Ranking presentation, shared legends, and Dataset interactions
