@@ -61,6 +61,7 @@ from ccusage_viz.render.surfaces import (
 )
 from ccusage_viz.terminal import Terminal
 from ccusage_viz.terminal_ui import AdjustmentAction
+from ccusage_viz.text_viewport import wrap_text_rows
 from ccusage_viz.tui.controls import _localized_actions
 from ccusage_viz.tui.custom_adjustments import _custom_capability_for_component
 from ccusage_viz.tui.models import (
@@ -143,6 +144,7 @@ def _custom_render_context(
     refreshing: bool | None = None,
     controls: SurfaceControls = EMPTY_SURFACE_CONTROLS,
     reserved_summary_rows: int = 0,
+    notices: int = 0,
     presentation: CustomPresentationDescriptor | None = None,
 ) -> RenderContext:
     """Adapt Custom semantics to the selected kind-specific product surface."""
@@ -173,6 +175,7 @@ def _custom_render_context(
         surface_presentation,
         controls=controls,
         reserved_summary_rows=reserved_summary_rows,
+        notices=notices,
     )
 
 
@@ -370,6 +373,7 @@ def _render_custom_projection(
     grouped_ranking_viewport: GroupedRankingViewport | None = None,
     scrollbar_hovered: bool = False,
     deltas: dict[object, float] | None = None,
+    notices: int = 0,
 ) -> PaneRender:
     context = _custom_render_context(
         config,
@@ -382,6 +386,7 @@ def _render_custom_projection(
         refreshing=refreshing,
         controls=controls,
         presentation=projection.presentation,
+        notices=notices,
     )
     summary_render = ""
     if (
@@ -420,6 +425,7 @@ def _render_custom_projection(
                 refreshing=refreshing,
                 controls=controls,
                 reserved_summary_rows=len(summary_render.splitlines()),
+                notices=notices,
                 presentation=projection.presentation,
             )
     context = replace(context, deltas=deltas)
@@ -453,7 +459,8 @@ def _render_custom_projection(
                 terminal.height
                 - summary_rows
                 - len(audit.splitlines())
-                - active_viewport.reserved_rows,
+                - active_viewport.reserved_rows
+                - notices,
             ),
         )
         heading = custom_heading(config, context, projection.presentation).strip()
@@ -520,7 +527,7 @@ def _render_custom_projection(
         rendered = "\n".join((summary_render, rendered))
     audit = render_audit(context)
     if audit:
-        rendered = "\n".join((rendered, audit))
+        rendered = "\n".join((rendered.rstrip("\n"), audit))
     return PaneRender(rendered)
 
 
@@ -668,6 +675,13 @@ def _custom_standalone_render(
         return PaneRender("\n".join(line for line in (rendered, audit) if line))
     if component.model is None:
         return PaneRender(translator.text("status.loading"))
+    notices = _custom_response_warning_notices(component, translator)
+    if component.error is not None:
+        notices = (*notices, format_error(component.error, translator, color=False))
+    # Preserve message boundaries until final notice formatting.
+    notice_rows = sum(
+        len(wrap_text_rows(notice, width=max(1, terminal.width - 2))) for notice in notices
+    )
     rendered = _render_custom_projection(
         component.model,  # ty: ignore[invalid-argument-type]
         component.accepted_config or component.candidate,
@@ -680,12 +694,6 @@ def _custom_standalone_render(
         refreshing=pending,
         surface=standalone_surface((component.accepted_config or component.candidate).kind),  # ty: ignore[invalid-argument-type]
         summary=summary,
+        notices=notice_rows,
     )
-    return (
-        PaneRender(
-            rendered.chart,
-            (*rendered.notices, format_error(component.error, translator, color=False)),
-        )
-        if component.error is not None
-        else rendered
-    )
+    return PaneRender(rendered.chart, (*rendered.notices, *notices))

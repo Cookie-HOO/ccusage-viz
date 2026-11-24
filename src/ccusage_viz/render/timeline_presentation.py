@@ -16,7 +16,6 @@ from ccusage_viz.render.base import (
     colored_mark,
     configure_plot,
     isolated_plot,
-    plot_height,
     plot_text,
 )
 from ccusage_viz.render.legend import legend_rows
@@ -123,7 +122,9 @@ def render_timeline_plot(
         # that ambient height after chrome is removed; let this renderer own
         # its explicit dimensions instead of silently dropping the final row.
         plt.terminal.limit(False, False)
-        plt.figure.plot_size(context.width, plot_height(context, text_rows=text_rows))
+        # Unlike other plots, timeline axes must fit short panes after notices
+        # and legends are reserved. An eight-row floor can clip the date row.
+        plt.figure.plot_size(context.width, max(4, context.height - text_rows))
         for index, item in enumerate(series):
             marker_name = (
                 "."

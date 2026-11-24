@@ -209,6 +209,20 @@ def _pane_render(
             pane.lifecycle, generation=component.generation
         )
         data_pending = component.is_pending and not retain_accepted
+        warning_notices = _custom_response_warning_notices(component, translator)
+        if component.error is not None:
+            warning_notices = (
+                *warning_notices,
+                format_error(component.error, translator, color=False),
+            )
+        # Keep logical messages intact; the painter adds one glyph per message.
+        notice_rows = min(
+            sum(
+                len(wrap_text_rows(notice, width=max(1, terminal.width - 2)))
+                for notice in warning_notices
+            ),
+            max(0, terminal.height - 3),
+        )
         rendered = _render_custom_projection(
             component.model,  # ty: ignore[invalid-argument-type]
             display_config,
@@ -250,6 +264,7 @@ def _pane_render(
             copied_all=pane.copied_ranking_all_until > time.monotonic(),
             item_spacing=pane.ranking_item_spacing,
             deltas=pane.deltas,
+            notices=notice_rows,
             entry_offset=ranking_entry_offset,
             entry_limit=ranking_entry_limit,
             ranking_viewport=(
@@ -279,16 +294,6 @@ def _pane_render(
                 ),
                 rendered.notices,
                 rendered.error_body,  # ty: ignore[invalid-argument-type]
-            )
-        warning_notices = _custom_response_warning_notices(component, translator)
-        if component.error is not None:
-            return PaneRender(
-                rendered.chart,
-                (
-                    *rendered.notices,
-                    *warning_notices,
-                    format_error(component.error, translator, color=False),
-                ),
             )
         return PaneRender(rendered.chart, (*rendered.notices, *warning_notices))
     if isinstance(pane, TuiAnimationPane):
@@ -596,6 +601,7 @@ def _local_pane_content(
     return_metadata: bool = False,
 ) -> str | tuple[str, int, int, int]:
     """Keep notices fixed below an optionally scrollable pane body."""
+    notices = tuple(row for notice in notices for row in wrap_text_rows(notice, width=width))
     notice_rows = min(len(notices), max(0, height - 3))
     chart_height = max(0, height - notice_rows)
     # Chart renderers already fit and wrap their own rows. Re-wrapping a
