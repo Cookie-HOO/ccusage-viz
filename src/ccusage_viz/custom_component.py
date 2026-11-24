@@ -484,7 +484,34 @@ class CustomHistoricalComponent:
         if not _primary_completion_matches(completion.config, self.request_config):
             return False
         if self.switch_target_config is not None:
-            self.candidate = self.switch_target_config
+            from ccusage_viz.configuration import apply_custom_label_color_default
+
+            target_config = self.switch_target_config
+            if "label_color_mode" in self.candidate.initial_explicit:
+                target_config = replace(
+                    target_config,
+                    initial_explicit=target_config.initial_explicit | {"label_color_mode"},
+                    presentation=replace(
+                        target_config.presentation,
+                        label_color_mode=self.candidate.presentation.label_color_mode,
+                    ),
+                )
+            target_metric = (
+                next(
+                    item
+                    for item in completion.response.descriptor.metrics
+                    if item.id == completion.response.metric_id
+                )
+                if isinstance(completion.response, V2ChartResponse)
+                else None
+            )
+            self.candidate = apply_custom_label_color_default(
+                target_config,
+                target_metric.defaults.get(target_config.kind)
+                if target_metric is not None
+                else None,
+                reset=True,
+            )
             self.switch_target_config = None
             self.switch_normalizations = frozenset()
         self.accepted_config = self.candidate

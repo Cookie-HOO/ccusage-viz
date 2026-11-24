@@ -125,6 +125,53 @@ def test_v2_default_filters_round_trip_in_registration_snapshot() -> None:
     }
 
 
+@pytest.mark.parametrize("mode", ("change", "increase", "decrease", "direction", "band", "none"))
+def test_v2_ranking_label_color_default_round_trip(mode) -> None:
+    raw = v2_probe_descriptor()
+    raw["metrics"][0]["capabilities"]["charts"]["ranking"] = {"group_by": [None]}
+    raw["metrics"][0]["defaults"] = {"ranking": {"label_color_mode": mode}}
+    descriptor = parse_v2_probe_descriptor(raw)
+    assert descriptor.metrics[0].defaults["ranking"].label_color_mode == mode
+    wire = v2_probe_descriptor_to_wire(descriptor)
+    assert wire["metrics"][0]["defaults"]["ranking"]["label_color_mode"] == mode
+    assert parse_v2_probe_descriptor(wire) == descriptor
+
+
+@pytest.mark.parametrize("mode", (None, "invalid", "", True, 1, [], {}))
+def test_invalid_v2_ranking_label_color_default_is_ignored(mode) -> None:
+    raw = v2_probe_descriptor()
+    raw["metrics"][0]["defaults"] = {"ranking": {"label_color_mode": mode}}
+    descriptor = parse_v2_probe_descriptor(raw)
+    assert descriptor.metrics[0].defaults["ranking"].label_color_mode is None
+    assert (
+        "label_color_mode"
+        not in v2_probe_descriptor_to_wire(descriptor)["metrics"][0]["defaults"]["ranking"]
+    )
+
+
+@pytest.mark.parametrize("kind", ("timeline", "stack", "calendar", "monitor"))
+def test_v2_label_color_default_is_ignored_for_other_kinds(kind) -> None:
+    raw = v2_probe_descriptor()
+    raw["metrics"][0]["defaults"] = {kind: {"label_color_mode": "band"}}
+    descriptor = parse_v2_probe_descriptor(raw)
+    assert descriptor.metrics[0].defaults[kind].label_color_mode is None
+    assert (
+        "label_color_mode"
+        not in v2_probe_descriptor_to_wire(descriptor)["metrics"][0]["defaults"][kind]
+    )
+
+
+def test_missing_v2_label_color_default_stays_absent() -> None:
+    raw = v2_probe_descriptor()
+    raw["metrics"][0]["defaults"] = {"ranking": {"top": 3}}
+    descriptor = parse_v2_probe_descriptor(raw)
+    assert descriptor.metrics[0].defaults["ranking"].label_color_mode is None
+    assert (
+        "label_color_mode"
+        not in v2_probe_descriptor_to_wire(descriptor)["metrics"][0]["defaults"]["ranking"]
+    )
+
+
 def test_custom_data_manual_construction_enforces_flat_or_grouped_union() -> None:
     series = CustomSeries("model", LocalizedText("Model", "模型"), ())
 

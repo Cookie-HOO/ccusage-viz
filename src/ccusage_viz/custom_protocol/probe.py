@@ -36,6 +36,7 @@ from ccusage_viz.custom_protocol.primitives import (
     _unique_ids,
     _validate_timezone,
 )
+from ccusage_viz.options import LABEL_COLOR_MODES
 
 
 def _parse_dataset(value: object) -> CustomDataset:
@@ -491,6 +492,13 @@ def _parse_v2_defaults(
         style = raw.get("style") if isinstance(raw.get("style"), str) else None
         theme = raw.get("theme") if isinstance(raw.get("theme"), str) else None
         window_seconds = _default_window_seconds(raw.get("window"))
+        label_color_mode = raw.get("label_color_mode")
+        if (
+            kind != "ranking"
+            or not isinstance(label_color_mode, str)
+            or label_color_mode not in LABEL_COLOR_MODES
+        ):
+            label_color_mode = None
         defaults[kind] = CustomChartDefaults(
             period,
             group_by,
@@ -503,6 +511,7 @@ def _parse_v2_defaults(
             window_seconds,
             declared,
             partition_by,
+            label_color_mode,
         )
     return defaults
 

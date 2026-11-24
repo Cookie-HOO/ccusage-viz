@@ -26,6 +26,87 @@ from ccusage_viz.query.models import QueryTrigger
 from .helpers import UNIT, config, response, v2_chart_response
 
 
+@pytest.mark.parametrize("target_mode", ("band", "none", None))
+@pytest.mark.parametrize("override", (None, "none", "change", "band"))
+def test_successful_metric_switch_applies_target_label_default_unless_explicit(
+    target_mode, override
+) -> None:
+    from ccusage_viz.custom_models import V2RankingData
+
+    initial = config(kind="ranking", metric_id="stars")
+    initial = replace(
+        initial,
+        presentation=replace(initial.presentation, label_color_mode=override or "band"),
+        initial_explicit=frozenset({"label_color_mode"}) if override else frozenset(),
+    )
+    component = CustomHistoricalComponent(initial)
+    source = replace(v2_chart_response("stars"), data=V2RankingData())
+    assert component.accept_response(source)
+    target_response = replace(source, metric_id="updated_days")
+    target_response = replace(
+        target_response,
+        descriptor=replace(
+            source.descriptor,
+            metrics=tuple(
+                replace(
+                    metric,
+                    defaults={
+                        "ranking": CustomChartDefaults(
+                            None, None, None, label_color_mode=target_mode
+                        )
+                    },
+                )
+                if metric.id == "updated_days"
+                else metric
+                for metric in source.descriptor.metrics
+            ),
+        ),
+    )
+    component.begin_metric_switch(replace(component.candidate, metric_id="updated_days"))
+    assert component.candidate.presentation.label_color_mode == (override or "band")
+    assert component.accept_response(target_response)
+    assert component.candidate.presentation.label_color_mode == (
+        override or target_mode or "change"
+    )
+
+
+def test_band_facts_do_not_automatically_enable_label_coloring() -> None:
+    from ccusage_viz.custom_models import CustomRankingBand, V2RankingData
+
+    component = CustomHistoricalComponent(config(kind="ranking", metric_id="stars"))
+    result = replace(
+        v2_chart_response("stars"),
+        data=V2RankingData(
+            bands=(CustomRankingBand("qualified"),),
+        ),
+    )
+    assert component.accept_response(result)
+    assert component.candidate.presentation.label_color_mode == "change"
+
+
+def test_metric_switch_label_default_failure_and_pending_user_edit() -> None:
+    from ccusage_viz.custom_models import V2RankingData
+
+    component = CustomHistoricalComponent(config(kind="ranking", metric_id="stars"))
+    source = replace(v2_chart_response("stars"), data=V2RankingData())
+    assert component.accept_response(source)
+    component.begin_metric_switch(replace(component.candidate, metric_id="updated_days"))
+    assert component.fail(RuntimeError("unavailable"), generation=component.generation)
+    assert component.candidate.presentation.label_color_mode == "change"
+    component.begin_metric_switch(replace(component.candidate, metric_id="updated_days"))
+    component.configure(
+        replace(
+            component.candidate,
+            presentation=replace(component.candidate.presentation, label_color_mode="none"),
+            initial_explicit=frozenset({"label_color_mode"}),
+        ),
+        data_affecting=False,
+    )
+    assert component.accept_response(replace(source, metric_id="updated_days"))
+    assert component.candidate.presentation.label_color_mode == "none"
+    assert "label_color_mode" in component.candidate.initial_explicit
+
+
 def test_metric_switch_request_wire_uses_target_partition_declaration() -> None:
     declared = V2HistoricalChartCapability(
         ("day",), (None,), (), partition_by=(None, "logical_model")

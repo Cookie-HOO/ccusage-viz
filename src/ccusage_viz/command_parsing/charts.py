@@ -232,6 +232,7 @@ def _custom_chart_from_namespace(
             "other",
             "style",
             "color_scheme",
+            "label_color_mode",
             "window",
         },
         metric_id=namespace.metric,

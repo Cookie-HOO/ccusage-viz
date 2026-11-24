@@ -309,7 +309,9 @@ def _adjust_custom_ranking_label_color(pane: TuiCustomPane) -> CustomChartConfig
 
     response = getattr(pane.component, "accepted_response", None)
     available = isinstance(response, V2ChartResponse) and bool(getattr(response.data, "bands", ()))
-    return adjust_ranking_label_color(pane.component.candidate, bands_available=available)  # ty: ignore[invalid-return-type]
+    updated = adjust_ranking_label_color(pane.component.candidate, bands_available=available)
+    assert isinstance(updated, CustomChartConfig)
+    return replace(updated, initial_explicit=updated.initial_explicit | {"label_color_mode"})
 
 
 def _custom_ranking_legend_available(pane: TuiCustomPane) -> bool:

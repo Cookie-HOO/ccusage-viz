@@ -189,7 +189,8 @@ An explicit CLI or Dashboard Pane option overrides the Dataset field.
     "period": "14d",
     "partition_by": "logical_model",
     "group_by": "real_model",
-    "top": 3
+    "top": 3,
+    "label_color_mode": "band"
   },
   "monitor": {"style": "ranking", "window": "6h"}
 }
@@ -201,8 +202,17 @@ A legacy Ranking `granularity` default is accepted but ignored. `top` needs a
 valid final grouping; style must be compatible with that grouping. `partition_by` is valid only
 for Ranking and must follow the declared partition capability. A non-null
 partition default requires a non-null, different `group_by`; invalid default
-combinations reject the descriptor. `other` is `"show"` or `"hide"`. `theme`
-and `style` use ccuv's ordinary CLI values. Filters have no static default:
+combinations reject the descriptor. `other` is `"show"` or `"hide"`. Added in ccuv 0.4.2,
+Ranking-only `label_color_mode` accepts the
+same values as `--label-color`: `change`, `increase`, `decrease`, `direction`,
+`band`, or `none`. It is only an initial presentation suggestion; an explicit
+CLI option, saved preset, or later local choice wins. Invalid values or a
+non-Ranking declaration are ignored. Merely returning `data.bands` never enables
+`band`. A successful related-Metric switch follows the target's declared mode
+only without an explicit user mode, falling back to `change` when omitted;
+a failed switch preserves the old mode. Replacing the chart kind creates a
+fresh Pane and applies its startup defaults. `theme` and `style` use ccuv's ordinary CLI
+values. Filters have no static default:
 their IDs and options are response-owned `runtime.filters`.
 
 Explicit CLI and Dashboard Pane settings override Dataset defaults. Dashboard
@@ -305,9 +315,11 @@ direction remain authoritative. Current-response definitions and membership
 control current labels, even if a comparison response classifies them differently.
 `Other` is unclassified.
 
-Datasets supply only classification facts (`bands` / `band_id`), not colors,
-threshold rules, label modes, or change arrows. ccuv owns those presentation
-choices; declaring bands does not change the default `change` mode. In
+Datasets supply only classification facts (`bands` / `band_id`), not RGB
+colors, threshold rules, or change arrows. ccuv owns those presentation
+choices; declaring bands alone does not change the default `change` mode. A
+Metric may separately suggest `defaults.ranking.label_color_mode: "band"` as
+described above; this still supplies no actual color values. In
 `--label-color band`, ccuv assigns theme colors in declaration order (repeating
 when the palette is exhausted). Only named bands represented in the accepted
 projected entries get a legend, before local search/scroll filtering: below

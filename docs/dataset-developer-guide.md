@@ -18,7 +18,7 @@ supports. Depending on its capabilities, a Dataset can provide:
 - source-owned fixed-window Monitor observations such as events per minute;
 - current/comparison summaries, or an explicit decision to provide none;
 - compatible first-screen defaults for period, grouping, Top/Other,
-  style, theme, and Monitor's local display horizon.
+  style, theme, Ranking label coloring, and Monitor's local display horizon.
 
 It does **not** become a ccuv collector or change built-in token calculations.
 ccuv owns terminal rendering, interaction, local Top/Other projection where
@@ -400,8 +400,19 @@ Bands describe source-owned business classification, not colors or thresholds.
 Their order assigns theme colors but never changes numeric sorting. Group
 legends occupy separate rows below the heading, never its value row. ccuv renders
 current-response membership even if the comparison response differs;
-synthesized Other is unclassified. Do not send color values, label modes, or
-arrow/refresh policy. Older ccuv versions may ignore this optional presentation,
+synthesized Other is unclassified. Do not send RGB color values or
+arrow/refresh policy in the response facts. To suggest band coloring at startup,
+declare `"defaults": {"ranking": {"label_color_mode": "band"}}` on the Metric
+(requires ccuv 0.4.2 or newer).
+This optional Ranking-only field accepts `change`, `increase`, `decrease`,
+`direction`, `band`, and `none`; invalid values or declarations on another kind
+are ignored, and omission leaves ordinary host behavior unchanged. Returning
+bands alone never enables coloring. Explicit CLI, saved preset, and keyboard
+choices override the suggestion. On a successful related-Metric switch, an
+inherited mode follows the target's default (or `change` when omitted); an
+explicit user mode stays unchanged. Chart-kind replacement creates a fresh
+Pane and applies that kind's startup defaults. Band definitions remain response
+facts, not Probe metadata or an RGB palette. Older ccuv versions may ignore this optional presentation,
 so keep scalar `value`, ordering, and labels meaningful without it. See the
 [protocol reference](custom-command-protocol.md#semantic-bands-v2-ranking-only)
 for validation and [usage](usage.md#ranking-label-colors-and-band-legends) for

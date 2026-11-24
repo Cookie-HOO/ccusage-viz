@@ -95,6 +95,7 @@ class CustomChartDefaults:
     window_seconds: int | None = None
     declared: frozenset[str] = frozenset()
     partition_by: str | None = None
+    label_color_mode: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
