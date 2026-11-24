@@ -224,7 +224,7 @@ ccuv 0.4.1 新增的语义分段是 `ccuv.custom/v2` 的可选扩展：不要修
 
 分区响应把 `bands` 与 `groups` 并列，各 Group 共享定义。ID 必须稳定、唯一且非空，每个 `band_id` 都必须在同一响应中解析。省略/null `bands` 表示没有定义；省略/null `band_id` 表示未分类。标签可省略/null（可着色但无图例），提供时必须是双语结构。重复 ID 或悬空引用会拒绝整个响应。
 
-分段表达源端业务分类，不是颜色或阈值配置。声明顺序决定主题颜色分配，但不改变数值排序；分区图例独立放在标题下，不与 value 同行；即使比较响应不同，ccuv 也使用当前响应的归属，合成 Other 不分类。不要返回颜色、标签模式或箭头/刷新策略。旧版 ccuv 可能忽略该可选呈现，因此标量 `value`、排序和标签在没有分段时也必须完整可用。校验规则见[协议参考](custom-command-protocol.zh-CN.md#语义分段仅-v2-ranking)，控制见[使用指南](usage.zh-CN.md#ranking-标签颜色与分段图例)。V1、Timeline、Stack、Calendar 和 Monitor 不得使用分段。
+分段表达源端业务分类，不是颜色或阈值配置。声明顺序决定主题颜色分配，但不改变数值排序；分区图例独立放在标题下，不与 value 同行；即使比较响应不同，ccuv 也使用当前响应的归属，合成 Other 不分类。响应事实不得返回 RGB 颜色或箭头/刷新策略。ccuv 0.4.2 起，若希望首屏建议分段着色，可在 Metric 声明 `"defaults": {"ranking": {"label_color_mode": "band"}}`。该字段可选且仅用于 Ranking，接受 `change`、`increase`、`decrease`、`direction`、`band`、`none`；无效值或其他图表类型中的声明会被忽略，省略则保持宿主原有行为。仅返回分段绝不会启用着色。显式 CLI、已保存 preset 和键盘选择优先；同 Group Metric 成功切换后，继承的模式遵循目标默认值（省略时为 `change`），显式用户模式保持不变。替换图表类型会创建新 Pane 并应用对应类型的启动默认值。分段定义仍属于响应事实，不是 Probe 元数据或 RGB 调色板。旧版 ccuv 可能忽略该可选呈现，因此标量 `value`、排序和标签在没有分段时也必须完整可用。校验规则见[协议参考](custom-command-protocol.zh-CN.md#语义分段仅-v2-ranking)，控制见[使用指南](usage.zh-CN.md#ranking-标签颜色与分段图例)。V1、Timeline、Stack、Calendar 和 Monitor 不得使用分段。
 
 ### `summary`
 

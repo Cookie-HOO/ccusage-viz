@@ -1,4 +1,5 @@
 import shlex
+from dataclasses import replace
 from datetime import date
 
 import pytest
@@ -104,6 +105,43 @@ def test_custom_probe_defaults_apply_to_an_unconfigured_ranking_chart() -> None:
     assert resolved.date_range.until == local_today(timezone="UTC")
     assert resolved.group_by == "book"
     assert resolved.top == 10
+
+
+@pytest.mark.parametrize("override", (None, "none", "change", "band"))
+def test_ranking_declared_label_color_default_and_explicit_cli_override(override) -> None:
+    parser = build_parser(load_translator("en"))
+    argv = ["chart", "ranking", "--dataset", "weread", "--command", "reader"]
+    if override is not None:
+        argv += ["--label-color", override]
+    initial = _to_options(
+        parser.parse_args(argv),
+        explicit=frozenset({"label_color_mode"}) if override is not None else frozenset(),
+    ).chart
+    descriptor = replace(
+        _probe_descriptor(),
+        defaults={"ranking": CustomChartDefaults(None, None, None, label_color_mode="band")},
+    )
+    resolved = apply_custom_probe_defaults(initial, descriptor, timezone="UTC")
+    assert resolved.presentation.label_color_mode == (override or "band")
+
+
+def test_custom_defaults_label_color_field_is_appended_for_positional_compatibility() -> None:
+    defaults = CustomChartDefaults(
+        "14d",
+        "real_model",
+        3,
+        None,
+        (),
+        "show",
+        "dot",
+        "nord",
+        None,
+        frozenset({"partition_by"}),
+        "logical_model",
+        "band",
+    )
+    assert defaults.partition_by == "logical_model"
+    assert defaults.label_color_mode == "band"
 
 
 def test_custom_probe_partition_default_does_not_overwrite_explicit_grouping() -> None:

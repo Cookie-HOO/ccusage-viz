@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import replace
 
 import pytest
 
@@ -43,6 +44,32 @@ def test_round_trip_persists_safe_configuration_not_runtime_or_environment() -> 
     assert restored.explicit == frozenset()
     assert restored.launcher == "ccuv"
     assert restored.panes == record.panes
+
+
+@pytest.mark.parametrize("mode", ("none", "change", "band"))
+def test_saved_ranking_label_color_is_not_overwritten_by_dataset_default(mode) -> None:
+    from ccusage_viz.configuration import apply_custom_probe_defaults
+    from ccusage_viz.custom_models import CustomChartDefaults
+    from tests.cli.option_helpers import _probe_descriptor
+
+    pane = CustomChartPaneConfig(
+        CustomChartConfig(
+            "ranking",
+            CustomCommandSource("weread", ("reader",)),
+            RANGE,
+            presentation=ChartPresentation(style="dot", label_color_mode=mode),
+        )
+    )
+    record = preset_from_launch("saved-color", _launch(panes=(pane,)), now=NOW)
+    saved = DashboardPresetDocument.parse(DashboardPresetDocument((record,)).to_wire()).presets[0]
+    chart = saved.materialize().panes[0].chart
+    descriptor = replace(
+        _probe_descriptor(),
+        defaults={"ranking": CustomChartDefaults(None, None, None, label_color_mode="band")},
+    )
+    assert "label_color_mode" in chart.initial_explicit
+    resolved = apply_custom_probe_defaults(chart, descriptor, timezone="UTC")
+    assert resolved.presentation == chart.presentation
 
 
 def test_round_trip_all_pane_kinds_and_trusted_command_configuration() -> None:

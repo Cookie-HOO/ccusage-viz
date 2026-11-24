@@ -7,12 +7,14 @@ from datetime import datetime
 from ccusage_viz.custom_models import (
     CustomCapabilities,
     CustomChartCapability,
+    CustomChartDefaults,
     CustomDataset,
     CustomProbeDescriptor,
     V2HistoricalChartCapability,
     V2ProbeDescriptor,
 )
 from ccusage_viz.options import (
+    LABEL_COLOR_MODES,
     CalendarConfig,
     ChartPaneConfig,
     ChartPresentation,
@@ -212,13 +214,39 @@ def apply_custom_probe_defaults(
         config,
         date_range=date_range,
         filters=config.filters,
-        presentation=replace(config.presentation, theme=theme, style=style),
+        presentation=replace(
+            apply_custom_label_color_default(config, defaults).presentation,
+            theme=theme,
+            style=style,
+        ),
         group_by=group_by,
         top=top,
         partition_by=partition_by,
         other=other,
         granularity=granularity,
     )
+
+
+def apply_custom_label_color_default(
+    config: CustomChartConfig,
+    defaults: CustomChartDefaults | None,
+    *,
+    reset: bool = False,
+) -> CustomChartConfig:
+    """Apply a Ranking suggestion without inferring presentation from band facts.
+
+    A successful Metric switch resets an inherited suggestion to the ordinary
+    default when the target declares none. Explicit CLI, preset, and local
+    keyboard choices remain authoritative.
+    """
+    if config.kind != "ranking" or "label_color_mode" in config.initial_explicit:
+        return config
+    mode = defaults.label_color_mode if defaults is not None else None
+    if mode not in LABEL_COLOR_MODES:
+        if not reset:
+            return config
+        mode = "change"
+    return replace(config, presentation=replace(config.presentation, label_color_mode=mode))
 
 
 def _declared(defaults, field: str) -> bool:

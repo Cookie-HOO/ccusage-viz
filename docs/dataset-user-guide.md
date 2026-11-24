@@ -157,7 +157,7 @@ period intersection valid for every advertised grouping, or model them as
 separate capabilities.
 
 Dataset defaults can set an initial period, group, Top N, Other,
-style, theme, and Monitor display horizon. They are suggestions. Your explicit
+style, theme, Ranking label-color mode, and Monitor display horizon. They are suggestions. Your explicit
 options override them:
 
 ```bash
@@ -190,7 +190,16 @@ coloring. Refresh deltas—including zero—take precedence over prior-period
 comparison; equal consecutive values show a neutral `-` without change-based
 label highlighting. Band coloring remains active regardless of numeric change. Sorting, values, arrows, and search highlighting are unaffected.
 
-Bands are optional response facts, not Dataset color settings. Only represented,
+Bands are optional response facts, not Dataset RGB color settings. A Metric
+can separately suggest an initial mode with `defaults.ranking.label_color_mode`
+(starting with ccuv 0.4.2),
+for example `band`. Bands alone never enable coloring. `--label-color none`
+explicitly disables that suggestion; any explicit CLI mode, saved preset mode,
+or later Advanced `C` choice takes priority. A successful related-Metric switch
+applies the new Metric's declared mode only without an explicit user choice;
+if omitted, an inherited mode returns to `change`. A failed switch keeps the
+old mode. Replacing a Pane's chart kind creates a fresh Pane with its own
+startup defaults. Only represented,
 named bands get legends; unnamed bands may still color labels, while
 unclassified and Other remain ordinary. Ranking accepts only
 `--legend below-title|hidden`: `below-title` is the default and uses separate

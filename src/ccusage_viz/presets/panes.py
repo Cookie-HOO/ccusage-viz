@@ -61,6 +61,7 @@ _PERSISTED_CUSTOM_EXPLICIT = frozenset(
         "other",
         "style",
         "color_scheme",
+        "label_color_mode",
         "window",
     }
 )

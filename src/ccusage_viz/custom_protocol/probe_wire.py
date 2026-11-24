@@ -251,6 +251,8 @@ def _defaults_to_wire(value: CustomChartDefaults, *, ranking: bool = False) -> d
     ):
         if name in declared and not (ranking and name == "granularity"):
             fields[name] = item
+    if ranking and value.label_color_mode is not None:
+        fields["label_color_mode"] = value.label_color_mode
     if "window" in declared and value.window_seconds is not None:
         suffix = "h" if value.window_seconds % 3600 == 0 else "m"
         divisor = 3600 if suffix == "h" else 60

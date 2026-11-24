@@ -104,7 +104,7 @@ Ranking 响应可提供一份有序的 `data.bands`。每个分段包含稳定�
 
 省略或设为 null 的 `bands` 表示无定义；省略或设为 null 的 `band_id` 表示未分类。分段的 `label` 可省略或为 null，此时没有图例项；提供时必须满足既有 `LocalizedText` 双语校验。重复分段 ID 或引用未知 ID 会拒绝整个响应。分段顺序不改变条目排序，十进制 `value` 与 Metric 的排序方向仍然权威。当前标签始终使用当前响应的定义和成员归属，即使比较响应中的分类不同；`Other` 不分类。
 
-Dataset 只提供分类事实（`bands` / `band_id`），不提供颜色、阈值规则、标签模式或变化箭头；这些呈现选择由 ccuv 管理。声明分段不会改变默认 `change` 模式。使用 `--label-color band` 时，ccuv 按声明顺序分配主题颜色，调色板耗尽后重复。图例只包含已接受投影条目中实际出现的具名分段，并在本地搜索/滚动过滤之前确定：分区图放在各 Group 标题下，平铺图放在主标题下。无名分段仍可着色，但绝不生成无名图例项。`--legend hidden` 只隐藏图例，不关闭着色；`below-title` 显示图例。高度允许时图例最多两行。这是 V2 的增量扩展，不适用于 V1 或 Monitor；旧版读取器可能不展示。
+Dataset 只提供分类事实（`bands` / `band_id`），不提供 RGB 颜色、阈值规则或变化箭头；这些呈现选择由 ccuv 管理。仅声明分段不会改变默认 `change` 模式。Metric 可以另外建议 `defaults.ranking.label_color_mode: "band"`（见默认值章节），但仍不提供实际颜色值。使用 `--label-color band` 时，ccuv 按声明顺序分配主题颜色，调色板耗尽后重复。图例只包含已接受投影条目中实际出现的具名分段，并在本地搜索/滚动过滤之前确定：分区图放在各 Group 标题下，平铺图放在主标题下。无名分段仍可着色，但绝不生成无名图例项。`--legend hidden` 只隐藏图例，不关闭着色；`below-title` 显示图例。高度允许时图例最多两行。这是 V2 的增量扩展，不适用于 V1 或 Monitor；旧版读取器可能不展示。
 
 #### 平铺与分区响应形状
 
@@ -214,13 +214,14 @@ V2 Metric 可以为 Ranking 增加可选外层分区。Metric 可以声明独立
     "period": "14d",
     "partition_by": "logical_model",
     "group_by": "real_model",
-    "top": 3
+    "top": 3,
+    "label_color_mode": "band"
   },
   "monitor": {"style": "ranking", "window": "6h"}
 }
 ```
 
-所有字段都可省略。`period`、`group_by` 必须受当前图 capability 支持；非 Ranking 的 `granularity` 也必须受支持。遗留的 Ranking `granularity` 默认值可以携带，但会被接受并忽略。`top` 需要最终有效的分组；style 必须与最终分组兼容。`partition_by` 仅可用于 Ranking，并且必须符合已声明分区 capability。非空分区默认值要求 `group_by` 非空且不同；无效默认值组合会拒绝 descriptor。`other` 只能是 `"show"` 或 `"hide"`；`theme` 和 `style` 使用 ccuv 正常 CLI 值。filter 没有静态 default；其 ID 与 option 由响应的 `runtime.filters` 提供。
+所有字段都可省略。`period`、`group_by` 必须受当前图 capability 支持；非 Ranking 的 `granularity` 也必须受支持。遗留的 Ranking `granularity` 默认值可以携带，但会被接受并忽略。`top` 需要最终有效的分组；style 必须与最终分组兼容。`partition_by` 仅可用于 Ranking，并且必须符合已声明分区 capability。非空分区默认值要求 `group_by` 非空且不同；无效默认值组合会拒绝 descriptor。`other` 只能是 `"show"` 或 `"hide"`；ccuv 0.4.2 新增的仅 Ranking 字段 `label_color_mode` 与 `--label-color` 接受相同值：`change`、`increase`、`decrease`、`direction`、`band`、`none`。它只是初始呈现建议，显式 CLI 参数、已保存 preset 或后续本地选择优先；无效值或非 Ranking 声明会被忽略；仅返回 `data.bands` 绝不会启用 `band`。同 Group Metric 成功切换后，仅在没有显式用户模式时遵循目标默认值（省略时为 `change`），失败则保留旧模式。替换图表类型会创建新 Pane 并应用其启动默认值。`theme` 和 `style` 使用 ccuv 正常 CLI 值。filter 没有静态 default；其 ID 与 option 由响应的 `runtime.filters` 提供。
 
 显式 CLI 与 Dashboard Pane 设置优先于 Dataset 默认值。Dashboard preset 会持久化 `partition_by`；旧 preset 省略它并保持平铺。切换 Metric 需要规范化时，ccuv 先选择目标 Metric 的有效分区默认值；否则在允许时选择 `null`，或选择第一个必填分区，然后再选择不冲突的分组。
 
